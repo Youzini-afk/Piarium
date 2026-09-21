@@ -22,7 +22,7 @@ const actorContext = (sessionId: string): HarnessServiceContext => ({
 });
 
 async function fixture() {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-message-identity-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-message-identity-"));
   const registry = createThreadRegistry({ dataDir, hostId: "identity-audit" });
   const deliver = vi.fn(async () => undefined);
   const service = createThreadSendService({ threadRegistry: registry, threadSendToSession: deliver } as never);

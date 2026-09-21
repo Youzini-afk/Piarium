@@ -14,7 +14,7 @@ const getBearerToken = (req: Request): string => {
 
 const resolveServerUrl = (req: Request, explicitOrigin: unknown): string => {
   const configured = normalizeString(explicitOrigin)
-    || normalizeString(process.env.PIARIUM_PUBLIC_ORIGIN);
+    || normalizeString(process.env.VARIN_PUBLIC_ORIGIN);
   if (configured) return configured.replace(/\/$/, '');
 
   const proto = normalizeString(req.headers['x-forwarded-proto']).split(',')[0] || (req.secure ? 'https' : 'http');
@@ -27,7 +27,7 @@ const requireMobileDevice = (
   deviceStore: MobileDeviceStore,
   authenticatedDevices: WeakMap<Request, PublicMobileDevice>,
 ): RequestHandler => async (req, res, next) => {
-  const deviceId = normalizeString(req.headers['x-piarium-device-id']) || normalizeString(req.body?.deviceId);
+  const deviceId = normalizeString(req.headers['x-varin-device-id']) || normalizeString(req.body?.deviceId);
   const deviceToken = getBearerToken(req) || normalizeString(req.body?.deviceToken);
   const device = await deviceStore.authenticateDevice(deviceId, deviceToken);
   if (!device) {
@@ -62,7 +62,7 @@ export const registerMobileRoutes = (app: Express, dependencies: MobileRoutesDep
     if (req.path === '/pair/complete') {
       return next();
     }
-    const hasDeviceCredentials = Boolean(normalizeString(req.headers['x-piarium-device-id']) && getBearerToken(req));
+    const hasDeviceCredentials = Boolean(normalizeString(req.headers['x-varin-device-id']) && getBearerToken(req));
     if (hasDeviceCredentials) {
       return next();
     }

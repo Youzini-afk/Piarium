@@ -34,18 +34,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
-import type { HostHandshakeResult } from '@piarium/protocol';
-import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+import type { HostHandshakeResult } from '@varin/protocol';
+import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import {
-  isPiariumDesktopCommand,
+  isVarinDesktopCommand,
   type DesktopHostsConfig as DesktopHostsContract,
   type DesktopUpdateProgressEvent,
-  type PiariumDesktopCommand,
-  type PiariumDesktopCommandResult,
-  type PiariumDesktopEvent,
-  type PiariumDesktopEventArguments,
-} from '@piarium/application-client/desktop';
-import type { WebUiServerController } from '@piarium/web/server/index.js';
+  type VarinDesktopCommand,
+  type VarinDesktopCommandResult,
+  type VarinDesktopEvent,
+  type VarinDesktopEventArguments,
+} from '@varin/application-client/desktop';
+import type { WebUiServerController } from '@varin/web/server/index.js';
 import { ElectronSshManager } from './ssh-manager.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
@@ -86,23 +86,23 @@ import type { RendererRuntimeConfig, WindowFocusListener } from './electron-runt
 import { errorMessage, recordOf } from './runtime-types.js';
 import {
   mintOutsideFileGrant,
-  resolvePiariumDataDir,
+  resolveVarinDataDir,
   clearAppImageArgv0FromProcessEnv,
-} from '@piarium/web/server/index.js';
-import { createSettingsFileStore, type PiariumSettingsDocument } from '@piarium/settings-store';
-import { PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE } from '@piarium/protocol';
+} from '@varin/web/server/index.js';
+import { createSettingsFileStore, type VarinSettingsDocument } from '@varin/settings-store';
+import { PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE } from '@varin/protocol';
 
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const isDev = process.env.PIARIUM_ELECTRON_DEV === '1' || !app.isPackaged;
+const isDev = process.env.VARIN_ELECTRON_DEV === '1' || !app.isPackaged;
 const electronStartupStartedAt = performance.now();
 
-const DEEP_LINK_PROTOCOL = 'piarium';
-const UI_PROTOCOL = 'piarium-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.piarium.desktop';
-const DEV_APP_USER_MODEL_ID = 'dev.piarium.desktop.dev';
+const DEEP_LINK_PROTOCOL = 'varin';
+const UI_PROTOCOL = 'varin-ui';
+const PACKAGED_APP_USER_MODEL_ID = 'dev.varin.desktop';
+const DEV_APP_USER_MODEL_ID = 'dev.varin.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
@@ -137,13 +137,13 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 };
 
 // Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/Piarium/ (not ~/Library/Logs/@piarium/electron/).
-app.setName('Piarium');
+// ~/Library/Logs/Varin/ (not ~/Library/Logs/@varin/electron/).
+app.setName('Varin');
 if (process.platform === 'linux') {
-  app.setDesktopName('piarium.desktop');
+  app.setDesktopName('varin.desktop');
 }
 if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'Piarium Dev'));
+  app.setPath('userData', path.join(app.getPath('appData'), 'Varin Dev'));
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
@@ -152,7 +152,7 @@ app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 // pipeline with the module graph and delays React startup.
 if (shouldIgnoreLoopbackConnectionLimit({
   development: isDev,
-  packagedUi: process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1',
+  packagedUi: process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1',
 })) {
   app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
 }
@@ -187,7 +187,7 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
-// that output never lands in ~/Library/Logs/Piarium/main.log and we
+// that output never lands in ~/Library/Logs/Varin/main.log and we
 // can't diagnose issues (e.g. Pi runtime lifecycle, SSE disconnects) after
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
@@ -211,7 +211,7 @@ interface StartupPerformanceDetails {
 }
 
 const recordElectronStartupPerformance = (phase: string, details: StartupPerformanceDetails = {}): void => {
-  const enabled = STARTUP_PERF_ENABLED_VALUES.has(String(process.env.PIARIUM_STARTUP_PERF ?? '').toLowerCase());
+  const enabled = STARTUP_PERF_ENABLED_VALUES.has(String(process.env.VARIN_STARTUP_PERF ?? '').toLowerCase());
   if (!enabled || !ELECTRON_STARTUP_PERF_PHASES.has(phase)) return;
   const event: Record<string, unknown> = {
     phase,
@@ -263,14 +263,14 @@ const readAppMetadata = () => {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed?.name === '@piarium/electron' && typeof parsed.version === 'string') {
+      if (parsed?.name === '@varin/electron' && typeof parsed.version === 'string') {
         return { name: parsed.name, version: parsed.version };
       }
     } catch {
       /* best-effort metadata read; try next candidate package.json */
     }
   }
-  return { name: '@piarium/electron', version: app.getVersion() };
+  return { name: '@varin/electron', version: app.getVersion() };
 };
 
 const APP_METADATA = readAppMetadata();
@@ -296,9 +296,9 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // connecting to someone else's server).
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Piarium/main/CHANGELOG.md';
-const GITHUB_BUG_REPORT_URL = 'https://github.com/Youzini-afk/Piarium/issues/new';
-const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/Youzini-afk/Piarium/issues/new';
+const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Varin/main/CHANGELOG.md';
+const GITHUB_BUG_REPORT_URL = 'https://github.com/Youzini-afk/Varin/issues/new';
+const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/Youzini-afk/Varin/issues/new';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
@@ -464,8 +464,8 @@ const ensurePiRuntime = async (): Promise<HostHandshakeResult> => {
   if (state.piRuntimeStartPromise) return state.piRuntimeStartPromise;
   if (state.piRuntimeBroker && state.piRuntimeHandshake) return state.piRuntimeHandshake;
 
-  const agentDir = typeof process.env.PIARIUM_AGENT_DIR === 'string'
-    ? process.env.PIARIUM_AGENT_DIR.trim()
+  const agentDir = typeof process.env.VARIN_AGENT_DIR === 'string'
+    ? process.env.VARIN_AGENT_DIR.trim()
     : '';
   const createdBroker = !state.piRuntimeBroker;
   const broker = state.piRuntimeBroker || createDesktopPiRuntimeBroker({
@@ -558,7 +558,7 @@ const shouldHideMainWindowToTray = (browserWindow: BrowserWindow | null | undefi
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
-  if (browserWindow.__piariumMiniChat === true) return false;
+  if (browserWindow.__varinMiniChat === true) return false;
   return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
@@ -589,7 +589,7 @@ const quitConfirmationMessage = () => {
   if (reasons.length === 0) {
     return 'Background processes (sidecar, SSH sessions) will be stopped.';
   }
-  return `Piarium detected ${reasons.join(', ')}. Quitting now will stop background processes and may interrupt pending work.`;
+  return `Varin detected ${reasons.join(', ')}. Quitting now will stop background processes and may interrupt pending work.`;
 };
 
 const shutdownBackgroundServices = async ({ allowDuringUpdate = false }: { allowDuringUpdate?: boolean } = {}): Promise<void> => {
@@ -737,8 +737,8 @@ const requestQuitWithConfirmation = async () => {
   try {
     const result = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Quit Piarium?',
-      message: 'Quit Piarium?',
+      title: 'Quit Varin?',
+      message: 'Quit Varin?',
       detail: quitConfirmationMessage(),
       buttons: ['Quit', 'Cancel'],
       defaultId: 1,
@@ -777,8 +777,8 @@ const refreshQuitRiskFlags = async () => {
   const base = typeof state.sidecarUrl === 'string' ? state.sidecarUrl.trim().replace(/\/$/, '') : '';
   if (!base) return;
 
-  const scheduledUrl = `${base}/api/piarium/scheduled-tasks/status`;
-  const tunnelUrl = `${base}/api/piarium/tunnel/status`;
+  const scheduledUrl = `${base}/api/varin/scheduled-tasks/status`;
+  const tunnelUrl = `${base}/api/varin/tunnel/status`;
 
   const fetchJson = async (url: string): Promise<Record<string, unknown> | null> => {
     try {
@@ -806,7 +806,7 @@ const refreshQuitRiskFlags = async () => {
   }
 };
 
-const settingsFilePath = (): string => path.join(resolvePiariumDataDir(process), 'settings.json');
+const settingsFilePath = (): string => path.join(resolveVarinDataDir(process), 'settings.json');
 const settingsStore = createSettingsFileStore({ filePath: settingsFilePath() });
 
 const sshManager = new ElectronSshManager({
@@ -815,12 +815,12 @@ const sshManager = new ElectronSshManager({
   emit: (event, detail) => emitToAllWindows(event, detail),
 });
 
-const readSettingsRoot = (): PiariumSettingsDocument => settingsStore.readSync();
+const readSettingsRoot = (): VarinSettingsDocument => settingsStore.readSync();
 const mutateSettingsRoot = (mutator: Parameters<typeof settingsStore.update>[0]) => settingsStore.update(mutator);
 
 // Stable per-install identifier for this desktop, persisted in settings. Used as
 // the client dedupe key on remote hosts so re-authenticating (e.g. after a login
-// session expires) reuses the same "Piarium Desktop" record instead of
+// session expires) reuses the same "Varin Desktop" record instead of
 // piling up a new one each time. Different desktops get different ids.
 // Display-only device metadata shown in a server's device list ("macOS",
 // app version). Never used for auth decisions.
@@ -1410,15 +1410,15 @@ const detectLanIPv4Address = async (): Promise<string | null> => {
 const buildLocalUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
 const resolveLocalWorkspaceHome = (): string => {
-  const configuredRoot = process.env.PIARIUM_WORKSPACE_ROOT?.trim();
+  const configuredRoot = process.env.VARIN_WORKSPACE_ROOT?.trim();
   return configuredRoot ? path.resolve(configuredRoot) : (os.homedir() || '');
 };
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
-  if (process.env.PIARIUM_ELECTRON_LOAD_SERVER_UI === '1') return false;
-  if (process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1') return true;
+  if (process.env.VARIN_ELECTRON_LOAD_SERVER_UI === '1') return false;
+  if (process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1') return true;
   return app.isPackaged;
 };
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
@@ -1427,7 +1427,7 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 const injectRuntimeConfigIntoHtml = (html: string): string => {
   const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
   const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  const initScript = `<script>if(window.__PIARIUM_LOCAL_ORIGIN__===undefined){window.__PIARIUM_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__PIARIUM_API_BASE_URL__===undefined){window.__PIARIUM_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__PIARIUM_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__PIARIUM_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
+  const initScript = `<script>if(window.__VARIN_LOCAL_ORIGIN__===undefined){window.__VARIN_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__VARIN_API_BASE_URL__===undefined){window.__VARIN_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__VARIN_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__VARIN_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
   if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
   if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
   return `${initScript}${html}`;
@@ -1557,7 +1557,7 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
 
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title.trim()
-    : 'Piarium';
+    : 'Varin';
   const body = typeof payload.body === 'string' ? payload.body : '';
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
     ? payload.sessionId.trim()
@@ -1579,7 +1579,7 @@ const maybeShowNativeNotification = (rawInput: unknown): void => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToAllWindows('piarium:open-session', { sessionId, directory });
+      emitToAllWindows('varin:open-session', { sessionId, directory });
     }
     release();
   });
@@ -1676,7 +1676,7 @@ const loadShellEnv = (): Record<string, string> | null => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/index.js';
+import { pathLooksUserConfigured, mergePathValues } from '@varin/web/server/index.js';
 
 // import/start the server in-process. The server and its children (Pi host,
 // git, etc.) inherit process.env directly now — there is no sidecar
@@ -1706,7 +1706,7 @@ const inheritUserShellEnv = () => {
 
 const shouldSkipLocalServer = () => {
   inheritUserShellEnv();
-  return process.env.PIARIUM_SKIP_LOCAL_SERVER === '1';
+  return process.env.VARIN_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
@@ -1747,33 +1747,33 @@ const spawnLocalServer = async () => {
     chosenPort = await pickUnusedPort(bindHost);
   }
 
-  // The server module reads PIARIUM_DESKTOP_NOTIFY / PIARIUM_DIST_DIR /
-  // PIARIUM_RUNTIME at import time (top-level const), so these must be
+  // The server module reads VARIN_DESKTOP_NOTIFY / VARIN_DIST_DIR /
+  // VARIN_RUNTIME at import time (top-level const), so these must be
   // set before the first import. After this point, the same env is used by
   // both the Electron main and the server running inside it.
-  process.env.PIARIUM_HOST = bindHost;
-  process.env.PIARIUM_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
+  process.env.VARIN_HOST = bindHost;
+  process.env.VARIN_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
   if (lanAccessBlockedByMissingPassword) {
-    process.env.PIARIUM_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+    process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
   } else {
-    delete process.env.PIARIUM_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    delete process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
   }
-  process.env.PIARIUM_DIST_DIR = resolveWebDistDir();
-  process.env.PIARIUM_RUNTIME = 'desktop';
-  if (!process.env.PIARIUM_KERNEL_PATH?.trim()) {
-    process.env.PIARIUM_KERNEL_PATH = path.join(process.resourcesPath, 'kernel', process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel');
+  process.env.VARIN_DIST_DIR = resolveWebDistDir();
+  process.env.VARIN_RUNTIME = 'desktop';
+  if (!process.env.VARIN_KERNEL_PATH?.trim()) {
+    process.env.VARIN_KERNEL_PATH = path.join(process.resourcesPath, 'kernel', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
   }
-  process.env.PIARIUM_DESKTOP_NOTIFY = 'true';
+  process.env.VARIN_DESKTOP_NOTIFY = 'true';
   if (desktopUiPassword) {
-    process.env.PIARIUM_UI_PASSWORD = desktopUiPassword;
+    process.env.VARIN_UI_PASSWORD = desktopUiPassword;
   } else {
-    delete process.env.PIARIUM_UI_PASSWORD;
+    delete process.env.VARIN_UI_PASSWORD;
   }
-  process.env.PIARIUM_SKIP_API_COMPRESSION = process.env.PIARIUM_SKIP_API_COMPRESSION || 'true';
+  process.env.VARIN_SKIP_API_COMPRESSION = process.env.VARIN_SKIP_API_COMPRESSION || 'true';
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
-  const { startWebUiServer } = await import('@piarium/web/server/index.js');
+  const { startWebUiServer } = await import('@varin/web/server/index.js');
   const hostEntry = getDesktopPiHostEntry();
 
   const handle = await startWebUiServer({
@@ -1793,8 +1793,8 @@ const spawnLocalServer = async () => {
       return result.html;
     },
     createPiRuntimeBroker: (brokerOptions) => createDesktopPiRuntimeBroker({
-      ...(typeof process.env.PIARIUM_AGENT_DIR === 'string' && process.env.PIARIUM_AGENT_DIR.trim()
-        ? { agentDir: process.env.PIARIUM_AGENT_DIR.trim() }
+      ...(typeof process.env.VARIN_AGENT_DIR === 'string' && process.env.VARIN_AGENT_DIR.trim()
+        ? { agentDir: process.env.VARIN_AGENT_DIR.trim() }
         : {}),
       clientVersion: APP_VERSION,
       emit: emitPiRuntimeEvent,
@@ -1877,7 +1877,7 @@ const buildInitScript = (
   const outcome = JSON.stringify(bootOutcome ?? null);
   return [
     '(function(){',
-    `try{var __piarium_local=${local};var __piarium_api=${apiBase};var __piarium_headers=${headers};var __piarium_packaged=${packagedOrigin};var __piarium_origin=window.location&&window.location.origin||'';var __piarium_is_packaged=__piarium_origin===__piarium_packaged;var __piarium_is_local=__piarium_local&&__piarium_origin===new URL(__piarium_local).origin;window.__PIARIUM_MACOS_MAJOR__=${macVersion};window.__PIARIUM_LOCAL_ORIGIN__=__piarium_local;window.__PIARIUM_API_BASE_URL__=__piarium_api;if(__piarium_is_local||__piarium_is_packaged){window.__PIARIUM_HOME__=${home};window.__PIARIUM_RUNTIME_HEADERS__=__piarium_headers;}if((__piarium_is_local||__piarium_is_packaged)&&${token}){window.__PIARIUM_CLIENT_TOKEN__=${token};}var __piarium_bo=${outcome};if(__piarium_bo){window.__PIARIUM_DESKTOP_BOOT_OUTCOME__=__piarium_bo;}}catch(_e){}`,
+    `try{var __varin_local=${local};var __varin_api=${apiBase};var __varin_headers=${headers};var __varin_packaged=${packagedOrigin};var __varin_origin=window.location&&window.location.origin||'';var __varin_is_packaged=__varin_origin===__varin_packaged;var __varin_is_local=__varin_local&&__varin_origin===new URL(__varin_local).origin;window.__VARIN_MACOS_MAJOR__=${macVersion};window.__VARIN_LOCAL_ORIGIN__=__varin_local;window.__VARIN_API_BASE_URL__=__varin_api;if(__varin_is_local||__varin_is_packaged){window.__VARIN_HOME__=${home};window.__VARIN_RUNTIME_HEADERS__=__varin_headers;}if((__varin_is_local||__varin_is_packaged)&&${token}){window.__VARIN_CLIENT_TOKEN__=${token};}var __varin_bo=${outcome};if(__varin_bo){window.__VARIN_DESKTOP_BOOT_OUTCOME__=__varin_bo;}}catch(_e){}`,
     '}())',
   ].join('');
 };
@@ -1984,7 +1984,7 @@ const buildStartupSplashHtml = (): string => {
   </head>
   <body>
     <div class="stack">
-      <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Piarium loading icon">
+      <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Varin loading icon">
         <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
         <path d="M50 50 L39.608 44 L39.608 56 L50 62 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
         <path d="M39.608 44 L29.216 38 L29.216 50 L39.608 56 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
@@ -2050,12 +2050,12 @@ const navigateWindow = async (
 ): Promise<void> => {
   const navigationStartedAt = performance.now();
   const documentClass = classifyStartupDocument(url);
-  if (browserWindow.__piariumLabel === 'main') {
+  if (browserWindow.__varinLabel === 'main') {
     recordElectronStartupPerformance('electron.navigation.start', { documentClass });
   }
   try {
     await browserWindow.loadURL(url);
-    if (browserWindow.__piariumLabel === 'main') {
+    if (browserWindow.__varinLabel === 'main') {
       recordElectronStartupPerformance('electron.navigation.ready', {
         documentClass,
         durationMs: performance.now() - navigationStartedAt,
@@ -2114,7 +2114,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       password: candidatePassword,
       trustDevice: trustDevice === true,
       issueClientToken: true,
-      clientLabel: 'Piarium Desktop',
+      clientLabel: 'Varin Desktop',
       ...clientIdentity,
     }),
   });
@@ -2142,7 +2142,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       Cookie: cookie,
     },
     body: JSON.stringify({
-      label: 'Piarium Desktop',
+      label: 'Varin Desktop',
       ...clientIdentity,
     }),
   });
@@ -2154,19 +2154,19 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
   return token ? { ok: true, token } : { ok: false, status: 500 };
 };
 
-const emitToWindow = <E extends PiariumDesktopEvent>(
+const emitToWindow = <E extends VarinDesktopEvent>(
   browserWindow: BrowserWindow | null | undefined,
   event: E,
-  ...eventArguments: PiariumDesktopEventArguments<E>
+  ...eventArguments: VarinDesktopEventArguments<E>
 ): void => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   const detail = eventArguments[0];
-  browserWindow.webContents.send('piarium:emit', { event, detail });
+  browserWindow.webContents.send('varin:emit', { event, detail });
 };
 
-const emitToAllWindows = <E extends PiariumDesktopEvent>(
+const emitToAllWindows = <E extends VarinDesktopEvent>(
   event: E,
-  ...eventArguments: PiariumDesktopEventArguments<E>
+  ...eventArguments: VarinDesktopEventArguments<E>
 ): void => {
   for (const browserWindow of BrowserWindow.getAllWindows()) {
     emitToWindow(browserWindow, event, ...eventArguments);
@@ -2189,7 +2189,7 @@ const applyMacVibrancy = (browserWindow: BrowserWindow | null | undefined): void
 
 const setMacVibrancyReady = (browserWindow: BrowserWindow | null | undefined, ready: boolean): void => {
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  emitToWindow(browserWindow, 'piarium:vibrancy-ready', { ready });
+  emitToWindow(browserWindow, 'varin:vibrancy-ready', { ready });
 };
 
 const scheduleMacVibrancyReady = (browserWindow: BrowserWindow | null | undefined, delayMs = 160): void => {
@@ -2304,7 +2304,7 @@ const parseConnectPairingDeepLinkPayload = (raw: unknown): PairingPayload | null
     return {
       pairingId,
       secret,
-      label: typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : 'Piarium',
+      label: typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : 'Varin',
       fingerprint: typeof payload.fingerprint === 'string' && payload.fingerprint.trim() ? payload.fingerprint.trim() : '',
       expiresAt: expiresAt || null,
       candidates: candidates.sort((left, right) => left.priority - right.priority),
@@ -2385,9 +2385,9 @@ const redeemConnectPairingDeepLink = async (
     body: JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
-      clientLabel: 'Piarium Desktop',
+      clientLabel: 'Varin Desktop',
       clientKind: 'desktop',
-      deviceName: 'Piarium Desktop',
+      deviceName: 'Varin Desktop',
       ...desktopDeviceMetadata(),
       dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
     }),
@@ -2450,7 +2450,7 @@ const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<bo
   }
   const options: MessageBoxOptions = {
     type: 'warning',
-    title: 'Connect to Piarium server?',
+    title: 'Connect to Varin server?',
     message: `Connect to "${payload.label}"?`,
     detail:
       `This will add ${payload.serverUrl} as a remote instance and route this app's activity ` +
@@ -2508,7 +2508,7 @@ const dispatchDeepLink = (link: DeepLink | undefined): void => {
     return;
   }
   if (link.type === 'session' && link.value) {
-    emitToAllWindows('piarium:open-session', { sessionId: link.value, directory: link.directory || '' });
+    emitToAllWindows('varin:open-session', { sessionId: link.value, directory: link.directory || '' });
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -2574,14 +2574,14 @@ const getMenuTargetWindow = () => {
 
 const dispatchMenuAction = (action: string): void => {
   const target = getMenuTargetWindow();
-  emitToWindow(target, 'piarium:menu-action', action);
-  dispatchDomEventToWindow(target, 'piarium:menu-action', action);
+  emitToWindow(target, 'varin:menu-action', action);
+  dispatchDomEventToWindow(target, 'varin:menu-action', action);
 };
 
 const dispatchCheckForUpdates = () => {
-  emitToAllWindows('piarium:check-for-updates');
+  emitToAllWindows('varin:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    dispatchDomEventToWindow(browserWindow, 'piarium:check-for-updates');
+    dispatchDomEventToWindow(browserWindow, 'varin:check-for-updates');
   }
 };
 
@@ -2636,7 +2636,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
   return Boolean(
     process.platform === 'win32'
     && browserWindow
-    && browserWindow.__piariumTitleBarOverlayEnabled
+    && browserWindow.__varinTitleBarOverlayEnabled
     && typeof browserWindow.setTitleBarOverlay === 'function'
     && !browserWindow.isDestroyed(),
   );
@@ -2671,7 +2671,7 @@ const createBrowserWindow = ({
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
   const options: BrowserWindowConstructorOptions = {
-    title: 'Piarium',
+    title: 'Varin',
     ...(restoredBounds && Number.isFinite(restoredBounds.x) && Number.isFinite(restoredBounds.y)
       ? { x: restoredBounds.x, y: restoredBounds.y }
       : {}),
@@ -2707,10 +2707,10 @@ const createBrowserWindow = ({
   };
 
   const browserWindow = new BrowserWindow(options);
-  browserWindow.__piariumLabel = label || nextWindowLabel();
-  browserWindow.__piariumRuntimeConfig = rendererRuntimeConfig;
-  browserWindow.__piariumInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
-  browserWindow.__piariumTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.__varinLabel = label || nextWindowLabel();
+  browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
+  browserWindow.__varinInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__varinTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved?.maximized) {
     browserWindow.maximize();
@@ -2757,16 +2757,16 @@ const createBrowserWindow = ({
 
   browserWindow.on('resize', () => {
     if (process.platform === 'darwin') {
-      emitToWindow(browserWindow, 'piarium:window-resized');
+      emitToWindow(browserWindow, 'varin:window-resized');
     }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
-    emitToWindow(browserWindow, 'piarium:window-maximized-changed', { maximized: true });
+    emitToWindow(browserWindow, 'varin:window-maximized-changed', { maximized: true });
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('unmaximize', () => {
-    emitToWindow(browserWindow, 'piarium:window-maximized-changed', { maximized: false });
+    emitToWindow(browserWindow, 'varin:window-maximized-changed', { maximized: false });
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('move', () => {
@@ -2882,19 +2882,19 @@ const createBrowserWindow = ({
   });
 
   browserWindow.webContents.on('dom-ready', () => {
-    if (browserWindow.__piariumLabel === 'main') {
+    if (browserWindow.__varinLabel === 'main') {
       recordElectronStartupPerformance('electron.renderer.dom-ready', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    const initScript = browserWindow.__piariumInitScript;
+    const initScript = browserWindow.__varinInitScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
 
   browserWindow.webContents.on('did-finish-load', () => {
-    if (browserWindow.__piariumLabel === 'main') {
+    if (browserWindow.__varinLabel === 'main') {
       recordElectronStartupPerformance('electron.renderer.loaded', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
@@ -2911,7 +2911,7 @@ const createBrowserWindow = ({
   });
 
   browserWindow.once('ready-to-show', () => {
-    if (browserWindow.__piariumLabel === 'main') {
+    if (browserWindow.__varinLabel === 'main') {
       recordElectronStartupPerformance('electron.window.ready-to-show', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
@@ -2962,7 +2962,7 @@ const activateMainWindow = async (
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__piariumRuntimeConfig = rendererRuntimeConfig;
+    mainWindow.__varinRuntimeConfig = rendererRuntimeConfig;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
     mainWindow.focus();
@@ -3066,7 +3066,7 @@ const getWindowRuntimeConfig = (browserWindow: BrowserWindow | null | undefined)
     relayHostId: '',
   };
   if (!browserWindow || browserWindow.isDestroyed()) return fallback;
-  const config = browserWindow.__piariumRuntimeConfig;
+  const config = browserWindow.__varinRuntimeConfig;
   return {
     apiBaseUrl: typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : fallback.apiBaseUrl,
     clientToken: typeof config?.clientToken === 'string' ? config.clientToken : fallback.clientToken,
@@ -3108,7 +3108,7 @@ const createMiniChatWindow = async ({
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const miniChatIcon = getWindowIconPath();
   const miniChatOptions: BrowserWindowConstructorOptions = {
-    title: 'Piarium Mini Chat',
+    title: 'Varin Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
     height: MINI_CHAT_WINDOW_HEIGHT,
     minWidth: MINI_CHAT_MIN_WINDOW_WIDTH,
@@ -3133,22 +3133,22 @@ const createMiniChatWindow = async ({
     },
   };
   const browserWindow = new BrowserWindow(miniChatOptions);
-  browserWindow.__piariumLabel = nextWindowLabel();
-  browserWindow.__piariumRuntimeConfig = effectiveRuntimeConfig;
-  browserWindow.__piariumInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
-  browserWindow.__piariumMiniChat = true;
-  browserWindow.__piariumMiniChatSessionId = sessionWindowKey;
-  browserWindow.__piariumPinned = false;
+  browserWindow.__varinLabel = nextWindowLabel();
+  browserWindow.__varinRuntimeConfig = effectiveRuntimeConfig;
+  browserWindow.__varinInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__varinMiniChat = true;
+  browserWindow.__varinMiniChatSessionId = sessionWindowKey;
+  browserWindow.__varinPinned = false;
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
   }
 
   browserWindow.on('closed', () => {
-    if (browserWindow.__piariumMiniChatSessionId) {
-      const existing = state.miniChatWindowsBySession.get(browserWindow.__piariumMiniChatSessionId);
+    if (browserWindow.__varinMiniChatSessionId) {
+      const existing = state.miniChatWindowsBySession.get(browserWindow.__varinMiniChatSessionId);
       if (existing?.id === browserWindow.id) {
-        state.miniChatWindowsBySession.delete(browserWindow.__piariumMiniChatSessionId);
+        state.miniChatWindowsBySession.delete(browserWindow.__varinMiniChatSessionId);
       }
     }
   });
@@ -3182,7 +3182,7 @@ const createMiniChatWindow = async ({
   browserWindow.webContents.on('will-navigate', (event, url) => {
     if (isTrustedLocalRendererUrl(url, {
       uiProtocol: UI_PROTOCOL,
-      developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+      developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.VARIN_HMR_UI_PORT || '5173'}` : '',
       localOrigins: [state.localOrigin, state.sidecarUrl],
     })) return;
     event.preventDefault();
@@ -3190,7 +3190,7 @@ const createMiniChatWindow = async ({
     if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {
-    const initScript = browserWindow.__piariumInitScript;
+    const initScript = browserWindow.__varinInitScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
@@ -3204,11 +3204,11 @@ const setMiniChatPinned = (browserWindow: BrowserWindow | null | undefined, pinn
   if (!browserWindow || browserWindow.isDestroyed()) {
     throw new Error('Window is not available');
   }
-  if (browserWindow.__piariumMiniChat !== true) {
+  if (browserWindow.__varinMiniChat !== true) {
     throw new Error('Pinning is only available for Mini Chat windows');
   }
   const nextPinned = pinned === true;
-  browserWindow.__piariumPinned = nextPinned;
+  browserWindow.__varinPinned = nextPinned;
   if (nextPinned) {
     browserWindow.setAlwaysOnTop(true, 'floating');
   } else {
@@ -3239,8 +3239,8 @@ const resolveMiniChatRuntimeConfig = (
 };
 
 const resolveInitialUrl = async () => {
-  const hmrApiPort = process.env.PIARIUM_HMR_API_PORT || '3901';
-  const hmrUiPort = process.env.PIARIUM_HMR_UI_PORT || '5173';
+  const hmrApiPort = process.env.VARIN_HMR_API_PORT || '3901';
+  const hmrUiPort = process.env.VARIN_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
@@ -3274,7 +3274,7 @@ const resolveInitialUrl = async () => {
   let requestHeaders: Record<string, string> = {};
   let remoteProbe: HostProbeResult | null = null;
 
-  const envTarget = normalizeHostUrl(process.env.PIARIUM_SERVER_URL || '');
+  const envTarget = normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
   const config = readDesktopHostsConfig();
   if (envTarget) {
     apiBaseUrl = envTarget;
@@ -3310,7 +3310,7 @@ const resolveInitialUrl = async () => {
   }
   if (!initialUrl) {
     throw new Error(
-      'PIARIUM_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
+      'VARIN_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
     );
   }
 
@@ -3377,11 +3377,11 @@ const setupTrayAndListener = (bootOutcome: BootOutcome | null): void => {
 
   // Resolve password: try host-level password from hosts config, then fall
   // back to any UI password stored in settings (desktopHosts entries don't
-  // currently persist passwords, but the app may set PIARIUM_UI_PASSWORD).
+  // currently persist passwords, but the app may set VARIN_UI_PASSWORD).
   const settingsPassword = readSettingsRoot().uiPassword;
   const password = host?.password
     || (typeof settingsPassword === 'string' ? settingsPassword : '')
-    || process.env.PIARIUM_UI_PASSWORD
+    || process.env.VARIN_UI_PASSWORD
     || '';
   const clientToken = host?.clientToken
     || resolveStoredClientTokenForUrl(serverUrl, config)
@@ -3426,8 +3426,8 @@ const setupAutoUpdater = () => {
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
 
-  const testBuild = typeof __PIARIUM_UPDATER_E2E_BUILD__ !== 'undefined'
-    && __PIARIUM_UPDATER_E2E_BUILD__ === true;
+  const testBuild = typeof __VARIN_UPDATER_E2E_BUILD__ !== 'undefined'
+    && __VARIN_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
   const updaterChannel = feed.provider === 'github'
     ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
@@ -3446,7 +3446,7 @@ const setupAutoUpdater = () => {
     const total = Number(progress.total || 0);
     const transferred = Number(progress.transferred || 0);
     setTaskbarProgress(total > 0 ? Math.max(0, Math.min(1, transferred / total)) : 0.01);
-    emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
+    emitToAllWindows('varin:update-progress', mapUpdaterProgressEvent({
       event: 'Progress',
       data: {
         chunkLength: Math.max(0, Math.round(progress.bytesPerSecond || 0)),
@@ -3529,7 +3529,7 @@ const isAppBundleInstalled = async (appName: string): Promise<boolean> => Boolea
 const iconToDataUrl = async (iconPath: string | null, appName: string): Promise<string | null> => {
   if (!iconPath || !(await pathExists(iconPath))) return null;
   const safeName = String(appName || 'app').replace(/[^a-z0-9]/gi, '_');
-  const tempPath = path.join(os.tmpdir(), `piarium-icon-${safeName}-${Date.now()}.png`);
+  const tempPath = path.join(os.tmpdir(), `varin-icon-${safeName}-${Date.now()}.png`);
   try {
     await execFileAsync('sips', ['-s', 'format', 'png', '-Z', '32', iconPath, '--out', tempPath]);
   } catch {
@@ -4098,7 +4098,7 @@ const renderDesktopWebPage = async (
   const renderWindow = new BrowserWindow({
     show: false,
     webPreferences: {
-      partition: 'persist:piarium-web-agent',
+      partition: 'persist:varin-web-agent',
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -4142,9 +4142,9 @@ const renderDesktopWebPage = async (
 
 const handleInvoke = async (
   browserWindow: BrowserWindow | null,
-  command: PiariumDesktopCommand,
+  command: VarinDesktopCommand,
   args: Record<string, unknown> = {},
-): Promise<PiariumDesktopCommandResult<PiariumDesktopCommand>> => {
+): Promise<VarinDesktopCommandResult<VarinDesktopCommand>> => {
   switch (command) {
     case 'desktop_start_window_drag':
       return null;
@@ -4307,7 +4307,7 @@ const handleInvoke = async (
       if (!underHome && !underTmp) {
         throw new Error('File is outside the allowed workspace');
       }
-      const DENIED_SEGMENTS = ['.ssh', '.aws', '.gnupg', '.gpg', '.config/gh', '.config/piarium/credentials'];
+      const DENIED_SEGMENTS = ['.ssh', '.aws', '.gnupg', '.gpg', '.config/gh', '.config/varin/credentials'];
       const relFromHome = underHome ? filePath.slice(home.length + 1) : '';
       const relNormalized = relFromHome.split(path.sep).join('/');
       if (DENIED_SEGMENTS.some((segment) => relNormalized === segment || relNormalized.startsWith(`${segment}/`))) {
@@ -4555,7 +4555,7 @@ const handleInvoke = async (
         const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
-        emitToAllWindows('piarium:installed-apps-updated', apps);
+        emitToAllWindows('varin:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
         return { apps: [], hasCache: false, isCacheStale: false, supported: false };
@@ -4578,7 +4578,7 @@ const handleInvoke = async (
       const nextConfigInput = recordOf(args.input || args.config);
       await writeDesktopHostsConfig(nextConfigInput);
       const updatedConfig = readDesktopHostsConfig();
-      const envTarget = normalizeHostUrl(process.env.PIARIUM_SERVER_URL || '');
+      const envTarget = normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
       if (Object.prototype.hasOwnProperty.call(nextConfigInput, 'localClientToken') && isLocalRuntimeUrl(state.apiBaseUrl || state.sidecarUrl || state.localOrigin || '')) {
         state.clientToken = readDesktopLocalClientToken();
       }
@@ -4693,7 +4693,7 @@ const handleInvoke = async (
         throw new Error('No pending update');
       }
       setTaskbarProgress(0.01);
-      emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
+      emitToAllWindows('varin:update-progress', mapUpdaterProgressEvent({
         event: 'Started',
         data: {
           contentLength: null,
@@ -4729,7 +4729,7 @@ const handleInvoke = async (
             });
           });
         }
-        emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
+        emitToAllWindows('varin:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
         }));
@@ -4745,7 +4745,7 @@ const handleInvoke = async (
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
           if (!app.isInApplicationsFolder()) {
-            throw new Error('Desktop update requires Piarium.app to be installed in /Applications');
+            throw new Error('Desktop update requires Varin.app to be installed in /Applications');
           }
         } catch (error) {
           log.warn('[electron] desktop_restart blocked', error);
@@ -4884,7 +4884,7 @@ const handleInvoke = async (
       return setMiniChatPinned(browserWindow, args.pinned === true);
 
     case 'desktop_get_window_pinned':
-      return { pinned: Boolean(browserWindow?.__piariumPinned) };
+      return { pinned: Boolean(browserWindow?.__varinPinned) };
 
     case 'desktop_focus_main_window': {
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
@@ -4907,9 +4907,9 @@ const handleInvoke = async (
       mainWindow.show();
       mainWindow.focus();
       if (sessionId) {
-        emitToWindow(mainWindow, 'piarium:open-session', { sessionId, directory });
+        emitToWindow(mainWindow, 'varin:open-session', { sessionId, directory });
       } else if (mode === 'draft') {
-        emitToWindow(mainWindow, 'piarium:open-draft-session', { directory, projectId });
+        emitToWindow(mainWindow, 'varin:open-draft-session', { directory, projectId });
       }
       return { focused: true };
     }
@@ -5018,7 +5018,7 @@ const buildMacMenu = () => {
     {
       label: app.name,
       submenu: [
-        { label: 'About Piarium', click: () => dispatchAction('about') },
+        { label: 'About Varin', click: () => dispatchAction('about') },
         {
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
@@ -5116,9 +5116,9 @@ const buildAutoHiddenMenu = () => {
 
   return Menu.buildFromTemplate([
     {
-      label: 'Piarium',
+      label: 'Varin',
       submenu: [
-        { label: 'About Piarium', click: () => dispatchAction('about') },
+        { label: 'About Varin', click: () => dispatchAction('about') },
         {
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
@@ -5270,17 +5270,17 @@ const ipcSenderUrl = (event: IpcMainEvent | IpcMainInvokeEvent): string => {
 
 const isLocalSender = (event: IpcMainEvent | IpcMainInvokeEvent): boolean => isTrustedLocalRendererUrl(ipcSenderUrl(event), {
   uiProtocol: UI_PROTOCOL,
-  developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+  developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.VARIN_HMR_UI_PORT || '5173'}` : '',
   localOrigins: [state.localOrigin, state.sidecarUrl],
 });
 
-ipcMain.on('piarium:bootstrap', (event) => {
+ipcMain.on('varin:bootstrap', (event) => {
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   const runtimeConfig = getWindowRuntimeConfig(browserWindow);
   event.returnValue = createPreloadBootstrapPayload({
     senderUrl: ipcSenderUrl(event),
     uiProtocol: UI_PROTOCOL,
-    developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+    developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.VARIN_HMR_UI_PORT || '5173'}` : '',
     localOrigins: [state.localOrigin, state.sidecarUrl],
     localOrigin: state.localOrigin || state.sidecarUrl || '',
     apiBaseUrl: runtimeConfig.apiBaseUrl,
@@ -5294,8 +5294,8 @@ ipcMain.on('piarium:bootstrap', (event) => {
   });
 });
 
-ipcMain.handle('piarium:invoke', async (event: IpcMainInvokeEvent, rawCommand: unknown, rawArgs: unknown) => {
-  const command = isPiariumDesktopCommand(rawCommand) ? rawCommand : null;
+ipcMain.handle('varin:invoke', async (event: IpcMainInvokeEvent, rawCommand: unknown, rawArgs: unknown) => {
+  const command = isVarinDesktopCommand(rawCommand) ? rawCommand : null;
   const args = recordOf(rawArgs);
   if (!isLocalSender(event) && (!command || !REMOTE_SAFE_DESKTOP_COMMANDS.has(command))) {
     log.warn(`[ipc] rejected ${typeof rawCommand === 'string' ? rawCommand : '(invalid command)'} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
@@ -5306,7 +5306,7 @@ ipcMain.handle('piarium:invoke', async (event: IpcMainInvokeEvent, rawCommand: u
   return handleInvoke(browserWindow, command, args);
 });
 
-ipcMain.handle('piarium:dialog:open', async (event: IpcMainInvokeEvent, rawOptions: unknown) => {
+ipcMain.handle('varin:dialog:open', async (event: IpcMainInvokeEvent, rawOptions: unknown) => {
   // Native file dialogs expose absolute local paths; never grant to remote.
   if (!isLocalSender(event)) {
     log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
@@ -5362,7 +5362,7 @@ ipcMain.handle('piarium:dialog:open', async (event: IpcMainInvokeEvent, rawOptio
   return result.filePaths[0] || null;
 });
 
-ipcMain.handle('piarium:file:grant-existing', async (event, filePath) => {
+ipcMain.handle('varin:file:grant-existing', async (event, filePath) => {
   if (!isLocalSender(event)) {
     log.warn(`[ipc] rejected file:grant-existing from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
@@ -5501,7 +5501,7 @@ const focusMainWindowWithSession = async (sessionId: string, directory: string):
         pendingDeepLinks.push({ type: 'session', value: sessionId, directory: directory || '' });
         return;
       }
-      emitToWindow(state.mainWindow, 'piarium:open-session', { sessionId, directory: directory || '' });
+      emitToWindow(state.mainWindow, 'varin:open-session', { sessionId, directory: directory || '' });
     }
     return;
   }
@@ -5518,7 +5518,7 @@ const emitTrayActionWhenReady = async (action: TrayAction): Promise<boolean> => 
     pendingTrayActions.push(action);
     return false;
   }
-  emitToWindow(target, 'piarium:tray-action', action);
+  emitToWindow(target, 'varin:tray-action', action);
   return true;
 };
 
@@ -5577,7 +5577,7 @@ const dispatchTrayAction = async (action: TrayAction | undefined): Promise<void>
       pendingTrayActions.push(action);
       return;
     }
-    emitToWindow(target, 'piarium:open-draft-session', { directory: '', projectId: '' });
+    emitToWindow(target, 'varin:open-draft-session', { directory: '', projectId: '' });
   }
   // show-main-window: revealing the window above is the whole action.
 };
@@ -5725,7 +5725,7 @@ app.whenReady().then(async () => {
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     setupTrayAndListener(bootOutcome);
     powerMonitor.on('resume', () => {
-      emitToAllWindows('piarium:system-resume', { timestamp: Date.now() });
+      emitToAllWindows('varin:system-resume', { timestamp: Date.now() });
     });
     log.info('[electron] started in background without window');
     return;
@@ -5751,7 +5751,7 @@ app.whenReady().then(async () => {
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
   powerMonitor.on('resume', () => {
-    emitToAllWindows('piarium:system-resume', { timestamp: Date.now() });
+    emitToAllWindows('varin:system-resume', { timestamp: Date.now() });
   });
 }).catch(async (error) => {
   log.error('[electron] startup failed:', error);

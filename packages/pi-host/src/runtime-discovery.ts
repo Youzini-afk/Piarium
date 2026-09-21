@@ -8,7 +8,7 @@ import type {
   PiRuntimeInstallation,
   PiRuntimeInstallationSource,
   RuntimeSourceKind,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { isStandalonePiLayout, resolvePiCommandLayout } from "./pi-command-layout.js";
 import {
   meetsMinimumNodeVersion,
@@ -352,7 +352,7 @@ function inspectBundledPi(): RuntimeCandidate {
     id: "bundled",
     ...(available
       ? {}
-      : { issue: "Pi SDK is not present in this Piarium installation" }),
+      : { issue: "Pi SDK is not present in this Varin installation" }),
     nodePath: process.execPath,
     nodeVersion: process.versions.node,
     packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
@@ -371,16 +371,16 @@ export async function discoverPiRuntimes(
     ((command: string, args: string[]) => defaultCommandRunner(command, args, env));
   const sourcePaths = [
     ...(options.sourcePaths ?? []),
-    ...(env.PIARIUM_PI_SOURCE ? [env.PIARIUM_PI_SOURCE] : []),
+    ...(env.VARIN_PI_SOURCE ? [env.VARIN_PI_SOURCE] : []),
   ];
   const uniqueSourcePaths = [...new Set(sourcePaths.map((entry) => resolve(entry)))];
   const customRuntimes = [
     ...(options.customRuntimes ?? []),
-    ...(env.PIARIUM_PI_CUSTOM_ROOT
+    ...(env.VARIN_PI_CUSTOM_ROOT
       ? [
           {
-            ...(env.PIARIUM_PI_CUSTOM_NODE ? { nodePath: env.PIARIUM_PI_CUSTOM_NODE } : {}),
-            packageRoot: env.PIARIUM_PI_CUSTOM_ROOT,
+            ...(env.VARIN_PI_CUSTOM_NODE ? { nodePath: env.VARIN_PI_CUSTOM_NODE } : {}),
+            packageRoot: env.VARIN_PI_CUSTOM_ROOT,
           },
         ]
       : []),

@@ -1,48 +1,48 @@
 import {
-  assertPiariumApplicationVersion,
-  parsePiariumExtensionActualState,
-  parsePiariumExtensionCandidateCapabilityReviewRequest,
-  parsePiariumExtensionCandidateSelectionRequest,
-  parsePiariumExtensionCapabilityReviewRequest,
-  parsePiariumExtensionHostStateWaitRequest,
-  parsePiariumExtensionLocalSourceReloadRequest,
-  parsePiariumExtensionPackageInstallRequest,
-  parsePiariumExtensionRemoveRequest,
-  parsePiariumExtensionServiceInvocationRequest,
-  parsePiariumExtensionServiceSelectionRequest,
-  parsePiariumWorkbenchProfileApplyRequest,
-  resolvePiariumExtensionServiceRouting,
+  assertVarinApplicationVersion,
+  parseVarinExtensionActualState,
+  parseVarinExtensionCandidateCapabilityReviewRequest,
+  parseVarinExtensionCandidateSelectionRequest,
+  parseVarinExtensionCapabilityReviewRequest,
+  parseVarinExtensionHostStateWaitRequest,
+  parseVarinExtensionLocalSourceReloadRequest,
+  parseVarinExtensionPackageInstallRequest,
+  parseVarinExtensionRemoveRequest,
+  parseVarinExtensionServiceInvocationRequest,
+  parseVarinExtensionServiceSelectionRequest,
+  parseVarinWorkbenchProfileApplyRequest,
+  resolveVarinExtensionServiceRouting,
   type JsonValue,
-  type PiariumExtensionActivationEvent,
-  type PiariumExtensionActualState,
-  type PiariumExtensionCandidateCapabilityReviewRequest,
-  type PiariumExtensionCandidateSelectionRequest,
-  type PiariumExtensionCapabilityReviewRequest,
-  type PiariumExtensionCandidatePreparationResult,
-  type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionHostStateSnapshot,
-  type PiariumExtensionHostStateWaitRequest,
-  type PiariumExtensionLocalSourceReloadRequest,
-  type PiariumExtensionLocalSourceReloadResult,
-  type PiariumExtensionPackageInstallRequest,
-  type PiariumExtensionRemoveRequest,
-  type PiariumExtensionServiceInvocationRequest,
-  type PiariumExtensionServiceRoutingRuleRemoveRequest,
-  type PiariumExtensionServiceRoutingRuleUpdateRequest,
-  type PiariumExtensionServiceRoutingSnapshot,
-  type PiariumExtensionServiceSelectionRequest,
-  type PiariumWorkbenchLayoutUpdateRequest,
-  type PiariumWorkbenchProfileRemoveRequest,
-  type PiariumWorkbenchProfileApplyRequest,
-  type PiariumWorkbenchProfileSelectionRequest,
-  type PiariumWorkbenchProfileSnapshot,
-  type PiariumWorkbenchProfileUpsertRequest,
-} from "@piarium/extension-contract";
+  type VarinExtensionActivationEvent,
+  type VarinExtensionActualState,
+  type VarinExtensionCandidateCapabilityReviewRequest,
+  type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCapabilityReviewRequest,
+  type VarinExtensionCandidatePreparationResult,
+  type VarinExtensionCatalogSnapshot,
+  type VarinExtensionHostStateSnapshot,
+  type VarinExtensionHostStateWaitRequest,
+  type VarinExtensionLocalSourceReloadRequest,
+  type VarinExtensionLocalSourceReloadResult,
+  type VarinExtensionPackageInstallRequest,
+  type VarinExtensionRemoveRequest,
+  type VarinExtensionServiceInvocationRequest,
+  type VarinExtensionServiceRoutingRuleRemoveRequest,
+  type VarinExtensionServiceRoutingRuleUpdateRequest,
+  type VarinExtensionServiceRoutingSnapshot,
+  type VarinExtensionServiceSelectionRequest,
+  type VarinWorkbenchLayoutUpdateRequest,
+  type VarinWorkbenchProfileRemoveRequest,
+  type VarinWorkbenchProfileApplyRequest,
+  type VarinWorkbenchProfileSelectionRequest,
+  type VarinWorkbenchProfileSnapshot,
+  type VarinWorkbenchProfileUpsertRequest,
+} from "@varin/extension-contract";
 import {
-  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-  PIARIUM_BUILTIN_EXTENSION_PREFIX,
-  PIARIUM_BUNDLED_LANGUAGE_SERVERS,
-} from "@piarium/extension-builtins";
+  VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+  VARIN_BUILTIN_EXTENSION_PREFIX,
+  VARIN_BUNDLED_LANGUAGE_SERVERS,
+} from "@varin/extension-builtins";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
@@ -59,7 +59,7 @@ export interface ApplicationExtensionRuntimeOptions {
   catalog?: ApplicationExtensionCatalog;
   dataDir: string;
   packages?: ExtensionPackageManager;
-  piariumVersion: string;
+  varinVersion: string;
   routing?: ServiceRoutingStore;
   services?: HostServiceRegistry;
   storage?: ExtensionStorageStore;
@@ -71,7 +71,7 @@ export class ApplicationExtensionRuntime {
   readonly capabilities: HostCapabilityRegistry;
   readonly catalog: ApplicationExtensionCatalog;
   readonly packages: ExtensionPackageManager;
-  readonly piariumVersion: string;
+  readonly varinVersion: string;
   readonly routing: ServiceRoutingStore;
   readonly services: HostServiceRegistry;
   readonly storage: ExtensionStorageStore;
@@ -84,16 +84,16 @@ export class ApplicationExtensionRuntime {
   #stopped = false;
 
   private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
-    this.piariumVersion = options.piariumVersion;
-    assertPiariumApplicationVersion(this.piariumVersion);
+    this.varinVersion = options.varinVersion;
+    assertVarinApplicationVersion(this.varinVersion);
     this.catalog = options.catalog ?? new ApplicationExtensionCatalog({ dataDir: options.dataDir });
     this.packages = options.packages ?? new ExtensionPackageManager({
       catalog: this.catalog,
       dataDir: options.dataDir,
-      piariumVersion: this.piariumVersion,
+      varinVersion: this.varinVersion,
     });
-    if (this.packages.piariumVersion !== this.piariumVersion) {
-      throw new Error("Extension package manager targets another Piarium application version");
+    if (this.packages.varinVersion !== this.varinVersion) {
+      throw new Error("Extension package manager targets another Varin application version");
     }
     this.capabilities = options.capabilities ?? new HostCapabilityRegistry();
     this.services = options.services ?? new HostServiceRegistry(hostId);
@@ -123,11 +123,11 @@ export class ApplicationExtensionRuntime {
     return new ApplicationExtensionRuntime({ ...options, catalog }, identity.hostId);
   }
 
-  async start(): Promise<PiariumExtensionHostStateSnapshot> {
+  async start(): Promise<VarinExtensionHostStateSnapshot> {
     await this.#mutate(async () => {
       const snapshot = await this.catalog.reconcileBuiltins(
-        PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-        PIARIUM_BUILTIN_EXTENSION_PREFIX,
+        VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+        VARIN_BUILTIN_EXTENSION_PREFIX,
       );
       await this.supervisor.reconcile(snapshot);
       await this.workbench.read();
@@ -137,7 +137,7 @@ export class ApplicationExtensionRuntime {
     return this.state();
   }
 
-  async state(): Promise<PiariumExtensionHostStateSnapshot> {
+  async state(): Promise<VarinExtensionHostStateSnapshot> {
     for (;;) {
       const before = this.#revision;
       const catalog = await this.catalog.snapshot();
@@ -156,10 +156,10 @@ export class ApplicationExtensionRuntime {
   }
 
   async waitForState(
-    requestValue: PiariumExtensionHostStateWaitRequest | unknown,
+    requestValue: VarinExtensionHostStateWaitRequest | unknown,
     signal?: AbortSignal,
-  ): Promise<PiariumExtensionHostStateSnapshot> {
-    const request = parsePiariumExtensionHostStateWaitRequest(requestValue);
+  ): Promise<VarinExtensionHostStateSnapshot> {
+    const request = parseVarinExtensionHostStateWaitRequest(requestValue);
     const current = await this.state();
     if (request.hostId !== current.catalog.hostId || request.revision !== current.revision) return current;
     return new Promise((resolveWait, rejectWait) => {
@@ -185,7 +185,7 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  reconcile(snapshot?: PiariumExtensionCatalogSnapshot): Promise<void> {
+  reconcile(snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
     return this.#mutate(async () => {
       await this.supervisor.reconcile(snapshot);
       this.#publish();
@@ -193,10 +193,10 @@ export class ApplicationExtensionRuntime {
   }
 
   installOrStage(
-    requestValue: PiariumExtensionPackageInstallRequest | unknown,
+    requestValue: VarinExtensionPackageInstallRequest | unknown,
     signal?: AbortSignal,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionPackageInstallRequest(requestValue);
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionPackageInstallRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const snapshot = await this.packages.installOrStage(request.source, request.expectedRevision, signal);
       await this.supervisor.reconcile(snapshot);
@@ -205,10 +205,10 @@ export class ApplicationExtensionRuntime {
   }
 
   reloadLocalSource(
-    requestValue: PiariumExtensionLocalSourceReloadRequest | unknown,
+    requestValue: VarinExtensionLocalSourceReloadRequest | unknown,
     signal?: AbortSignal,
-  ): Promise<PiariumExtensionLocalSourceReloadResult> {
-    const request = parsePiariumExtensionLocalSourceReloadRequest(requestValue);
+  ): Promise<VarinExtensionLocalSourceReloadResult> {
+    const request = parseVarinExtensionLocalSourceReloadRequest(requestValue);
     return this.#mutate(async () => {
       const result = await this.packages.reloadLocalSource(request, signal);
       if (result.outcome === "staged") {
@@ -220,18 +220,18 @@ export class ApplicationExtensionRuntime {
   }
 
   removeExtension(
-    requestValue: PiariumExtensionRemoveRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionRemoveRequest(requestValue);
+    requestValue: VarinExtensionRemoveRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionRemoveRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const current = await this.catalog.snapshot();
       if (current.revision !== request.expectedRevision) {
         return this.catalog.remove(request.extensionId, request.expectedRevision);
       }
       const entry = current.extensions.find((candidate) => candidate.manifest.id === request.extensionId);
-      if (!entry) throw new Error(`Piarium extension is not installed: ${request.extensionId}`);
-      if (entry.source.kind === "builtin") throw new Error(`Built-in Piarium extensions are managed by the distribution: ${request.extensionId}`);
-      if (entry.desired.enabled) throw new Error(`Disable the Piarium extension before removing it: ${request.extensionId}`);
+      if (!entry) throw new Error(`Varin extension is not installed: ${request.extensionId}`);
+      if (entry.source.kind === "builtin") throw new Error(`Built-in Varin extensions are managed by the distribution: ${request.extensionId}`);
+      if (entry.desired.enabled) throw new Error(`Disable the Varin extension before removing it: ${request.extensionId}`);
       await this.supervisor.deactivateExtension(request.extensionId);
       try {
         const removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
@@ -242,7 +242,7 @@ export class ApplicationExtensionRuntime {
           } catch (error) {
             throw new ExtensionStorageError(
               "storage_write_failed",
-              `Piarium extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
+              `Varin extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
               { cause: error },
             );
           }
@@ -255,7 +255,7 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     return this.#mutateCatalog(async () => {
       const snapshot = await this.catalog.setEnabled(extensionId, enabled, expectedRevision);
       await this.supervisor.reconcile(snapshot);
@@ -263,7 +263,7 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  setAllEnabled(enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  setAllEnabled(enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     return this.#mutateCatalog(async () => {
       const snapshot = await this.catalog.setAllEnabled(enabled, expectedRevision);
       await this.supervisor.reconcile(snapshot);
@@ -271,7 +271,7 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  prepareCandidate(extensionId: string, integrity: string): Promise<PiariumExtensionCandidatePreparationResult> {
+  prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
     return this.#mutate(async () => {
       const prepared = await this.supervisor.prepareCandidate(extensionId, integrity);
       this.#publish();
@@ -287,7 +287,7 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  activateForEvent(event: PiariumExtensionActivationEvent, { languageId }: { languageId?: string } = {}): Promise<void> {
+  activateForEvent(event: VarinExtensionActivationEvent, { languageId }: { languageId?: string } = {}): Promise<void> {
     return this.#mutate(async () => {
       const snapshot = await this.catalog.snapshot();
       if (!snapshot.authoritative) throw new Error("Cannot activate extensions from a stale catalog");
@@ -297,7 +297,7 @@ export class ApplicationExtensionRuntime {
         // request must not first materialize the unrelated Python/tooling pack.
         // Third-party workspace activations keep their declared event behavior.
         if (event === "workspace-match" && languageId && entry.source.kind === "builtin") {
-          const bundled = PIARIUM_BUNDLED_LANGUAGE_SERVERS.filter((server) => server.extensionId === entry.manifest.id);
+          const bundled = VARIN_BUNDLED_LANGUAGE_SERVERS.filter((server) => server.extensionId === entry.manifest.id);
           if (bundled.length > 0 && !bundled.some((server) => server.languageIds.includes(languageId))) continue;
         }
         await this.#ensureBuiltinArtifact(entry.manifest.id);
@@ -315,9 +315,9 @@ export class ApplicationExtensionRuntime {
   }
 
   discardCandidate(
-    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    requestValue: VarinExtensionCandidateSelectionRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const current = await this.catalog.snapshot();
       if (current.revision !== request.expectedRevision) {
@@ -344,9 +344,9 @@ export class ApplicationExtensionRuntime {
   }
 
   selectCandidate(
-    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    requestValue: VarinExtensionCandidateSelectionRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const selected = await this.supervisor.selectCandidate(
         request.extensionId,
@@ -359,9 +359,9 @@ export class ApplicationExtensionRuntime {
   }
 
   requestCandidateApplication(
-    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    requestValue: VarinExtensionCandidateSelectionRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
     return this.#mutateCatalog(() => this.catalog.requestCandidateApplication(
       request.extensionId,
       request.candidateIntegrity,
@@ -370,9 +370,9 @@ export class ApplicationExtensionRuntime {
   }
 
   reviewCandidateCapabilities(
-    requestValue: PiariumExtensionCandidateCapabilityReviewRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCandidateCapabilityReviewRequest(requestValue);
+    requestValue: VarinExtensionCandidateCapabilityReviewRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCandidateCapabilityReviewRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const reviewed = await this.catalog.reviewCandidateCapabilities(request);
       await this.supervisor.reconcile(reviewed);
@@ -381,9 +381,9 @@ export class ApplicationExtensionRuntime {
   }
 
   reviewCapabilities(
-    requestValue: PiariumExtensionCapabilityReviewRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCapabilityReviewRequest(requestValue);
+    requestValue: VarinExtensionCapabilityReviewRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCapabilityReviewRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const reviewed = await this.catalog.reviewCapabilities(request);
       await this.supervisor.reconcile(reviewed);
@@ -391,16 +391,16 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  reportActualState(extensionId: string, stateValue: PiariumExtensionActualState | unknown): Promise<void> {
-    const state = parsePiariumExtensionActualState(stateValue);
+  reportActualState(extensionId: string, stateValue: VarinExtensionActualState | unknown): Promise<void> {
+    const state = parseVarinExtensionActualState(stateValue);
     return this.#mutate(async () => {
       await this.catalog.reportActualState(extensionId, state);
       this.#publish();
     });
   }
 
-  invokeService(request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
-    const parsed = parsePiariumExtensionServiceInvocationRequest(request);
+  invokeService(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+    const parsed = parseVarinExtensionServiceInvocationRequest(request);
     const providerId = parsed.providerId;
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
       return this.supervisor.invokeStagedService(parsed, signal);
@@ -412,8 +412,8 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  setServiceSelection(requestValue: PiariumExtensionServiceSelectionRequest | unknown): Promise<PiariumExtensionHostStateSnapshot> {
-    const request = parsePiariumExtensionServiceSelectionRequest(requestValue);
+  setServiceSelection(requestValue: VarinExtensionServiceSelectionRequest | unknown): Promise<VarinExtensionHostStateSnapshot> {
+    const request = parseVarinExtensionServiceSelectionRequest(requestValue);
     return this.#mutate(async () => {
       this.services.setSelection(request.serviceId, request.version, request.providerId);
       this.#publish();
@@ -422,8 +422,8 @@ export class ApplicationExtensionRuntime {
   }
 
   upsertServiceRoutingRule(
-    request: PiariumExtensionServiceRoutingRuleUpdateRequest | unknown,
-  ): Promise<PiariumExtensionServiceRoutingSnapshot> {
+    request: VarinExtensionServiceRoutingRuleUpdateRequest | unknown,
+  ): Promise<VarinExtensionServiceRoutingSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.routing.upsertRule(request);
       this.#publish();
@@ -432,8 +432,8 @@ export class ApplicationExtensionRuntime {
   }
 
   removeServiceRoutingRule(
-    request: PiariumExtensionServiceRoutingRuleRemoveRequest | unknown,
-  ): Promise<PiariumExtensionServiceRoutingSnapshot> {
+    request: VarinExtensionServiceRoutingRuleRemoveRequest | unknown,
+  ): Promise<VarinExtensionServiceRoutingSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.routing.removeRule(request);
       this.#publish();
@@ -442,8 +442,8 @@ export class ApplicationExtensionRuntime {
   }
 
   updateWorkbenchLayout(
-    request: PiariumWorkbenchLayoutUpdateRequest | unknown,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    request: VarinWorkbenchLayoutUpdateRequest | unknown,
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.workbench.updateLayout(request);
       this.#publish();
@@ -452,8 +452,8 @@ export class ApplicationExtensionRuntime {
   }
 
   selectWorkbenchProfile(
-    request: PiariumWorkbenchProfileSelectionRequest | unknown,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    request: VarinWorkbenchProfileSelectionRequest | unknown,
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.workbench.selectProfile(request);
       this.#publish();
@@ -462,8 +462,8 @@ export class ApplicationExtensionRuntime {
   }
 
   upsertWorkbenchProfile(
-    request: PiariumWorkbenchProfileUpsertRequest | unknown,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    request: VarinWorkbenchProfileUpsertRequest | unknown,
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.workbench.upsertProfile(request);
       this.#publish();
@@ -472,8 +472,8 @@ export class ApplicationExtensionRuntime {
   }
 
   removeWorkbenchProfile(
-    request: PiariumWorkbenchProfileRemoveRequest | unknown,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    request: VarinWorkbenchProfileRemoveRequest | unknown,
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await this.workbench.removeProfile(request);
       this.#publish();
@@ -482,9 +482,9 @@ export class ApplicationExtensionRuntime {
   }
 
   applyWorkbenchProfile(
-    requestValue: PiariumWorkbenchProfileApplyRequest | unknown,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumWorkbenchProfileApplyRequest(requestValue);
+    requestValue: VarinWorkbenchProfileApplyRequest | unknown,
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinWorkbenchProfileApplyRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const workbench = await this.workbench.read();
       if (!workbench.authoritative) throw new Error("Cannot apply a stale workbench profile");
@@ -507,10 +507,10 @@ export class ApplicationExtensionRuntime {
   }
 
   async #invokeRegisteredService(
-    request: PiariumExtensionServiceInvocationRequest | unknown,
+    request: VarinExtensionServiceInvocationRequest | unknown,
     signal?: AbortSignal,
   ): Promise<JsonValue> {
-    const parsed = parsePiariumExtensionServiceInvocationRequest(request);
+    const parsed = parseVarinExtensionServiceInvocationRequest(request);
     if (parsed.providerId) return this.services.invoke(parsed, signal);
     const services = this.services.getSnapshot();
     const key = `${parsed.serviceId}@${parsed.version}`;
@@ -522,7 +522,7 @@ export class ApplicationExtensionRuntime {
       && provider.descriptor.version === parsed.version
     ));
     const routing = await this.routing.read();
-    const resolution = resolvePiariumExtensionServiceRouting({
+    const resolution = resolveVarinExtensionServiceRouting({
       candidates: candidates.map((provider) => ({
         providerId: provider.providerId,
         providerKey: provider.providerKey,
@@ -540,7 +540,7 @@ export class ApplicationExtensionRuntime {
   }
 
   async #ensureBuiltinArtifact(extensionId: string): Promise<void> {
-    const definition = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.find((candidate) => (
+    const definition = VARIN_BUILTIN_EXTENSION_DEFINITIONS.find((candidate) => (
       candidate.manifest.id === extensionId && candidate.manifest.entrypoints?.host
     ));
     if (!definition) return;
@@ -548,12 +548,12 @@ export class ApplicationExtensionRuntime {
     await this.packages.reconcileBuiltinArtifacts([definition], snapshot);
   }
 
-  async #ensureBuiltinServiceArtifacts(request: PiariumExtensionServiceInvocationRequest): Promise<void> {
+  async #ensureBuiltinServiceArtifacts(request: VarinExtensionServiceInvocationRequest): Promise<void> {
     const snapshot = await this.catalog.snapshot();
     const enabled = new Set(snapshot.extensions
       .filter((entry) => entry.desired.enabled)
       .map((entry) => entry.manifest.id));
-    const definitions = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.filter((definition) => (
+    const definitions = VARIN_BUILTIN_EXTENSION_DEFINITIONS.filter((definition) => (
       enabled.has(definition.manifest.id)
       && definition.manifest.entrypoints?.host
       && definition.manifest.provides?.services?.some((service) => (
@@ -569,7 +569,7 @@ export class ApplicationExtensionRuntime {
     return result;
   }
 
-  #mutateCatalog(operation: () => Promise<PiariumExtensionCatalogSnapshot>): Promise<PiariumExtensionCatalogSnapshot> {
+  #mutateCatalog(operation: () => Promise<VarinExtensionCatalogSnapshot>): Promise<VarinExtensionCatalogSnapshot> {
     return this.#mutate(async () => {
       const snapshot = await operation();
       this.#publish();

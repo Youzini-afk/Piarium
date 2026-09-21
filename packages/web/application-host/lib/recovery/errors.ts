@@ -3,7 +3,7 @@ import type {
   WorkspaceRecoveryFailure,
   WorkspaceRecoveryFailureCode,
   WorkspaceRecoveryFailureOrigin,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 
 export interface RecoveryErrorOptions {
   cause?: unknown;

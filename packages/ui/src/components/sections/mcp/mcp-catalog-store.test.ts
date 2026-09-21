@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { PiMcpConfigSnapshot } from '@piarium/protocol';
+import type { PiMcpConfigSnapshot } from '@varin/protocol';
 
 let runtimeKey = 'runtime-a';
 let resolveSnapshot: ((snapshot: PiMcpConfigSnapshot) => void) | null = null;
@@ -20,7 +20,7 @@ const nextSnapshot: PiMcpConfigSnapshot = {
   provider: { bridgeVersion: 1, state: 'active' },
 };
 
-mock.module('@piarium/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
+mock.module('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
 mock.module('@/lib/pi-runtime/mcp', () => ({
   getPiMcpConfigSnapshot: async () => {
     if (!deferSnapshot) return nextSnapshot;

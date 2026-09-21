@@ -18,7 +18,7 @@ export const registerLocalSemanticComponentRoutes = (
   app: Express,
   { manager, requireAuth = noAuth }: LocalSemanticComponentRoutesOptions,
 ): void => {
-  const uploadRoot = join(tmpdir(), "piarium-local-semantic-imports");
+  const uploadRoot = join(tmpdir(), "varin-local-semantic-imports");
   mkdirSync(uploadRoot, { recursive: true });
   const multipart = multer.diskStorage({
     destination: (_request, _file, callback) => callback(null, uploadRoot),

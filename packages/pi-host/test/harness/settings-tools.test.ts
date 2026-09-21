@@ -12,7 +12,7 @@ import {
   classifyPermissionAction,
   classifyPermissionToolSource,
 } from "../../src/harness/permission-target.js";
-import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@piarium/protocol";
+import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@varin/protocol";
 
 const SESSION = "session-1";
 const isError = (result: unknown) => (result as { isError?: boolean }).isError;

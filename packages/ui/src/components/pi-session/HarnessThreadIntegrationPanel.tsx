@@ -1,6 +1,6 @@
 import React from 'react';
-import type { ThreadConflictResolution, ThreadIntegrationPreview, Thread } from '@piarium/protocol';
-import { runtimeFetch } from '@piarium/application-client';
+import type { ThreadConflictResolution, ThreadIntegrationPreview, Thread } from '@varin/protocol';
+import { runtimeFetch } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';

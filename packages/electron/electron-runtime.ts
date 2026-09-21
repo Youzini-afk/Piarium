@@ -9,19 +9,19 @@ export interface RendererRuntimeConfig {
 
 declare module 'electron' {
   interface BrowserWindow {
-    __piariumInitScript?: string | null | undefined;
-    __piariumLabel?: string | undefined;
-    __piariumMiniChat?: boolean | undefined;
-    __piariumMiniChatSessionId?: string | undefined;
-    __piariumPinned?: boolean | undefined;
-    __piariumRuntimeConfig?: RendererRuntimeConfig | undefined;
-    __piariumTitleBarOverlayEnabled?: boolean | undefined;
+    __varinInitScript?: string | null | undefined;
+    __varinLabel?: string | undefined;
+    __varinMiniChat?: boolean | undefined;
+    __varinMiniChatSessionId?: string | undefined;
+    __varinPinned?: boolean | undefined;
+    __varinRuntimeConfig?: RendererRuntimeConfig | undefined;
+    __varinTitleBarOverlayEnabled?: boolean | undefined;
     setTrafficLightPosition?(position: { x: number; y: number }): void;
   }
 }
 
 declare global {
-  const __PIARIUM_UPDATER_E2E_BUILD__: boolean | undefined;
+  const __VARIN_UPDATER_E2E_BUILD__: boolean | undefined;
 }
 
 export type WindowFocusListener = (event: Electron.Event, browserWindow: BrowserWindow) => void;

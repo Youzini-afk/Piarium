@@ -4,7 +4,7 @@ import {
   HostServicesBridge,
   HarnessRequestError,
 } from "../../src/harness/host-services-bridge.js";
-import type { HarnessCancelData, HarnessRequestData } from "@piarium/protocol";
+import type { HarnessCancelData, HarnessRequestData } from "@varin/protocol";
 
 describe("HostServicesBridge", () => {
   it("correlates request and response by requestId", async () => {

@@ -2,10 +2,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Thread, ThreadIntegrationPreview } from '@piarium/protocol';
+import type { Thread, ThreadIntegrationPreview } from '@varin/protocol';
 import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
 
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -13,7 +13,7 @@ vi.mock('@/lib/documents/session', () => ({
   getDocumentRegistry: () => ({ surfaceOwner: () => ({ ownerId: 'surface-1', generation: 1 }) }),
 }));
 
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 const makeThread = (): Thread => ({
   purpose: 'task',

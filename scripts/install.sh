@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Piarium Install Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/Youzini-afk/Piarium/main/scripts/install.sh | bash
+# Varin Install Script
+# Usage: curl -fsSL https://raw.githubusercontent.com/Youzini-afk/Varin/main/scripts/install.sh | bash
 
 set -euo pipefail
 
-PACKAGE_NAME="@piarium/web"
-BIN_NAME="piarium"
+PACKAGE_NAME="@varin/web"
+BIN_NAME="varin"
 MIN_NODE_VERSION=22
 
 # Colors
@@ -156,7 +156,7 @@ main() {
   echo ""
   echo "  ╭───────────────────────────────────╮"
   echo "  │                                   │"
-  echo "  │   Piarium Installer              │"
+  echo "  │   Varin Installer              │"
   echo "  │   Pi-native coding workspace     │"
   echo "  │                                   │"
   echo "  ╰───────────────────────────────────╯"
@@ -176,23 +176,23 @@ main() {
   fi
   success "Node.js v$NODE_VERSION found"
 
-  # If Piarium is already installed, hand off to its own updater instead
-  # of guessing a package manager. `piarium update` detects which manager
+  # If Varin is already installed, hand off to its own updater instead
+  # of guessing a package manager. `varin update` detects which manager
   # actually owns the existing global install and reinstalls with that one —
   # reinstalling with a different manager here would orphan files and break PATH.
   if command_exists "$BIN_NAME"; then
-    info "Piarium is already installed — updating via 'piarium update'..."
+    info "Varin is already installed — updating via 'varin update'..."
     echo ""
-    if piarium update; then
+    if varin update; then
       echo ""
-      success "Piarium is up to date!"
+      success "Varin is up to date!"
       exit 0
     fi
     echo ""
     error "Update failed."
     echo ""
     echo "  Try running it manually:"
-    echo "    piarium update"
+    echo "    varin update"
     echo ""
     exit 1
   fi
@@ -216,7 +216,7 @@ main() {
 
   # Install
   echo ""
-  info "Installing Piarium..."
+  info "Installing Varin..."
   echo "  Running: $INSTALL_CMD"
   echo ""
 
@@ -224,10 +224,10 @@ main() {
     echo ""
     printf '%b' "$BLUE"
     cat <<'EOF'
-  π  PIARIUM
+  π  VARIN
 EOF
     printf '%b\n' "$NC"
-    success "Piarium installed successfully!"
+    success "Varin installed successfully!"
     echo ""
 
     # Verify the binary is actually reachable. Global installs frequently
@@ -235,8 +235,8 @@ EOF
     # letting the user hit a confusing "command not found".
     if command_exists "$BIN_NAME"; then
       echo "  Get started:"
-      echo "    piarium              # Start server on port 3000"
-      echo "    piarium --help       # Show all options"
+      echo "    varin              # Start server on port 3000"
+      echo "    varin --help       # Show all options"
     else
       warn "'$BIN_NAME' was installed but isn't on your PATH yet."
       echo ""
@@ -252,7 +252,7 @@ EOF
         echo "    export PATH=\"$bin_dir:\$PATH\""
       else
         echo "  Add your package manager's global bin directory to PATH,"
-        echo "  then restart your terminal and run: piarium"
+        echo "  then restart your terminal and run: varin"
       fi
     fi
     echo ""

@@ -5,7 +5,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from '@legendapp/list/react';
-import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
+import type { PiAssistantMessage, PiSessionEntry } from '@varin/protocol';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';

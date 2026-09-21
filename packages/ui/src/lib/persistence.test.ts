@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
-import type { RuntimeAPIs, SettingsPayload } from '@piarium/application-client';
+import type { RuntimeAPIs, SettingsPayload } from '@varin/application-client';
 import type { DesktopSettings } from '@/lib/desktop';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
@@ -17,10 +17,10 @@ import {
   syncDesktopSettings,
   updateDesktopSettings,
 } from './persistence';
-import { switchRuntimeEndpoint } from '@piarium/application-client';
+import { switchRuntimeEndpoint } from '@varin/application-client';
 
 type TestWindow = {
-  __PIARIUM_HOME__?: string;
+  __VARIN_HOME__?: string;
   addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
   removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
   dispatchEvent: (event: Event) => boolean;
@@ -123,7 +123,7 @@ afterAll(() => {
   if (createdWindow) {
     delete (globalThis as { window?: unknown }).window;
   } else if (typeof window !== 'undefined') {
-    delete getWindow().__PIARIUM_HOME__;
+    delete getWindow().__VARIN_HOME__;
   }
   if (createdLocalStorage) {
     delete (globalThis as { localStorage?: unknown }).localStorage;
@@ -132,21 +132,21 @@ afterAll(() => {
 
 describe('applyPersistedHomeDirectoryToWindow', () => {
   beforeEach(() => {
-    delete getWindow().__PIARIUM_HOME__;
+    delete getWindow().__VARIN_HOME__;
   });
 
   test('does not overwrite an injected desktop home directory', () => {
-    getWindow().__PIARIUM_HOME__ = '/Users/example';
+    getWindow().__VARIN_HOME__ = '/Users/example';
 
     applyPersistedHomeDirectoryToWindow('/Users/example/projects/app');
 
-    expect(getWindow().__PIARIUM_HOME__).toBe('/Users/example');
+    expect(getWindow().__VARIN_HOME__).toBe('/Users/example');
   });
 
   test('uses persisted home when no runtime home was injected', () => {
     applyPersistedHomeDirectoryToWindow('/Users/example/projects/app');
 
-    expect(getWindow().__PIARIUM_HOME__).toBe('/Users/example/projects/app');
+    expect(getWindow().__VARIN_HOME__).toBe('/Users/example/projects/app');
   });
 });
 
@@ -243,11 +243,11 @@ describe('updateDesktopSettings', () => {
     const applyProjects = (event: Event) => {
       useProjectsStore.getState().synchronizeFromSettings((event as CustomEvent<DesktopSettings>).detail);
     };
-    getWindow().addEventListener('piarium:settings-synced', applyProjects);
+    getWindow().addEventListener('varin:settings-synced', applyProjects);
     try {
       await syncDesktopSettings();
     } finally {
-      getWindow().removeEventListener('piarium:settings-synced', applyProjects);
+      getWindow().removeEventListener('varin:settings-synced', applyProjects);
     }
 
     const restored = useProjectsStore.getState().projects.find((entry) => entry.path === project.path);

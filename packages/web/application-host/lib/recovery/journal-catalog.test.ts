@@ -49,7 +49,7 @@ const V3_SCHEMA = `
   );
 `;
 
-const makeRoot = () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-journal-catalog-'));
+const makeRoot = () => fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-journal-catalog-'));
 const objectHash = (digit: string): string => `sha256-${digit.repeat(64)}`;
 
 const createV3 = (root: string): SqliteDatabase => {

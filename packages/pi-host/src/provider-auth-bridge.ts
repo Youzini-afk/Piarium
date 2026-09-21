@@ -4,7 +4,7 @@ import type {
   HostEvent,
   HostEventData,
   ProviderAuthResponse,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { createDeferred, type Deferred } from "./deferred.js";
 import { HostError } from "./errors.js";
 import { projectProviderAuthPrompt } from "./protocol-projector.js";

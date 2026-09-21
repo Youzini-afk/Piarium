@@ -1,4 +1,4 @@
-import type { Thread, ThreadOccupancy, ThreadParent, ThreadRun, WorkspaceThreadSpace } from '@piarium/protocol';
+import type { Thread, ThreadOccupancy, ThreadParent, ThreadRun, WorkspaceThreadSpace } from '@varin/protocol';
 
 export interface HarnessThreadSnapshot {
   thread: Thread;

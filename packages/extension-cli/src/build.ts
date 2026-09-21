@@ -3,9 +3,9 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { extname, join, relative } from "node:path";
 import type {
-  PiariumExtensionHostEntrypoint,
-  PiariumExtensionSurfaceEntrypoint,
-} from "@piarium/extension-contract";
+  VarinExtensionHostEntrypoint,
+  VarinExtensionSurfaceEntrypoint,
+} from "@varin/extension-contract";
 import { entrypointSourcePath, entrypointTargetPath, loadProject } from "./project.js";
 import type { BuildOutput, BuildResult, LoadedExtensionProject } from "./types.js";
 
@@ -39,7 +39,7 @@ const loadEsbuild = async (): Promise<EsbuildModule> => {
     const load = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
     module = await load("esbuild") as Partial<EsbuildModule>;
   }
-  if (typeof module.build !== "function") throw new Error("The esbuild dependency is not available; install @piarium/extension-cli dependencies first.");
+  if (typeof module.build !== "function") throw new Error("The esbuild dependency is not available; install @varin/extension-cli dependencies first.");
   return module as EsbuildModule;
 };
 
@@ -57,7 +57,7 @@ const targetFormat = (project: LoadedExtensionProject, target: string): "cjs" | 
 const buildEntrypoint = async (
   project: LoadedExtensionProject,
   esbuild: EsbuildModule,
-  entrypoint: PiariumExtensionHostEntrypoint | PiariumExtensionSurfaceEntrypoint,
+  entrypoint: VarinExtensionHostEntrypoint | VarinExtensionSurfaceEntrypoint,
   id: string,
   kind: "host" | "surface",
 ): Promise<BuildOutput> => {
@@ -68,7 +68,7 @@ const buildEntrypoint = async (
     await access(source);
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT") {
-      throw new Error(`Source file for ${kind} entrypoint ${id} is missing: ${logical(project, source)}. Add it or update package.json piarium.build.entrypoints.${id}.source.`);
+      throw new Error(`Source file for ${kind} entrypoint ${id} is missing: ${logical(project, source)}. Add it or update package.json varin.build.entrypoints.${id}.source.`);
     }
     throw error;
   }
@@ -76,7 +76,7 @@ const buildEntrypoint = async (
   const outputDirectory = target.slice(0, Math.max(target.lastIndexOf("\\"), target.lastIndexOf("/")));
   if (outputDirectory) await mkdir(outputDirectory, { recursive: true });
 
-  const temporaryRoot = samePath(source, target) ? await mkdtemp(join(tmpdir(), "piarium-extension-cli-")) : undefined;
+  const temporaryRoot = samePath(source, target) ? await mkdtemp(join(tmpdir(), "varin-extension-cli-")) : undefined;
   const temporaryOutput = temporaryRoot ? join(temporaryRoot, `bundle${extname(target) || ".js"}`) : target;
   try {
     const result = await esbuild.build({

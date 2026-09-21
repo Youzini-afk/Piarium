@@ -4,7 +4,7 @@ export interface IdeSearchRequest {
   mode: IdeSearchMode;
 }
 
-export const IDE_SEARCH_REQUEST_EVENT = 'piarium:ide-search-request';
+export const IDE_SEARCH_REQUEST_EVENT = 'varin:ide-search-request';
 
 /**
  * Ask the active workbench shell to reveal IDE Search. The cancelable event is

@@ -8,7 +8,7 @@ import { registerHarnessServices } from './harness-services.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from '../scheduled-tasks/service.js';
-import type { HarnessActorContext, HarnessServiceMap } from '@piarium/protocol';
+import type { HarnessActorContext, HarnessServiceMap } from '@varin/protocol';
 
 type ScheduleMethod = keyof HarnessServiceMap & `schedule.${string}`;
 

@@ -1,4 +1,4 @@
-# Piarium 对话式设置与 Agent 管理设计
+# Varin 对话式设置与 Agent 管理设计
 
 Status: Stage S delivered through D-311: owner-backed fields/actions, session-bound client Surfaces, typed owner operations and compound management are wired
 
@@ -13,7 +13,7 @@ session→Surface 绑定及 typed action-operation 收口见 D-311，
 
 ## 1. 产品目标
 
-设置页与对话是管理同一套设置的两个入口。用户可以通过自然语言查看、理解和修改 Piarium 的大部分设置，
+设置页与对话是管理同一套设置的两个入口。用户可以通过自然语言查看、理解和修改 Varin 的大部分设置，
 也可以继续在原设置页浏览、比较和微调。明确的请求沿已有授权直接执行、自动保存，结果简短说明改了什么、
 作用于哪里以及何时生效；仅在作用范围等歧义确实改变结果时澄清。
 
@@ -41,7 +41,7 @@ session→Surface 绑定及 typed action-operation 收口见 D-311，
 | Pi/Harness 设置协议 | [methods.ts](../packages/protocol/src/methods.ts) | 复用 settings.get/update 与 revision，保留字段所有权 |
 | Pi 设置、Skill、提示词资源 | [session-host.ts](../packages/pi-host/src/session-host.ts) | 复用资源所有权和配置写入，协调运行中的 reload |
 | 原生工具装配 | [select-tools.ts](../packages/pi-host/src/harness/select-tools.ts) | 注册稳定的设置工具及实际可用的管理动作入口 |
-| Piarium 扩展生命周期 | [routes.ts](../packages/web/application-host/lib/extensions/routes.ts) | 调用既有扩展服务，不创建第二份扩展状态 |
+| Varin 扩展生命周期 | [routes.ts](../packages/web/application-host/lib/extensions/routes.ts) | 调用既有扩展服务，不创建第二份扩展状态 |
 
 应用设置、Pi 原生配置、扩展配置以及客户端呈现状态的 owner 不同。统一的是发现、描述和操作合同，
 不把它们搬进新数据库，也不让 Agent 直接修改内部 SQLite、浏览器缓存或发行安装目录来代替正常操作。
@@ -58,7 +58,7 @@ session→Surface 绑定及 typed action-operation 收口见 D-311，
 | 项目、会话默认、模型与 provider | 解释来源和覆盖关系，修改实际支持的范围；登录与凭据操作沿原服务 |
 | Harness 工具、权限、上下文、模型分工 | 读取实际配置与运行世代，按字段所有权修改并准确报告生效时机 |
 | 代码检索、网页访问、知识与语言支持 | 管理配置，发现已有准备、安装、取消、重试等动作及其状态 |
-| Skill、提示词、Pi 包、MCP、Piarium 扩展 | 通过原 owner 查看和管理；不能把插件私有任意字段推断成可安全修改的设置 |
+| Skill、提示词、Pi 包、MCP、Varin 扩展 | 通过原 owner 查看和管理；不能把插件私有任意字段推断成可安全修改的设置 |
 | 远程连接、机器与执行偏好 | 绑定正确 Host/设备/工作区，复用连接与资源服务；操作状态如实返回 |
 
 有些设置页项目属于只读诊断或实际操作，而不是持久配置。目录需区分可读、可修改、需用户交互、
@@ -127,7 +127,7 @@ system/tools 中保留稳定、简短的管理说明，告知 Agent 可以查询
 例如“准备科研工作环境”可以读取一个组合 Skill，再检查模型分工、通知、资源和检索的实际情况。
 Skill 使用稳定设置 ID 或能力入口，不复制当前值、可选模型列表、凭据或独立参数校验表。
 
-可提供精简的 Piarium 管理指南及确有复用价值的专题 Skill。它们使用产品已有的 Skill 加载与用户/项目资源体系，
+可提供精简的 Varin 管理指南及确有复用价值的专题 Skill。它们使用产品已有的 Skill 加载与用户/项目资源体系，
 不新增仓库贡献者工作流 Skill，也不要求每个设置对应一个 Skill。单项设置无需先读指南才能修改。
 Agent 创建或修改 Skill/提示词时走既有资源 API，变更与用户在界面管理的是同一份文件与 revision；
 是否立即加载遵循实际运行时生效合同。
@@ -183,7 +183,7 @@ Surface id 只作为 Host 返回的事实，不接受模型传入的 Surface 选
 返回 `unavailable`，同一 session 的多个窗口返回 `ambiguous`，连接重建或 session 删除后
 必须重新登记，不能把临时连接推断成跨设备永久绑定。
 
-所有修改经过 Piarium 原生 `tool_call` 权限门和 Host 能力检查，沿实际设置资源描述授权，
+所有修改经过 Varin 原生 `tool_call` 权限门和 Host 能力检查，沿实际设置资源描述授权，
 不因使用统一 update 入口便给予对整个应用配置的无限写入。已有授权可直接执行，不为每次改字体、通知重复审批。
 权限策略修改按修改前的有效授权判断，不能让 Agent 用本次提交给自己放行；既有撤销仍即时生效。
 普通子线程沿已授权的管理能力工作，不新设按角色名一律禁止管理的政策。
@@ -235,7 +235,7 @@ Agent 再次读取应看到用户刚修改的值，设置页也应看到 Agent �
 UI 搜索、Agent 目录与按需说明从这里派生。自定义 React 控件可以保留，设计不要求全部页面改成自动生成表单。
 随着该领域接入，删除重复设置搜索表、独立 Agent 配置副本与过期写入分支，不保留内部兼容 facade。
 
-Pi 包、Piarium 扩展和原生 UI 能力仍保留各自权威；第三方设置由真实声明和可调用服务接入，
+Pi 包、Varin 扩展和原生 UI 能力仍保留各自权威；第三方设置由真实声明和可调用服务接入，
 不根据 DOM、字段名字或手写 Skill 推断执行能力。配置服务之外的文件/Git/线程/实验操作复用已有工具，
 本阶段不复制它们，也不引入任意自修改应用源码或发布更新的后台循环。
 

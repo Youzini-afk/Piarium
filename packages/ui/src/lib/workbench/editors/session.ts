@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import {
   activeEditorTab,

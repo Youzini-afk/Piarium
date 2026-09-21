@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import type { PiMcpConfigSnapshot, RuntimeContextTarget } from '@piarium/protocol';
+import type { PiMcpConfigSnapshot, RuntimeContextTarget } from '@varin/protocol';
 import { getPiMcpConfigSnapshot } from '@/lib/pi-runtime/mcp';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 export type McpCatalogSelection =
   | { kind: 'new' }

@@ -1,35 +1,33 @@
 [English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Français](README.fr.md) | 日本語
 
-# Piarium
+# Varin
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
-    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Varin" width="128" />
   </picture>
 </p>
 
-[![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
-[![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
+[![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
+[![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
-**コーディングエージェントのための、Pi ネイティブで再構成可能なワークスペースと統制されたエージェント
-ハーネス。ローカル作業を中心に据えつつ、デスクトップ、Web、エディタ、モバイルのいずれからも使えます。**
+**コーディング、研究、その他のプロジェクト作業に対応する独立した Agent ワークスペース兼フル
+Harness。ローカル作業を中心に据えつつ、デスクトップ、Web、エディタ、モバイルのいずれからも使えます。**
 
-Piarium は [Pi コーディングエージェント](https://github.com/earendil-works/pi)を、製品として完成した
-ものに拡張します。Pi はエージェントカーネルであり続けます——モデル/プロバイダースタック、セッション
-ツリー、パッケージマネージャー、拡張モデル——一方で Piarium はその周囲のすべてを所有します。ツール
-環境、ワーキングステート、リカバリ、検索、コンテキストポリシー、タスクガバナンス、そしてエージェントが
-動作するワークベンチ画面です。Pi の公開 SDK をそのまま使い、ターミナル出力のスクレイピングは行いません。
+Pi ランタイムを内蔵し、モデル/プロバイダースタック、セッションツリー、パッケージ
+マネージャー、拡張モデルは Pi が担います。Varin はツール環境、ワーキングステート、リカバリ、検索、
+コンテキストポリシー、タスクガバナンス、ワークベンチ画面を所有し、Pi の公開 SDK をそのまま使います。
 
-その UI は固定されたシェルではありません。Piarium には 2 つの公式ワークスタイルが同梱されています。
+その UI は固定されたシェルではありません。Varin には 2 つの公式ワークスタイルが同梱されています。
 セッション、タスク、コンテキストを中心に据えた **Agent Workspace** と、エディタ、検索、Git、診断、
 デバッグを中心に据え、エージェントをドッキング可能なパネルとして扱う **IDE Workbench** です。どちらも
-Workbench Profile によって選択される通常の Piarium 拡張なので、どちらか一方を丸ごと置き換えることも、
+Workbench Profile によって選択される通常の Varin 拡張なので、どちらか一方を丸ごと置き換えることも、
 その一部だけを置き換えることもできます。
 
 > [!IMPORTANT]
-> Piarium は 1.0 前で、活発に開発中です。各プロダクトサーフェスとプライベートなランタイムプロトコルは
+> Varin は 1.0 前で、活発に開発中です。各プロダクトサーフェスとプライベートなランタイムプロトコルは
 > いまのところ同時に進むため、古いビルドが新しいビルドと相互運用できる保証はありません。重要な
 > ワークスペースはバックアップし、継続的なデプロイでは検証済みのイメージダイジェストに固定してください。
 
@@ -42,24 +40,24 @@ Workbench Profile によって選択される通常の Piarium 拡張なので�
 セッションとプロジェクトを常に表示しながら、アクティブなエージェント、コンテキストツール、入力欄を
 一つの集中したワークスペースにまとめます。
 
-![Piarium Agent Workspace](assets/agent-workspace.png)
+![Varin Agent Workspace](assets/agent-workspace.png)
 
 ### IDE Workbench
 
 IDE プロファイルは、ワークスペースのナビゲーションとエディタ基盤を、ドッキングされた完全な Pi
 エージェントと組み合わせます。チャットを別アプリとして切り離しません。
 
-![Piarium IDE Workbench](assets/ide-workbench.png)
+![Varin IDE Workbench](assets/ide-workbench.png)
 
 ### モバイルワークスペース
 
 レスポンシブな画面でも、同じプロジェクト、エージェント操作、コンテキスト画面、入力欄を利用できます。
 
 <p align="center">
-  <img src="assets/mobile-workspace.png" alt="Piarium モバイルワークスペース" width="390" />
+  <img src="assets/mobile-workspace.png" alt="Varin モバイルワークスペース" width="390" />
 </p>
 
-## Piarium が提供するもの
+## Varin が提供するもの
 
 ### 統制されたエージェントハーネス
 
@@ -127,46 +125,47 @@ IDE プロファイルは、ワークスペースのナビゲーションとエ�
 
 ## 保守対象の拡張インテグレーション
 
-Piarium はこれらの拡張をフォークせず、プライベートな状態を複製しません。保守対象のアダプタは、
+Varin はこれらの拡張をフォークせず、プライベートな状態を複製しません。保守対象のアダプタは、
 各拡張の公開コマンド、イベント、設定ファイル、ケイパビリティ契約だけを消費します。対象は
 サブエージェントフリート、コンテキスト管理、ワークスペース履歴、MCP サーバー、Web アクセス、
 メモリシステム、バックグラウンドタスク、LSP/ツール設定で、パッケージの更新は独立して進められます。
 
 各アダプタの統合面——どのコマンド、イベント、ネイティブ設定を読み取りまたは呼び出すか、どのファイルが
 プラグイン所有のままか——は[拡張インテグレーション契約](../../docs/extension-compatibility.md)に記録されています。
-Piarium はプラグインのバージョンを Pi のリリースに対して認証しません。
+Varin はプラグインのバージョンを Pi のリリースに対して認証しません。
 
-## Piarium 拡張を開発する
+## Varin 拡張を開発する
 
-Piarium アプリケーション拡張と Pi パッケージは別々のプロダクトオブジェクトです。前者は Piarium の
-ワークベンチ、画面、信頼された Host を拡張し、後者は Pi エージェント内部で実行されます。公開 npm
-ツールチェーンは、Piarium のソースチェックアウトも、製品のプライベート UI からのインポートも
-必要としません。
+Varin アプリケーション拡張と Pi パッケージは別々のプロダクトオブジェクトです。前者は Varin の
+ワークベンチ、画面、信頼された Host を拡張し、後者は Pi エージェント内部で実行されます。予定されている
+npm ツールチェーンは Varin のソースチェックアウトも製品のプライベート UI からのインポートも必要と
+しません。`@varin/*` パッケージはまだ公開されていません。
 
-- `@piarium/extension-contract`：マニフェスト、コントリビューション、サービス、ルーティング、
+- `@varin/extension-contract`：マニフェスト、コントリビューション、サービス、ルーティング、
   ディスカバリの契約と JSON Schema。
-- `@piarium/extension-sdk`：フレームワーク非依存の Surface、隔離 realm、Host オーサリング API。
-- `@piarium/extension-react`：オプションの React 19 アダプタ。
-- `@piarium/extension-surface`：高度なテストや代替ホスト向けの低レベルライフサイクルとレジストリ。
-- `@piarium/extension-cli`：プロジェクト初期化、検証、ビルド、適合性テスト。
+- `@varin/extension-sdk`：フレームワーク非依存の Surface、隔離 realm、Host オーサリング API。
+- `@varin/extension-react`：オプションの React 19 アダプタ。
+- `@varin/extension-surface`：高度なテストや代替ホスト向けの低レベルライフサイクルとレジストリ。
+- `@varin/extension-cli`：プロジェクト初期化、検証、ビルド、適合性テスト。
 
-完全な拡張プロジェクトを作成します。
+パッケージ公開後は、次のコマンドで完全な拡張プロジェクトを作成できます。
 
 ```sh
-npx @piarium/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
+npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
 cd my-extension
 npm install
-npx piarium-extension build
-npx piarium-extension test
+npx varin-extension build
+npx varin-extension test
 ```
 
 マニフェスト、ケイパビリティ、ライフサイクル、ストレージ、公開、テストの完全な契約は
-[Piarium 拡張オーサリングガイド](../../docs/piarium-extension-authoring.md)を参照してください。
+[Varin 拡張オーサリングガイド](../../docs/varin-extension-authoring.md)を参照してください。
 
 ## デスクトップ版をダウンロード
 
-Windows x64/ARM64、Linux x64/ARM64、macOS Intel/Apple Silicon のデスクトップパッケージは
-[GitHub Releases](https://github.com/Youzini-afk/Piarium/releases)で公開しています。
+現在の Varin デスクトップパッケージはまだ公開されていません。[GitHub Releases](https://github.com/Youzini-afk/Varin/releases)
+ページには過去のアセットが残っています。Varin パッケージが公開されるまでは、以下のソースまたは
+Docker の手順を使ってください。
 
 ## ソースから始める
 
@@ -183,9 +182,9 @@ Rust システムカーネルは必須のランタイムコンポーネントで
 `bun run kernel:build` は、パッケージ済みレイアウトが要求するマニフェスト検証付きのリリース
 実行ファイルを生成します。
 
-Piarium はバンドルされた Pi ランタイムを同梱し、Runtime Manager を通じてユーザー級の Pi インストールを
+Varin はバンドルされた Pi ランタイムを同梱し、Runtime Manager を通じてユーザー級の Pi インストールを
 検出します。Runtime Manager は Pi をダウングレードせずに選択、インストール、アップグレードできます。
-Piarium は実際の Host ハンドシェイク後にのみ準備完了となり、アクティベーション後の再起動は不要です。
+Varin は実際の Host ハンドシェイク後にのみ準備完了となり、アクティベーション後の再起動は不要です。
 Electron にはアプリケーションの実行に必要な Node ランタイムが含まれますが、Pi は独立して管理される
 ツールであり続けます。Windows、Linux、macOS 向けのネイティブ x64/ARM64 デスクトップパッケージは、
 対応するアーキテクチャのランナーで、アプリケーション起動、Runtime Manager、ヘルス、ターミナル
@@ -195,13 +194,13 @@ Electron にはアプリケーションの実行に必要な Node ランタイ�
 ### Web 開発画面を起動する
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-ターミナルに表示される Vite の URL を開いてください。Piarium は利用可能な開発ポートを選択し、
+ターミナルに表示される Vite の URL を開いてください。Varin は利用可能な開発ポートを選択し、
 UI とともに信頼された API/ランタイムサービスを起動します。
 
 ### デスクトップアプリを起動する
@@ -231,14 +230,14 @@ NSIS インストーラー、更新メタデータ、ブロックマップは `p
 
 ## クラウドイメージを実行する
 
-Compose ファイルはデフォルトでスリムイメージ `ghcr.io/youzini-afk/piarium-slim:latest` を使います。
+Compose ファイルはデフォルトでスリムイメージ `ghcr.io/youzini-afk/varin-slim:latest` を使います。
 Linux Docker ホスト上で：
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
@@ -246,7 +245,7 @@ curl --fail http://127.0.0.1:3000/health
 `http://127.0.0.1:3000` を開き、生成されたパスワードを使ってください。インターネットに面する
 デプロイの前には、TLS リバースプロキシまたは承認済みトンネルを置いてください。必要な転送ルールは
 [リバースプロキシの設定](../../docs/REVERSE_PROXY.md)を参照してください。本番環境では、フローティング
-タグに頼らず、`PIARIUM_IMAGE` を検証済みのイミュータブルダイジェストに設定してください。
+タグに頼らず、`VARIN_IMAGE` を検証済みのイミュータブルダイジェストに設定してください。
 
 エージェントがコンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルト
 オーバーレイを適用します。
@@ -263,18 +262,18 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ```mermaid
 flowchart LR
-    S["レンダラー：Workbench Profile がシェル拡張を選択"] --> C["@piarium/application-client"]
+    S["レンダラー：Workbench Profile がシェル拡張を選択"] --> C["@varin/application-client"]
     S --> D["ドキュメント、検索、言語、実行系 API"]
     C --> T["認証付き HTTP/WebSocket またはエディタ転送"]
-    T --> A["アプリケーションホスト：@piarium/web サービス"]
+    T --> A["アプリケーションホスト：@varin/web サービス"]
     D --> A
-    A --> K["piarium-kernel：プライベートな Rust システムカーネル"]
-    A --> B["@piarium/runtime-broker"]
-    B --> H["隔離された @piarium/pi-host ワーカー"]
+    A --> K["varin-kernel：プライベートな Rust システムカーネル"]
+    A --> B["@varin/runtime-broker"]
+    B --> H["隔離された @varin/pi-host ワーカー"]
     H --> P["Pi SDK + 信頼された Pi パッケージ"]
 ```
 
-アプリケーションホストは唯一の信頼されたバックエンドです。各ホストはプライベートな `piarium-kernel`
+アプリケーションホストは唯一の信頼されたバックエンドです。各ホストはプライベートな `varin-kernel`
 子プロセスを所有し、それが永続的でマシンに近いリソースの本番権威です。不変のワーキングステート
 ルート、コンテンツオブジェクトと GC、リカバリメタデータ、正規のファイルリソースと実体化、PTY と
 パイプのプロセスツリー、固定ビューのファイル/構造計算を担います。ホストはプロダクトポリシー——
@@ -292,7 +291,7 @@ Electron は同じホストをメインプロセスで実行し、並列のデ�
 ウィンドウ、メニュー、ダイアログのようなネイティブケイパビリティだけが Electron の preload 境界を
 越えます。
 
-サードパーティの Pi パッケージは、ユーザーの OS 権限を持つ実行可能コードです。Piarium は観測された
+サードパーティの Pi パッケージは、ユーザーの OS 権限を持つ実行可能コードです。Varin は観測された
 ケイパビリティを表示し、プロジェクトローカルの実行可能リソースにゲートを設けますが、信頼された拡張を
 完全なサンドボックスに変えるとは主張しません。リモートインスタンスを公開したり、不慣れなコードを
 インストールしたりする前に、[セキュリティポリシー](../../.github/SECURITY.md)と
@@ -307,7 +306,7 @@ Electron は同じホストをメインプロセスで実行し、並列のデ�
 | `packages/ui` | 共有の Pi ネイティブ React UI、ストア、設定、拡張画面 |
 | `packages/web` | ブラウザ/リモートフロントエンド、信頼された Application Host、クラウド CLI |
 | `packages/electron` | ネイティブデスクトップシェル、特権境界、パッケージング、SSH、更新 |
-| `packages/mobile` | Piarium サーバーに接続する Capacitor iOS/Android シェル |
+| `packages/mobile` | Varin サーバーに接続する Capacitor iOS/Android シェル |
 | `packages/protocol` | バージョン管理された JSON セーフなワーカー/画面プロトコル |
 | `packages/runtime-client` | ブラウザで安全なランタイムリクエスト/イベントクライアント |
 | `packages/runtime-broker` | カタログ/セッションワーカーの所有、ルーティング、シャットダウン |
@@ -318,7 +317,7 @@ Electron は同じホストをメインプロセスで実行し、並列のデ�
 | `packages/extension-sdk`、`-react`、`-cli` | 公開オーサリング SDK、React アダプタ、作者向けツール |
 | `packages/extension-host` | 信頼されたアプリケーションホストのカタログ、アーティファクト、ストレージ、サービス |
 | `packages/extension-loader` | 認証済みの管理対象 Surface モジュールローダーと隔離 realm |
-| `packages/extension-builtins` | 両シェルを含む Piarium 組み込み拡張のマニフェスト |
+| `packages/extension-builtins` | 両シェルを含む Varin 組み込み拡張のマニフェスト |
 | `packages/docs` | ユーザー向けドキュメントサイトのソース |
 | `docs` | アーキテクチャ、ハーネス、カーネル、ワークベンチ、移行、リカバリ、クラウド、セキュリティの契約 |
 | `scripts` | 開発、カーネルビルド/計測、リリース、クラウド、デプロイ、検証ツール |
@@ -362,7 +361,7 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 - [Rust システムカーネル設計](../../docs/rust-kernel-design.md)と[監査記録](../../docs/rust-kernel-audit.md)
 - [コンポーザブルワークベンチと IDE 契約](../../docs/composable-workbench.md)（中国語）
 - [統合ファイルエディタプラットフォーム](../../docs/unified-file-editor-platform.md)
-- [Piarium 拡張プラットフォーム](../../docs/piarium-extension-platform.md)
+- [Varin 拡張プラットフォーム](../../docs/varin-extension-platform.md)
 - [OpenChamber から Pi への移行契約](../../docs/openchamber-pi-migration.md)
 - [プラグイン GUI と所有権設計](../../docs/plugin-gui-design.md)
 - [リカバリモデル](../../docs/recovery.md)
@@ -371,9 +370,9 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 
 ## 系譜とライセンス
 
-Piarium はメンテナーの OpenChamber フォークを Pi ネイティブに作り替えたものです。
+Varin はメンテナーの OpenChamber フォークを Pi ネイティブに作り替えたものです。
 
-Piarium は結合された著作物として
+Varin は結合された著作物として
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）の下で頒布されます。
 ネットワーク越しに改変版をユーザーへ提供する場合、ライセンスの要求に従って対応するソースコードを
 利用可能にする必要があります。

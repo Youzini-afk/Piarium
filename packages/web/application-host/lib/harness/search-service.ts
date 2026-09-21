@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { SearchContentParams, SearchContentResult, SearchContentFile, SearchContentHit } from "@piarium/protocol";
-import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { SearchContentParams, SearchContentResult, SearchContentFile, SearchContentHit } from "@varin/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import type { WorkspaceContentSearchRequest, WorkspaceContentSearchOptions, WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
 import { compileGlobFilter } from "./glob-matcher.js";

@@ -1,5 +1,5 @@
-import { runtimeFetch } from '@piarium/application-client';
-import type { FollowUpDefinitionView, FollowUpRegisterParams, FollowUpRegisterResult, FollowUpSource } from '@piarium/protocol';
+import { runtimeFetch } from '@varin/application-client';
+import type { FollowUpDefinitionView, FollowUpRegisterParams, FollowUpRegisterResult, FollowUpSource } from '@varin/protocol';
 
 export async function saveFollowUp(
   sessionId: string,

@@ -2,7 +2,7 @@ import React from 'react';
 import type {
   ProviderAuthEvent,
   ProviderAuthPrompt,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {

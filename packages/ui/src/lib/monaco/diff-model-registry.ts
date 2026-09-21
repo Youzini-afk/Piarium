@@ -48,7 +48,7 @@ export const acquireMonacoDiffSnapshotModel = (
   },
 ): MonacoDiffSnapshotModelHandle => {
   const uri = monaco.Uri.from({
-    scheme: 'piarium-diff',
+    scheme: 'varin-diff',
     authority: 'snapshot',
     path: `/${encodeURIComponent(input.viewId)}/${input.side}`,
     query: `revision=${encodeURIComponent(input.revision)}`,

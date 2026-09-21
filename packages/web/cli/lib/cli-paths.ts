@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { resolvePiariumDataDir } from '#application-host/lib/platform/data-paths.js';
+import { resolveVarinDataDir } from '#application-host/lib/platform/data-paths.js';
 import { recordOf } from './cli-types.js';
 
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
@@ -8,7 +8,7 @@ const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tu
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
 
 function getDataDir(): string {
-  return resolvePiariumDataDir(process);
+  return resolveVarinDataDir(process);
 }
 
 function getLogsDir(): string {
@@ -47,7 +47,7 @@ function ensureLogsDir(): void {
 }
 
 function getLogFilePath(port: number | string): string {
-  return path.join(getLogsDir(), `piarium-${port}.log`);
+  return path.join(getLogsDir(), `varin-${port}.log`);
 }
 
 function getTunnelProfilesFilePath(): string {

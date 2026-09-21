@@ -10,7 +10,7 @@ export type UpdaterFeed = {
 export const PRODUCTION_UPDATER_FEED: Readonly<UpdaterFeed> = Object.freeze({
   provider: 'github',
   owner: 'Youzini-afk',
-  repo: 'Piarium',
+  repo: 'Varin',
 });
 
 const isLoopbackHostname = (hostname: string): boolean => {
@@ -46,12 +46,12 @@ export const resolveUpdaterFeed = ({
   environment?: NodeJS.ProcessEnv;
   testBuild?: boolean;
 } = {}): Readonly<UpdaterFeed> => {
-  if (environment.PIARIUM_E2E !== '1'
+  if (environment.VARIN_E2E !== '1'
     || testBuild !== true) {
     return PRODUCTION_UPDATER_FEED;
   }
 
-  const url = parseLoopbackUpdaterUrl(environment.PIARIUM_UPDATER_E2E_URL);
+  const url = parseLoopbackUpdaterUrl(environment.VARIN_UPDATER_E2E_URL);
   if (!url) return PRODUCTION_UPDATER_FEED;
   return { provider: 'generic', url };
 };

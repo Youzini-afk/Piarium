@@ -1,15 +1,15 @@
 ---
 title: Actualizaciones
-description: Mantén Piarium al día en escritorio y web.
+description: Mantén Varin al día en escritorio y web.
 ---
 
 # Actualizaciones
 
-Cómo actualizas Piarium depende de cómo lo instalaste. En todos los casos puedes ver tu versión actual en **Settings → About**.
+Cómo actualizas Varin depende de cómo lo instalaste. En todos los casos puedes ver tu versión actual en **Settings → About**.
 
 ## App de escritorio
 
-La app de escritorio comprueba actualizaciones frente a GitHub releases. Cuando hay una disponible, Piarium te avisa, la descarga cuando tú lo eliges y la instala en el siguiente reinicio. Siempre tienes el control: no se instala nada sin tu consentimiento.
+La app de escritorio comprueba actualizaciones frente a GitHub releases. Cuando hay una disponible, Varin te avisa, la descarga cuando tú lo eliges y la instala en el siguiente reinicio. Siempre tienes el control: no se instala nada sin tu consentimiento.
 
 Aún no se publican GitHub Releases. Hasta entonces, actualiza una copia del código fuente con `git pull` y vuelve a compilar, o fija un digest de contenedor probado.
 
@@ -18,10 +18,10 @@ Aún no se publican GitHub Releases. Hasta entonces, actualiza una copia del có
 Si instalaste una CLI publicada, actualízala desde **About** con los botones de comprobar y actualizar, o desde el terminal:
 
 ```bash
-piarium update
+varin update
 ```
 
-Piarium detecta cómo se instaló (npm, pnpm, yarn o bun) y ejecuta la actualización correcta. El paquete `@piarium/web` aún no está en el registro público de npm, así que este camino solo aplica después de publicar una versión.
+Varin detecta cómo se instaló (npm, pnpm, yarn o bun) y ejecuta la actualización correcta. El paquete `@varin/web` aún no está en el registro público de npm, así que este camino solo aplica después de publicar una versión.
 
 Las copias del código fuente se actualizan con Git. Los despliegues Docker se actualizan al extraer un nuevo digest de imagen.
 

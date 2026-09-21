@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TerminalHandlers } from '@piarium/application-client';
+import type { TerminalHandlers } from '@varin/application-client';
 import { ProjectActionsButton } from './ProjectActionsButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useUIStore } from '@/stores/useUIStore';

@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   createRequest,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type ResponseEnvelope,
   type SessionSnapshot,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostController } from "../../src/host-controller.js";
 import { MemoryHostTransport } from "../../src/transport.js";
 
@@ -18,7 +18,7 @@ const responseFor = (id: string) => (entry: WireEnvelope): entry is ResponseEnve
 );
 
 async function createSession(capabilities: { harnessLspNavigation?: boolean; harnessThreads?: boolean; harnessWebRead?: boolean; harnessWebSearch?: boolean }): Promise<SessionSnapshot> {
-  const root = await mkdtemp(join(tmpdir(), "piarium-thread-capability-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-thread-capability-"));
   const cwd = join(root, "workspace");
   const agentDir = join(root, "agent");
   await Promise.all([mkdir(cwd), mkdir(agentDir)]);
@@ -36,7 +36,7 @@ async function createSession(capabilities: { harnessLspNavigation?: boolean; har
       clientName: "thread-capability-test",
       clientVersion: "0.0.0",
       mode: "test",
-      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+      protocolVersions: [VARIN_PROTOCOL_VERSION],
     }));
     const handshake = await transport.waitFor(responseFor("handshake"));
     assert.ok(handshake.kind === "response" && handshake.ok);

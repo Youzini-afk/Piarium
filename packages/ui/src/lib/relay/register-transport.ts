@@ -12,7 +12,7 @@
 import {
   registerRelayTunnelLifecycle,
   registerRelayTunnelProvider,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import {
   activateRelayTunnel,
   deactivateRelayTunnel,

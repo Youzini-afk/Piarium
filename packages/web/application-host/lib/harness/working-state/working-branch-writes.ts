@@ -2,7 +2,7 @@ import type {
   DocumentBranchWriteAction,
   DocumentBranchWriteResult,
   WorkingBranchReadProvenance,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { RecoveryState, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./types.js";
 import { readBranchFile, resolveBranchPath } from "./branch-view.js";
 import type { ThreadExecutionView, ThreadExecutionViewRegistry } from "./execution-view.js";

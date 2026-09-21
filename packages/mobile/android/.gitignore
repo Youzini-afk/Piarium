@@ -62,7 +62,7 @@ captures/
 .cxx/
 
 # Google Services (e.g. APIs or Firebase). Release automation supplies the
-# Piarium project file; never commit a project credential/configuration here.
+# Varin project file; never commit a project credential/configuration here.
 app/google-services.json
 
 # Freeline

@@ -17,7 +17,7 @@ test.after(async () => { await Promise.all(directories.splice(0).map((directory)
 
 const extensionId = "dev.example.brokered";
 const serviceId = "dev.example.memory";
-const piariumVersion = "1.2.3";
+const varinVersion = "1.2.3";
 
 const writeHostExtension = async (
   directory: string,
@@ -27,11 +27,11 @@ const writeHostExtension = async (
   mode: "brokered" | "native" = "brokered",
 ): Promise<void> => {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: extensionId,
     version,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     storage: { schemaVersion },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode } },
     provides: { services: [{ id: serviceId, version: 1 }] },
@@ -59,11 +59,11 @@ module.exports = {
 
 const writeRoutingProvider = async (directory: string, providerExtensionId: string, value: string): Promise<void> => {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: providerExtensionId,
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
     provides: { services: [{ id: serviceId, multiple: true, version: 1 }] },
   }), "utf8");
@@ -85,11 +85,11 @@ const writeMultiStorageExtension = async (
   schemaVersion = 1,
 ): Promise<void> => {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: extensionId,
     version,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     storage: { schemaVersion },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
     provides: { services: [{ id: serviceId, version: 1 }] },
@@ -121,26 +121,26 @@ module.exports = {
 
 const writeSurfaceOnlyExtension = async (directory: string, id: string): Promise<void> => {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id,
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: { surfaces: [{ id: "main", file: "surface.cjs", mode: "managed", supports: ["web"] }] },
   }), "utf8");
   await writeFile(join(directory, "surface.cjs"), "module.exports={activate(){}};", "utf8");
 };
 
 test("brokered Host storage, migration rollback, services, and crash isolation preserve application state", { timeout: 30_000 }, async () => {
-  const dataDir = await temporaryDirectory("piarium-broker-runtime-");
-  const v1 = await temporaryDirectory("piarium-broker-v1-");
-  const v2 = await temporaryDirectory("piarium-broker-v2-");
+  const dataDir = await temporaryDirectory("varin-broker-runtime-");
+  const v1 = await temporaryDirectory("varin-broker-v1-");
+  const v2 = await temporaryDirectory("varin-broker-v2-");
   await writeHostExtension(v1, "1.0.0", 1, "ok");
   await writeHostExtension(v2, "2.0.0", 2, "throw");
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   try {
     const started = await runtime.start();
@@ -201,13 +201,13 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
 });
 
 test("local reload is a no-op for identical content and transactionally applies or rolls back changed Host generations", { timeout: 30_000 }, async () => {
-  const dataDir = await temporaryDirectory("piarium-local-reload-runtime-");
-  const source = await temporaryDirectory("piarium-local-reload-source-");
+  const dataDir = await temporaryDirectory("varin-local-reload-runtime-");
+  const source = await temporaryDirectory("varin-local-reload-source-");
   await writeHostExtension(source, "1.0.0", 1, "ok");
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   try {
     const started = await runtime.start();
@@ -275,15 +275,15 @@ test("local reload is a no-op for identical content and transactionally applies 
 });
 
 test("candidate Host generations stage every opened storage document and commit them together", { timeout: 30_000 }, async () => {
-  const dataDir = await temporaryDirectory("piarium-multi-storage-runtime-");
-  const v1 = await temporaryDirectory("piarium-multi-storage-v1-");
-  const v2 = await temporaryDirectory("piarium-multi-storage-v2-");
+  const dataDir = await temporaryDirectory("varin-multi-storage-runtime-");
+  const v1 = await temporaryDirectory("varin-multi-storage-v1-");
+  const v2 = await temporaryDirectory("varin-multi-storage-v2-");
   await writeMultiStorageExtension(v1, "1.0.0");
   await writeMultiStorageExtension(v2, "2.0.0");
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   const applicationAddress = { extensionId, key: "state", scope: "application" as const };
   const profileAddress = { extensionId, key: "preferences", scope: "profile" as const };
@@ -348,15 +348,15 @@ test("candidate Host generations stage every opened storage document and commit 
 });
 
 test("candidate Host storage rolls back every committed document when storage sync fails", { timeout: 30_000 }, async () => {
-  const dataDir = await temporaryDirectory("piarium-storage-sync-rollback-runtime-");
-  const v1 = await temporaryDirectory("piarium-storage-sync-rollback-v1-");
-  const v2 = await temporaryDirectory("piarium-storage-sync-rollback-v2-");
+  const dataDir = await temporaryDirectory("varin-storage-sync-rollback-runtime-");
+  const v1 = await temporaryDirectory("varin-storage-sync-rollback-v1-");
+  const v2 = await temporaryDirectory("varin-storage-sync-rollback-v2-");
   await writeMultiStorageExtension(v1, "1.0.0", 1);
   await writeMultiStorageExtension(v2, "2.0.0", 2);
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   const addresses = [
     { extensionId, key: "state", scope: "application" as const },
@@ -440,14 +440,14 @@ test("candidate Host storage rolls back every committed document when storage sy
 });
 
 test("remove retains storage by default and deletes only when explicitly requested", async () => {
-  const dataDir = await temporaryDirectory("piarium-remove-storage-runtime-");
-  const source = await temporaryDirectory("piarium-remove-storage-source-");
+  const dataDir = await temporaryDirectory("varin-remove-storage-runtime-");
+  const source = await temporaryDirectory("varin-remove-storage-source-");
   const id = "dev.example.removable";
   await writeSurfaceOnlyExtension(source, id);
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   const dataAddress = { extensionId: id, key: "preferences", scope: "profile" as const };
   try {
@@ -483,13 +483,13 @@ test("remove retains storage by default and deletes only when explicitly request
 });
 
 test("trusted-native Host updates remain on the prior generation until application restart", async () => {
-  const dataDir = await temporaryDirectory("piarium-native-runtime-");
-  const v1 = await temporaryDirectory("piarium-native-v1-");
-  const v2 = await temporaryDirectory("piarium-native-v2-");
+  const dataDir = await temporaryDirectory("varin-native-runtime-");
+  const v1 = await temporaryDirectory("varin-native-v1-");
+  const v2 = await temporaryDirectory("varin-native-v2-");
   await writeHostExtension(v1, "1.0.0", 1, "ok", "native");
   await writeHostExtension(v2, "2.0.0", 1, "ok", "native");
   const brokerScript = fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url));
-  const first = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, piariumVersion });
+  const first = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
   const started = await first.start();
   const installed = await first.installOrStage({
     expectedRevision: started.catalog.revision,
@@ -516,7 +516,7 @@ test("trusted-native Host updates remain on the prior generation until applicati
   assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "restart-required");
   await first.stop();
 
-  const restarted = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, piariumVersion });
+  const restarted = await ApplicationExtensionRuntime.create({ brokerScript, dataDir, varinVersion });
   try {
     await restarted.start();
     const state = await restarted.state();
@@ -528,15 +528,15 @@ test("trusted-native Host updates remain on the prior generation until applicati
 });
 
 test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {
-  const dataDir = await temporaryDirectory("piarium-routing-runtime-");
-  const alpha = await temporaryDirectory("piarium-routing-alpha-");
-  const beta = await temporaryDirectory("piarium-routing-beta-");
+  const dataDir = await temporaryDirectory("varin-routing-runtime-");
+  const alpha = await temporaryDirectory("varin-routing-alpha-");
+  const beta = await temporaryDirectory("varin-routing-beta-");
   await writeRoutingProvider(alpha, "dev.example.alpha", "alpha");
   await writeRoutingProvider(beta, "dev.example.beta", "beta");
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion,
+    varinVersion,
   });
   try {
     const started = await runtime.start();

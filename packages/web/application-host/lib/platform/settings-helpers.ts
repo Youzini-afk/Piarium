@@ -814,7 +814,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
       }
     }
 
-    // Piarium-owned global behavior prompt.
+    // Varin-owned global behavior prompt.
     if (typeof candidate.globalBehaviorPrompt === 'string') {
       const value = candidate.globalBehaviorPrompt;
       if (value.length <= 1024 * 1024) {
@@ -935,11 +935,11 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
-      ...(process.env.PIARIUM_RUNTIME === 'desktop'
+      ...(process.env.VARIN_RUNTIME === 'desktop'
         ? {
-            desktopLanAccessActive: process.env.PIARIUM_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
+            desktopLanAccessActive: process.env.VARIN_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
             desktopLanAccessBlockedReason:
-              process.env.PIARIUM_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
+              process.env.VARIN_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
                 ? 'missing-password'
                 : null,
           }

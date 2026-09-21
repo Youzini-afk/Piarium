@@ -6,7 +6,7 @@ import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 

@@ -11,7 +11,7 @@ import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDi
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`);
 const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "package.json"), "utf8")).version as string;
 const clients: KernelClient[] = [];
 const roots: string[] = [];
@@ -52,7 +52,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-test-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-test-"));
   roots.push(root);
   const host = createKernelClient({
     hostId: "kernel-test-host",
@@ -289,7 +289,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-operation-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-operation-"));
   roots.push(root);
   const faultedHost = createKernelClient({
     hostId: "operation-fault-host",
@@ -297,7 +297,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
-    env: { PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" },
+    env: { VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" },
   });
   clients.push(faultedHost);
   await faultedHost.start();
@@ -342,7 +342,7 @@ test("GC distinguishes durable release from physical cleanup failure and retries
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-gc-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-gc-"));
   roots.push(root);
   const faultedHost = createKernelClient({
     hostId: "gc-fault-host",
@@ -350,7 +350,7 @@ test("GC distinguishes durable release from physical cleanup failure and retries
     buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
-    env: { PIARIUM_KERNEL_FAIL_GC_DELETE: "1" },
+    env: { VARIN_KERNEL_FAIL_GC_DELETE: "1" },
   });
   clients.push(faultedHost);
   await faultedHost.start();
@@ -385,7 +385,7 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-grant-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-grant-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "grant-host", hostGeneration: "grant-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -525,7 +525,7 @@ test("queued long branch build observes cancellation and leaves the kernel usabl
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cancel-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-cancel-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "cancel-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -554,7 +554,7 @@ test("grant revoke cancels queued side effects before admission", { timeout: 30_
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-revoke-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-revoke-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "revoke-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -584,7 +584,7 @@ test("temporary blob owners are independent and have explicit release", async (t
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-owner-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-owner-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "owner-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -621,7 +621,7 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-records-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-records-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "record-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -680,7 +680,7 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
 
 test("typed working result boundary stores root identity with frozen state maps", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-record-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-working-record-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "working-record-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -782,7 +782,7 @@ test("typed working result boundary stores root identity with frozen state maps"
 
 test("Rust rejects malformed and mismatched typed working result DTOs", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-dto-reject-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-working-dto-reject-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "working-dto-reject-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -813,7 +813,7 @@ test("Rust rejects malformed and mismatched typed working result DTOs", { timeou
 
 test("releasing a non-head result drops its revision while an explicit pin alone retains its objects", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-result-release-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-result-release-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "result-release-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -931,7 +931,7 @@ test("releasing a non-head result drops its revision while an explicit pin alone
 
 test("a baseline rebase keeps older result provenance and validates new results against the new base", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-rebase-result-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-rebase-result-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "rebase-result-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1096,7 +1096,7 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-record-scope-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-record-scope-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "record-scope-host", hostGeneration: "record-scope-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1124,7 +1124,7 @@ test("typed recovery turn reads honor actor session identity", { timeout: 30_000
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-actor-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-recovery-actor-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "recovery-actor-host", hostGeneration: "recovery-actor-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1142,7 +1142,7 @@ test("branch creation streams a normal input larger than one control frame", { t
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-large-branch-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-large-branch-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "large-branch-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1174,7 +1174,7 @@ test("kernel rejects an Application Host build identity mismatch", async (t) => 
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-build-id-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-build-id-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "mismatch-host", storageRoot: root, buildVersion: `${buildVersion}-other`, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1186,7 +1186,7 @@ test("a current-format catalog with missing authority tables is rejected without
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-schema-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-schema-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "schema-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1210,8 +1210,8 @@ test("the source package finds its kernel independently of process cwd", async (
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cwd-root-"));
-  const unrelated = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cwd-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-cwd-root-"));
+  const unrelated = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-cwd-"));
   roots.push(root, unrelated);
   const previous = process.cwd();
   process.chdir(unrelated);
@@ -1236,8 +1236,8 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-test-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-recovery-workspace-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-recovery-test-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-recovery-workspace-"));
   roots.push(root, workspace);
   await fs.writeFile(path.join(workspace, "a.txt"), "before");
   const makeEngine = async () => {
@@ -1298,7 +1298,7 @@ test("typed recovery operation publishes files atomically and rejects stale phas
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-typed-recovery-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-typed-recovery-"));
   roots.push(root);
   const host = createKernelClient({ hostId: "typed-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
@@ -1340,9 +1340,9 @@ test("typed recovery create fault injection rolls back operation intent and perm
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-fault-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-recovery-fault-"));
   roots.push(root);
-  const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { PIARIUM_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
+  const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { VARIN_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
   clients.push(faultedHost);
   await faultedHost.start();
   const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
@@ -1361,9 +1361,9 @@ test("R2 kernel file authority gates paths and applies conditional filesystem st
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-authority-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-workspace-"));
-  const alternateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-alternate-"));
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-file-authority-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-file-workspace-"));
+  const alternateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-file-alternate-"));
   roots.push(storageRoot, workspace, alternateRoot);
   await fs.writeFile(path.join(workspace, "note.txt"), "before\n");
 
@@ -1480,8 +1480,8 @@ test("R2 file apply reconciles a committed disk side effect after kernel restart
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-reconcile-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-reconcile-workspace-"));
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-file-reconcile-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-file-reconcile-workspace-"));
   roots.push(storageRoot, workspace);
 
   const faultedHost = createKernelClient({
@@ -1490,7 +1490,7 @@ test("R2 file apply reconciles a committed disk side effect after kernel restart
     buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
-    env: { PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" },
+    env: { VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" },
   });
   clients.push(faultedHost);
   await faultedHost.start();
@@ -1563,8 +1563,8 @@ test("R2 production fs.lock delegates overlap admission to the Rust file lease a
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-path-lock-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-path-lock-workspace-"));
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-path-lock-workspace-"));
   roots.push(storageRoot, workspace);
   const host = createKernelClient({
     hostId: "path-lock-host",
@@ -1609,17 +1609,17 @@ test("R3 kernel scans a fixed workspace view and materializes an immutable root 
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-materialize-"));
-  const source = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-source-"));
-  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-managed-"));
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-r3-materialize-"));
+  const source = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-r3-source-"));
+  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-r3-managed-"));
   roots.push(storageRoot, source, managed);
   await fs.mkdir(path.join(source, "nested"), { recursive: true });
   await fs.mkdir(path.join(source, ".git"), { recursive: true });
-  await fs.mkdir(path.join(source, ".piarium"), { recursive: true });
+  await fs.mkdir(path.join(source, ".varin"), { recursive: true });
   await fs.writeFile(path.join(source, "plain.txt"), "fixed plain\n");
   await fs.writeFile(path.join(source, "nested", "b.txt"), "fixed nested\n");
   await fs.writeFile(path.join(source, ".git", "ignored"), "git metadata\n");
-  await fs.writeFile(path.join(source, ".piarium", "ignored"), "piarium metadata\n");
+  await fs.writeFile(path.join(source, ".varin", "ignored"), "varin metadata\n");
 
   const host = createKernelClient({
     hostId: "r3-materialize-host",
@@ -1755,8 +1755,8 @@ test("R3 materialization reconciles a crash after live backup before staging pro
     t.skip("release kernel has not been built in this checkout");
     return;
   }
-  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-reconcile-"));
-  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-reconcile-managed-"));
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-r3-reconcile-"));
+  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-r3-reconcile-managed-"));
   roots.push(storageRoot, managed);
 
   const seedHost = createKernelClient({
@@ -1793,7 +1793,7 @@ test("R3 materialization reconciles a crash after live backup before staging pro
     buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
-    env: { PIARIUM_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" },
+    env: { VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" },
   });
   clients.push(faultedHost);
   await faultedHost.start();
@@ -1815,8 +1815,8 @@ test("R3 materialization reconciles a crash after live backup before staging pro
     /injected materialize failure after backup/i,
   );
   await assert.rejects(fs.stat(live), { code: "ENOENT" });
-  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.piarium-staging-")));
-  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.piarium-backup-")));
+  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.varin-staging-")));
+  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.varin-backup-")));
   await faultedHost.close();
   clients.splice(clients.indexOf(faultedHost), 1);
 
@@ -1839,7 +1839,7 @@ test("R3 materialization reconciles a crash after live backup before staging pro
   assert.equal(reopenedRegistration.reconciledOperations, 1);
   assert.equal(reopenedRegistration.pendingOperations, 0);
   assert.equal(await fs.readFile(path.join(live, "result.txt"), "utf8"), "new immutable body\n");
-  assert.deepEqual((await fs.readdir(managed)).filter((name) => name.includes(".piarium-staging-") || name.includes(".piarium-backup-")), []);
+  assert.deepEqual((await fs.readdir(managed)).filter((name) => name.includes(".varin-staging-") || name.includes(".varin-backup-")), []);
   const retried = await reopened.fileMaterialize({
     operationId: "r3-crash-materialize",
     workspaceId: "r3-reconcile-workspace",

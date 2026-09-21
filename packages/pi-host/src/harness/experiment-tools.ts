@@ -13,8 +13,8 @@ import type {
   ResourceListResult,
   SourceListResult,
   SourceRegisterResult,
-} from "@piarium/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
+} from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 
 /**
  * Experiment/resource/source tools (7C/7D, D-300).

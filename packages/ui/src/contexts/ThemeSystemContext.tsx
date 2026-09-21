@@ -21,7 +21,7 @@ import {
 } from '@/lib/theme/themes';
 import { withPrColors } from '@/lib/theme/themes/prColors';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import {
   getInitialSystemPreference,
   publishEmbeddedThemeBootstrap,
@@ -30,9 +30,9 @@ import {
 } from './theme-embedded-bootstrap';
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import {
-  PIARIUM_THEME_STORAGE_KEY,
+  VARIN_THEME_STORAGE_KEY,
   readStoredThemeState,
   writeStoredThemeState,
 } from '@/lib/theme/themeStorage';
@@ -199,8 +199,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       });
     };
 
-    window.addEventListener('piarium:theme-hmr', handleThemeHmr);
-    return () => window.removeEventListener('piarium:theme-hmr', handleThemeHmr);
+    window.addEventListener('varin:theme-hmr', handleThemeHmr);
+    return () => window.removeEventListener('varin:theme-hmr', handleThemeHmr);
   }, []);
 
   const getThemeByIdFromAvailable = useCallback(
@@ -289,8 +289,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const hasMacVibrancy = document.documentElement.hasAttribute('data-piarium-vibrancy')
-      || window.__PIARIUM_ELECTRON__?.macVibrancy === true;
+    const hasMacVibrancy = document.documentElement.hasAttribute('data-varin-vibrancy')
+      || window.__VARIN_ELECTRON__?.macVibrancy === true;
     const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
@@ -394,7 +394,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      if (event.key !== PIARIUM_THEME_STORAGE_KEY) {
+      if (event.key !== VARIN_THEME_STORAGE_KEY) {
         return;
       }
 
@@ -468,18 +468,18 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
 
     const scopedWindow = window as unknown as {
-      __piariumApplyThemeSync?: (payload: ThemeSyncPayload) => void;
+      __varinApplyThemeSync?: (payload: ThemeSyncPayload) => void;
     };
 
-    scopedWindow.__piariumApplyThemeSync = applyIncomingThemeSync;
+    scopedWindow.__varinApplyThemeSync = applyIncomingThemeSync;
 
     if (receivesParentThemeSync && window.parent !== window) {
-      window.parent.postMessage({ type: 'piarium:theme-sync-request' }, window.location.origin);
+      window.parent.postMessage({ type: 'varin:theme-sync-request' }, window.location.origin);
     }
 
     return () => {
-      if (scopedWindow.__piariumApplyThemeSync === applyIncomingThemeSync) {
-        delete scopedWindow.__piariumApplyThemeSync;
+      if (scopedWindow.__varinApplyThemeSync === applyIncomingThemeSync) {
+        delete scopedWindow.__varinApplyThemeSync;
       }
     };
   }, [applyIncomingThemeSync, receivesParentThemeSync]);
@@ -499,7 +499,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         payload?: ThemeSyncPayload;
       };
 
-      if (data?.type !== 'piarium:theme-sync' || !data.payload) {
+      if (data?.type !== 'varin:theme-sync' || !data.payload) {
         return;
       }
 
@@ -593,8 +593,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       });
     };
 
-    window.addEventListener('piarium:settings-synced', handleSettingsSynced);
-    return () => window.removeEventListener('piarium:settings-synced', handleSettingsSynced);
+    window.addEventListener('varin:settings-synced', handleSettingsSynced);
+    return () => window.removeEventListener('varin:settings-synced', handleSettingsSynced);
   }, [receivesParentThemeSync]);
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {

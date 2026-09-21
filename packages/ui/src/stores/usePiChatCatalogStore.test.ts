@@ -3,7 +3,7 @@ import type {
   PiCommandDescriptor,
   PiResourceCatalogSnapshot,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { createPiChatCatalogStore } from './usePiChatCatalogStore';
 
 const target: RuntimeContextTarget = { sessionId: 'session-a' };

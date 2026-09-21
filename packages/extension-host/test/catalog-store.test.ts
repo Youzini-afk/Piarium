@@ -3,11 +3,11 @@ import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { PiariumExtensionInstallationRecord } from "@piarium/extension-contract";
+import type { VarinExtensionInstallationRecord } from "@varin/extension-contract";
 import {
-  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-  PIARIUM_BUILTIN_EXTENSION_PREFIX,
-} from "@piarium/extension-builtins";
+  VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+  VARIN_BUILTIN_EXTENSION_PREFIX,
+} from "@varin/extension-builtins";
 import {
   ApplicationExtensionCatalog,
   ExtensionCatalogRevisionConflictError,
@@ -17,19 +17,19 @@ import {
 const temporaryDirectories: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "piarium-extension-host-"));
+  const directory = await mkdtemp(join(tmpdir(), "varin-extension-host-"));
   temporaryDirectories.push(directory);
   return directory;
 }
 
-function installation(id = "dev.example.extension"): PiariumExtensionInstallationRecord {
+function installation(id = "dev.example.extension"): VarinExtensionInstallationRecord {
   const now = "2026-08-14T00:00:00.000Z";
   return {
     manifest: {
       schemaVersion: 1,
       id,
       version: "1.0.0",
-      engines: { piarium: ">=0.1.0" },
+      engines: { varin: ">=0.1.0" },
       entrypoints: { surfaces: [{ id: "main", mode: "managed", file: "dist/main.mjs", supports: ["web"] }] },
     },
     source: { kind: "npm", specifier: `npm:${id}`, display: `npm:${id}` },
@@ -140,28 +140,28 @@ test("external extensions cannot be enabled until every selected capability has 
   assert.equal(enabled.extensions[0]?.desired.enabled, true);
 });
 
-test("reconciles Piarium-owned built-ins while preserving their desired state", async () => {
+test("reconciles Varin-owned built-ins while preserving their desired state", async () => {
   const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
   const seeded = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
-  assert.equal(seeded.extensions.length, PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.length);
+  assert.equal(seeded.extensions.length, VARIN_BUILTIN_EXTENSION_DEFINITIONS.length);
   assert.ok(seeded.extensions.every((entry) => entry.source.kind === "builtin"));
 
-  const extensionId = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS[0]?.manifest.id;
+  const extensionId = VARIN_BUILTIN_EXTENSION_DEFINITIONS[0]?.manifest.id;
   assert.ok(extensionId);
   const disabled = await catalog.setEnabled(extensionId, false, seeded.revision);
   const reconciled = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
   assert.equal(reconciled.revision, disabled.revision);
   assert.equal(reconciled.extensions.find((entry) => entry.manifest.id === extensionId)?.desired.enabled, false);
 
   const trimmed = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.slice(1),
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS.slice(1),
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
   assert.equal(trimmed.extensions.some((entry) => entry.manifest.id === extensionId), false);
 });
@@ -170,10 +170,10 @@ test("repairs only known legacy built-ins before strict catalog reconciliation",
   const dataDir = await temporaryDirectory();
   const catalog = new ApplicationExtensionCatalog({ dataDir });
   const seeded = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
-  const shellDefinition = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.find(({ manifest }) => (
+  const shellDefinition = VARIN_BUILTIN_EXTENSION_DEFINITIONS.find(({ manifest }) => (
     manifest.contributions?.some((contribution) => contribution.kind === "shell")
   ));
   assert.ok(shellDefinition);
@@ -197,8 +197,8 @@ test("repairs only known legacy built-ins before strict catalog reconciliation",
 
   const restarted = new ApplicationExtensionCatalog({ dataDir });
   const repaired = await restarted.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
   const repairedRecord = repaired.extensions.find(({ manifest }) => manifest.id === shellDefinition.manifest.id);
   assert.ok(repairedRecord);
@@ -209,8 +209,8 @@ test("repairs only known legacy built-ins before strict catalog reconciliation",
   assert.equal(repairedRecord.selectedVersion, shellDefinition.manifest.version);
   assert.equal(repairedRecord.candidate, undefined);
   const stable = await restarted.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
   assert.equal(stable.revision, repaired.revision);
 });
@@ -219,8 +219,8 @@ test("does not use built-in reconciliation to repair an invalid external extensi
   const dataDir = await temporaryDirectory();
   const catalog = new ApplicationExtensionCatalog({ dataDir });
   const seeded = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
   await catalog.upsert(installation(), seeded.revision);
   const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as {
@@ -235,8 +235,8 @@ test("does not use built-in reconciliation to repair an invalid external extensi
   const restarted = new ApplicationExtensionCatalog({ dataDir });
   await assert.rejects(
     () => restarted.reconcileBuiltins(
-      PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-      PIARIUM_BUILTIN_EXTENSION_PREFIX,
+      VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+      VARIN_BUILTIN_EXTENSION_PREFIX,
     ),
     ExtensionCatalogStorageError,
   );

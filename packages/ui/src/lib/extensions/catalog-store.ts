@@ -1,23 +1,23 @@
 import React, { useSyncExternalStore } from 'react';
 import type {
-  PiariumExtensionCandidateCapabilityReviewRequest,
-  PiariumExtensionCapabilityReviewRequest,
-  PiariumExtensionCatalogSnapshot,
-  PiariumExtensionHostStateSnapshot,
-  PiariumExtensionPackageSource,
-  PiariumExtensionServiceRoutingContext,
-} from '@piarium/extension-contract';
-import { serviceRoutingRuleKey } from '@piarium/extension-contract';
+  VarinExtensionCandidateCapabilityReviewRequest,
+  VarinExtensionCapabilityReviewRequest,
+  VarinExtensionCatalogSnapshot,
+  VarinExtensionHostStateSnapshot,
+  VarinExtensionPackageSource,
+  VarinExtensionServiceRoutingContext,
+} from '@varin/extension-contract';
+import { serviceRoutingRuleKey } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
-export interface PiariumExtensionCatalogStoreState {
+export interface VarinExtensionCatalogStoreState {
   busyExtensionId: string | null;
   error: string | null;
   loading: boolean;
-  snapshot: PiariumExtensionHostStateSnapshot | null;
+  snapshot: VarinExtensionHostStateSnapshot | null;
 }
 
-const initialState = (): PiariumExtensionCatalogStoreState => ({
+const initialState = (): VarinExtensionCatalogStoreState => ({
   busyExtensionId: null,
   error: null,
   loading: false,
@@ -37,7 +37,7 @@ interface CatalogSurfaceRuntime {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot>;
+  ): Promise<VarinExtensionCatalogSnapshot>;
   refresh(): Promise<void>;
 }
 
@@ -74,16 +74,16 @@ const defaultWatchRetry = (attempt: number, signal: AbortSignal): Promise<void> 
 
 const extensionsApi = () => {
   const api = getRegisteredRuntimeAPIs()?.extensions;
-  if (!api) throw new Error('Piarium application-host extension API is unavailable');
+  if (!api) throw new Error('Varin application-host extension API is unavailable');
   return api;
 };
 
-const publish = (next: PiariumExtensionCatalogStoreState): void => {
+const publish = (next: VarinExtensionCatalogStoreState): void => {
   state = next;
   for (const listener of listeners) listener();
 };
 
-const acceptSnapshot = (snapshot: PiariumExtensionHostStateSnapshot, requestGeneration: number): boolean => {
+const acceptSnapshot = (snapshot: VarinExtensionHostStateSnapshot, requestGeneration: number): boolean => {
   if (requestGeneration !== generation) return false;
   const current = state.snapshot;
   if (
@@ -164,10 +164,10 @@ const loadInitialSnapshot = async (
   }
 };
 
-export const startPiariumExtensionCatalog = (): Promise<void> => {
+export const startVarinExtensionCatalog = (): Promise<void> => {
   if (startPromise) return startPromise;
   const requestGeneration = ++generation;
-  watchController?.abort('Piarium extension catalog restarted');
+  watchController?.abort('Varin extension catalog restarted');
   const controller = new AbortController();
   watchController = controller;
   publish({ ...state, error: null, loading: true });
@@ -176,15 +176,15 @@ export const startPiariumExtensionCatalog = (): Promise<void> => {
   return operation;
 };
 
-export const stopPiariumExtensionCatalog = (): void => {
+export const stopVarinExtensionCatalog = (): void => {
   generation += 1;
-  watchController?.abort('Piarium extension catalog stopped');
+  watchController?.abort('Varin extension catalog stopped');
   watchController = null;
   startPromise = null;
   if (state.loading) publish({ ...state, loading: false });
 };
 
-export const refreshPiariumExtensionCatalog = async (): Promise<void> => {
+export const refreshVarinExtensionCatalog = async (): Promise<void> => {
   const requestGeneration = generation;
   try {
     const snapshot = await extensionsApi().hostState();
@@ -199,12 +199,12 @@ export const refreshPiariumExtensionCatalog = async (): Promise<void> => {
 
 const runMutation = (
   extensionId: string,
-  mutate: (snapshot: PiariumExtensionCatalogSnapshot) => Promise<PiariumExtensionCatalogSnapshot>,
+  mutate: (snapshot: VarinExtensionCatalogSnapshot) => Promise<VarinExtensionCatalogSnapshot>,
 ): Promise<void> => {
   const operation = mutationQueue.then(async () => {
-    await startPiariumExtensionCatalog();
+    await startVarinExtensionCatalog();
     const current = state.snapshot;
-    if (!current) throw new Error('Piarium extension catalog is unavailable');
+    if (!current) throw new Error('Varin extension catalog is unavailable');
     const requestGeneration = generation;
     publish({ ...state, busyExtensionId: extensionId, error: null });
     try {
@@ -221,7 +221,7 @@ const runMutation = (
     } catch (error) {
       if (requestGeneration === generation) {
         const message = error instanceof Error ? error.message : String(error);
-        await refreshPiariumExtensionCatalog().catch(() => undefined);
+        await refreshVarinExtensionCatalog().catch(() => undefined);
         if (requestGeneration === generation) publish({ ...state, error: message });
       }
       throw error;
@@ -235,20 +235,20 @@ const runMutation = (
   return operation;
 };
 
-export const setPiariumExtensionEnabled = (
+export const setVarinExtensionEnabled = (
   extensionId: string,
   enabled: boolean,
 ): Promise<void> => runMutation(extensionId, (catalog) => (
   extensionsApi().setEnabled(extensionId, enabled, catalog.revision)
 ));
 
-export const installPiariumExtension = (
-  source: PiariumExtensionPackageSource,
+export const installVarinExtension = (
+  source: VarinExtensionPackageSource,
 ): Promise<void> => runMutation('__install__', (catalog) => (
   extensionsApi().install({ expectedRevision: catalog.revision, source })
 ));
 
-export const reloadPiariumExtensionLocalSource = (
+export const reloadVarinExtensionLocalSource = (
   extensionId: string,
 ): Promise<void> => runMutation(extensionId, async (catalog) => {
   const result = await extensionsApi().reloadLocalSource({
@@ -259,7 +259,7 @@ export const reloadPiariumExtensionLocalSource = (
   const entry = result.snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
   const candidate = entry?.candidate;
   if (!candidate || candidate.integrity !== result.candidateIntegrity) {
-    throw new Error(`Reloaded local Piarium extension candidate is no longer current: ${extensionId}`);
+    throw new Error(`Reloaded local Varin extension candidate is no longer current: ${extensionId}`);
   }
   if (!candidate.capabilitiesReviewed) return result.snapshot;
   return (await catalogSurfaceRuntime()).applyCandidate(
@@ -269,21 +269,21 @@ export const reloadPiariumExtensionLocalSource = (
   );
 });
 
-export const selectPiariumExtensionCandidate = (
+export const selectVarinExtensionCandidate = (
   extensionId: string,
   candidateIntegrity: string,
 ): Promise<void> => runMutation(extensionId, async (catalog) => {
   return (await catalogSurfaceRuntime()).applyCandidate(extensionId, candidateIntegrity, catalog.revision);
 });
 
-export const discardPiariumExtensionCandidate = (
+export const discardVarinExtensionCandidate = (
   extensionId: string,
   candidateIntegrity: string,
 ): Promise<void> => runMutation(extensionId, (catalog) => (
   extensionsApi().discardCandidate({ candidateIntegrity, expectedRevision: catalog.revision, extensionId })
 ));
 
-export const removePiariumExtension = (
+export const removeVarinExtension = (
   extensionId: string,
   deleteData: boolean,
 ): Promise<void> => runMutation(extensionId, async (catalog) => {
@@ -295,28 +295,28 @@ export const removePiariumExtension = (
   return extensionsApi().removeExtension({ deleteData, expectedRevision: disabled.revision, extensionId });
 });
 
-export const reviewPiariumExtensionCandidateCapabilities = (
-  request: Omit<PiariumExtensionCandidateCapabilityReviewRequest, 'expectedRevision'>,
+export const reviewVarinExtensionCandidateCapabilities = (
+  request: Omit<VarinExtensionCandidateCapabilityReviewRequest, 'expectedRevision'>,
 ): Promise<void> => runMutation(request.extensionId, (catalog) => (
   extensionsApi().reviewCandidateCapabilities({ ...request, expectedRevision: catalog.revision })
 ));
 
-export const reviewPiariumExtensionCapabilities = (
-  request: Omit<PiariumExtensionCapabilityReviewRequest, 'expectedRevision'>,
+export const reviewVarinExtensionCapabilities = (
+  request: Omit<VarinExtensionCapabilityReviewRequest, 'expectedRevision'>,
 ): Promise<void> => runMutation(request.extensionId, (catalog) => (
   extensionsApi().reviewCapabilities({ ...request, expectedRevision: catalog.revision })
 ));
 
-export const setPiariumExtensionServiceRoute = (
+export const setVarinExtensionServiceRoute = (
   serviceId: string,
   version: number,
-  scope: PiariumExtensionServiceRoutingContext,
+  scope: VarinExtensionServiceRoutingContext,
   providerKey: string | null,
 ): Promise<void> => {
   const operation = mutationQueue.then(async () => {
-    await startPiariumExtensionCatalog();
+    await startVarinExtensionCatalog();
     const current = state.snapshot;
-    if (!current) throw new Error('Piarium extension routing is unavailable');
+    if (!current) throw new Error('Varin extension routing is unavailable');
     const requestGeneration = generation;
     const identity = serviceRoutingRuleKey({ scope, serviceId, version });
     const existing = current.routing.document.rules.find((rule) => serviceRoutingRuleKey(rule) === identity);
@@ -334,19 +334,19 @@ export const setPiariumExtensionServiceRoute = (
         rule: { allowFallback: false, providerKey, scope, serviceId, version },
       });
     }
-    if (requestGeneration === generation) await refreshPiariumExtensionCatalog();
+    if (requestGeneration === generation) await refreshVarinExtensionCatalog();
   });
   mutationQueue = operation.catch(() => undefined);
   return operation;
 };
 
-export const usePiariumExtensionCatalog = (): PiariumExtensionCatalogStoreState => {
+export const useVarinExtensionCatalog = (): VarinExtensionCatalogStoreState => {
   React.useEffect(() => {
     catalogConsumers += 1;
-    void startPiariumExtensionCatalog().catch(() => undefined);
+    void startVarinExtensionCatalog().catch(() => undefined);
     return () => {
       catalogConsumers = Math.max(0, catalogConsumers - 1);
-      if (catalogConsumers === 0) stopPiariumExtensionCatalog();
+      if (catalogConsumers === 0) stopVarinExtensionCatalog();
     };
   }, []);
   return useSyncExternalStore(
@@ -359,20 +359,20 @@ export const usePiariumExtensionCatalog = (): PiariumExtensionCatalogStoreState 
   );
 };
 
-export const subscribePiariumExtensionCatalog = (listener: () => void): (() => void) => {
+export const subscribeVarinExtensionCatalog = (listener: () => void): (() => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
 
-export const getPiariumExtensionCatalogState = (): PiariumExtensionCatalogStoreState => state;
+export const getVarinExtensionCatalogState = (): VarinExtensionCatalogStoreState => state;
 
-export const getPiariumExtensionCatalogWatchGeneration = (): number => generation;
+export const getVarinExtensionCatalogWatchGeneration = (): number => generation;
 
-export const resetPiariumExtensionCatalogForTests = (
+export const resetVarinExtensionCatalogForTests = (
   surfaceRuntime: CatalogSurfaceRuntime | null = null,
 ): void => {
   generation += 1;
-  watchController?.abort('Piarium extension catalog reset');
+  watchController?.abort('Varin extension catalog reset');
   watchController = null;
   startPromise = null;
   catalogConsumers = 0;

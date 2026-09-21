@@ -18,23 +18,23 @@ const packageJson = (options: {
   version: "0.1.0",
   private: false,
   type: "module",
-  description: `${options.name} Piarium extension`,
-  files: ["dist", ...(options.extraPublishedFiles ?? []), "piarium.extension.json"],
+  description: `${options.name} Varin extension`,
+  files: ["dist", ...(options.extraPublishedFiles ?? []), "varin.extension.json"],
   scripts: {
-    build: "piarium-extension build",
-    check: "piarium-extension check",
-    test: "piarium-extension test",
+    build: "varin-extension build",
+    check: "varin-extension check",
+    test: "varin-extension test",
   },
   dependencies: {
-    "@piarium/extension-contract": "0.2.0",
-    "@piarium/extension-sdk": "0.2.0",
+    "@varin/extension-contract": "0.2.0",
+    "@varin/extension-sdk": "0.2.0",
     ...options.extraDependencies,
   },
   devDependencies: {
-    "@piarium/extension-cli": "0.2.0",
+    "@varin/extension-cli": "0.2.0",
     typescript: "^5.9.0",
   },
-  piarium: {
+  varin: {
     build: {
       entrypoints: options.extraEntrypoints,
     },
@@ -58,17 +58,17 @@ const readme = (options: { name: string; summary: string }): string => `# ${opti
 
 ${options.summary}
 
-This package extends the Piarium Surface or Host. It is not a Pi package.
+This package extends the Varin Surface or Host. It is not a Pi package.
 
 ## Commands
 
 \`\`\`sh
-npx piarium-extension check
-npx piarium-extension build
-npx piarium-extension test
+npx varin-extension check
+npx varin-extension build
+npx varin-extension test
 \`\`\`
 
-Import \`@piarium/extension-sdk\` and \`@piarium/extension-contract\` only. Do not import Piarium's React product UI.
+Import \`@varin/extension-sdk\` and \`@varin/extension-contract\` only. Do not import Varin's React product UI.
 `;
 
 const brokeredHostFiles = (options: {
@@ -80,14 +80,14 @@ const brokeredHostFiles = (options: {
   runtimeFiles?: Record<string, string>;
   summary: string;
 }): Record<string, string> => ({
-  "piarium.extension.json": json({
-    $schema: "https://raw.githubusercontent.com/Youzini-afk/Piarium/main/packages/extension-contract/schema/piarium.extension.schema.json",
+  "varin.extension.json": json({
+    $schema: "https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
     schemaVersion: 1,
     id: options.id,
     version: "0.1.0",
     displayName: options.name,
     metadata: { description: options.description },
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     capabilities: { host: [options.capability] },
     entrypoints: {
       host: { file: "dist/host.cjs", mode: "brokered", activation: ["workspace-match"] },
@@ -154,7 +154,7 @@ const handle = async (message) => {
     return;
   }
   if (message.method === "textDocument/hover" && message.id !== undefined) {
-    respond(message.id, { contents: { kind: "markdown", value: "Piarium language provider" } });
+    respond(message.id, { contents: { kind: "markdown", value: "Varin language provider" } });
     return;
   }
   if (message.method === "textDocument/didOpen") {
@@ -277,7 +277,7 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.language",
       description: `${options.name} language provider`,
-      hostSource: `import { defineLanguageProvider } from "@piarium/extension-sdk";\n\nexport default defineLanguageProvider((context) => ({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/language-server.mjs")],\n  languageIds: ["markdown"],\n}));\n`,
+      hostSource: `import { defineLanguageProvider } from "@varin/extension-sdk";\n\nexport default defineLanguageProvider((context) => ({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/language-server.mjs")],\n  languageIds: ["markdown"],\n}));\n`,
       runtimeFiles: { "runtime/language-server.mjs": languageServerRuntime },
       summary: "A brokered Host language provider. The Application Host spawns the server; this extension never starts a debugger or language process in the renderer.",
     });
@@ -288,7 +288,7 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.debug",
       description: `${options.name} debug adapter`,
-      hostSource: `import { defineDebugAdapter } from "@piarium/extension-sdk";\n\nexport default defineDebugAdapter((context) => ({\n  adapterId: ${JSON.stringify(`${options.id}.node`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/debug-adapter.mjs")],\n  languageIds: ["javascript"],\n}));\n`,
+      hostSource: `import { defineDebugAdapter } from "@varin/extension-sdk";\n\nexport default defineDebugAdapter((context) => ({\n  adapterId: ${JSON.stringify(`${options.id}.node`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/debug-adapter.mjs")],\n  languageIds: ["javascript"],\n}));\n`,
       runtimeFiles: { "runtime/debug-adapter.mjs": debugAdapterRuntime },
       summary: "A brokered Host debug adapter. The Application Host spawns the DAP process; this extension never starts a debugger in the renderer.",
     });
@@ -299,7 +299,7 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.test",
       description: `${options.name} test provider`,
-      hostSource: `import { defineTestProvider } from "@piarium/extension-sdk";\n\nexport default defineTestProvider({\n  providerId: ${JSON.stringify(`${options.id}.node-test`)},\n  kind: "node-test",\n});\n`,
+      hostSource: `import { defineTestProvider } from "@varin/extension-sdk";\n\nexport default defineTestProvider({\n  providerId: ${JSON.stringify(`${options.id}.node-test`)},\n  kind: "node-test",\n});\n`,
       summary: "A brokered Host test provider. The Application Host spawns the test adapter; this extension never starts a test runner in the renderer.",
     });
   }
@@ -309,7 +309,7 @@ export const createInitFiles = (options: {
       id: `${options.id}.shell`,
       kind: "shell",
       data: {
-        contract: "piarium-workbench-shell/v1",
+        contract: "varin-workbench-shell/v1",
         seams: {
           desktop: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },
           web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },
@@ -339,22 +339,22 @@ export const createInitFiles = (options: {
         };
 
   const source = options.template === "shell"
-    ? `import { defineShellMount, defineSurfaceExtension, type PiariumManagedSurfaceContext } from "@piarium/extension-sdk";\nimport { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS, PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT, PIARIUM_WORKBENCH_SLOTS } from "@piarium/extension-contract";\n\nexport default defineSurfaceExtension((context: PiariumManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "shell",\n    contractVersion: 1,\n    data: {\n      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,\n      seams: {\n        desktop: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },\n        web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },\n      },\n    },\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },\n  }, defineShellMount(async (container, mount) => {\n    container.replaceChildren();\n    const root = container.ownerDocument.createElement("main");\n    const title = container.ownerDocument.createElement("header");\n    const editor = container.ownerDocument.createElement("section");\n    const sidebar = container.ownerDocument.createElement("aside");\n    root.dataset.piariumShell = ${JSON.stringify(options.id)};\n    title.textContent = ${JSON.stringify(options.name)};\n    root.append(title, sidebar, editor);\n    container.append(root);\n    let editorMount;\n    try {\n      editorMount = await mount.workbench.mountReplacement({\n        container: editor,\n        target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor,\n      });\n      const sidebarMount = await mount.workbench.mountSlot({\n        container: sidebar,\n        slot: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews,\n      });\n      return async () => {\n        await sidebarMount.dispose("Shell unmounted");\n        await editorMount.dispose("Shell unmounted");\n        root.remove();\n      };\n    } catch (error) {\n      await editorMount?.dispose(error);\n      root.remove();\n      throw error;\n    }\n  }));\n});\n`
+    ? `import { defineShellMount, defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\nimport { VARIN_WORKBENCH_REPLACEMENT_TARGETS, VARIN_WORKBENCH_SHELL_DATA_CONTRACT, VARIN_WORKBENCH_SLOTS } from "@varin/extension-contract";\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "shell",\n    contractVersion: 1,\n    data: {\n      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,\n      seams: {\n        desktop: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },\n        web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] },\n      },\n    },\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },\n  }, defineShellMount(async (container, mount) => {\n    container.replaceChildren();\n    const root = container.ownerDocument.createElement("main");\n    const title = container.ownerDocument.createElement("header");\n    const editor = container.ownerDocument.createElement("section");\n    const sidebar = container.ownerDocument.createElement("aside");\n    root.dataset.varinShell = ${JSON.stringify(options.id)};\n    title.textContent = ${JSON.stringify(options.name)};\n    root.append(title, sidebar, editor);\n    container.append(root);\n    let editorMount;\n    try {\n      editorMount = await mount.workbench.mountReplacement({\n        container: editor,\n        target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor,\n      });\n      const sidebarMount = await mount.workbench.mountSlot({\n        container: sidebar,\n        slot: VARIN_WORKBENCH_SLOTS.primarySidebarViews,\n      });\n      return async () => {\n        await sidebarMount.dispose("Shell unmounted");\n        await editorMount.dispose("Shell unmounted");\n        root.remove();\n      };\n    } catch (error) {\n      await editorMount?.dispose(error);\n      root.remove();\n      throw error;\n    }\n  }));\n});\n`
     : options.template === "editor"
-      ? `import { defineEditorMount, defineSurfaceExtension, type PiariumManagedSurfaceContext } from "@piarium/extension-sdk";\n\nexport default defineSurfaceExtension((context: PiariumManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "editor",\n    contractVersion: 1,\n    data: { languageIds: ["markdown"], priority: 60 },\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n  }, defineEditorMount((container, mount) => {\n    const textarea = container.ownerDocument.createElement("textarea");\n    textarea.setAttribute("aria-label", ${JSON.stringify(options.name)});\n    textarea.style.cssText = "width:100%;height:100%;resize:none;border:0;padding:12px;background:transparent;color:inherit;font:inherit";\n    const render = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      if (textarea.value !== snapshot.content) textarea.value = snapshot.content;\n      textarea.readOnly = snapshot.status !== "ready";\n    };\n    const onInput = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      const next = textarea.value;\n      let from = 0;\n      while (from < snapshot.content.length && from < next.length && snapshot.content[from] === next[from]) from += 1;\n      let previousTo = snapshot.content.length;\n      let nextTo = next.length;\n      while (previousTo > from && nextTo > from && snapshot.content[previousTo - 1] === next[nextTo - 1]) {\n        previousTo -= 1;\n        nextTo -= 1;\n      }\n      void mount.props.document.applyEdits([{ from, to: previousTo, insert: next.slice(from, nextTo) }], snapshot.documentVersion).then((result) => {\n        if (mount.signal.aborted) return;\n        switch (result.status) {\n          case "applied":\n            delete textarea.dataset.piariumEditStatus;\n            return;\n          case "stale":\n          case "conflict":\n          case "invalid-range":\n          case "overlapping-ranges":\n          case "unsupported":\n            textarea.dataset.piariumEditStatus = result.status;\n            render();\n            return;\n        }\n      });\n    };\n    const onKeyDown = (event: KeyboardEvent) => {\n      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;\n      event.preventDefault();\n      const version = mount.props.document.getSnapshot().documentVersion;\n      void mount.props.document.save(version).then((result) => {\n        if (mount.signal.aborted) return;\n        if (result.status !== "updated") textarea.dataset.piariumEditStatus = result.status;\n        render();\n      });\n    };\n    textarea.addEventListener("input", onInput);\n    textarea.addEventListener("keydown", onKeyDown);\n    const unsubscribe = mount.props.document.subscribe(render);\n    container.replaceChildren(textarea);\n    render();\n    return () => {\n      unsubscribe();\n      textarea.removeEventListener("input", onInput);\n      textarea.removeEventListener("keydown", onKeyDown);\n      container.replaceChildren();\n    };\n  }));\n});\n`
+      ? `import { defineEditorMount, defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "editor",\n    contractVersion: 1,\n    data: { languageIds: ["markdown"], priority: 60 },\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n  }, defineEditorMount((container, mount) => {\n    const textarea = container.ownerDocument.createElement("textarea");\n    textarea.setAttribute("aria-label", ${JSON.stringify(options.name)});\n    textarea.style.cssText = "width:100%;height:100%;resize:none;border:0;padding:12px;background:transparent;color:inherit;font:inherit";\n    const render = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      if (textarea.value !== snapshot.content) textarea.value = snapshot.content;\n      textarea.readOnly = snapshot.status !== "ready";\n    };\n    const onInput = () => {\n      const snapshot = mount.props.document.getSnapshot();\n      const next = textarea.value;\n      let from = 0;\n      while (from < snapshot.content.length && from < next.length && snapshot.content[from] === next[from]) from += 1;\n      let previousTo = snapshot.content.length;\n      let nextTo = next.length;\n      while (previousTo > from && nextTo > from && snapshot.content[previousTo - 1] === next[nextTo - 1]) {\n        previousTo -= 1;\n        nextTo -= 1;\n      }\n      void mount.props.document.applyEdits([{ from, to: previousTo, insert: next.slice(from, nextTo) }], snapshot.documentVersion).then((result) => {\n        if (mount.signal.aborted) return;\n        switch (result.status) {\n          case "applied":\n            delete textarea.dataset.varinEditStatus;\n            return;\n          case "stale":\n          case "conflict":\n          case "invalid-range":\n          case "overlapping-ranges":\n          case "unsupported":\n            textarea.dataset.varinEditStatus = result.status;\n            render();\n            return;\n        }\n      });\n    };\n    const onKeyDown = (event: KeyboardEvent) => {\n      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;\n      event.preventDefault();\n      const version = mount.props.document.getSnapshot().documentVersion;\n      void mount.props.document.save(version).then((result) => {\n        if (mount.signal.aborted) return;\n        if (result.status !== "updated") textarea.dataset.varinEditStatus = result.status;\n        render();\n      });\n    };\n    textarea.addEventListener("input", onInput);\n    textarea.addEventListener("keydown", onKeyDown);\n    const unsubscribe = mount.props.document.subscribe(render);\n    container.replaceChildren(textarea);\n    render();\n    return () => {\n      unsubscribe();\n      textarea.removeEventListener("input", onInput);\n      textarea.removeEventListener("keydown", onKeyDown);\n      container.replaceChildren();\n    };\n  }));\n});\n`
       : options.template === "view"
-        ? `import { defineViewMount, defineSurfaceExtension, type PiariumManagedSurfaceContext } from "@piarium/extension-sdk";\nimport { PIARIUM_WORKBENCH_SLOTS } from "@piarium/extension-contract";\n\nexport default defineSurfaceExtension((context: PiariumManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "view",\n    contractVersion: 1,\n    data: {},\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n    placement: { slot: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, order: 40 },\n  }, defineViewMount((container) => {\n    container.textContent = ${JSON.stringify(options.name)};\n    return () => { container.replaceChildren(); };\n  }));\n});\n`
-        : `import type { PiariumExtensionStaticContribution } from "@piarium/extension-contract";\nimport { defineSurfaceExtension, type PiariumManagedSurfaceContext } from "@piarium/extension-sdk";\n\nconst contribution: PiariumExtensionStaticContribution = {\n  id: ${JSON.stringify(contribution.id)},\n  kind: "page",\n  contractVersion: 1,\n  data: {},\n  supports: ["desktop", "mobile", "web"],\n  title: ${JSON.stringify(options.name)},\n};\n\nexport default defineSurfaceExtension((context: PiariumManagedSurfaceContext) => {\n  context.contribute(contribution, {\n    render: () => undefined,\n  });\n});\n`;
+        ? `import { defineViewMount, defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\nimport { VARIN_WORKBENCH_SLOTS } from "@varin/extension-contract";\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute({\n    id: ${JSON.stringify(contribution.id)},\n    kind: "view",\n    contractVersion: 1,\n    data: {},\n    supports: ["desktop", "web"],\n    title: ${JSON.stringify(options.name)},\n    placement: { slot: VARIN_WORKBENCH_SLOTS.primarySidebarViews, order: 40 },\n  }, defineViewMount((container) => {\n    container.textContent = ${JSON.stringify(options.name)};\n    return () => { container.replaceChildren(); };\n  }));\n});\n`
+        : `import type { VarinExtensionStaticContribution } from "@varin/extension-contract";\nimport { defineSurfaceExtension, type VarinManagedSurfaceContext } from "@varin/extension-sdk";\n\nconst contribution: VarinExtensionStaticContribution = {\n  id: ${JSON.stringify(contribution.id)},\n  kind: "page",\n  contractVersion: 1,\n  data: {},\n  supports: ["desktop", "mobile", "web"],\n  title: ${JSON.stringify(options.name)},\n};\n\nexport default defineSurfaceExtension((context: VarinManagedSurfaceContext) => {\n  context.contribute(contribution, {\n    render: () => undefined,\n  });\n});\n`;
 
   return {
-    "piarium.extension.json": json({
-      $schema: "https://raw.githubusercontent.com/Youzini-afk/Piarium/main/packages/extension-contract/schema/piarium.extension.schema.json",
+    "varin.extension.json": json({
+      $schema: "https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
       schemaVersion: 1,
       id: options.id,
       version: "0.1.0",
       displayName: options.name,
-      metadata: { description: `${options.name} Piarium extension` },
-      engines: { piarium: "*" },
+      metadata: { description: `${options.name} Varin extension` },
+      engines: { varin: "*" },
       entrypoints: {
         surfaces: [{
           id: surfaceEntrypointId,
@@ -384,10 +384,10 @@ export const createInitFiles = (options: {
       summary: options.template === "shell"
         ? "A framework-neutral Shell replacement. Core still owns documents, terminals, and sessions; this package only draws the workbench chrome."
         : options.template === "editor"
-          ? "A custom resource editor contribution. Document buffers stay in Piarium DocumentsAPI."
+          ? "A custom resource editor contribution. Document buffers stay in Varin DocumentsAPI."
           : options.template === "view"
             ? "A sidebar view contribution placed through a public workbench slot."
-            : "A managed Surface extension for Piarium.",
+            : "A managed Surface extension for Varin.",
     }),
   };
 };

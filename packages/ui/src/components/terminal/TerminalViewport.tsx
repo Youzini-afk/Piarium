@@ -32,7 +32,7 @@ const loadGhostty = (): Promise<GhosttyRuntime> =>
 const NERD_FONT_FIRST_TERMINAL_WAIT_MS = 2_000;
 const ensureNerdFonts = (): Promise<void> => {
   if (typeof window === 'undefined') return Promise.resolve();
-  const loader = (window as typeof window & { __PIARIUM_ENSURE_NERD_FONTS__?: () => Promise<void> }).__PIARIUM_ENSURE_NERD_FONTS__;
+  const loader = (window as typeof window & { __VARIN_ENSURE_NERD_FONTS__?: () => Promise<void> }).__VARIN_ENSURE_NERD_FONTS__;
   if (typeof loader !== 'function') return Promise.resolve();
   return Promise.race([
     Promise.resolve(loader()).catch(() => undefined),

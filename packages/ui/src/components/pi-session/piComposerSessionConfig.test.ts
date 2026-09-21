@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ModelDescriptor, SessionSnapshot, ThinkingLevel } from '@piarium/protocol';
+import type { ModelDescriptor, SessionSnapshot, ThinkingLevel } from '@varin/protocol';
 import { configurePiComposerSession } from './piComposerSessionConfig';
 
 const model = (
@@ -64,7 +64,7 @@ describe('Pi composer session configuration', () => {
     expect(result.thinkingLevel).toBe('high');
   });
 
-  test('uses the Piarium project model when the draft inherits', async () => {
+  test('uses the Varin project model when the draft inherits', async () => {
     const calls: string[] = [];
     await configurePiComposerSession(
       snapshot(),

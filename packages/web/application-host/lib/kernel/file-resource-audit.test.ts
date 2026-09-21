@@ -14,10 +14,10 @@ import { createKernelClient, type KernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1" && !hasReleaseKernel) {
+if (process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1" && !hasReleaseKernel) {
   throw new Error("Kernel authority acceptance requires a built release kernel");
 }
 const it = vitestIt.skipIf(!hasReleaseKernel);
@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 async function fixture(env: Record<string, string> = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-authority-audit-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-authority-audit-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
@@ -103,7 +103,7 @@ it("audit: a fresh rename cannot report success for a missing source and unrelat
 });
 
 it("audit: retrying a remove after terminal loss never deletes newly created user content", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" });
   const target = path.join(f.workspace, "note.txt");
   await fs.writeFile(target, "original");
   const request = { ...f.address, operationId: "remove-lost-terminal", path: "note.txt", recursive: false, force: true };
@@ -129,7 +129,7 @@ async function restart(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 it("audit: GC cannot delete a blob reintroduced after physical cleanup failed", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_GC_DELETE: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_GC_DELETE: "1" });
   const first = await f.client.putBlob(Buffer.from("revived body"), "gc-first");
   await f.client.releaseBlob(first.ownerId);
   const released = await f.client.gc("gc-queued");
@@ -141,7 +141,7 @@ it("audit: GC cannot delete a blob reintroduced after physical cleanup failed", 
 });
 
 it("audit: GC and operation.release preserve unfinished filesystem reconciliation records", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" });
   await assert.rejects(f.client.fileMkdir({ ...f.address, operationId: "pending-mkdir", path: "created", recursive: true }), /finish failure/);
   const resumed = await restart(f);
   const release = await resumed.releaseOperation("pending-mkdir");
@@ -153,7 +153,7 @@ it("audit: GC and operation.release preserve unfinished filesystem reconciliatio
 });
 
 it("audit: unresolved directory rename is visible and remains explicitly needs-attention", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" });
   await fs.mkdir(path.join(f.workspace, "tree", "nested"), { recursive: true });
   await fs.writeFile(path.join(f.workspace, "tree", "nested", "value.txt"), "preserve");
   await assert.rejects(f.client.fileRename({
@@ -357,7 +357,7 @@ it("audit: epoch-local query pins expire on restart while explicit revision pins
 });
 
 it("audit: a pending materialization retains its source root across branch deletion, GC and restart", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" });
   const source = await branch(f);
   await assert.rejects(f.client.fileMaterialize({ ...f.address, operationId: "pending-materialize", path: "nested", sourceRoot: String(source.root) }), /after backup/i);
   await f.client.deleteBranch({ operationId: "drop-materialize-branch", branchId: "source" });
@@ -427,7 +427,7 @@ it("audit: materialization installs children before readonly directory modes", a
 });
 
 it("audit: ambiguous interrupted directory rename remains pending instead of claiming recovery", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_OPERATION_FINISH: "1" });
   await fs.writeFile(path.join(f.workspace, "nested", "note.txt"), "original tree");
   await assert.rejects(f.client.fileRename({ ...f.address, operationId: "directory-rename", fromPath: "nested", toPath: "moved" }), /finish failure/i);
   await fs.writeFile(path.join(f.workspace, "moved", "note.txt"), "later user edit");

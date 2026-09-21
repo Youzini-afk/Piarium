@@ -35,7 +35,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
     }),
     {
-      name: 'piarium.sessionDisplay.v1',
+      name: 'varin.sessionDisplay.v1',
       storage: createDeferredSafeJSONStorage(),
     },
   ),

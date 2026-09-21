@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it, vi } from 'vitest';
-import type { SessionSnapshot, SessionStats } from '@piarium/protocol';
+import type { SessionSnapshot, SessionStats } from '@varin/protocol';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createNativeAuthorityTestRuntime } from '../kernel/native-authority.test-helper.js';
 import { createManagedRootAdmission } from '../kernel/managed-root-admission.js';

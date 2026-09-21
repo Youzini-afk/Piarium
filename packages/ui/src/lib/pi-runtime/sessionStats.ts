@@ -1,4 +1,4 @@
-import type { JsonValue, SessionSnapshot, SessionStats } from '@piarium/protocol';
+import type { JsonValue, SessionSnapshot, SessionStats } from '@varin/protocol';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 
 const finiteNumber = (value: JsonValue | undefined): number | null => (

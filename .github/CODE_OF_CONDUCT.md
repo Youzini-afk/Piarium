@@ -1,4 +1,4 @@
-English | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Contributor Covenant Code of Conduct
 
@@ -62,7 +62,7 @@ representative at an online or offline event.
 
 Report incidents to the maintainers through GitHub by opening a private
 maintainer contact from the repository, or by filing a
-[private security advisory](https://github.com/Youzini-afk/Piarium/security/advisories/new)
+[private security advisory](https://github.com/Youzini-afk/Varin/security/advisories/new)
 when the report involves a vulnerability. Do not post harassment reports as
 public issues.
 

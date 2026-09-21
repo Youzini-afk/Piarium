@@ -8,9 +8,9 @@ import { createFixtureServer, stageUpdaterFixture } from './updater-e2e-fixture.
 import { parseUpdateManifest, verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 test('stages architecture-specific generic updater fixtures with valid metadata', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-updater-fixture-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-updater-fixture-'));
   try {
-    const source = path.join(root, 'Piarium-1.15.1-linux-arm64.AppImage');
+    const source = path.join(root, 'Varin-1.15.1-linux-arm64.AppImage');
     const directory = path.join(root, 'feed');
     fs.writeFileSync(source, 'fixture-appimage');
     const result = stageUpdaterFixture({
@@ -27,7 +27,7 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
       artifactPath: result.artifactPath,
       expectedVersion: '1.15.1',
     }), {
-      name: 'Piarium-1.15.1-linux-arm64.AppImage',
+      name: 'Varin-1.15.1-linux-arm64.AppImage',
       size: 16,
       version: '1.15.1',
     });
@@ -37,13 +37,13 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
 });
 
 test('serves only staged fixture files over loopback', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-updater-server-'));
-  const artifact = path.join(root, 'Piarium.AppImage');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-updater-server-'));
+  const artifact = path.join(root, 'Varin.AppImage');
   fs.writeFileSync(artifact, 'fixture');
   const { server, url } = await createFixtureServer({ directory: root });
   try {
     assert.equal(new URL(url).hostname, '127.0.0.1');
-    const response = await fetch(`${url}Piarium.AppImage`);
+    const response = await fetch(`${url}Varin.AppImage`);
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'fixture');
     assert.equal((await fetch(`${url}../package.json`)).status, 404);

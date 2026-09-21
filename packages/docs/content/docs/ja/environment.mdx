@@ -1,67 +1,67 @@
 ---
 title: 環境変数
-description: 環境変数で Piarium サーバー、ターミナル、Git、音声、トンネルを設定します。
+description: 環境変数で Varin サーバー、ターミナル、Git、音声、トンネルを設定します。
 ---
 
 # 環境変数
 
-Piarium は起動時にこれらの環境変数を読みます。スタートアップサービスでは、`piarium startup enable` がデフォルトで現在の環境をスナップショットするため、サービスに使わせたい変数を変えたあとは再実行してください。
+Varin は起動時にこれらの環境変数を読みます。スタートアップサービスでは、`varin startup enable` がデフォルトで現在の環境をスナップショットするため、サービスに使わせたい変数を変えたあとは再実行してください。
 
-Piarium は Pi ランタイムを内蔵しています。別の OpenCode サーバーはなく、`OPENCODE_*` 統合変数もありません。
+Varin は Pi ランタイムを内蔵しています。別の OpenCode サーバーはなく、`OPENCODE_*` 統合変数もありません。
 
-## Piarium サーバー
+## Varin サーバー
 
-### `PIARIUM_HOST`
+### `VARIN_HOST`
 
-Piarium Web サーバーのバインドアドレス。他のマシンからのアクセスを許可するには `0.0.0.0` を使います。
+Varin Web サーバーのバインドアドレス。他のマシンからのアクセスを許可するには `0.0.0.0` を使います。
 
-### `PIARIUM_UI_PASSWORD`
+### `VARIN_UI_PASSWORD`
 
 ブラウザ UI のパスワード。localhost 以外にバインドするとき、トンネルを使うとき、リバースプロキシの背後で動かすときに使います。
 
-### `PIARIUM_API_ONLY`
+### `VARIN_API_ONLY`
 
-`true` または `1` にすると、Piarium をヘッドレスモードで起動します。API ルートはデスクトップとモバイルクライアント向けに残りますが、ブラウザ UI は提供されません。
+`true` または `1` にすると、Varin をヘッドレスモードで起動します。API ルートはデスクトップとモバイルクライアント向けに残りますが、ブラウザ UI は提供されません。
 
-### `PIARIUM_DATA_DIR`
+### `VARIN_DATA_DIR`
 
-Piarium のデータディレクトリを上書きします。デフォルトは `~/.config/piarium` です。
+Varin のデータディレクトリを上書きします。デフォルトは `~/.config/varin` です。
 
-### `PIARIUM_COMPRESS_API`
+### `VARIN_COMPRESS_API`
 
 API レスポンス圧縮を制御します。強制オンは `true` または `1`、強制オフは `false` または `0` です。
 
-### `PIARIUM_SKIP_API_COMPRESSION`
+### `VARIN_SKIP_API_COMPRESSION`
 
-`true` または `1` にすると API レスポンス圧縮を無効にします。こちらが `PIARIUM_COMPRESS_API` より優先されます。
+`true` または `1` にすると API レスポンス圧縮を無効にします。こちらが `VARIN_COMPRESS_API` より優先されます。
 
-### `PIARIUM_VERBOSE_REQUEST_LOGS`
+### `VARIN_VERBOSE_REQUEST_LOGS`
 
 `true` または `1` にすると、詳細な HTTP リクエストログを有効にします。
 
-### `PIARIUM_UPDATE_API_URL`
+### `VARIN_UPDATE_API_URL`
 
 更新確認 API のエンドポイントを上書きします。ほとんどのユーザーは未設定のままにしてください。
 
-### `PIARIUM_PACKAGE_MANAGER`
+### `VARIN_PACKAGE_MANAGER`
 
 自動検出が誤っているとき、更新操作が使うパッケージマネージャーを強制します。
 
 ## ターミナルと Git
 
-### `PIARIUM_TERMINAL_SHELL`
+### `VARIN_TERMINAL_SHELL`
 
-Piarium ターミナルセッションで使うシェル実行ファイルです。
+Varin ターミナルセッションで使うシェル実行ファイルです。
 
-### `PIARIUM_GIT_BINARY`
+### `VARIN_GIT_BINARY`
 
-Piarium の Git 機能が使う Git 実行ファイルです。
+Varin の Git 機能が使う Git 実行ファイルです。
 
 ### `GIT_BINARY`
 
-別の Git 実行ファイル上書きです。Piarium 専用の設定には `PIARIUM_GIT_BINARY` を優先してください。
+別の Git 実行ファイル上書きです。Varin 専用の設定には `VARIN_GIT_BINARY` を優先してください。
 
-### `PIARIUM_GIT_READ_CACHE_TTL_MS`
+### `VARIN_GIT_READ_CACHE_TTL_MS`
 
 Git 経由のファイル読み取りキャッシュの有効期間（ミリ秒）。デバッグ中にこのキャッシュを無効にするには `0` を設定します。
 
@@ -69,22 +69,22 @@ Git 経由のファイル読み取りキャッシュの有効期間（ミリ秒�
 
 ### `OPENAI_API_KEY`
 
-OpenAI 互換サービスを呼び出す Piarium 音声機能が使う API キーです。
+OpenAI 互換サービスを呼び出す Varin 音声機能が使う API キーです。
 
-### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 `true` または `1` にすると、音声機能でリモートの OpenAI 互換 base URL を許可します。
 
 ### `NGROK_AUTHTOKEN`
 
-Piarium のトンネルコマンドが使う ngrok auth token です。`ngrok config add-authtoken <token>` で ngrok を設定することもできます。
+Varin のトンネルコマンドが使う ngrok auth token です。`ngrok config add-authtoken <token>` で ngrok を設定することもできます。
 
 ## ランタイム補助
 
 ### `BUN_BINARY`
 
-デーモンプロセスを起動するときに Piarium が使うべき Bun 実行ファイルです。
+デーモンプロセスを起動するときに Varin が使うべき Bun 実行ファイルです。
 
 ### `BUN_INSTALL`
 
-Bun のインストールルートです。Piarium はデーモン起動と更新のために `bin/bun` を探すのに使います。
+Bun のインストールルートです。Varin はデーモン起動と更新のために `bin/bun` を探すのに使います。

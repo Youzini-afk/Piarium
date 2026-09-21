@@ -80,7 +80,7 @@ export interface DocumentAuthorityHarness {
 export const createDocumentAuthorityHarness = async (
   overrides: DocumentAuthorityHarnessOverrides = {},
 ): Promise<DocumentAuthorityHarness> => {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-documents-'));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-documents-'));
   const workspaceRoot = path.join(root, 'workspace');
   const dataDir = path.join(root, 'data');
   await fs.promises.mkdir(workspaceRoot, { recursive: true });
@@ -500,7 +500,7 @@ export const defineDocumentAuthorityContract = ({
       const fsPromises = new Proxy(fs.promises, {
         get(target, property, receiver) {
           if (property === 'rename') return async (...args: Parameters<typeof fs.promises.rename>) => {
-            if (String(args[0]).includes('.piarium-tmp-') && String(args[1]).endsWith('protected.txt')) {
+            if (String(args[0]).includes('.varin-tmp-') && String(args[1]).endsWith('protected.txt')) {
               throw Object.assign(new Error('EPERM: replacement denied'), { code: 'EPERM' });
             }
             return target.rename(...args);
@@ -526,7 +526,7 @@ export const defineDocumentAuthorityContract = ({
       })).rejects.toMatchObject({ code: 'failed' });
 
       expect(await fs.promises.readFile(filePath, 'utf8')).toBe('original');
-      expect((await fs.promises.readdir(harness.workspaceRoot)).some((entry) => entry.includes('.piarium-tmp-'))).toBe(false);
+      expect((await fs.promises.readdir(harness.workspaceRoot)).some((entry) => entry.includes('.varin-tmp-'))).toBe(false);
     });
 
     it('fences document and journal mutations by persisted workspace epoch', async () => {

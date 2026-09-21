@@ -1,12 +1,12 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   buildRtkCommand,
@@ -104,7 +104,7 @@ export const RtkRuntimePanel: React.FC<RtkRuntimePanelProps> = ({ runtimeTarget,
         && actionTargetKey === targetKeyRef.current
         && runtimeKey === getRuntimeKey()
       ) {
-        toast.error(t('settings.piarium.pluginSettings.rtk.runtime.commandFailed'), {
+        toast.error(t('settings.varin.pluginSettings.rtk.runtime.commandFailed'), {
           description: cause instanceof Error ? cause.message : String(cause),
         });
       }
@@ -120,13 +120,13 @@ export const RtkRuntimePanel: React.FC<RtkRuntimePanelProps> = ({ runtimeTarget,
   return (
     <div className="space-y-4 border-t border-border/60 pt-6">
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.rtk.runtime.title')}
-        info={t('settings.piarium.pluginSettings.rtk.runtime.description')}
+        title={t('settings.varin.pluginSettings.rtk.runtime.title')}
+        info={t('settings.varin.pluginSettings.rtk.runtime.description')}
         contentClassName="space-y-3"
       >
         <div className="flex items-center justify-between gap-3">
           <span className="typography-meta text-muted-foreground">
-            {t(`settings.piarium.pluginSettings.rtk.runtime.state.${state}` as never)}
+            {t(`settings.varin.pluginSettings.rtk.runtime.state.${state}` as never)}
           </span>
           <Button
             type="button"
@@ -136,7 +136,7 @@ export const RtkRuntimePanel: React.FC<RtkRuntimePanelProps> = ({ runtimeTarget,
             onClick={() => void refresh()}
           >
             <Icon name="refresh" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-            <span className="sr-only">{t('settings.piarium.recovery.actions.refresh')}</span>
+            <span className="sr-only">{t('settings.varin.recovery.actions.refresh')}</span>
           </Button>
         </div>
         {state === 'failure' ? (
@@ -144,7 +144,7 @@ export const RtkRuntimePanel: React.FC<RtkRuntimePanelProps> = ({ runtimeTarget,
         ) : null}
         {state === 'not-observed' ? (
           <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.pluginSettings.rtk.runtime.notObserved')}
+            {t('settings.varin.pluginSettings.rtk.runtime.notObserved')}
           </p>
         ) : null}
         {state === 'available' ? (
@@ -160,14 +160,14 @@ export const RtkRuntimePanel: React.FC<RtkRuntimePanelProps> = ({ runtimeTarget,
                 onClick={() => void runAction(action)}
               >
                 {runningAction === action ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-                {t(`settings.piarium.pluginSettings.rtk.runtime.action.${action}` as never)}
+                {t(`settings.varin.pluginSettings.rtk.runtime.action.${action}` as never)}
               </Button>
             ))}
           </div>
         ) : null}
         {sessionBusy && state === 'available' ? (
           <p className="typography-meta text-[var(--status-warning)]">
-            {t('settings.piarium.pluginSettings.rtk.runtime.busy')}
+            {t('settings.varin.pluginSettings.rtk.runtime.busy')}
           </p>
         ) : null}
       </SettingsControlGroup>

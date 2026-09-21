@@ -13,7 +13,7 @@ export function retainedContextState(entries: readonly SessionEntry[]): {
   const shellCompletions = new Set<string>();
   for (const message of buildSessionContext([...entries]).messages) {
     if (message.role !== "toolResult" && message.role !== "custom") continue;
-    if (message.role === "custom" && message.customType !== "piarium-context") continue;
+    if (message.role === "custom" && message.customType !== "varin-context") continue;
     const details = message.details as Record<string, unknown> | undefined;
     if (!details || typeof details !== "object") continue;
     const completion = details.shellCompletion;

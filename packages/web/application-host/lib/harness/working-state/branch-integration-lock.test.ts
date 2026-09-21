@@ -20,7 +20,7 @@ afterEach(async () => {
 
 describe("branch integration lock order", () => {
   it("returns a determinate nested merge while materialize holds beginSwitch and waits for the store", async () => {
-    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-branch-lock-"));
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-branch-lock-"));
     roots.push(root);
     const workspace = path.join(root, "workspace");
     const scratch = path.join(root, "scratch");

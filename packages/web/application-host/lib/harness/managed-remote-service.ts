@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import type { ExperimentResourceRequest } from "@piarium/protocol";
-import { sliceUtf8ByBytes, type ShellExecResult, type ShellReadResult } from "@piarium/protocol";
+import type { ExperimentResourceRequest } from "@varin/protocol";
+import { sliceUtf8ByBytes, type ShellExecResult, type ShellReadResult } from "@varin/protocol";
 import os from "node:os";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelBranchState, KernelRecordResult } from "../kernel/protocol.generated.js";
@@ -24,7 +24,7 @@ import {
   type ManagedRemoteReadReceipt,
 } from "./managed-remote-types.js";
 
-const WORKSPACE_ID = "__piarium_managed_remote__";
+const WORKSPACE_ID = "__varin_managed_remote__";
 const MATERIAL_PREFIX = "managed.remote.material:";
 const OBJECT_PREFIX = "managed.remote.object:";
 const JOB_PREFIX = "managed.remote.job:";

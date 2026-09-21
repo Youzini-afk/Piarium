@@ -3,8 +3,8 @@ import type {
   Thread,
   ThreadParent,
   ThreadRun,
-} from "@piarium/protocol";
-import { summarizeRetrievalEvidence } from "@piarium/protocol";
+} from "@varin/protocol";
+import { summarizeRetrievalEvidence } from "@varin/protocol";
 import type { ObservationCursorEntry, ObservationCursorStore, PendingObservation } from "./observation-cursors.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { Zone2Thread, Zone2Threads } from "./zone2.js";

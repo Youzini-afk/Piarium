@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResultHistoryReleaseResult } from "@piarium/application-client";
+import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResultHistoryReleaseResult } from "@varin/application-client";
 import type {
   AgentInputContext,
   HarnessWorktreeSettings,
@@ -22,14 +22,14 @@ import type {
   ThreadRestoreStatus,
   WorkingBranchEnsureMaterializedResult,
   WorkspaceThreadSpace,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   assembleFreshInput,
   HARNESS_TOOL_META,
   minePiBranchEntries,
   normalizeFrozenHarnessPermissions,
   threadIntegrationBindingFromPreview,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { scopePathContainedBy } from "./thread-nesting.js";
 import {
   assembleKeepReasons,
@@ -79,23 +79,23 @@ export interface ThreadSessionAdapter {
     name: string;
     parentSession: string;
     model?: { providerId: string; modelId: string };
-    permissions?: import("@piarium/protocol").PermissionPolicy;
+    permissions?: import("@varin/protocol").PermissionPolicy;
     scope?: string[];
     tools: string[];
-    workFocus: import("@piarium/protocol").WorkFocusId;
+    workFocus: import("@varin/protocol").WorkFocusId;
     workspaceId: string;
   }): Promise<SessionSnapshot>;
   open(input: {
     cwd: string;
     model?: { providerId: string; modelId: string };
-    permissions?: import("@piarium/protocol").PermissionPolicy;
+    permissions?: import("@varin/protocol").PermissionPolicy;
     scope?: string[];
     sessionId: string;
     tools: string[];
-    workFocus: import("@piarium/protocol").WorkFocusId;
+    workFocus: import("@varin/protocol").WorkFocusId;
     workspaceId: string;
   }): Promise<SessionSnapshot>;
-  prompt(sessionId: string, text: string, instructions?: string, images?: import("@piarium/protocol").ImageAttachment[]): Promise<void>;
+  prompt(sessionId: string, text: string, instructions?: string, images?: import("@varin/protocol").ImageAttachment[]): Promise<void>;
   send(sessionId: string, text: string): Promise<void>;
   /** Passive durable input; implementations must never emulate this with prompt/followUp. */
   notify?(sessionId: string, text: string, messageId: string): Promise<void>;
@@ -110,7 +110,7 @@ export interface ThreadSessionAdapter {
    * Read a persisted session's entries without opening a worker — used for
    * `fresh` input construction on a settled Thread's retained transcript.
    */
-  captureInput?(sessionId: string): Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>;
+  captureInput?(sessionId: string): Promise<Pick<import("@varin/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>;
   readEntries?(sessionId: string, cwd: string | undefined, scope?: "branch" | "all"): Promise<SessionEntriesResult>;
 }
 
@@ -421,7 +421,7 @@ const initialPrompt = (
   parentBlocks?: Array<{ label: string; content: string }> | null,
 ): string => input.preset === "retrieval"
   ? [
-      "You are working as the retrieval thread for a parent Piarium session.",
+      "You are working as the retrieval thread for a parent Varin session.",
       input.systemPromptFragment?.trim() || null,
       "Work only on the assigned fact-finding task. Do not modify the workspace.",
       input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
@@ -433,7 +433,7 @@ const initialPrompt = (
       input.promptText ?? input.brief,
     ].filter((line): line is string => line !== null).join("\n")
   : [
-      `You are working as the ${input.preset ?? "teammate"} thread for a parent Piarium session.`,
+      `You are working as the ${input.preset ?? "teammate"} thread for a parent Varin session.`,
       input.systemPromptFragment?.trim() || null,
       "Work only on the task below. Keep the existing workspace state intact outside that task.",
       input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
@@ -454,13 +454,13 @@ const initialPrompt = (
       input.promptText ?? input.brief,
     ].filter((line): line is string => line !== null).join("\n");
 
-const messagePeerLabel = (peer: import("@piarium/protocol").ThreadMessagePeer): string => (
+const messagePeerLabel = (peer: import("@varin/protocol").ThreadMessagePeer): string => (
   peer.kind === "thread" ? `thread ${peer.id}`
     : peer.kind === "user" ? "the user"
       : "the parent agent"
 );
 
-const pendingMessagesSection = (messages: readonly import("@piarium/protocol").ThreadMessageRecord[]): string => (
+const pendingMessagesSection = (messages: readonly import("@varin/protocol").ThreadMessageRecord[]): string => (
   messages.map((message) => (
     `- ${messagePeerLabel(message.from)}${message.kind === "request" ? ` (request ${message.id})` : ""}: ${message.text}`
   )).join("\n")
@@ -470,7 +470,7 @@ const discussionPrompt = (
   input: SpawnThreadRunInput,
   parentBlocks?: Array<{ label: string; content: string }> | null,
 ): string => [
-  "Piarium opened a user discussion thread from one persisted parent-conversation message.",
+  "Varin opened a user discussion thread from one persisted parent-conversation message.",
   "Discuss the starting point with the user. This thread is read-only: inspect material when useful, but do not change workspace files or start implementation work.",
   parentBlocksText(parentBlocks),
   `<parent-message entry-id="${input.forkPoint?.entryId ?? "unknown"}" note="Snapshot from the parent conversation; the parent may have progressed.">`,
@@ -2460,7 +2460,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     workspaceId: string,
     threadId: string,
     currentResultRevision: number | undefined,
-    write: (store: WorkingStateRootStore) => Promise<import("@piarium/protocol").ThreadVerificationProjection>,
+    write: (store: WorkingStateRootStore) => Promise<import("@varin/protocol").ThreadVerificationProjection>,
   ): Promise<void> => {
     if (!options.workingStates) return;
     const projection = await options.workingStates.withBranchStore(workspaceId, "thread-verification", write);
@@ -5515,7 +5515,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   /** Pi owns the active context, including kept entries before a compaction record. */
   const captureInputContext = async (
     sessionId: string,
-  ): Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null> => {
+  ): Promise<Pick<import("@varin/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null> => {
     if (!options.sessions.captureInput) {
       throw new ThreadRuntimeError("unavailable", "The session adapter cannot capture committed Pi input");
     }
@@ -5538,12 +5538,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     requestId?: string;
     /** Skips the shared-budget admission check (dequeue path already gated). */
     admitted?: boolean;
-    from?: import("@piarium/protocol").ThreadMessagePeer;
+    from?: import("@varin/protocol").ThreadMessagePeer;
     /**
      * Resolved capability/model re-route for the new Run (7B/D-300). Frozen
      * at request time; a parked continuation keeps this exact configuration.
      */
-    frozen?: import("@piarium/protocol").ThreadRunFrozenConfig;
+    frozen?: import("@varin/protocol").ThreadRunFrozenConfig;
   }): Promise<{ runId?: string }> => {
     const requestId = input.requestId ?? `continuation-${randomUUID()}`;
     const from = input.from ?? { kind: "user" as const, id: "host" };

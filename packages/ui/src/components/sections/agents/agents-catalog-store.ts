@@ -3,9 +3,9 @@ import type {
   PiAgentCatalogSnapshot,
   PiAgentStatus,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 export type AgentProviderFilter = 'all' | string;
 export type AgentStatusFilter = 'all' | PiAgentStatus;

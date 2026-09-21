@@ -4,7 +4,7 @@ import type {
   PackageDescriptor,
   PiPackageScope,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const piPackageNameFromSource = (source: string): string => {

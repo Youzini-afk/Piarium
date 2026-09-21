@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 const createHarness = async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-passkeys-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-passkeys-'));
   roots.push(root);
   return { storeFile: path.join(root, 'ui-passkeys.json') };
 };

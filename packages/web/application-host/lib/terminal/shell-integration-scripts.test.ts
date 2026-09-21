@@ -13,15 +13,15 @@ import {
 const powershellPath = process.env.SystemRoot
   ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
   : "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const zshCandidate = process.env.PIARIUM_TEST_ZSH ?? "zsh";
+const zshCandidate = process.env.VARIN_TEST_ZSH ?? "zsh";
 const hasZsh = !spawnSync(zshCandidate, ["--version"], { encoding: "utf8" }).error;
 
 describe("shell integration launch", () => {
   it("injects an init file for bash and a script file for PowerShell", () => {
     const bash = shellIntegrationLaunch("/usr/bin/bash", ["-l"], true, "user-bash:1");
     expect(bash?.args).toEqual(["-l", "--init-file", expect.stringContaining("bash-")]);
-    expect(bash?.env.PIARIUM_SHELL_INTEGRATION_KIND).toBe("bash");
-    expect(bash?.env.PIARIUM_SHELL_INTEGRATION_ID).toBe("user-bash:1");
+    expect(bash?.env.VARIN_SHELL_INTEGRATION_KIND).toBe("bash");
+    expect(bash?.env.VARIN_SHELL_INTEGRATION_ID).toBe("user-bash:1");
 
     const pwsh = shellIntegrationLaunch("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe", [], false, "term-ps:1");
     expect(pwsh?.args).toEqual([
@@ -31,14 +31,14 @@ describe("shell integration launch", () => {
       "-File",
       expect.stringMatching(/powershell-.*\.ps1$/),
     ]);
-    expect(pwsh?.env.PIARIUM_SHELL_INTEGRATION_ID).toBe("term-ps:1");
+    expect(pwsh?.env.VARIN_SHELL_INTEGRATION_ID).toBe("term-ps:1");
   });
 
   it("uses ZDOTDIR for zsh, does not inject cmd, and does not treat sh as bash", () => {
     const zsh = shellIntegrationLaunch("/bin/zsh", ["-l"], true, "term-zsh:1");
     expect(zsh?.args).toEqual(["-l"]);
     expect(zsh?.env.ZDOTDIR).toEqual(expect.stringContaining("zsh-"));
-    expect(zsh?.env.PIARIUM_ZDOTDIR).toBe(zsh?.env.ZDOTDIR);
+    expect(zsh?.env.VARIN_ZDOTDIR).toBe(zsh?.env.ZDOTDIR);
     expect(shellIntegrationFamily("cmd.exe")).toBeNull();
     expect(shellIntegrationLaunch("cmd.exe", [], false, "x")).toBeNull();
     expect(shellIntegrationFamily("/bin/sh")).toBeNull();
@@ -48,7 +48,7 @@ describe("shell integration launch", () => {
 
   it.skipIf(!hasZsh)("lets each user zsh file observe the original ZDOTDIR", () => {
     const candidate = zshCandidate;
-    const userDir = mkdtempSync(join(tmpdir(), "piarium-zsh-user-"));
+    const userDir = mkdtempSync(join(tmpdir(), "varin-zsh-user-"));
     const observed = join(userDir, "observed");
     const shellQuote = (value: string): string => `'${value.replace(/'/gu, "'\\''")}'`;
     const previousZdotdir = process.env.ZDOTDIR;
@@ -75,7 +75,7 @@ describe("shell integration launch", () => {
 
   it("does not reuse native exit 7 for a later failed cmdlet", () => {
     if (process.platform !== "win32" || !existsSync(powershellPath)) return;
-    const probe = join(tmpdir(), `piarium-missing-${Date.now()}`);
+    const probe = join(tmpdir(), `varin-missing-${Date.now()}`);
     const result = spawnSync(powershellPath, [
       "-NoProfile",
       "-NonInteractive",
@@ -123,7 +123,7 @@ describe("shell integration launch", () => {
 
   it("keeps a custom Bash PROMPT_COMMAND array and DEBUG trap after sourcing the init file", () => {
     const bash = [
-      process.env.PIARIUM_TERMINAL_SHELL,
+      process.env.VARIN_TERMINAL_SHELL,
       "C:/Program Files/Git/bin/bash.exe",
       "C:/Program Files/Git/usr/bin/bash.exe",
       "/bin/bash",
@@ -137,7 +137,7 @@ describe("shell integration launch", () => {
     ], { encoding: "utf8" });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("declare -a PROMPT_COMMAND");
-    expect(result.stdout).toContain("__piarium_prompt_command");
+    expect(result.stdout).toContain("__varin_prompt_command");
     expect(result.stdout).toContain("echo USER_PROMPT_RAN");
     expect(result.stdout).toContain("USER_DEBUG_RAN");
   });

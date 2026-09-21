@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type {
-  PiariumDebugEvent,
-  PiariumDebugFeatureResult,
-  PiariumDebugStackFrame,
-  PiariumDebugThread,
-  PiariumTestEvent,
-  PiariumTestRunStatus,
+  VarinDebugEvent,
+  VarinDebugFeatureResult,
+  VarinDebugStackFrame,
+  VarinDebugThread,
+  VarinTestEvent,
+  VarinTestRunStatus,
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import {
   acquireRunDebugView,
   bindRunDebugServices,
@@ -45,16 +45,16 @@ const flushPromises = async (): Promise<void> => {
 };
 
 type HarnessOptions = {
-  getStack?(request: { workspaceId: string; threadId: number }): Promise<PiariumDebugFeatureResult<PiariumDebugStackFrame[]>>;
-  getTestStatus?(workspaceId: string): Promise<PiariumTestRunStatus>;
-  getThreads?(request: { workspaceId: string }): Promise<PiariumDebugFeatureResult<PiariumDebugThread[]>>;
+  getStack?(request: { workspaceId: string; threadId: number }): Promise<VarinDebugFeatureResult<VarinDebugStackFrame[]>>;
+  getTestStatus?(workspaceId: string): Promise<VarinTestRunStatus>;
+  getThreads?(request: { workspaceId: string }): Promise<VarinDebugFeatureResult<VarinDebugThread[]>>;
 };
 
 const createHarness = (options: HarnessOptions = {}) => {
   const subscribed = { tasks: 0, debug: 0, tests: 0 };
   const disposed = { tasks: 0, debug: 0, tests: 0 };
-  let debugListener: ((event: PiariumDebugEvent) => void) | undefined;
-  let testListener: ((event: PiariumTestEvent) => void) | undefined;
+  let debugListener: ((event: VarinDebugEvent) => void) | undefined;
+  let testListener: ((event: VarinTestEvent) => void) | undefined;
 
   const tasks: WorkspaceTasksAPI = {
     list: async (workspaceId) => ({ status: 'ready', workspaceId, configurations: [] }),
@@ -129,12 +129,12 @@ const createHarness = (options: HarnessOptions = {}) => {
 
   return {
     apis: { tasks, debug, tests },
-    debugEvent(event: PiariumDebugEvent) {
+    debugEvent(event: VarinDebugEvent) {
       debugListener?.(event);
     },
     disposed,
     subscribed,
-    testEvent(event: PiariumTestEvent) {
+    testEvent(event: VarinTestEvent) {
       testListener?.(event);
     },
   };
@@ -189,8 +189,8 @@ describe('run/debug editor projection lifecycle', () => {
 
 describe('run/debug editor projection ownership', () => {
   test('resolves the real paused thread top frame and drops the old session completion', async () => {
-    const firstThreads = deferred<PiariumDebugFeatureResult<PiariumDebugThread[]>>();
-    const secondThreads = deferred<PiariumDebugFeatureResult<PiariumDebugThread[]>>();
+    const firstThreads = deferred<VarinDebugFeatureResult<VarinDebugThread[]>>();
+    const secondThreads = deferred<VarinDebugFeatureResult<VarinDebugThread[]>>();
     const threadRequests: Array<{ workspaceId: string }> = [];
     const stackRequests: Array<{ workspaceId: string; threadId: number }> = [];
     const harness = createHarness({
@@ -253,7 +253,7 @@ describe('run/debug editor projection ownership', () => {
   });
 
   test('a new test run clears the previous failure and an older status completion cannot restore its owner', async () => {
-    const initialStatus = deferred<PiariumTestRunStatus>();
+    const initialStatus = deferred<VarinTestRunStatus>();
     const harness = createHarness({
       getTestStatus: () => initialStatus.promise,
     });

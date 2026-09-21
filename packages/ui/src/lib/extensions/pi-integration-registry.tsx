@@ -1,10 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from 'react';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
+import type { PackageDescriptor, RuntimeContextTarget } from '@varin/protocol';
 import type { IconName } from '@/components/icon/icons';
 import { piPackageNameFromSource } from '@/lib/pi-runtime/packages';
-import { piariumSurfaceRuntime } from './surface-runtime';
+import { varinSurfaceRuntime } from './surface-runtime';
 
 export interface PiPluginSettingsAdapterRenderProps {
   activeSessionId: string | null;
@@ -71,9 +71,9 @@ export const pluginSettingsAdaptersFromSnapshot = (
 
 export const usePiPluginSettingsAdapters = (): PiPluginSettingsAdapterRegistration[] => {
   const snapshot = React.useSyncExternalStore(
-    piariumSurfaceRuntime.subscribe,
-    piariumSurfaceRuntime.getSnapshot,
-    piariumSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.subscribe,
+    varinSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.getSnapshot,
   );
   return React.useMemo(() => pluginSettingsAdaptersFromSnapshot(snapshot), [snapshot]);
 };
@@ -97,9 +97,9 @@ export const usePiSettingsPanelContributions = (
   slot: string,
 ): PiSettingsPanelRegistration[] => {
   const snapshot = React.useSyncExternalStore(
-    piariumSurfaceRuntime.subscribe,
-    piariumSurfaceRuntime.getSnapshot,
-    piariumSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.subscribe,
+    varinSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.getSnapshot,
   );
   return React.useMemo(() => snapshot.visibleContributions.flatMap((contribution) => {
     if (contribution.descriptor.kind !== 'panel' || contribution.descriptor.placement?.slot !== slot) return [];

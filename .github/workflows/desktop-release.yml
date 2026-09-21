@@ -90,7 +90,7 @@ jobs:
             artifact: latest-yml-aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
     env:
-      PIARIUM_TARGET_ARCH: ${{ matrix.architecture }}
+      VARIN_TARGET_ARCH: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -152,8 +152,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: |
-            ~/.cache/piarium-native/**/payload
-            ~/.cache/piarium-native/**/receipt.json
+            ~/.cache/varin-native/**/payload
+            ~/.cache/varin-native/**/receipt.json
           key: native-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/scripts/prepare-*-runtime.mjs', 'bun-patches/triviumdb+0.8.6.patch') }}
 
       - name: Prepare target native libraries
@@ -166,8 +166,8 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: |
-            ~/.cache/piarium-native/**/payload
-            ~/.cache/piarium-native/**/receipt.json
+            ~/.cache/varin-native/**/payload
+            ~/.cache/varin-native/**/receipt.json
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
       - name: Build native desktop package
@@ -184,7 +184,7 @@ jobs:
           bun run --cwd packages/electron verify:native
           args=("--${{ matrix.target }}" "--${{ matrix.architecture }}" "--publish=never")
           if [ "${{ matrix.platform }}" = "macos" ]; then
-            args+=("--piarium-unsigned-mac")
+            args+=("--varin-unsigned-mac")
           fi
           node packages/electron/scripts/package.mjs "${args[@]}"
 
@@ -195,11 +195,11 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
-          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Piarium.exe |
+          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Varin.exe |
             Where-Object { $_.FullName -match 'unpacked' } |
             Select-Object -First 1
           if (-not $executable) {
-            throw 'Packaged Piarium.exe was not found under an unpacked output directory.'
+            throw 'Packaged Varin.exe was not found under an unpacked output directory.'
           }
           node packages/electron/scripts/smoke-windows-unpacked.mjs $executable.FullName
 
@@ -210,7 +210,7 @@ jobs:
           set -euo pipefail
           suffix="${{ matrix.architecture }}"
           if [ "$suffix" = "x64" ]; then suffix=x86_64; fi
-          appimage="packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage"
+          appimage="packages/electron/dist/Varin-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage"
           manifest="packages/electron/dist/latest-linux.yml"
           if [ "${{ matrix.architecture }}" = "arm64" ]; then
             manifest="packages/electron/dist/latest-linux-arm64.yml"
@@ -223,7 +223,7 @@ jobs:
           (cd "$extract_root" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
           node --input-type=module -e '
             import { assertElfArchitecture, verifyExtractedPayload } from "./.release-automation/packages/electron/scripts/verify-linux-appimage.mjs";
-            const targetArchitecture = process.env.PIARIUM_TARGET_ARCH;
+            const targetArchitecture = process.env.VARIN_TARGET_ARCH;
             assertElfArchitecture(process.argv[1], targetArchitecture, "AppImage");
             verifyExtractedPayload({ root: process.argv[2], targetArchitecture });
           ' "$appimage" "$extract_root/squashfs-root"
@@ -235,9 +235,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$(find packages/electron/dist -type d -name Piarium.app -print -quit)"
+          app="$(find packages/electron/dist -type d -name Varin.app -print -quit)"
           test -n "$app"
-          executable="$app/Contents/MacOS/Piarium"
+          executable="$app/Contents/MacOS/Varin"
           expected_arch="${{ matrix.architecture }}"
           if [ "$expected_arch" = "x64" ]; then expected_arch=x86_64; fi
           file "$executable" | grep -q "$expected_arch"
@@ -252,7 +252,7 @@ jobs:
             fi
             runtime_native_modules="${runtime_native_modules}${runtime_native_modules:+$'\n'}${native_module}"
           done <<< "$native_modules"
-          file "$app/Contents/Resources/kernel/piarium-kernel" | grep -q "$expected_arch"
+          file "$app/Contents/Resources/kernel/varin-kernel" | grep -q "$expected_arch"
           printf '%s\n' "$runtime_native_modules" | grep -q "/triviumdb.darwin-${{ matrix.architecture }}.node$"
           for required in sherpa-onnx.node; do
             printf '%s\n' "$runtime_native_modules" | grep -q "/$required$"
@@ -270,8 +270,8 @@ jobs:
         run: |
           $assets = 'packages/electron/release-assets'
           New-Item -ItemType Directory -Path $assets -Force | Out-Null
-          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
-          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
           Copy-Item -LiteralPath 'packages/electron/dist/latest.yml' -Destination $assets
 
       - name: Stage Linux release assets
@@ -283,7 +283,7 @@ jobs:
           suffix="${{ matrix.architecture }}"
           manifest=latest-linux.yml
           if [ "$suffix" = "x64" ]; then suffix=x86_64; else manifest=latest-linux-arm64.yml; fi
-          cp "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage" \
+          cp "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-linux-${suffix}.AppImage" \
             "packages/electron/dist/$manifest" packages/electron/release-assets/
 
       - name: Stage macOS release assets
@@ -292,12 +292,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p packages/electron/release-assets
-          cp "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg" \
-            "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip" \
+          cp "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg" \
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip" \
             packages/electron/dist/latest-mac.yml packages/electron/release-assets/
           for optional in \
-            "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg.blockmap" \
-            "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip.blockmap"; do
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.dmg.blockmap" \
+            "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip.blockmap"; do
             if [ -f "$optional" ]; then cp "$optional" packages/electron/release-assets/; fi
           done
 
@@ -342,23 +342,23 @@ jobs:
           LATEST_YML_DIR="$GITHUB_WORKSPACE/artifacts" \
             RUNNER_TEMP="$GITHUB_WORKSPACE/finalized" \
             GH_REPO="$GITHUB_REPOSITORY" \
-            PIARIUM_VERSION="$version" \
+            VARIN_VERSION="$version" \
             node .release-automation/packages/electron/scripts/finalize-latest-yml.mjs
 
-          find artifacts -type f -name 'Piarium-*' -exec cp {} release-assets/ \;
+          find artifacts -type f -name 'Varin-*' -exec cp {} release-assets/ \;
           find artifacts -type f \( -name 'latest-linux.yml' -o -name 'latest-linux-arm64.yml' \) \
             -exec cp {} release-assets/ \;
           cp finalized/latest.yml finalized/latest-arm64.yml finalized/latest-mac.yml release-assets/
 
           for required in \
-            "Piarium-${version}-win-x64.exe" \
-            "Piarium-${version}-win-arm64.exe" \
-            "Piarium-${version}-linux-x86_64.AppImage" \
-            "Piarium-${version}-linux-arm64.AppImage" \
-            "Piarium-${version}-mac-x64.dmg" \
-            "Piarium-${version}-mac-arm64.dmg" \
-            "Piarium-${version}-mac-x64.zip" \
-            "Piarium-${version}-mac-arm64.zip" \
+            "Varin-${version}-win-x64.exe" \
+            "Varin-${version}-win-arm64.exe" \
+            "Varin-${version}-linux-x86_64.AppImage" \
+            "Varin-${version}-linux-arm64.AppImage" \
+            "Varin-${version}-mac-x64.dmg" \
+            "Varin-${version}-mac-arm64.dmg" \
+            "Varin-${version}-mac-x64.zip" \
+            "Varin-${version}-mac-arm64.zip" \
             latest.yml latest-arm64.yml latest-linux.yml latest-linux-arm64.yml latest-mac.yml; do
             test -f "release-assets/$required" || { echo "Missing release asset: $required" >&2; exit 1; }
           done
@@ -367,7 +367,7 @@ jobs:
       - name: Upload complete desktop release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: piarium-desktop-${{ inputs.release_ref }}
+          name: varin-desktop-${{ inputs.release_ref }}
           if-no-files-found: error
           path: release-assets/*
           retention-days: 14

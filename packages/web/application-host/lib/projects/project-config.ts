@@ -586,7 +586,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
       if (!input) throw new Error('task is required');
       for (const field of LOOP_METADATA_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(input, field)) {
-          throw new Error('Loop metadata is managed by Piarium');
+          throw new Error('Loop metadata is managed by Varin');
         }
       }
 

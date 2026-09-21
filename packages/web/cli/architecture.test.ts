@@ -30,7 +30,7 @@ describe('Web CLI source boundary', () => {
     // happened to exist. A public self-reference is also unavailable when running bin/
     // directly from the checkout. The private import maps source tooling to Host source
     // and emitted CLI code to the sibling server/ artifact.
-    const generatedReach = /^\s*(?:import|export)\b[^;]*?from\s*['"](?:(?:\.\.?\/)+(?:server|bin|\.application-host-types)\/|@piarium\/web\/server\/)/mu;
+    const generatedReach = /^\s*(?:import|export)\b[^;]*?from\s*['"](?:(?:\.\.?\/)+(?:server|bin|\.application-host-types)\/|@varin\/web\/server\/)/mu;
     const offenders = listFiles(cliRoot)
       .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file))
       .filter((file) => generatedReach.test(readFileSync(file, 'utf8')))
@@ -47,7 +47,7 @@ describe('Web CLI source boundary', () => {
 
   it('does not import renderer or Electron implementation code', () => {
     // Only check actual import statements, not comments that mention package names.
-    const importLine = /^\s*import\s.*(?:@piarium\/ui|packages\/electron|\.\.\/src\/)/mu;
+    const importLine = /^\s*import\s.*(?:@varin\/ui|packages\/electron|\.\.\/src\/)/mu;
     const offenders = listFiles(cliRoot)
       .filter((file) => /\.(?:[cm]?[jt]s)$/u.test(file) && !file.endsWith('.test.ts'))
       .filter((file) => importLine.test(readFileSync(file, 'utf8')))

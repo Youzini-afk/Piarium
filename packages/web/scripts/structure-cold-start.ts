@@ -14,11 +14,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
-} from "@piarium/extension-builtins/host";
+  VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS,
+} from "@varin/extension-builtins/host";
 import {
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-} from "@piarium/extension-builtins";
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+} from "@varin/extension-builtins";
 import { createDocumentAuthorityHarness } from "../application-host/lib/documents/contract-fixtures.js";
 import { AGENT_LANGUAGE_VIEW, createLanguageSupervisor } from "../application-host/lib/lsp/supervisor.js";
 import { createLanguageViewBinder } from "../application-host/lib/lsp/language-view.js";
@@ -31,8 +31,8 @@ const recordOf = (value: unknown): Record<string, unknown> => (
 );
 
 const main = async (): Promise<void> => {
-  const packageRoot = PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS.get(
-    PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+  const packageRoot = VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS.get(
+    VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
   );
   if (!packageRoot) {
     throw new Error("TypeScript language extension package root is unavailable");
@@ -53,7 +53,7 @@ const main = async (): Promise<void> => {
     }));
     await fs.writeFile(path.join(harness.workspaceRoot, "explore.ts"), subject, "utf8");
     language.registerProvider({
-      providerId: "piarium.typescript-language",
+      providerId: "varin.typescript-language",
       command: process.execPath,
       args: [path.join(packageRoot, "runtime", "typescript-language-server.mjs"), "--stdio"],
       initializationOptions: {
@@ -98,7 +98,7 @@ const main = async (): Promise<void> => {
         subjectBytes: Buffer.byteLength(subject, "utf8"),
         languageId: "typescript",
         view: AGENT_LANGUAGE_VIEW,
-        provider: "piarium.typescript-language",
+        provider: "varin.typescript-language",
       },
       machine: {
         platform: os.platform(),

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { createThreadRegistry, threadCatalogPath } from "./thread-registry.js";
-import type { ThreadReport, ThreadRun } from "@piarium/protocol";
+import type { ThreadReport, ThreadRun } from "@varin/protocol";
 
 it("emits only a newly persisted Run report, with fixed Run identity and no stale-report return", async () => {
   const dataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "thread-return-"));

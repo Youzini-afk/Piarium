@@ -8,10 +8,10 @@ import { themeStoragePlugin } from '../../vite-theme-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const pwaDevEnabled = process.env.PIARIUM_DISABLE_PWA_DEV !== '1';
-const lowMemoryBuild = process.env.PIARIUM_LOW_MEMORY_BUILD === '1';
-const monacoSmokeEnabled = process.env.PIARIUM_MONACO_SMOKE === '1';
-const monacoBundleAuditEnabled = process.env.PIARIUM_MONACO_BUNDLE_AUDIT === '1';
+const pwaDevEnabled = process.env.VARIN_DISABLE_PWA_DEV !== '1';
+const lowMemoryBuild = process.env.VARIN_LOW_MEMORY_BUILD === '1';
+const monacoSmokeEnabled = process.env.VARIN_MONACO_SMOKE === '1';
+const monacoBundleAuditEnabled = process.env.VARIN_MONACO_BUNDLE_AUDIT === '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
@@ -25,7 +25,7 @@ const packageNameFromModuleId = (id: string): string | null => {
 };
 
 const themeJsonHmrPlugin = () => ({
-  name: 'piarium-theme-json-hmr',
+  name: 'varin-theme-json-hmr',
   handleHotUpdate({ file, server }: { file: string; server: { ws: { send: (payload: unknown) => void } } }) {
     if (!file.startsWith(`${themeDirectory}${path.sep}`) || path.extname(file) !== '.json') {
       return;
@@ -34,7 +34,7 @@ const themeJsonHmrPlugin = () => ({
     try {
       server.ws.send({
         type: 'custom',
-        event: 'piarium:theme-updated',
+        event: 'varin:theme-updated',
         data: JSON.parse(readFileSync(file, 'utf-8')),
       });
       // Theme JSON is applied by the runtime event listener. Returning no
@@ -98,12 +98,12 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      { find: '@piarium/application-client', replacement: path.resolve(__dirname, '../application-client/src/index.ts') },
-      { find: '@piarium/extension-contract', replacement: path.resolve(__dirname, '../extension-contract/src/index.ts') },
-      { find: '@piarium/extension-loader', replacement: path.resolve(__dirname, '../extension-loader/src/index.ts') },
-      { find: '@piarium/extension-sdk', replacement: path.resolve(__dirname, '../extension-sdk/src/index.ts') },
-      { find: '@piarium/extension-surface', replacement: path.resolve(__dirname, '../extension-surface/src/index.ts') },
-      { find: '@piarium/ui', replacement: path.resolve(__dirname, '../ui/src') },
+      { find: '@varin/application-client', replacement: path.resolve(__dirname, '../application-client/src/index.ts') },
+      { find: '@varin/extension-contract', replacement: path.resolve(__dirname, '../extension-contract/src/index.ts') },
+      { find: '@varin/extension-loader', replacement: path.resolve(__dirname, '../extension-loader/src/index.ts') },
+      { find: '@varin/extension-sdk', replacement: path.resolve(__dirname, '../extension-sdk/src/index.ts') },
+      { find: '@varin/extension-surface', replacement: path.resolve(__dirname, '../extension-surface/src/index.ts') },
+      { find: '@varin/ui', replacement: path.resolve(__dirname, '../ui/src') },
       { find: '@web', replacement: path.resolve(__dirname, './src') },
       { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
     ],
@@ -120,15 +120,15 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/auth': {
-        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
         changeOrigin: true,
       },
       '/health': {
-        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
         changeOrigin: true,
       },
       '/api': {
-        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.VARIN_PORT || 3001}`,
         changeOrigin: true,
         rewriteWsOrigin: true,
         ws: true,

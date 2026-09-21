@@ -1,23 +1,23 @@
 import { buildProject } from "./build.js";
 import { checkProject } from "./project.js";
 import type {
-  PiariumIsolatedSurfaceModule,
-  PiariumManagedSurfaceModule,
-  PiariumShellMountImplementation,
-  PiariumWorkbenchCompositionHost,
-} from "@piarium/extension-sdk";
-import type { PiariumExtensionManifest } from "@piarium/extension-contract";
+  VarinIsolatedSurfaceModule,
+  VarinManagedSurfaceModule,
+  VarinShellMountImplementation,
+  VarinWorkbenchCompositionHost,
+} from "@varin/extension-sdk";
+import type { VarinExtensionManifest } from "@varin/extension-contract";
 import {
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
   resolveSurfaceExtensionModule,
-} from "@piarium/extension-sdk";
-import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
+} from "@varin/extension-sdk";
+import { SurfaceExtensionRuntime } from "@varin/extension-surface";
 import {
   runHostExtensionConformance,
   runIsolatedExtensionConformance,
   runSurfaceExtensionConformance,
-} from "@piarium/extension-sdk/testing";
+} from "@varin/extension-sdk/testing";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { entrypointTargetPath } from "./project.js";
@@ -37,7 +37,7 @@ const runSurfaceConformance = async (
   entrypointId: string,
   supports: readonly ("desktop" | "mobile" | "web")[],
   mode: "managed" | "isolated" | "native",
-  module: PiariumManagedSurfaceModule,
+  module: VarinManagedSurfaceModule,
 ): Promise<void> => {
   if (mode === "isolated") return;
   const extension = resolveSurfaceExtensionModule(module);
@@ -49,7 +49,7 @@ const runSurfaceConformance = async (
       ...context,
       assets: {
         read: async (path) => ({ bytes: new Uint8Array(), contentType: "application/octet-stream", integrity: `sha256-${"0".repeat(64)}`, path }),
-        url: async () => "mock://piarium-extension-asset",
+        url: async () => "mock://varin-extension-asset",
       },
       styles: { use: async () => undefined },
     }),
@@ -60,14 +60,14 @@ const runSurfaceConformance = async (
       extensionVersion: version,
       generation: 0,
       hostId,
-      realmId: "piarium-cli-test",
+      realmId: "varin-cli-test",
     },
     runtime,
   });
 };
 
 const runDeclarativeConformance = async (
-  manifest: PiariumExtensionManifest,
+  manifest: VarinExtensionManifest,
   entrypointId: string,
   supports: readonly ("desktop" | "mobile" | "web")[],
 ): Promise<void> => {
@@ -88,7 +88,7 @@ const runDeclarativeConformance = async (
       extensionVersion: manifest.version,
       generation: 0,
       hostId: "00000000-0000-4000-8000-000000000001",
-      realmId: "piarium-cli-declarative-test",
+      realmId: "varin-cli-declarative-test",
     },
     runtime,
   });
@@ -101,8 +101,8 @@ const runDeclarativeConformance = async (
  * disposing the shell cleans up all children.
  */
 export const runShellCompositionSmoke = async (
-  manifest: PiariumExtensionManifest,
-  module: PiariumManagedSurfaceModule,
+  manifest: VarinExtensionManifest,
+  module: VarinManagedSurfaceModule,
 ): Promise<void> => {
   const shellContribution = (manifest.contributions ?? []).find((c) => c.kind === "shell");
   if (!shellContribution) return; // Not a shell extension — skip
@@ -117,14 +117,14 @@ export const runShellCompositionSmoke = async (
     extensionVersion: manifest.version,
     generation: 1,
     hostId,
-    realmId: "piarium-cli-shell-smoke",
+    realmId: "varin-cli-shell-smoke",
   };
   // Activate the shell extension
   await runtime.activate({ owner }, (context) => extension.activate({
     ...context,
     assets: {
       read: async (path) => ({ bytes: new Uint8Array(), contentType: "application/octet-stream", integrity: `sha256-${"0".repeat(64)}`, path }),
-      url: async () => "mock://piarium-extension-asset",
+      url: async () => "mock://varin-extension-asset",
     },
     styles: { use: async () => undefined },
   }));
@@ -132,7 +132,7 @@ export const runShellCompositionSmoke = async (
   const snapshot = runtime.getSnapshot();
   const shellItem = snapshot.contributions.find((c) => c.descriptor.id === shellContribution.id);
   if (!shellItem) throw new Error("Shell composition smoke: shell contribution was not registered");
-  const impl = shellItem.implementation as PiariumShellMountImplementation | undefined;
+  const impl = shellItem.implementation as VarinShellMountImplementation | undefined;
   if (!impl || typeof impl.mount !== "function") {
     throw new Error("Shell composition smoke: shell contribution implementation has no mount function");
   }
@@ -176,7 +176,7 @@ export const runShellCompositionSmoke = async (
   const child = (label: string) => ({
     dispose: async () => { disposed.push(label); },
   });
-  const workbench: PiariumWorkbenchCompositionHost = {
+  const workbench: VarinWorkbenchCompositionHost = {
     mountReplacement: async ({ target }) => {
       mounted.push({ kind: "replacement", value: target });
       return child(`replacement:${target}`);
@@ -236,7 +236,7 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
     const target = entrypointTargetPath(project, entrypoint.file);
     if (entrypoint.mode === "isolated") {
       const extension = resolveIsolatedExtensionModule(
-        await moduleFromFile(target) as PiariumIsolatedSurfaceModule,
+        await moduleFromFile(target) as VarinIsolatedSurfaceModule,
       );
       await runIsolatedExtensionConformance({ activation: extension.activate });
     } else {
@@ -247,7 +247,7 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
         entrypoint.id,
         entrypoint.supports,
         entrypoint.mode,
-        module as PiariumManagedSurfaceModule,
+        module as VarinManagedSurfaceModule,
       );
     }
     surfaces.push({
@@ -264,7 +264,7 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
     if (shellEntrypoint?.file) {
       const target = entrypointTargetPath(project, shellEntrypoint.file);
       const module = await moduleFromFile(target);
-      await runShellCompositionSmoke(project.manifest, module as PiariumManagedSurfaceModule);
+      await runShellCompositionSmoke(project.manifest, module as VarinManagedSurfaceModule);
     }
   }
   let host: TestResult["host"] = "skipped";

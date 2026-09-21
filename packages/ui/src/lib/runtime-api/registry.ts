@@ -1,4 +1,4 @@
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 
 let registeredRuntimeAPIs: RuntimeAPIs | null = null;
 
@@ -15,6 +15,6 @@ export const getRegisteredRuntimeAPIs = (): RuntimeAPIs | null => {
     return null;
   }
 
-  return (window as typeof window & { __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs })
-    .__PIARIUM_RUNTIME_APIS__ ?? null;
+  return (window as typeof window & { __VARIN_RUNTIME_APIS__?: RuntimeAPIs })
+    .__VARIN_RUNTIME_APIS__ ?? null;
 };

@@ -7,7 +7,7 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   JsonLineDecoder,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
@@ -17,7 +17,7 @@ describe("protocol envelopes", () => {
       clientName: "test",
       clientVersion: "0.0.0",
       mode: "test",
-      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+      protocolVersions: [VARIN_PROTOCOL_VERSION],
     });
 
     assert.deepEqual(decodeEnvelope(encodeEnvelope(request).trimEnd()), request);
@@ -52,7 +52,7 @@ describe("protocol envelopes", () => {
             event: "x",
             kind: "event",
             seq: -1,
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           }),
         ),
       /event.seq/,

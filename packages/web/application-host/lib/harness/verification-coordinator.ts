@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { HarnessActorIdentity, ThreadParent, ThreadVerificationProjection } from "@piarium/protocol";
+import type { HarnessActorIdentity, ThreadParent, ThreadVerificationProjection } from "@varin/protocol";
 import {
   bindCommandsToPublishedResult,
   cwdUnderRoot,

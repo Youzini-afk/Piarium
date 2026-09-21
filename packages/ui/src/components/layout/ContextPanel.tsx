@@ -22,14 +22,14 @@ import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
 import { useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@piarium/application-client';
-import { getRuntimeUrlResolver } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@varin/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
-import { PiariumLogo } from "@/components/ui/PiariumLogo";
+import { VarinLogo } from "@/components/ui/VarinLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
@@ -458,13 +458,13 @@ const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, 
 };
 
 const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
-  const existing = document.getElementById('__piarium_desktop_browser_overlay');
+  const existing = document.getElementById('__varin_desktop_browser_overlay');
   if (existing) existing.remove();
-  if (typeof window.__piariumDesktopBrowserCancelInspect === 'function') {
-    try { window.__piariumDesktopBrowserCancelInspect(); } catch { /* webview not ready */ }
+  if (typeof window.__varinDesktopBrowserCancelInspect === 'function') {
+    try { window.__varinDesktopBrowserCancelInspect(); } catch { /* webview not ready */ }
   }
   const overlay = document.createElement('div');
-  overlay.id = '__piarium_desktop_browser_overlay';
+  overlay.id = '__varin_desktop_browser_overlay';
   overlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #60a5fa;background:rgba(96,165,250,.24);border-radius:3px;display:none;box-sizing:border-box;';
   document.documentElement.appendChild(overlay);
   const cssEscape = (value) => {
@@ -515,8 +515,8 @@ const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
     window.removeEventListener('mousemove', move, true);
     window.removeEventListener('click', click, true);
     window.removeEventListener('keydown', keydown, true);
-    if (window.__piariumDesktopBrowserCancelInspect === cancel) {
-      delete window.__piariumDesktopBrowserCancelInspect;
+    if (window.__varinDesktopBrowserCancelInspect === cancel) {
+      delete window.__varinDesktopBrowserCancelInspect;
     }
   };
   const cancel = () => {
@@ -537,24 +537,24 @@ const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
     if (event.key !== 'Escape') return;
     cancel();
   };
-  window.__piariumDesktopBrowserCancelInspect = cancel;
+  window.__varinDesktopBrowserCancelInspect = cancel;
   window.addEventListener('mousemove', move, true);
   window.addEventListener('click', click, true);
   window.addEventListener('keydown', keydown, true);
 });`;
 
 const DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT = `(() => {
-  if (typeof window.__piariumDesktopBrowserCancelInspect === 'function') {
-    window.__piariumDesktopBrowserCancelInspect();
+  if (typeof window.__varinDesktopBrowserCancelInspect === 'function') {
+    window.__varinDesktopBrowserCancelInspect();
     return;
   }
-  const overlay = document.getElementById('__piarium_desktop_browser_overlay');
+  const overlay = document.getElementById('__varin_desktop_browser_overlay');
   if (overlay) overlay.remove();
 })()`;
 
 const DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT = `(() => {
-  if (window.__piariumSameWebviewNavigationInstalled) return;
-  window.__piariumSameWebviewNavigationInstalled = true;
+  if (window.__varinSameWebviewNavigationInstalled) return;
+  window.__varinSameWebviewNavigationInstalled = true;
 
   const navigate = (rawUrl) => {
     if (typeof rawUrl !== 'string' || rawUrl.length === 0) return false;
@@ -647,9 +647,9 @@ const stripPreviewTokenFromUrl = (value: string): string => {
   if (!value) return value;
   try {
     const parsed = new URL(value);
-    parsed.searchParams.delete('piarium_preview_token');
-    parsed.searchParams.delete('piarium_client_token');
-    parsed.searchParams.delete('piarium_url_token');
+    parsed.searchParams.delete('varin_preview_token');
+    parsed.searchParams.delete('varin_client_token');
+    parsed.searchParams.delete('varin_url_token');
     return parsed.toString();
   } catch {
     return value;
@@ -661,9 +661,9 @@ const stripPreviewQueryParams = (value: string): string => {
   try {
     const parsed = new URL(value);
     parsed.searchParams.delete('ocPreview');
-    parsed.searchParams.delete('piarium_preview_token');
-    parsed.searchParams.delete('piarium_client_token');
-    parsed.searchParams.delete('piarium_url_token');
+    parsed.searchParams.delete('varin_preview_token');
+    parsed.searchParams.delete('varin_client_token');
+    parsed.searchParams.delete('varin_url_token');
     return parsed.toString();
   } catch {
     return value;
@@ -815,10 +815,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
-      searchParams.delete('piarium_url_token');
-      searchParams.delete('piarium_client_token');
+      searchParams.delete('varin_url_token');
+      searchParams.delete('varin_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('piarium_preview_token', proxyState.previewToken || '');
+      searchParams.set('varin_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
       const hash = normalizedUrl.hash || '';
       return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`);
@@ -884,7 +884,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'piarium-preview-parent',
+      source: 'varin-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled: inspectMode,
@@ -897,7 +897,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'piarium-preview-parent',
+      source: 'varin-preview-parent',
       version: 1,
       type: 'set-color-scheme',
       scheme: previewColorScheme,
@@ -948,7 +948,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         return;
       }
       const data = event.data;
-      if (!data || data.source !== 'piarium-preview-bridge' || data.version !== 1) {
+      if (!data || data.source !== 'varin-preview-bridge' || data.version !== 1) {
         return;
       }
 
@@ -1448,7 +1448,7 @@ type DesktopBrowserPaneProps = {
 };
 
 const isElectronBrowserRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean(window.__PIARIUM_ELECTRON__);
+  return typeof window !== 'undefined' && Boolean(window.__VARIN_ELECTRON__);
 };
 
 const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
@@ -1631,10 +1631,10 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const parsed = new URL(loadedUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
-      searchParams.delete('piarium_url_token');
-      searchParams.delete('piarium_client_token');
+      searchParams.delete('varin_url_token');
+      searchParams.delete('varin_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('piarium_preview_token', proxyState.previewToken || '');
+      searchParams.set('varin_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
       return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${parsed.hash}`);
     } catch {
@@ -1689,7 +1689,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const frameWindow = iframeRef.current?.contentWindow;
     if (!frameWindow) return;
     frameWindow.postMessage({
-      source: 'piarium-preview-parent',
+      source: 'varin-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled,
@@ -1757,7 +1757,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
       if (event.source !== iframeRef.current?.contentWindow) return;
       const data = event.data;
-      if (!data || data.source !== 'piarium-preview-bridge' || data.version !== 1) return;
+      if (!data || data.source !== 'varin-preview-bridge' || data.version !== 1) return;
 
       if (data.type === 'ready') {
         const frameUrl = typeof data.url === 'string' ? data.url : '';
@@ -1914,7 +1914,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <PiariumLogo width={140} height={140} className="opacity-20" />
+            <VarinLogo width={140} height={140} className="opacity-20" />
             <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
             <span className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.browser.emptyHint')}</span>
             <span className="max-w-md typography-micro leading-relaxed text-status-warning/70">{t('contextPanel.browser.trustNotice')}</span>
@@ -2167,13 +2167,13 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         <webview
           ref={webviewRef}
           src={initialWebviewSrcRef.current}
-          partition="persist:piarium-browser"
+          partition="persist:varin-browser"
           allowpopups
           style={{ width: '100%', height: '100%', border: 'none' }}
         />
         {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <PiariumLogo width={140} height={140} className="opacity-20" />
+            <VarinLogo width={140} height={140} className="opacity-20" />
             <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
           </div>
         ) : null}
@@ -2519,7 +2519,7 @@ export const ContextPanel: React.FC = () => {
 
       frameWindow.postMessage(
         {
-          type: 'piarium:theme-sync',
+          type: 'varin:theme-sync',
           payload,
         },
         window.location.origin,
@@ -2535,7 +2535,7 @@ export const ContextPanel: React.FC = () => {
       const frameWindow = frame.contentWindow;
       if (!frameWindow) continue;
 
-      frameWindow.postMessage({ type: 'piarium:chat-settings-sync', payload }, window.location.origin);
+      frameWindow.postMessage({ type: 'varin:chat-settings-sync', payload }, window.location.origin);
     }
   }, [allowPromptingSubagentSessions]);
 
@@ -2553,7 +2553,7 @@ export const ContextPanel: React.FC = () => {
       const payload = { visible: activeChatTabID === tabID };
       frameWindow.postMessage(
         {
-          type: 'piarium:embedded-visibility',
+          type: 'varin:embedded-visibility',
           payload,
         },
         window.location.origin,
@@ -2584,8 +2584,8 @@ export const ContextPanel: React.FC = () => {
         const payload: EmbeddedSessionRuntimeBootstrap = {
           apiBaseUrl: getRuntimeApiBaseUrl(),
           clientToken: getRuntimeBearerTokenSync(),
-          localOrigin: typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string'
-            ? window.__PIARIUM_LOCAL_ORIGIN__
+          localOrigin: typeof window.__VARIN_LOCAL_ORIGIN__ === 'string'
+            ? window.__VARIN_LOCAL_ORIGIN__
             : '',
           runtimeHeaders: getRuntimeExtraHeadersSync(),
           relayHostId: runtimeKey.startsWith('host:') ? runtimeKey.slice('host:'.length) : '',
@@ -2598,15 +2598,15 @@ export const ContextPanel: React.FC = () => {
         }, event.origin);
         return;
       }
-      if (data?.type === 'piarium:theme-sync-request') {
+      if (data?.type === 'varin:theme-sync-request') {
         postThemeSyncToEmbeddedChat();
         return;
       }
-      if (data?.type === 'piarium:chat-settings-request') {
+      if (data?.type === 'varin:chat-settings-request') {
         postChatSettingsSyncToEmbeddedChat();
         return;
       }
-      if (data?.type !== 'piarium:cycle-theme-request') {
+      if (data?.type !== 'varin:cycle-theme-request') {
         return;
       }
 

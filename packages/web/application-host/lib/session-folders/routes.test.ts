@@ -95,7 +95,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const handler = getRoute('POST', '/api/session-folders');
@@ -125,7 +125,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const handler = getRoute('POST', '/api/session-folders');
@@ -143,7 +143,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();
@@ -159,7 +159,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();
@@ -178,7 +178,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();
@@ -203,7 +203,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();
@@ -226,7 +226,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();
@@ -249,7 +249,7 @@ describe('session folders routes', () => {
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
     });
 
     const response = createMockResponse();

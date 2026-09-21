@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const schemaPath = path.join(root, 'kernel', 'protocol', 'schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
-const rustTarget = path.join(root, 'kernel', 'crates', 'piarium-kernel', 'src', 'protocol_generated.rs');
+const rustTarget = path.join(root, 'kernel', 'crates', 'varin-kernel', 'src', 'protocol_generated.rs');
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};
@@ -36,7 +36,7 @@ const generated = `/**
 
 export const KERNEL_PROTOCOL_VERSION = ${schema.protocolVersion} as const;
 export const KERNEL_REQUEST_WINDOW = ${schema.requestWindow} as const;
-export const KERNEL_PROTOCOL_SCHEMA = "piarium.kernel.v${schema.protocolVersion}" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v${schema.protocolVersion}" as const;
 
 export type KernelMethod =
 ${methods};

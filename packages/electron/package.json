@@ -1,19 +1,19 @@
 {
-  "name": "@piarium/electron",
+  "name": "@varin/electron",
   "version": "0.9.12",
   "license": "AGPL-3.0-only",
   "private": true,
-  "description": "Piarium desktop runtime",
-  "author": "Youzini-afk and Piarium contributors",
+  "description": "Varin desktop runtime",
+  "author": "Youzini-afk and Varin contributors",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
-    "@piarium/application-client": "workspace:*",
-    "@piarium/web": "workspace:*",
-    "@piarium/pi-host": "workspace:*",
-    "@piarium/protocol": "workspace:*",
-    "@piarium/runtime-broker": "workspace:*",
-    "@piarium/settings-store": "workspace:*",
+    "@varin/application-client": "workspace:*",
+    "@varin/web": "workspace:*",
+    "@varin/pi-host": "workspace:*",
+    "@varin/protocol": "workspace:*",
+    "@varin/runtime-broker": "workspace:*",
+    "@varin/settings-store": "workspace:*",
     "electron-context-menu": "^5.0.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.9"
@@ -61,13 +61,13 @@
     "verify:native": "node ./scripts/verify-native.mjs"
   },
   "build": {
-    "appId": "dev.piarium.desktop",
-    "productName": "Piarium",
+    "appId": "dev.varin.desktop",
+    "productName": "Varin",
     "files": [
       "dist-bundle/main.mjs",
       "dist-bundle/preload.mjs",
-      "!node_modules/@piarium/*/{src,test,tests}/**/*",
-      "!node_modules/@piarium/web/{application-host,cli,scripts,kernel}/**/*"
+      "!node_modules/@varin/*/{src,test,tests}/**/*",
+      "!node_modules/@varin/web/{application-host,cli,scripts,kernel}/**/*"
     ],
     "asarUnpack": [
       "node_modules/**/*"
@@ -157,14 +157,14 @@
       ],
       "category": "Development",
       "icon": "resources/icons/icon.png",
-      "executableName": "piarium",
+      "executableName": "varin",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "Piarium",
-          "Comment": "Pi-native coding workspace",
-          "Icon": "piarium",
-          "StartupWMClass": "piarium"
+          "Name": "Varin",
+          "Comment": "Agent workspace for coding and research",
+          "Icon": "varin",
+          "StartupWMClass": "varin"
         }
       }
     },
@@ -204,7 +204,7 @@
     "publish": {
       "provider": "github",
       "owner": "Youzini-afk",
-      "repo": "Piarium"
+      "repo": "Varin"
     }
   }
 }

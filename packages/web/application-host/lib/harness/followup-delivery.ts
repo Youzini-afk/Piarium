@@ -1,4 +1,4 @@
-import type { FollowUpOccurrenceDelivery, ThreadMessagePeer } from "@piarium/protocol";
+import type { FollowUpOccurrenceDelivery, ThreadMessagePeer } from "@varin/protocol";
 import { deliverAuthorizedThreadRequest, type AuthorizedThreadRequestDeps } from "./thread-services.js";
 
 /** Follow-up adapter over the exact already-authorized thread.send request core. */

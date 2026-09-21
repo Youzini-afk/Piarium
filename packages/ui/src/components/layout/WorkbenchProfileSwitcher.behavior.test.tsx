@@ -13,15 +13,15 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/extensions/catalog-store', async () => {
-  const { defaultPiariumWorkbenchProfileDocument } = await import('@piarium/extension-contract');
+  const { defaultVarinWorkbenchProfileDocument } = await import('@varin/extension-contract');
   return {
-    usePiariumExtensionCatalog: () => ({
+    useVarinExtensionCatalog: () => ({
       snapshot: {
         workbench: {
           authoritative: true,
           hostId: state.hostId,
           document: {
-            ...defaultPiariumWorkbenchProfileDocument(),
+            ...defaultVarinWorkbenchProfileDocument(),
             profileSelections: { users: { default: state.activeProfileId } },
           },
         },
@@ -30,7 +30,7 @@ vi.mock('@/lib/extensions/catalog-store', async () => {
   };
 });
 vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.selectProfile }));
-vi.mock('@/lib/extensions/surface-runtime', () => ({ piariumSurfaceRuntime: { surface: 'desktop' } }));
+vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'desktop' } }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: state.error } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -67,7 +67,7 @@ describe('independent workbench presentation controls', () => {
   };
   const agentButton = '[role="group"] button:first-child';
   const ideButton = '[role="group"] button:last-child';
-  const researchItem = '[data-profile="piarium.research"]';
+  const researchItem = '[data-profile="varin.research"]';
 
   beforeEach(() => {
     const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -92,36 +92,36 @@ describe('independent workbench presentation controls', () => {
 
   it('selects Research within Agent, with IDE outside the workspace menu', async () => {
     await render();
-    expect(container.querySelector('[data-profile="piarium.ide"]')).toBeNull();
+    expect(container.querySelector('[data-profile="varin.ide"]')).toBeNull();
     await click(researchItem);
-    expect(state.selectProfile).toHaveBeenLastCalledWith('piarium.research', undefined, { enableShell: true });
+    expect(state.selectProfile).toHaveBeenLastCalledWith('varin.research', undefined, { enableShell: true });
     expect(container.querySelector(agentButton)?.getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector(researchItem)?.getAttribute('aria-checked')).toBe('true');
   });
 
   it('returns from IDE to Research after the shell controls remount', async () => {
-    state.activeProfileId = 'piarium.research';
+    state.activeProfileId = 'varin.research';
     await render();
     await click(ideButton);
-    expect(state.activeProfileId).toBe('piarium.ide');
+    expect(state.activeProfileId).toBe('varin.ide');
     act(() => root.unmount());
     root = createRoot(container);
     await render();
     expect(container.querySelector(researchItem)?.getAttribute('aria-checked')).toBe('true');
     await click(agentButton);
-    expect(state.activeProfileId).toBe('piarium.research');
+    expect(state.activeProfileId).toBe('varin.research');
     const persisted = useUIStore.persist.getOptions().partialize!(useUIStore.getState()) as { agentWorkbenchProfileByHost: Record<string, string> };
-    expect(persisted.agentWorkbenchProfileByHost['host-a']).toBe('piarium.research');
+    expect(persisted.agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
   });
 
   it('changes the workspace return choice in IDE without exiting IDE', async () => {
-    state.activeProfileId = 'piarium.ide';
+    state.activeProfileId = 'varin.ide';
     await render();
     await click(researchItem);
     expect(state.selectProfile).not.toHaveBeenCalled();
     expect(container.querySelector(ideButton)?.getAttribute('aria-pressed')).toBe('true');
     await click(agentButton);
-    expect(state.activeProfileId).toBe('piarium.research');
+    expect(state.activeProfileId).toBe('varin.research');
   });
 
   it('retains the current workspace and return choice when a transition fails', async () => {
@@ -134,12 +134,12 @@ describe('independent workbench presentation controls', () => {
   });
 
   it('does not reuse another Host return choice', async () => {
-    useUIStore.setState({ agentWorkbenchProfileByHost: { 'host-a': 'piarium.research' } });
+    useUIStore.setState({ agentWorkbenchProfileByHost: { 'host-a': 'varin.research' } });
     state.hostId = 'host-b';
-    state.activeProfileId = 'piarium.ide';
+    state.activeProfileId = 'varin.ide';
     await render();
     await click(agentButton);
     expect(state.activeProfileId).toBe('default');
-    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('piarium.research');
+    expect(useUIStore.getState().agentWorkbenchProfileByHost['host-a']).toBe('varin.research');
   });
 });

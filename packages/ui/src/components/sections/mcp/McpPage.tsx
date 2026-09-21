@@ -5,7 +5,7 @@ import type {
   PiMcpConfigServer,
   PiMcpConfigSource,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { Icon } from '@/components/icon/Icon';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
@@ -35,7 +35,7 @@ import {
   getPiConfigTextDocument,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
@@ -61,7 +61,7 @@ import {
 } from './mcp-catalog-store';
 
 const transportLabelKey = (kind: PiMcpConfigServer['transport']['kind']): string => (
-  `settings.piarium.mcp.structured.transport.${kind === 'stdio'
+  `settings.varin.mcp.structured.transport.${kind === 'stdio'
     ? 'localCommand'
     : kind === 'socket'
       ? 'localSocket'
@@ -263,7 +263,7 @@ const McpConfigEditor: React.FC<{
     >
       <div className="space-y-4">
         <SettingsFieldRow
-          label={text('settings.piarium.mcp.config.source.label')}
+          label={text('settings.varin.mcp.config.source.label')}
           alignEnd={false}
           controlClassName="w-full max-w-lg"
         >
@@ -277,9 +277,9 @@ const McpConfigEditor: React.FC<{
             <SelectTrigger
               size="settings"
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-              aria-label={text('settings.piarium.mcp.config.source.label')}
+              aria-label={text('settings.varin.mcp.config.source.label')}
             >
-              <SelectValue placeholder={text('settings.piarium.mcp.config.source.label')} />
+              <SelectValue placeholder={text('settings.varin.mcp.config.source.label')} />
             </SelectTrigger>
             <SelectContent>
               {sources.map((candidate) => (
@@ -302,8 +302,8 @@ const McpConfigEditor: React.FC<{
             >
               <Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
               {dirty
-                ? text('settings.piarium.mcp.config.actions.reloadDiscard')
-                : text('settings.piarium.mcp.config.actions.reload')}
+                ? text('settings.varin.mcp.config.actions.reloadDiscard')
+                : text('settings.varin.mcp.config.actions.reload')}
             </Button>
           ) : null}
         </SettingsFieldRow>
@@ -318,7 +318,7 @@ const McpConfigEditor: React.FC<{
 
             {dirty ? (
               <p className="typography-meta text-[var(--status-warning)]">
-                {text('settings.piarium.mcp.config.source.dirtyGuard')}
+                {text('settings.varin.mcp.config.source.dirtyGuard')}
               </p>
             ) : null}
 
@@ -340,8 +340,8 @@ const McpConfigEditor: React.FC<{
               <CollapsibleTrigger disabled={!parsed.valid} className="border border-border/60 px-3 py-2.5">
                 <span className="typography-ui-label text-foreground">
                   {rawOpen || !parsed.valid
-                    ? text('settings.piarium.mcp.config.raw.hide')
-                    : text('settings.piarium.mcp.config.raw.show')}
+                    ? text('settings.varin.mcp.config.raw.hide')
+                    : text('settings.varin.mcp.config.raw.show')}
                 </span>
                 <Icon name={rawOpen || !parsed.valid ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 text-muted-foreground" />
               </CollapsibleTrigger>
@@ -364,12 +364,12 @@ const McpConfigEditor: React.FC<{
 
             {parsed.error ? (
               <p className="typography-meta text-[var(--status-error)]">
-                {t('settings.piarium.mcp.config.invalid')}
+                {t('settings.varin.mcp.config.invalid')}
               </p>
             ) : null}
             {projectBlocked && !loading ? (
               <p className="typography-meta text-[var(--status-warning)]">
-                {t('settings.piarium.mcp.config.untrusted')}
+                {t('settings.varin.mcp.config.untrusted')}
               </p>
             ) : null}
             {loadError ? (
@@ -377,7 +377,7 @@ const McpConfigEditor: React.FC<{
             ) : null}
             {saveWillClearUrlCredentials ? (
               <p className="typography-meta text-[var(--status-warning)]">
-                {text('settings.piarium.mcp.structured.urlCredentialReset')}
+                {text('settings.varin.mcp.structured.urlCredentialReset')}
               </p>
             ) : null}
 
@@ -413,28 +413,28 @@ const ServerActions: React.FC<{
       <div className="flex flex-wrap items-center gap-2">
         {!server.disabled ? (
           <Button type="button" variant="outline" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand('reconnect', `/mcp reconnect ${argument}`)} className="!font-normal">
-            {t('settings.piarium.mcp.actions.reconnect')}
+            {t('settings.varin.mcp.actions.reconnect')}
           </Button>
         ) : null}
         {server.status === 'needs-auth' ? (
           <Button type="button" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand('authorize', `/mcp-auth ${argument}`)} className="!font-normal">
-            {t('settings.piarium.mcp.actions.authorize')}
+            {t('settings.varin.mcp.actions.authorize')}
           </Button>
         ) : null}
         {!server.disabled ? (
           <Button type="button" variant="ghost" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand('logout', `/mcp logout ${argument}`)} className="!font-normal text-muted-foreground">
-            {t('settings.piarium.mcp.actions.logout')}
+            {t('settings.varin.mcp.actions.logout')}
           </Button>
         ) : null}
         <Button type="button" variant="ghost" size="xs" disabled={busy !== null || commandUnsupported} onClick={() => onCommand(server.disabled ? 'enable' : 'disable', `/mcp ${server.disabled ? 'enable' : 'disable'} ${argument}`, true)} className="!font-normal text-muted-foreground">
           {server.disabled
-            ? t('settings.piarium.mcp.actions.enable')
-            : t('settings.piarium.mcp.actions.disable')}
+            ? t('settings.varin.mcp.actions.enable')
+            : t('settings.varin.mcp.actions.disable')}
         </Button>
       </div>
       {commandUnsupported ? (
         <p className="typography-micro text-[var(--status-warning)]">
-          {t('settings.piarium.mcp.runtime.commandNameUnsupported')}
+          {t('settings.varin.mcp.runtime.commandNameUnsupported')}
         </p>
       ) : null}
     </div>
@@ -485,7 +485,7 @@ export const McpPage: React.FC = () => {
       if (reload) await executeCommand(currentSessionId, '/reload');
     } catch (error) {
       console.error(`Failed to execute Pi MCP command ${command}:`, error);
-      toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.commandFailed'));
+      toast.error(error instanceof Error ? error.message : t('settings.varin.mcp.toast.commandFailed'));
     } finally {
       setCommandAction(null);
     }
@@ -493,8 +493,8 @@ export const McpPage: React.FC = () => {
 
   const title = selectedServer?.name
     ?? (catalogState.selection.kind === 'new'
-      ? t('settings.piarium.mcp.structured.addServer')
-      : t('settings.piarium.mcp.config.title'));
+      ? t('settings.varin.mcp.structured.addServer')
+      : t('settings.varin.mcp.config.title'));
 
   return (
     <SettingsPageLayout
@@ -502,7 +502,7 @@ export const McpPage: React.FC = () => {
       showSaveStatus={false}
       headerEnd={currentSessionId ? (
         <Button type="button" variant="outline" size="xs" disabled={commandAction !== null} onClick={() => void runCommand('panel', '/mcp')} className="!font-normal">
-          {t('settings.piarium.mcp.actions.openPanel')}
+          {t('settings.varin.mcp.actions.openPanel')}
         </Button>
       ) : undefined}
     >
@@ -521,14 +521,14 @@ export const McpPage: React.FC = () => {
               ? <Icon name="loader-4" className="mx-auto size-5 animate-spin" />
               : catalogState.error
                 ?? snapshot?.provider.issue
-                ?? t('settings.piarium.mcp.runtime.noStatus')}
+                ?? t('settings.varin.mcp.runtime.noStatus')}
           </div>
         </SettingsSection>
       ) : (
         <>
           {selectedServer ? (
             <SettingsSection
-              title={t('settings.piarium.mcp.runtime.title')}
+              title={t('settings.varin.mcp.runtime.title')}
               settingsItem="mcp.runtime"
             >
               <div className="space-y-4">
@@ -543,7 +543,7 @@ export const McpPage: React.FC = () => {
                   {selectedServer.transport.command ? <p className="break-all font-mono typography-micro">{selectedServer.transport.command}</p> : null}
                   {selectedServer.transport.url ? <p className="break-all font-mono typography-micro">{selectedServer.transport.url}</p> : null}
                   {selectedServer.transport.socket ? <p className="break-all font-mono typography-micro">{selectedServer.transport.socket}</p> : null}
-                  {liveServer ? <p>{t('settings.piarium.mcp.runtime.serverCounts', { tools: liveServer.toolCount, resources: liveServer.resourceCount ?? 0 })}</p> : null}
+                  {liveServer ? <p>{t('settings.varin.mcp.runtime.serverCounts', { tools: liveServer.toolCount, resources: liveServer.resourceCount ?? 0 })}</p> : null}
                 </div>
                 {liveServer && currentSessionId ? (
                   <ServerActions busy={commandAction} onCommand={(action, command, reload) => void runCommand(`${action}:${liveServer.name}`, command, reload)} server={liveServer} />

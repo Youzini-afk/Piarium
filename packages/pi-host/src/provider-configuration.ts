@@ -23,7 +23,7 @@ import {
   type ProviderConfigScope,
   parseProviderConfigInput,
   ProviderConfigValidationError,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   applyEdits,
   modify,
@@ -61,7 +61,7 @@ function configurableDuration(name: string): number | undefined {
   return parsed === 0 ? undefined : Math.floor(parsed);
 }
 
-const LOCK_TIMEOUT_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS");
+const LOCK_TIMEOUT_MS = configurableDuration("VARIN_PROVIDER_CONFIG_LOCK_TIMEOUT_MS");
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -362,7 +362,7 @@ async function readDocument(path: string): Promise<ConfigDocument> {
 }
 
 async function acquireLock(path: string): Promise<() => Promise<void>> {
-  const lockPath = `${path}.piarium.lock`;
+  const lockPath = `${path}.varin.lock`;
   const started = Date.now();
   for (;;) {
     let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -513,7 +513,7 @@ export class ProviderConfigurationManager {
 
   constructor(options: ProviderConfigurationManagerOptions) {
     this.#agentDir = resolve(options.agentDir);
-    const configuredPath = options.customConfigPath ?? process.env.PIARIUM_MODELS_CONFIG;
+    const configuredPath = options.customConfigPath ?? process.env.VARIN_MODELS_CONFIG;
     this.#customPath = configuredPath ? resolve(configuredPath) : undefined;
   }
 
@@ -720,7 +720,7 @@ export class ProviderConfigurationManager {
       throw new HostError(
         "provider_config_scope_unavailable",
         scope === "custom"
-          ? "PIARIUM_MODELS_CONFIG is not configured"
+          ? "VARIN_MODELS_CONFIG is not configured"
           : `Provider scope ${scope} is unavailable`,
       );
     }

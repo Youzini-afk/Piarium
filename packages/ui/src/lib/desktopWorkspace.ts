@@ -4,7 +4,7 @@ import {
   requestDirectoryAccess,
   startAccessingDirectory,
 } from '@/lib/desktop';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';

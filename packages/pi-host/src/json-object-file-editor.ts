@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { JsonValue } from "@piarium/protocol";
+import type { JsonValue } from "@varin/protocol";
 import lockfile from "proper-lockfile";
 import { HostError } from "./errors.js";
 

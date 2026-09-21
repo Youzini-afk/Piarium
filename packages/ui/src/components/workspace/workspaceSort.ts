@@ -1,8 +1,8 @@
-import type { WorkspaceEntry } from '@piarium/application-client';
+import type { WorkspaceEntry } from '@varin/application-client';
 
 export type WorkspaceSortMode = 'name-asc' | 'name-desc' | 'modified-desc' | 'modified-asc';
 
-export const WORKSPACE_SORT_STORAGE_KEY = 'piarium.workspaceSidebar.sortMode';
+export const WORKSPACE_SORT_STORAGE_KEY = 'varin.workspaceSidebar.sortMode';
 export const DEFAULT_WORKSPACE_SORT_MODE: WorkspaceSortMode = 'name-asc';
 
 export const WORKSPACE_SORT_MODES: WorkspaceSortMode[] = [

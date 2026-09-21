@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { usePiChatCatalog } from '@/components/chat/usePiChatCatalog';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
@@ -60,7 +60,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
     try {
       await executeCommand(sessionId, `/${command}`);
     } catch (error) {
-      toast.error(t('settings.piarium.pluginSettings.webAccess.runtime.commandFailed'), {
+      toast.error(t('settings.varin.pluginSettings.webAccess.runtime.commandFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -77,10 +77,10 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
         <div className="min-w-0 space-y-1">
           <h3 className="typography-settings-group-title text-foreground">
-            {t('settings.piarium.pluginSettings.webAccess.runtime.title')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.title')}
           </h3>
           <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.pluginSettings.webAccess.runtime.description')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.description')}
           </p>
         </div>
         <span className={cn(
@@ -89,38 +89,38 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             ? 'border-[var(--status-success)]/30 text-[var(--status-success)]'
             : 'border-border/60 text-muted-foreground',
         )}>
-          {t(`settings.piarium.pluginSettings.webAccess.runtime.state.${providerState}`)}
+          {t(`settings.varin.pluginSettings.webAccess.runtime.state.${providerState}`)}
         </span>
       </div>
 
       {!sessionId ? (
         <p className="rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.webAccess.runtime.openSession')}
+          {t('settings.varin.pluginSettings.webAccess.runtime.openSession')}
         </p>
       ) : catalog.error ? (
         <p className="break-words typography-meta text-[var(--status-error)]">{catalog.error}</p>
       ) : !webAccessAvailable && catalog.loaded ? (
         <p className="rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.webAccess.runtime.notActive')}
+          {t('settings.varin.pluginSettings.webAccess.runtime.notActive')}
         </p>
       ) : null}
 
       {runningCommand ? (
         <p className="flex items-center gap-2 rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
           <Icon name="loader-4" className="size-4 animate-spin" />
-          {t('settings.piarium.pluginSettings.webAccess.runtime.running', {
+          {t('settings.varin.pluginSettings.webAccess.runtime.running', {
             command: `/${runningCommand}`,
           })}
         </p>
       ) : sessionBusy ? (
         <p className="rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 px-3 py-2 typography-meta text-[var(--status-warning)]">
-          {t('settings.piarium.pluginSettings.webAccess.runtime.busy')}
+          {t('settings.varin.pluginSettings.webAccess.runtime.busy')}
         </p>
       ) : null}
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.webAccess.runtime.curator.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.runtime.curator.description')}
+        title={t('settings.varin.pluginSettings.webAccess.runtime.curator.title')}
+        description={t('settings.varin.pluginSettings.webAccess.runtime.curator.description')}
         contentClassName="space-y-3"
       >
         <form
@@ -132,14 +132,14 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
         >
           <div className="min-w-0 flex-1 space-y-1.5">
             <label className="typography-settings-field-label text-foreground" htmlFor="web-access-query">
-              {t('settings.piarium.pluginSettings.webAccess.runtime.query')}
+              {t('settings.varin.pluginSettings.webAccess.runtime.query')}
             </label>
             <Input
               id="web-access-query"
               value={query}
               disabled={actionsDisabled}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('settings.piarium.pluginSettings.webAccess.runtime.queryPlaceholder')}
+              placeholder={t('settings.varin.pluginSettings.webAccess.runtime.queryPlaceholder')}
             />
           </div>
           <Button
@@ -149,7 +149,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             disabled={actionsDisabled || !commandAvailable('open-curator')}
           >
             {runningCommand === 'websearch' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.webAccess.runtime.action.openCurator')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.action.openCurator')}
           </Button>
         </form>
         <div className="flex flex-wrap gap-2">
@@ -160,7 +160,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             disabled={actionsDisabled || !commandAvailable('curator-on')}
             onClick={() => void runAction('curator-on')}
           >
-            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorOn')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.action.curatorOn')}
           </Button>
           <Button
             type="button"
@@ -169,7 +169,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             disabled={actionsDisabled || !commandAvailable('curator-summary-review')}
             onClick={() => void runAction('curator-summary-review')}
           >
-            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorSummaryReview')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.action.curatorSummaryReview')}
           </Button>
           <Button
             type="button"
@@ -178,15 +178,15 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             disabled={actionsDisabled || !commandAvailable('curator-off')}
             onClick={() => void runAction('curator-off')}
           >
-            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorOff')}
+            {t('settings.varin.pluginSettings.webAccess.runtime.action.curatorOff')}
           </Button>
         </div>
       </SettingsControlGroup>
 
       <SettingsControlGroup
         className="border-t border-border/60 pt-5"
-        title={t('settings.piarium.pluginSettings.webAccess.runtime.utilities.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.runtime.utilities.description')}
+        title={t('settings.varin.pluginSettings.webAccess.runtime.utilities.title')}
+        description={t('settings.varin.pluginSettings.webAccess.runtime.utilities.description')}
         contentClassName="flex flex-wrap gap-2"
       >
         <Button
@@ -197,7 +197,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
           onClick={() => void runAction('google-account')}
         >
           {runningCommand === 'google-account' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.pluginSettings.webAccess.runtime.action.googleAccount')}
+          {t('settings.varin.pluginSettings.webAccess.runtime.action.googleAccount')}
         </Button>
         <Button
           type="button"
@@ -207,12 +207,12 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
           onClick={() => void runAction('stored-results')}
         >
           {runningCommand === 'search' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.pluginSettings.webAccess.runtime.action.storedResults')}
+          {t('settings.varin.pluginSettings.webAccess.runtime.action.storedResults')}
         </Button>
       </SettingsControlGroup>
 
       <p className="typography-meta text-muted-foreground">
-        {t('settings.piarium.pluginSettings.webAccess.runtime.ownershipNote')}
+        {t('settings.varin.pluginSettings.webAccess.runtime.ownershipNote')}
       </p>
     </div>
   );

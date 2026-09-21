@@ -2,7 +2,7 @@ English | [简体中文](DEPLOYMENT.zh-CN.md)
 
 # Docs Source Deployment
 
-This repository owns Piarium docs **source**. Rendering and hosting for a public
+This repository owns Varin docs **source**. Rendering and hosting for a public
 docs site are not automated here yet.
 
 The default language is English: `content/docs/*.mdx` is the English source, and

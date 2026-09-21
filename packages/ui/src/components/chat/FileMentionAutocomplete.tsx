@@ -1,7 +1,7 @@
 import React from 'react';
 import { RiCodeLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiFolder3Fill, RiRefreshLine } from '@remixicon/react';
 import { cn, truncatePathMiddle } from '@/lib/utils';
-import { useFileSearchStore, type PiariumFileSearchHit } from '@/stores/useFileSearchStore';
+import { useFileSearchStore, type VarinFileSearchHit } from '@/stores/useFileSearchStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
@@ -18,7 +18,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
-type FileInfo = PiariumFileSearchHit;
+type FileInfo = VarinFileSearchHit;
 type AgentInfo = {
   name: string;
   description?: string;

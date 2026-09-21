@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue, PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
+import type { JsonValue, PiConfigScope, RuntimeContextTarget } from '@varin/protocol';
 import {
   SettingsControlGroup,
   SettingsFieldRow,
@@ -42,36 +42,36 @@ const GROUP_CLASS = 'border-t border-border/60 pt-5';
 
 const fieldLabelKey = (field: string): string => {
   const labels: Record<string, string> = {
-    'lens.enabled': 'settings.piarium.pluginSettings.piLens.field.lens',
-    'lsp.enabled': 'settings.piarium.pluginSettings.piLens.field.lsp',
-    'tests.enabled': 'settings.piarium.pluginSettings.piLens.field.tests',
-    'delta.enabled': 'settings.piarium.pluginSettings.piLens.field.delta',
-    'opengrep.enabled': 'settings.piarium.pluginSettings.piLens.field.opengrep',
-    'readGuard.enabled': 'settings.piarium.pluginSettings.piLens.field.readGuard',
-    'turnEnd.madge.enabled': 'settings.piarium.pluginSettings.piLens.field.turnEndMadge',
-    'format.enabled': 'settings.piarium.pluginSettings.piLens.field.format',
-    'format.mode': 'settings.piarium.pluginSettings.piLens.field.formatMode',
-    'autofix.enabled': 'settings.piarium.pluginSettings.piLens.field.autofix',
-    'contextInjection.enabled': 'settings.piarium.pluginSettings.piLens.field.contextInjection',
-    'turnSummary.enabled': 'settings.piarium.pluginSettings.piLens.field.turnSummary',
-    'actionableWarnings.enabled': 'settings.piarium.pluginSettings.piLens.field.actionableWarnings',
-    'actionableWarnings.includeLspCodeActions': 'settings.piarium.pluginSettings.piLens.field.includeLspCodeActions',
-    'actionableWarnings.deltaOnly': 'settings.piarium.pluginSettings.piLens.field.deltaOnly',
-    'actionableWarnings.autoFix.enabled': 'settings.piarium.pluginSettings.piLens.field.actionableAutoFix',
-    'actionableWarnings.autoFix.maxFixes': 'settings.piarium.pluginSettings.piLens.field.maxFixes',
-    'tools.lazy': 'settings.piarium.pluginSettings.piLens.field.lazyTools',
-    'ui.compactToolLine': 'settings.piarium.pluginSettings.piLens.field.compactToolLine',
-    'widget.visible': 'settings.piarium.pluginSettings.piLens.field.widget',
-    'guard.enabled': 'settings.piarium.pluginSettings.piLens.field.guard',
-    'dispatch.runnerTimeoutFloorMs': 'settings.piarium.pluginSettings.piLens.field.runnerTimeoutFloor',
-    ignore: 'settings.piarium.pluginSettings.piLens.field.ignore',
-    maxProjectFiles: 'settings.piarium.pluginSettings.piLens.field.maxProjectFiles',
-    'reviewGraph.maxFiles': 'settings.piarium.pluginSettings.piLens.field.reviewGraphMaxFiles',
-    'rules.high-complexity.threshold': 'settings.piarium.pluginSettings.piLens.field.complexityThreshold',
-    'rules.high-fan-out.threshold': 'settings.piarium.pluginSettings.piLens.field.fanOutThreshold',
-    'trivy.enabled': 'settings.piarium.pluginSettings.piLens.field.trivyEnabled',
-    'trivy.minSeverity': 'settings.piarium.pluginSettings.piLens.field.trivyMinSeverity',
-    'helm.renderValidation.enabled': 'settings.piarium.pluginSettings.piLens.field.helmRenderValidation',
+    'lens.enabled': 'settings.varin.pluginSettings.piLens.field.lens',
+    'lsp.enabled': 'settings.varin.pluginSettings.piLens.field.lsp',
+    'tests.enabled': 'settings.varin.pluginSettings.piLens.field.tests',
+    'delta.enabled': 'settings.varin.pluginSettings.piLens.field.delta',
+    'opengrep.enabled': 'settings.varin.pluginSettings.piLens.field.opengrep',
+    'readGuard.enabled': 'settings.varin.pluginSettings.piLens.field.readGuard',
+    'turnEnd.madge.enabled': 'settings.varin.pluginSettings.piLens.field.turnEndMadge',
+    'format.enabled': 'settings.varin.pluginSettings.piLens.field.format',
+    'format.mode': 'settings.varin.pluginSettings.piLens.field.formatMode',
+    'autofix.enabled': 'settings.varin.pluginSettings.piLens.field.autofix',
+    'contextInjection.enabled': 'settings.varin.pluginSettings.piLens.field.contextInjection',
+    'turnSummary.enabled': 'settings.varin.pluginSettings.piLens.field.turnSummary',
+    'actionableWarnings.enabled': 'settings.varin.pluginSettings.piLens.field.actionableWarnings',
+    'actionableWarnings.includeLspCodeActions': 'settings.varin.pluginSettings.piLens.field.includeLspCodeActions',
+    'actionableWarnings.deltaOnly': 'settings.varin.pluginSettings.piLens.field.deltaOnly',
+    'actionableWarnings.autoFix.enabled': 'settings.varin.pluginSettings.piLens.field.actionableAutoFix',
+    'actionableWarnings.autoFix.maxFixes': 'settings.varin.pluginSettings.piLens.field.maxFixes',
+    'tools.lazy': 'settings.varin.pluginSettings.piLens.field.lazyTools',
+    'ui.compactToolLine': 'settings.varin.pluginSettings.piLens.field.compactToolLine',
+    'widget.visible': 'settings.varin.pluginSettings.piLens.field.widget',
+    'guard.enabled': 'settings.varin.pluginSettings.piLens.field.guard',
+    'dispatch.runnerTimeoutFloorMs': 'settings.varin.pluginSettings.piLens.field.runnerTimeoutFloor',
+    ignore: 'settings.varin.pluginSettings.piLens.field.ignore',
+    maxProjectFiles: 'settings.varin.pluginSettings.piLens.field.maxProjectFiles',
+    'reviewGraph.maxFiles': 'settings.varin.pluginSettings.piLens.field.reviewGraphMaxFiles',
+    'rules.high-complexity.threshold': 'settings.varin.pluginSettings.piLens.field.complexityThreshold',
+    'rules.high-fan-out.threshold': 'settings.varin.pluginSettings.piLens.field.fanOutThreshold',
+    'trivy.enabled': 'settings.varin.pluginSettings.piLens.field.trivyEnabled',
+    'trivy.minSeverity': 'settings.varin.pluginSettings.piLens.field.trivyMinSeverity',
+    'helm.renderValidation.enabled': 'settings.varin.pluginSettings.piLens.field.helmRenderValidation',
   };
   return labels[field] ?? field;
 };
@@ -86,12 +86,12 @@ const PiLensIssueNote: React.FC<{
       {issues.map((issue) => {
         const field = t(fieldLabelKey(issue.field) as never);
         const message = issue.code === 'project-global-only'
-          ? t('settings.piarium.pluginSettings.piLens.validation.projectGlobalOnly', { field })
+          ? t('settings.varin.pluginSettings.piLens.validation.projectGlobalOnly', { field })
           : issue.code === 'invalid-number'
-            ? t('settings.piarium.pluginSettings.validation.invalidNumber', { field })
+            ? t('settings.varin.pluginSettings.validation.invalidNumber', { field })
             : issue.code === 'invalid-boolean'
-              ? t('settings.piarium.pluginSettings.validation.invalidBoolean', { field })
-              : t('settings.piarium.pluginSettings.validation.invalidValue', { field });
+              ? t('settings.varin.pluginSettings.validation.invalidBoolean', { field })
+              : t('settings.varin.pluginSettings.validation.invalidValue', { field });
         return <p key={`${issue.code}:${issue.field}`}>{message}</p>;
       })}
     </div>
@@ -111,52 +111,52 @@ const fieldProps = (controller: PluginObjectDraft, trustBlocked: boolean): PiLen
 
 const GlobalQuickSettings: React.FC<{ fields: PiLensFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   const options = (values: readonly string[]) => values.map((value) => ({
     value,
-    label: t(`settings.piarium.pluginSettings.piLens.value.${value}` as never),
+    label: t(`settings.varin.pluginSettings.piLens.value.${value}` as never),
   }));
   return (
     <div className="space-y-7">
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.piLens.section.diagnostics')}
+        title={t('settings.varin.pluginSettings.piLens.section.diagnostics')}
         contentClassName="space-y-4"
       >
-        <PluginOptionalBooleanField {...fields} path={['lens', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.lens')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['lsp', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.lsp')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['tests', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.tests')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['delta', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.delta')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['opengrep', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.opengrep')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['readGuard', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.readGuard')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['turnEnd', 'madge', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.turnEndMadge')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['lens', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.lens')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['lsp', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.lsp')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['tests', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.tests')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['delta', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.delta')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['opengrep', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.opengrep')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['readGuard', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.readGuard')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['turnEnd', 'madge', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.turnEndMadge')} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.mutations')} contentClassName="space-y-4">
-        <PluginOptionalBooleanField {...fields} path={['format', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.format')} unsetLabel={notSet} />
-        <PluginOptionalSelectField {...fields} path={['format', 'mode']} label={t('settings.piarium.pluginSettings.piLens.field.formatMode')} options={options(['deferred', 'immediate'])} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['autofix', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.autofix')} unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.mutations')} contentClassName="space-y-4">
+        <PluginOptionalBooleanField {...fields} path={['format', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.format')} unsetLabel={notSet} />
+        <PluginOptionalSelectField {...fields} path={['format', 'mode']} label={t('settings.varin.pluginSettings.piLens.field.formatMode')} options={options(['deferred', 'immediate'])} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['autofix', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.autofix')} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.context')} contentClassName="space-y-4">
-        <PluginOptionalBooleanField {...fields} path={['contextInjection', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.contextInjection')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['turnSummary', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.turnSummary')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.actionableWarnings')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'includeLspCodeActions']} label={t('settings.piarium.pluginSettings.piLens.field.includeLspCodeActions')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'deltaOnly']} label={t('settings.piarium.pluginSettings.piLens.field.deltaOnly')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'autoFix', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.actionableAutoFix')} unsetLabel={notSet} />
-        <PluginOptionalNumberField {...fields} path={['actionableWarnings', 'autoFix', 'maxFixes']} label={t('settings.piarium.pluginSettings.piLens.field.maxFixes')} min={0} step={1} unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.context')} contentClassName="space-y-4">
+        <PluginOptionalBooleanField {...fields} path={['contextInjection', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.contextInjection')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['turnSummary', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.turnSummary')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.actionableWarnings')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'includeLspCodeActions']} label={t('settings.varin.pluginSettings.piLens.field.includeLspCodeActions')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'deltaOnly']} label={t('settings.varin.pluginSettings.piLens.field.deltaOnly')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'autoFix', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.actionableAutoFix')} unsetLabel={notSet} />
+        <PluginOptionalNumberField {...fields} path={['actionableWarnings', 'autoFix', 'maxFixes']} label={t('settings.varin.pluginSettings.piLens.field.maxFixes')} min={0} step={1} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.interface')} contentClassName="space-y-4">
-        <PluginOptionalBooleanField {...fields} path={['tools', 'lazy']} label={t('settings.piarium.pluginSettings.piLens.field.lazyTools')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['ui', 'compactToolLine']} label={t('settings.piarium.pluginSettings.piLens.field.compactToolLine')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['widget', 'visible']} label={t('settings.piarium.pluginSettings.piLens.field.widget')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['guard', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.guard')} unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.interface')} contentClassName="space-y-4">
+        <PluginOptionalBooleanField {...fields} path={['tools', 'lazy']} label={t('settings.varin.pluginSettings.piLens.field.lazyTools')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['ui', 'compactToolLine']} label={t('settings.varin.pluginSettings.piLens.field.compactToolLine')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['widget', 'visible']} label={t('settings.varin.pluginSettings.piLens.field.widget')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['guard', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.guard')} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.scan')} contentClassName="space-y-4">
-        <PluginStringListField {...fields} path={['ignore']} label={t('settings.piarium.pluginSettings.piLens.field.ignore')} placeholder="**/*.generated.ts" />
-        <PluginOptionalNumberField {...fields} path={['dispatch', 'runnerTimeoutFloorMs']} label={t('settings.piarium.pluginSettings.piLens.field.runnerTimeoutFloor')} min={1} step={1} unit="ms" unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.scan')} contentClassName="space-y-4">
+        <PluginStringListField {...fields} path={['ignore']} label={t('settings.varin.pluginSettings.piLens.field.ignore')} placeholder="**/*.generated.ts" />
+        <PluginOptionalNumberField {...fields} path={['dispatch', 'runnerTimeoutFloorMs']} label={t('settings.varin.pluginSettings.piLens.field.runnerTimeoutFloor')} min={1} step={1} unit="ms" unsetLabel={notSet} />
       </SettingsControlGroup>
     </div>
   );
@@ -164,33 +164,33 @@ const GlobalQuickSettings: React.FC<{ fields: PiLensFields }> = ({ fields }) => 
 
 const ProjectQuickSettings: React.FC<{ fields: PiLensFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
     <div className="space-y-7">
-      <SettingsControlGroup title={t('settings.piarium.pluginSettings.piLens.section.mutations')} contentClassName="space-y-4">
-        <PluginOptionalBooleanField {...fields} path={['format', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.format')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['autofix', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.autofix')} unsetLabel={notSet} />
-        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'autoFix', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.actionableAutoFix')} unsetLabel={notSet} />
+      <SettingsControlGroup title={t('settings.varin.pluginSettings.piLens.section.mutations')} contentClassName="space-y-4">
+        <PluginOptionalBooleanField {...fields} path={['format', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.format')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['autofix', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.autofix')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['actionableWarnings', 'autoFix', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.actionableAutoFix')} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.projectScale')} contentClassName="space-y-4">
-        <PluginStringListField {...fields} path={['ignore']} label={t('settings.piarium.pluginSettings.piLens.field.ignore')} placeholder="**/*.test.ts" />
-        <PluginOptionalNumberField {...fields} path={['maxProjectFiles']} label={t('settings.piarium.pluginSettings.piLens.field.maxProjectFiles')} min={1} step={1} unsetLabel={notSet} />
-        <PluginOptionalNumberField {...fields} path={['reviewGraph', 'maxFiles']} label={t('settings.piarium.pluginSettings.piLens.field.reviewGraphMaxFiles')} min={100} max={20000} step={1} unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.projectScale')} contentClassName="space-y-4">
+        <PluginStringListField {...fields} path={['ignore']} label={t('settings.varin.pluginSettings.piLens.field.ignore')} placeholder="**/*.test.ts" />
+        <PluginOptionalNumberField {...fields} path={['maxProjectFiles']} label={t('settings.varin.pluginSettings.piLens.field.maxProjectFiles')} min={1} step={1} unsetLabel={notSet} />
+        <PluginOptionalNumberField {...fields} path={['reviewGraph', 'maxFiles']} label={t('settings.varin.pluginSettings.piLens.field.reviewGraphMaxFiles')} min={100} max={20000} step={1} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.rules')} contentClassName="space-y-4">
-        <PluginOptionalNumberField {...fields} path={['rules', 'high-complexity', 'threshold']} label={t('settings.piarium.pluginSettings.piLens.field.complexityThreshold')} min={1} step={1} unsetLabel={notSet} />
-        <PluginOptionalNumberField {...fields} path={['rules', 'high-fan-out', 'threshold']} label={t('settings.piarium.pluginSettings.piLens.field.fanOutThreshold')} min={1} step={1} unsetLabel={notSet} />
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.rules')} contentClassName="space-y-4">
+        <PluginOptionalNumberField {...fields} path={['rules', 'high-complexity', 'threshold']} label={t('settings.varin.pluginSettings.piLens.field.complexityThreshold')} min={1} step={1} unsetLabel={notSet} />
+        <PluginOptionalNumberField {...fields} path={['rules', 'high-fan-out', 'threshold']} label={t('settings.varin.pluginSettings.piLens.field.fanOutThreshold')} min={1} step={1} unsetLabel={notSet} />
       </SettingsControlGroup>
 
-      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.piLens.section.security')} contentClassName="space-y-4">
-        <PluginOptionalBooleanField {...fields} path={['trivy', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.trivyEnabled')} unsetLabel={notSet} />
-        <PluginOptionalSelectField {...fields} path={['trivy', 'minSeverity']} label={t('settings.piarium.pluginSettings.piLens.field.trivyMinSeverity')} unsetLabel={notSet} options={PI_LENS_TRIVY_SEVERITIES.map((value) => ({
+      <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.piLens.section.security')} contentClassName="space-y-4">
+        <PluginOptionalBooleanField {...fields} path={['trivy', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.trivyEnabled')} unsetLabel={notSet} />
+        <PluginOptionalSelectField {...fields} path={['trivy', 'minSeverity']} label={t('settings.varin.pluginSettings.piLens.field.trivyMinSeverity')} unsetLabel={notSet} options={PI_LENS_TRIVY_SEVERITIES.map((value) => ({
           value,
-          label: t(`settings.piarium.pluginSettings.piLens.value.${value.toLowerCase()}` as never),
+          label: t(`settings.varin.pluginSettings.piLens.value.${value.toLowerCase()}` as never),
         }))} />
-        <PluginOptionalBooleanField {...fields} path={['helm', 'renderValidation', 'enabled']} label={t('settings.piarium.pluginSettings.piLens.field.helmRenderValidation')} unsetLabel={notSet} />
+        <PluginOptionalBooleanField {...fields} path={['helm', 'renderValidation', 'enabled']} label={t('settings.varin.pluginSettings.piLens.field.helmRenderValidation')} unsetLabel={notSet} />
       </SettingsControlGroup>
     </div>
   );
@@ -223,16 +223,16 @@ export const PiLensSettings: React.FC<PiLensSettingsProps> = ({ runtimeTarget, t
   const issueMessage = React.useCallback((issue: PiLensDraftIssue): string => {
     const field = t(fieldLabelKey(issue.field) as never);
     if (issue.code === 'project-global-only') {
-      return t('settings.piarium.pluginSettings.piLens.validation.projectGlobalOnly', { field });
+      return t('settings.varin.pluginSettings.piLens.validation.projectGlobalOnly', { field });
     }
-    if (issue.code === 'invalid-number') return t('settings.piarium.pluginSettings.validation.invalidNumber', { field });
-    if (issue.code === 'invalid-boolean') return t('settings.piarium.pluginSettings.validation.invalidBoolean', { field });
-    return t('settings.piarium.pluginSettings.validation.invalidValue', { field });
+    if (issue.code === 'invalid-number') return t('settings.varin.pluginSettings.validation.invalidNumber', { field });
+    if (issue.code === 'invalid-boolean') return t('settings.varin.pluginSettings.validation.invalidBoolean', { field });
+    return t('settings.varin.pluginSettings.validation.invalidValue', { field });
   }, [t]);
 
   return (
     <div className="space-y-7">
-      <SettingsFieldRow label={t('settings.piarium.pluginSettings.scope.label')} info={t('settings.piarium.pluginSettings.scope.description')} controlClassName="w-full max-w-[24rem]">
+      <SettingsFieldRow label={t('settings.varin.pluginSettings.scope.label')} info={t('settings.varin.pluginSettings.scope.description')} controlClassName="w-full max-w-[24rem]">
         <ScopeSelector
           value={scope}
           onChange={setScope}
@@ -241,7 +241,7 @@ export const PiLensSettings: React.FC<PiLensSettingsProps> = ({ runtimeTarget, t
       </SettingsFieldRow>
       <PluginConfigSource controller={controller} />
       {scope === 'project' ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.piLens.projectScopeNote')}</PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.varin.pluginSettings.piLens.projectScopeNote')}</PluginRuntimeNote>
       ) : null}
       <PiLensIssueNote issues={issues} />
       {scope === 'global' ? <GlobalQuickSettings fields={fields} /> : <ProjectQuickSettings fields={fields} />}

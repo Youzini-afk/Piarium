@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { HostError } from "../src/errors.js";
 import { SessionHost } from "../src/session-host.js";
 
@@ -17,7 +17,7 @@ function createHost(agentDir: string, projectTrusted: boolean): SessionHost {
 
 describe("SessionHost Pi resources", () => {
   it("creates, discovers, updates, and deletes native prompt templates with revisions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-resources-prompt-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-resources-prompt-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const previousHome = process.env.HOME;
@@ -83,7 +83,7 @@ describe("SessionHost Pi resources", () => {
   });
 
   it("copies complete skill directories and keeps invalid editable skills visible", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-resources-skill-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-resources-skill-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const previousHome = process.env.HOME;
@@ -151,7 +151,7 @@ describe("SessionHost Pi resources", () => {
   });
 
   it("keeps external resources read-only and enforces project trust on writes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-resources-trust-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-resources-trust-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const externalPrompt = join(root, "external", "shared.md");

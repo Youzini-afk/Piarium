@@ -1,4 +1,4 @@
-import { createWorkspaceHttpAPI } from '@piarium/ui/lib/workspaceApiHttp';
-import type { WorkspaceAPI } from '@piarium/application-client';
+import { createWorkspaceHttpAPI } from '@varin/ui/lib/workspaceApiHttp';
+import type { WorkspaceAPI } from '@varin/application-client';
 
 export const createWebWorkspaceAPI = (): WorkspaceAPI => createWorkspaceHttpAPI();

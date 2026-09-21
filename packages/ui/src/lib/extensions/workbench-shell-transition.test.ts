@@ -1,16 +1,16 @@
 import { expect, mock, test } from 'bun:test';
 import type {
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionHostStateSnapshot,
-} from '@piarium/extension-contract';
+  VarinExtensionCatalogEntry,
+  VarinExtensionHostStateSnapshot,
+} from '@varin/extension-contract';
 import {
-  defaultPiariumWorkbenchProfileDocument,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-} from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceOwnerIdentity, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+  defaultVarinWorkbenchProfileDocument,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+} from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceOwnerIdentity, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { startWorkbenchMountSession } from './workbench-mount';
-import type { PiariumExtensionCatalogStoreState } from './catalog-store';
+import type { VarinExtensionCatalogStoreState } from './catalog-store';
 
 mock.module('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
@@ -38,7 +38,7 @@ const owner = (): SurfaceOwnerIdentity => ({
   realmId: 'surface',
 });
 
-const shellEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEntry => ({
+const shellEntry = (enabled: boolean, failed = false): VarinExtensionCatalogEntry => ({
   actual: failed
     ? [{
       desiredRevision: 1,
@@ -56,14 +56,14 @@ const shellEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
   desired: { enabled, revision: 1, updatedAt: '2026-08-20T00:00:00.000Z' },
   installedAt: '2026-08-20T00:00:00.000Z',
   manifest: {
-    engines: { piarium: '*' },
+    engines: { varin: '*' },
     id: shellExtensionId,
     schemaVersion: 1,
     version: '1.0.0',
     contributions: [{
       contractVersion: 1,
       data: {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: { replacementTargets: [], slots: [] },
           desktop: { replacementTargets: [], slots: [] },
@@ -71,7 +71,7 @@ const shellEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
       },
       id: shellContributionId,
       kind: 'shell',
-      replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+      replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
       supports: ['web', 'desktop'],
     }],
   },
@@ -82,13 +82,13 @@ const shellEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
 });
 
 const workbenchDocument = () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.profiles.push({ id: 'studio', label: 'Studio' });
   document.revision = 4;
   document.layouts = [{
     profileId: 'studio',
     references: [],
-    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId },
+    replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId },
     scope: 'distribution',
     scopeId: 'studio',
     surface: 'web',
@@ -96,7 +96,7 @@ const workbenchDocument = () => {
   return document;
 };
 
-const hostSnapshot = (entry: PiariumExtensionCatalogEntry): PiariumExtensionHostStateSnapshot => ({
+const hostSnapshot = (entry: VarinExtensionCatalogEntry): VarinExtensionHostStateSnapshot => ({
   catalog: {
     authoritative: true,
     diagnostics: [],
@@ -140,14 +140,14 @@ const contribution = (implementation: unknown): SurfaceContribution => ({
   descriptor: {
     contractVersion: 1,
     data: {
-      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: {
         web: { replacementTargets: [], slots: [] },
       },
     },
     id: shellContributionId,
     kind: 'shell',
-    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
     supports: ['web'],
   },
   implementation,
@@ -155,7 +155,7 @@ const contribution = (implementation: unknown): SurfaceContribution => ({
 });
 
 const createDeps = (options: {
-  entry: PiariumExtensionCatalogEntry;
+  entry: VarinExtensionCatalogEntry;
   generation?: number;
   implementation?: unknown;
   activate?: () => Promise<void>;
@@ -177,7 +177,7 @@ const createDeps = (options: {
   let disposed = 0;
   const deps: WorkbenchShellTransitionDependencies = {
     createMountContainer: () => ({ remove() {} } as HTMLElement),
-    getCatalogState: (): PiariumExtensionCatalogStoreState => ({
+    getCatalogState: (): VarinExtensionCatalogStoreState => ({
       busyExtensionId: null,
       error: null,
       loading: false,

@@ -12,12 +12,12 @@ import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 import {
   deleteScheduledTask,
   deleteScheduledTaskLoopFile,
@@ -294,7 +294,7 @@ export function ScheduledTasksDialog() {
       return;
     }
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type !== 'scheduled-task-ran') {
         return;
       }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ModelDescriptor, SessionSnapshot } from '@piarium/protocol';
+import type { ModelDescriptor, SessionSnapshot } from '@varin/protocol';
 import { nextPiFavoriteModel, nextPiThinkingLevel } from './keyboardActions';
 
 const model = (

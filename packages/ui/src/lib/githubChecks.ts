@@ -1,4 +1,4 @@
-import type { GitHubCheckRun, GitHubChecksSummary } from '@piarium/application-client';
+import type { GitHubCheckRun, GitHubChecksSummary } from '@varin/application-client';
 
 /**
  * Client-side mirror of the server's check-run aggregation so surfaces that

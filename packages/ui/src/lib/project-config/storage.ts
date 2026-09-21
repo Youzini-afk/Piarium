@@ -1,31 +1,31 @@
 import type {
   DocumentsAPI,
   FilesAPI,
-  PiariumDocumentReadResult,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinDocumentReadResult,
+  VarinResourceReference,
+} from '@varin/application-client';
 import { requireWorkspaceEpoch } from '@/lib/documents/mutation-token';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { documentIdentityForPath, pickWorkspaceRoot } from '@/lib/documents/path';
 import { createProjectIdFromPath } from '@/lib/projectId';
-import type { PiariumProjectConfig, PiariumProjectRef } from './types';
+import type { VarinProjectConfig, VarinProjectRef } from './types';
 
 type ProjectConfigFailureReason = 'conflict' | 'malformed' | 'unavailable' | 'unsupported' | 'write-failed';
 
-export class PiariumProjectConfigError extends Error {
+export class VarinProjectConfigError extends Error {
   readonly reason: ProjectConfigFailureReason;
   readonly path?: string;
 
   constructor(message: string, options: { path?: string; reason: ProjectConfigFailureReason }) {
     super(message);
-    this.name = 'PiariumProjectConfigError';
+    this.name = 'VarinProjectConfigError';
     this.reason = options.reason;
     this.path = options.path;
   }
 }
 
-export interface PiariumProjectConfigRuntime {
+export interface VarinProjectConfigRuntime {
   documents: DocumentsAPI;
   files: FilesAPI;
   currentDirectory: string;
@@ -38,19 +38,19 @@ interface ProjectPaths {
 
 interface TextSnapshot {
   path: string;
-  resource: PiariumResourceReference;
-  result: PiariumDocumentReadResult;
+  resource: VarinResourceReference;
+  result: VarinDocumentReadResult;
   documents: DocumentsAPI;
 }
 
-const mutationToken = (snapshot: TextSnapshot, project: PiariumProjectRef) => ({
+const mutationToken = (snapshot: TextSnapshot, project: VarinProjectRef) => ({
   workspaceId: snapshot.resource.workspaceId,
   epoch: requireWorkspaceEpoch(snapshot.result.epoch),
   owner: { kind: 'project-config', id: project.id },
 });
 
 interface LoadedConfig {
-  config: PiariumProjectConfig;
+  config: VarinProjectConfig;
   revision: string | null;
 }
 
@@ -67,22 +67,22 @@ const joinPath = (base: string, ...segments: string[]): string => {
 
 const parentPath = (value: string): string => value.slice(0, value.lastIndexOf('/')) || '/';
 
-const parseConfig = (raw: string, path: string): PiariumProjectConfig => {
+const parseConfig = (raw: string, path: string): VarinProjectConfig => {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('root must be an object');
     }
-    return parsed as PiariumProjectConfig;
+    return parsed as VarinProjectConfig;
   } catch (error) {
-    throw new PiariumProjectConfigError(
+    throw new VarinProjectConfigError(
       `Project configuration is malformed: ${error instanceof Error ? error.message : String(error)}`,
       { path, reason: 'malformed' },
     );
   }
 };
 
-const defaultRuntime = (): PiariumProjectConfigRuntime | null => {
+const defaultRuntime = (): VarinProjectConfigRuntime | null => {
   const apis = getRegisteredRuntimeAPIs();
   if (!apis?.documents || !apis.files) return null;
   return {
@@ -92,8 +92,8 @@ const defaultRuntime = (): PiariumProjectConfigRuntime | null => {
   };
 };
 
-export const createPiariumProjectConfigStore = (
-  getRuntime: () => PiariumProjectConfigRuntime | null = defaultRuntime,
+export const createVarinProjectConfigStore = (
+  getRuntime: () => VarinProjectConfigRuntime | null = defaultRuntime,
 ) => {
   const mutationQueues = new Map<string, Promise<unknown>>();
 
@@ -107,43 +107,43 @@ export const createPiariumProjectConfigStore = (
     return result;
   };
 
-  const requireRuntime = (): PiariumProjectConfigRuntime => {
+  const requireRuntime = (): VarinProjectConfigRuntime => {
     const runtime = getRuntime();
     if (!runtime) {
-      throw new PiariumProjectConfigError('Project configuration runtime is unavailable', { reason: 'unavailable' });
+      throw new VarinProjectConfigError('Project configuration runtime is unavailable', { reason: 'unavailable' });
     }
     return runtime;
   };
 
-  const resolvePaths = async (project: PiariumProjectRef): Promise<ProjectPaths> => {
+  const resolvePaths = async (project: VarinProjectRef): Promise<ProjectPaths> => {
     const runtime = requireRuntime();
     const rawHome = (await runtime.files.getHomeDirectory()).trim();
     if (!rawHome) {
-      throw new PiariumProjectConfigError('Home directory is unavailable', { reason: 'unavailable' });
+      throw new VarinProjectConfigError('Home directory is unavailable', { reason: 'unavailable' });
     }
     const home = normalizePath(rawHome);
     const projectPath = normalizePath(project.path.trim());
     if (!project.path.trim()) {
-      throw new PiariumProjectConfigError('Project path is required', { reason: 'unavailable' });
+      throw new VarinProjectConfigError('Project path is required', { reason: 'unavailable' });
     }
     const pathId = createProjectIdFromPath(projectPath);
     if (!pathId) {
-      throw new PiariumProjectConfigError('Project identity is unavailable', { reason: 'unavailable' });
+      throw new VarinProjectConfigError('Project identity is unavailable', { reason: 'unavailable' });
     }
-    const piariumProjects = joinPath(home, '.config', 'piarium', 'projects');
-    const canonicalConfig = joinPath(piariumProjects, `${pathId}.json`);
+    const varinProjects = joinPath(home, '.config', 'varin', 'projects');
+    const canonicalConfig = joinPath(varinProjects, `${pathId}.json`);
     return {
       canonicalConfig,
-      canonicalDirectory: joinPath(piariumProjects, pathId),
+      canonicalDirectory: joinPath(varinProjects, pathId),
     };
   };
 
-  const resolveTextSnapshot = async (path: string, project?: PiariumProjectRef): Promise<TextSnapshot> => {
+  const resolveTextSnapshot = async (path: string, project?: VarinProjectRef): Promise<TextSnapshot> => {
     const runtime = requireRuntime();
     const home = await runtime.files.getHomeDirectory().catch(() => '');
     const root = pickWorkspaceRoot(path, [home, runtime.currentDirectory, project?.path ?? '']);
     if (!root) {
-      throw new PiariumProjectConfigError('Project configuration path is outside available roots', {
+      throw new VarinProjectConfigError('Project configuration path is outside available roots', {
         path,
         reason: 'unavailable',
       });
@@ -151,7 +151,7 @@ export const createPiariumProjectConfigStore = (
     const workspace = await runtime.documents.resolveWorkspace({ path: root });
     const resource = documentIdentityForPath(workspace.workspaceId, root, path);
     if (!resource) {
-      throw new PiariumProjectConfigError('Project configuration path is outside its workspace', {
+      throw new VarinProjectConfigError('Project configuration path is outside its workspace', {
         path,
         reason: 'unavailable',
       });
@@ -167,7 +167,7 @@ export const createPiariumProjectConfigStore = (
   const configFromSnapshot = (snapshot: TextSnapshot): LoadedConfig | null => {
     if (snapshot.result.status === 'missing') return null;
     if (snapshot.result.status !== 'ready') {
-      throw new PiariumProjectConfigError('Project configuration must be a UTF text file', {
+      throw new VarinProjectConfigError('Project configuration must be a UTF text file', {
         path: snapshot.path,
         reason: 'unsupported',
       });
@@ -179,16 +179,16 @@ export const createPiariumProjectConfigStore = (
   };
 
   const writeConfigSnapshot = async (
-    project: PiariumProjectRef,
+    project: VarinProjectRef,
     path: string,
-    config: PiariumProjectConfig,
+    config: VarinProjectConfig,
     expectedRevision: string | null,
   ): Promise<{ status: 'written'; revision: string } | { status: 'conflict' }> => {
     const runtime = requireRuntime();
     const directory = parentPath(path);
     const created = await runtime.files.createDirectory(directory);
     if (created.success === false) {
-      throw new PiariumProjectConfigError('Failed to create the project configuration directory', {
+      throw new VarinProjectConfigError('Failed to create the project configuration directory', {
         path: directory,
         reason: 'write-failed',
       });
@@ -211,7 +211,7 @@ export const createPiariumProjectConfigStore = (
   };
 
   const loadCanonical = async (
-    project: PiariumProjectRef,
+    project: VarinProjectRef,
     paths: ProjectPaths,
   ): Promise<LoadedConfig> => {
     const canonicalSnapshot = await resolveTextSnapshot(paths.canonicalConfig, project);
@@ -220,7 +220,7 @@ export const createPiariumProjectConfigStore = (
     return { config: {}, revision: null };
   };
 
-  const read = async (project: PiariumProjectRef): Promise<PiariumProjectConfig> => {
+  const read = async (project: VarinProjectRef): Promise<VarinProjectConfig> => {
     const paths = await resolvePaths(project);
     return runSerialized(paths.canonicalConfig, async () => (
       (await loadCanonical(project, paths)).config
@@ -228,15 +228,15 @@ export const createPiariumProjectConfigStore = (
   };
 
   const mutate = async (
-    project: PiariumProjectRef,
-    createPatch: (current: Readonly<PiariumProjectConfig>) => Partial<PiariumProjectConfig> | null,
+    project: VarinProjectRef,
+    createPatch: (current: Readonly<VarinProjectConfig>) => Partial<VarinProjectConfig> | null,
   ): Promise<boolean> => {
     const paths = await resolvePaths(project);
     return runSerialized(paths.canonicalConfig, async () => {
       const current = await loadCanonical(project, paths);
       const patch = createPatch(current.config);
       if (patch === null) return false;
-      const next: PiariumProjectConfig = {
+      const next: VarinProjectConfig = {
         ...current.config,
         ...patch,
         projectPath: normalizePath(project.path),
@@ -247,20 +247,20 @@ export const createPiariumProjectConfigStore = (
   };
 
   const update = async (
-    project: PiariumProjectRef,
-    patch: Partial<PiariumProjectConfig>,
+    project: VarinProjectRef,
+    patch: Partial<VarinProjectConfig>,
   ): Promise<boolean> => mutate(project, () => patch);
 
-  const readText = async (project: PiariumProjectRef, path: string): Promise<string | null> => {
+  const readText = async (project: VarinProjectRef, path: string): Promise<string | null> => {
     const snapshot = await resolveTextSnapshot(path, project);
     if (snapshot.result.status === 'missing') return null;
     if (snapshot.result.status !== 'ready') {
-      throw new PiariumProjectConfigError('Project text resource is not UTF text', { path, reason: 'unsupported' });
+      throw new VarinProjectConfigError('Project text resource is not UTF text', { path, reason: 'unsupported' });
     }
     return snapshot.result.content;
   };
 
-  const writeText = async (project: PiariumProjectRef, path: string, content: string): Promise<boolean> => {
+  const writeText = async (project: VarinProjectRef, path: string, content: string): Promise<boolean> => {
     const runtime = requireRuntime();
     const created = await runtime.files.createDirectory(parentPath(path));
     if (created.success === false) return false;
@@ -278,7 +278,7 @@ export const createPiariumProjectConfigStore = (
     return result.status === 'written';
   };
 
-  const deleteText = async (project: PiariumProjectRef, path: string): Promise<boolean> => {
+  const deleteText = async (project: VarinProjectRef, path: string): Promise<boolean> => {
     const snapshot = await resolveTextSnapshot(path, project);
     if (snapshot.result.status === 'missing') return true;
     const result = await snapshot.documents.delete({
@@ -301,4 +301,4 @@ export const createPiariumProjectConfigStore = (
   };
 };
 
-export const piariumProjectConfigStore = createPiariumProjectConfigStore();
+export const varinProjectConfigStore = createVarinProjectConfigStore();

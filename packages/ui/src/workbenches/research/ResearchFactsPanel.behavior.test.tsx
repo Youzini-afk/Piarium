@@ -2,22 +2,22 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { ResearchFactsPanel } from './ResearchFactsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from '@/components/pi-session/HarnessThreadStateContext';
-import type { PiariumEvent } from '@/lib/piariumEvents';
+import type { VarinEvent } from '@/lib/varinEvents';
 
 const mocks = vi.hoisted(() => ({
   translate: (key: string, params?: Record<string, unknown>) => (
     params ? `${key}:${JSON.stringify(params)}` : key
   ),
-  listeners: new Set<(event: PiariumEvent) => void>(),
+  listeners: new Set<(event: VarinEvent) => void>(),
 }));
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/lib/piariumEvents', () => ({
-  subscribePiariumEvents: (listener: (event: PiariumEvent) => void) => {
+vi.mock('@/lib/varinEvents', () => ({
+  subscribeVarinEvents: (listener: (event: VarinEvent) => void) => {
     mocks.listeners.add(listener);
     return () => { mocks.listeners.delete(listener); };
   },
@@ -94,7 +94,7 @@ const render = async (value: HarnessThreadStateValue = state()) => {
   ));
 };
 
-const emit = (event: PiariumEvent) => {
+const emit = (event: VarinEvent) => {
   for (const listener of [...mocks.listeners]) listener(event);
 };
 
@@ -333,7 +333,7 @@ describe('ResearchFactsPanel', () => {
             remote: {
               machineId: 'managed:host-1',
               outputId: 'output-1',
-              path: '/srv/piarium/output/remote.bin',
+              path: '/srv/varin/output/remote.bin',
               retainedBy: 'execution-target',
               accessible: 'unreachable',
             },
@@ -346,7 +346,7 @@ describe('ResearchFactsPanel', () => {
       .find((button) => button.textContent === 'research-facts.viewDetails');
     await act(async () => detailsButton!.click());
     const text = container.textContent ?? '';
-    expect(text).toContain('/srv/piarium/output/remote.bin');
+    expect(text).toContain('/srv/varin/output/remote.bin');
     expect(text).toContain('research-facts.remoteUnreachable');
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'research-facts.download')).toBe(false);
   });

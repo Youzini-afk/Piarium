@@ -2,12 +2,12 @@ import type { DesktopBootOutcome } from '@/lib/desktopBoot';
 
 declare global {
   interface Window {
-    __PIARIUM_HOME__?: string;
-    __PIARIUM_MACOS_MAJOR__?: number;
-    __PIARIUM_LOCAL_ORIGIN__?: string;
-    __PIARIUM_ELECTRON__?: { runtime?: string; arch?: string; macVibrancy?: boolean; macVibrancySupported?: boolean; trayEnabled?: boolean };
-    __PIARIUM_PLATFORM__?: string;
-    __PIARIUM_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
+    __VARIN_HOME__?: string;
+    __VARIN_MACOS_MAJOR__?: number;
+    __VARIN_LOCAL_ORIGIN__?: string;
+    __VARIN_ELECTRON__?: { runtime?: string; arch?: string; macVibrancy?: boolean; macVibrancySupported?: boolean; trayEnabled?: boolean };
+    __VARIN_PLATFORM__?: string;
+    __VARIN_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
   }
 
   interface WebviewElement extends HTMLElement {

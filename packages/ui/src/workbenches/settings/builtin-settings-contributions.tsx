@@ -1,12 +1,12 @@
-import type { SurfaceActivationContext } from '@piarium/extension-surface';
+import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { LanguageSupportPage } from '@/components/sections/language-support/LanguageSupportPage';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
-import { PiariumSettingsPage } from '@/components/sections/piarium/PiariumSettingsPage';
-import type { PiariumSettingsSection } from '@/components/sections/piarium/types';
+import { VarinSettingsPage } from '@/components/sections/varin/VarinSettingsPage';
+import type { VarinSettingsSection } from '@/components/sections/varin/types';
 import { PluginsPage } from '@/components/sections/plugins';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -31,14 +31,14 @@ import {
 import type { SettingsPageImplementation } from '@/lib/settings/page-types';
 import { BuiltinAboutSettingsPage } from './BuiltinAboutSettingsPage';
 
-const piariumPage = (section: PiariumSettingsSection): SettingsPageImplementation => ({
-  renderContent: () => <PiariumSettingsPage section={section} />,
+const varinPage = (section: VarinSettingsSection): SettingsPageImplementation => ({
+  renderContent: () => <VarinSettingsPage section={section} />,
 });
 
 const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplementation => {
   let implementation: SettingsPageImplementation | null = null;
-  if (spec.renderer.startsWith('piarium:')) {
-    implementation = piariumPage(spec.renderer.slice('piarium:'.length) as PiariumSettingsSection);
+  if (spec.renderer.startsWith('varin:')) {
+    implementation = varinPage(spec.renderer.slice('varin:'.length) as VarinSettingsSection);
   } else {
     switch (spec.renderer) {
       case 'empty': implementation = { renderContent: () => null }; break;

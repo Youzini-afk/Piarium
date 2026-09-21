@@ -11,11 +11,11 @@
  */
 
 import {
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
-  type PiariumApplicationSurface,
-} from '@piarium/extension-contract';
+  VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
+  type VarinApplicationSurface,
+} from '@varin/extension-contract';
 import { registerWorkbenchShellComponent } from '@/lib/extensions/shell-component-registry';
 import { registerBuiltinSettingsWorkbench } from './settings/register';
 
@@ -26,7 +26,7 @@ let researchRegistration: Promise<void> | null = null;
 const registerAgentShell = (): Promise<void> => {
   if (agentRegistration) return agentRegistration;
   const pending = import('./agent/AgentWorkspaceShell').then(({ AgentWorkspaceShell }) => {
-    registerWorkbenchShellComponent(PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID, AgentWorkspaceShell);
+    registerWorkbenchShellComponent(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID, AgentWorkspaceShell);
   });
   agentRegistration = pending;
   void pending.catch(() => {
@@ -38,7 +38,7 @@ const registerAgentShell = (): Promise<void> => {
 const registerIdeShell = (): Promise<void> => {
   if (ideRegistration) return ideRegistration;
   const pending = import('./ide/IdeWorkbenchShell').then(({ IdeWorkbenchShell }) => {
-    registerWorkbenchShellComponent(PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, IdeWorkbenchShell);
+    registerWorkbenchShellComponent(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, IdeWorkbenchShell);
   });
   ideRegistration = pending;
   void pending.catch(() => {
@@ -50,7 +50,7 @@ const registerIdeShell = (): Promise<void> => {
 const registerResearchShell = (): Promise<void> => {
   if (researchRegistration) return researchRegistration;
   const pending = import('./research/ResearchWorkbenchShell').then(({ ResearchWorkbenchShell }) => {
-    registerWorkbenchShellComponent(PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID, ResearchWorkbenchShell);
+    registerWorkbenchShellComponent(VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID, ResearchWorkbenchShell);
   });
   researchRegistration = pending;
   void pending.catch(() => {
@@ -59,7 +59,7 @@ const registerResearchShell = (): Promise<void> => {
   return pending;
 };
 
-export const registerWorkbenchShells = async (surface: PiariumApplicationSurface): Promise<void> => {
+export const registerWorkbenchShells = async (surface: VarinApplicationSurface): Promise<void> => {
   registerBuiltinSettingsWorkbench();
   const registrations: Promise<void>[] = [];
   if (surface === 'web' || surface === 'desktop' || surface === 'mobile') {

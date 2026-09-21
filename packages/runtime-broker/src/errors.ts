@@ -5,7 +5,7 @@ import {
   PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE,
   type JsonValue,
   type PiRuntimeIssueCode,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export class PiRuntimeNotReadyError extends Error {
   readonly code = "runtime_not_ready";
@@ -41,8 +41,8 @@ export class PiHostEntryUnavailableError extends PiRuntimeBrokerError {
     const normalized = [...new Set(candidates.map((candidate) => resolve(candidate)))];
     super(
       PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE,
-      `Piarium installation files required to start Pi are missing or unavailable. `
-        + `Reinstall Piarium; changing the selected Pi runtime will not repair these application files. `
+      `Varin installation files required to start Pi are missing or unavailable. `
+        + `Reinstall Varin; changing the selected Pi runtime will not repair these application files. `
         + `Checked: ${normalized.join(", ")}`,
       { details: { checkedPaths: normalized }, retryable: true },
     );

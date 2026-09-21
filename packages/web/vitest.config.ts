@@ -51,7 +51,7 @@ export default defineConfig({
       // published bin/ output resolves server/. Tests run against Host source instead,
       // which keeps them working in a clean checkout with nothing generated yet.
       { find: '#application-host', replacement: applicationHostSrc },
-      { find: '@piarium/ui', replacement: uiSrc },
+      { find: '@varin/ui', replacement: uiSrc },
       { find: '@', replacement: uiSrc },
     ],
   },

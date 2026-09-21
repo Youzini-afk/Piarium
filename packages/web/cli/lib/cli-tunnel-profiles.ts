@@ -361,7 +361,7 @@ function resolveProfileByName(profiles: TunnelProfile[], profileName: string, pr
   });
 
   if (matches.length === 0) {
-    return { profile: null, error: `No tunnel profile found for name '${profileName}'. Run 'piarium tunnel profile list'.` };
+    return { profile: null, error: `No tunnel profile found for name '${profileName}'. Run 'varin tunnel profile list'.` };
   }
   if (matches.length > 1) {
     return { profile: null, error: `Profile name '${profileName}' exists for multiple providers. Use --provider <id>.` };

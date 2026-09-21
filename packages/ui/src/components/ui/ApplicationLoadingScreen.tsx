@@ -1,5 +1,5 @@
 import React from 'react';
-import { PiariumSplash } from '@/components/ui/PiariumSplash';
+import { VarinSplash } from '@/components/ui/VarinSplash';
 import { useI18n } from '@/lib/i18n';
 import { isInitialSplashPresent } from '@/lib/splash';
 
@@ -22,5 +22,5 @@ export const ApplicationLoadingScreen: React.FC = () => {
 
   if (deferToInitialSplash) return null;
 
-  return <PiariumSplash mode="boot" label={t('splash.aria.loading')} />;
+  return <VarinSplash mode="boot" label={t('splash.aria.loading')} />;
 };

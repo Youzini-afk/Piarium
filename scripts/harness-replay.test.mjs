@@ -20,7 +20,7 @@ test('the checked-in replay manifest resolves six real historical tasks', () => 
 });
 
 test('run records are non-overwriting and pair into the three designed metrics', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-harness-replay-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-harness-replay-'));
   try {
     const manifest = loadReplayManifest();
     const nativeDir = path.join(root, 'native');
@@ -43,7 +43,7 @@ test('run records are non-overwriting and pair into the three designed metrics',
 });
 
 test('failed runs require a diagnostic category', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-harness-replay-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-harness-replay-'));
   try {
     const manifest = loadReplayManifest();
     const run = createReplayRun({ manifest, caseId: manifest.cases[0].id, variant: 'native', model: 'test/model', pairId: 'trial-1', output: path.join(root, 'run') });

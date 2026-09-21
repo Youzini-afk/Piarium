@@ -3,7 +3,7 @@ import {
   JsonLineDecoder,
   ProtocolDecodeError,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { createDeferred } from "./deferred.js";
 
 export type EnvelopeHandler = (envelope: WireEnvelope) => void;

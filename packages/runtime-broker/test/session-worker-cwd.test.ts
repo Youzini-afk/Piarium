@@ -27,7 +27,7 @@ async function installCwdExtension(workspace: string, label: string, logFile: st
       appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(record) + "\\n", "utf8");
       pi.registerCommand("record-factory-cwd", {
         description: "Record the extension factory cwd",
-        handler: async () => pi.appendEntry("piarium.test.factory-cwd", record),
+        handler: async () => pi.appendEntry("varin.test.factory-cwd", record),
       });
     }\n`,
     "utf8",
@@ -84,7 +84,7 @@ async function writeSessionHeader(
 }
 
 test("catalog, workspace, and session workers keep independent cwd ownership", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-worker-cwd-create-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-worker-cwd-create-"));
   const agentDir = join(root, "agent");
   const catalogCwd = join(root, "catalog");
   const workspaceA = join(root, "workspace-a");
@@ -146,7 +146,7 @@ test("catalog, workspace, and session workers keep independent cwd ownership", a
 });
 
 test("session.open resolves every cwd source before starting the session worker", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-worker-cwd-open-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-worker-cwd-open-"));
   const agentDir = join(root, "agent");
   const catalogCwd = join(root, "catalog");
   const headerCwd = join(root, "header-cwd");
@@ -272,7 +272,7 @@ test("session.open resolves every cwd source before starting the session worker"
 });
 
 test("a missing child cwd leaves no failed session worker behind", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-worker-cwd-missing-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-worker-cwd-missing-"));
   const catalogCwd = join(root, "catalog");
   const missingCwd = join(root, "missing");
   await mkdir(catalogCwd, { recursive: true });
@@ -288,7 +288,7 @@ test("a missing child cwd leaves no failed session worker behind", async () => {
 });
 
 test("a blocked workspace extension cannot stall the catalog or another workspace", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-workspace-isolation-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-workspace-isolation-"));
   const agentDir = join(root, "agent");
   const catalogCwd = join(root, "catalog");
   const blockedWorkspace = join(root, "blocked");

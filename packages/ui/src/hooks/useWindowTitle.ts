@@ -3,11 +3,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { findPiProjectForCwd } from '@/lib/pi-runtime/sessionNavigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
-const APP_TITLE = 'Piarium';
+const APP_TITLE = 'Varin';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -75,7 +75,7 @@ export const useWindowTitle = () => {
           return;
         }
 
-        const localOrigin = window.__PIARIUM_LOCAL_ORIGIN__ || window.location.origin;
+        const localOrigin = window.__VARIN_LOCAL_ORIGIN__ || window.location.origin;
         const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
 
         if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {

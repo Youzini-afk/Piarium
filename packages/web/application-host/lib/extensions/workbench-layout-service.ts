@@ -1,21 +1,21 @@
 import {
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_CORE_SERVICE_VERSION,
-  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
-} from '@piarium/extension-contract';
-import type { JsonObject, JsonValue, PiariumExtensionStorageAddress } from '@piarium/extension-contract';
-import type { HostServiceHandler, HostServiceOwnerIdentity, HostServiceProvision } from '@piarium/extension-host';
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_CORE_SERVICE_VERSION,
+  VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
+} from '@varin/extension-contract';
+import type { JsonObject, JsonValue, VarinExtensionStorageAddress } from '@varin/extension-contract';
+import type { HostServiceHandler, HostServiceOwnerIdentity, HostServiceProvision } from '@varin/extension-host';
 
 const OWNER = {
   entrypointId: 'workbench-layout',
-  extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  extensionId: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   generation: 1,
 };
 
 interface WorkbenchLayoutStorage {
-  read(address: PiariumExtensionStorageAddress): Promise<unknown>;
+  read(address: VarinExtensionStorageAddress): Promise<unknown>;
   update(
-    address: PiariumExtensionStorageAddress,
+    address: VarinExtensionStorageAddress,
     expectedRevision: number,
     schemaVersion: number,
     document: JsonObject,
@@ -60,7 +60,7 @@ const jsonValue = (value: unknown, label = 'value'): JsonValue => {
   throw new TypeError(`${label} must be JSON-safe`);
 };
 
-const addressFor = (input: JsonObject): PiariumExtensionStorageAddress => {
+const addressFor = (input: JsonObject): VarinExtensionStorageAddress => {
   const profileId = text(input.profileId, 'profileId');
   const workspaceId = input.workspaceId === undefined || input.workspaceId === null
     ? null
@@ -98,9 +98,9 @@ export const registerBuiltinWorkbenchLayoutService = async (
   const handler: HostServiceHandler = createWorkbenchLayoutServiceHandler(extensionRuntime.storage);
   await extensionRuntime.services.replaceOwner(owner, [{
     descriptor: {
-      id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+      id: VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
       multiple: true,
-      version: PIARIUM_CORE_SERVICE_VERSION,
+      version: VARIN_CORE_SERVICE_VERSION,
     },
     handler,
   }]);

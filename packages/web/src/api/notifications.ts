@@ -1,8 +1,8 @@
-import type { NotificationPayload, NotificationsAPI } from '@piarium/application-client';
+import type { NotificationPayload, NotificationsAPI } from '@varin/application-client';
 
 const SW_READY_TIMEOUT_MS = 1500;
 const NOTIFICATION_DEDUPE_TTL_MS = 5000;
-const NOTIFICATION_DEDUPE_STORAGE_PREFIX = 'piarium.notificationClaim.v1:';
+const NOTIFICATION_DEDUPE_STORAGE_PREFIX = 'varin.notificationClaim.v1:';
 
 const notificationClaims = new Map<string, number>();
 
@@ -103,7 +103,7 @@ const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<b
   }
 
   try {
-    await registration.showNotification(payload?.title ?? 'Piarium', {
+    await registration.showNotification(payload?.title ?? 'Varin', {
       body: payload?.body,
       tag: payload?.tag,
     });
@@ -168,7 +168,7 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
       return true;
     }
 
-    new Notification(payload?.title ?? 'Piarium', {
+    new Notification(payload?.title ?? 'Varin', {
       body: payload?.body,
       tag: payload?.tag,
     });
@@ -184,7 +184,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
     return false;
   }
 
-  const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+  const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
   if (!desktop?.invoke) {
     return false;
   }
@@ -214,7 +214,7 @@ export const createWebNotificationsAPI = (): NotificationsAPI => ({
   },
   canNotify: () => {
     if (typeof window !== 'undefined') {
-      const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+      const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
       if (desktop?.invoke) {
         return true;
       }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HarnessActorContext } from "@piarium/protocol";
+import type { HarnessActorContext } from "@varin/protocol";
 import { openWorkspaceKnowledge } from "../knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../knowledge/context-runtime.js";
 import { createKnowledgeVectorRuntime } from "../knowledge/vectors/runtime.js";
@@ -29,7 +29,7 @@ const context = (signal: AbortSignal): HarnessServiceContext => ({
 });
 
 async function fixture() {
-  const dataDir = mkdtempSync(join(tmpdir(), "piarium-knowledge-services-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "varin-knowledge-services-"));
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
   const store = await openWorkspaceKnowledge({ dataDir, hostId: "host", workspaceId: "authority-workspace", embedding: null });
   cleanup.push(() => store.close());

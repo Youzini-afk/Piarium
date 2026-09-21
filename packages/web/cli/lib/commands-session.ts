@@ -1,10 +1,10 @@
 import path from 'node:path';
-import type { RuntimeMethodResult } from '@piarium/protocol';
+import type { RuntimeMethodResult } from '@varin/protocol';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
 import {
-  requestPiariumApi,
+  requestVarinApi,
   requestRuntimeMethod,
   waitForSessionIdle,
 } from './cli-runtime.js';
@@ -231,13 +231,13 @@ const resolveSessionDirectory = async (
   options: CliOptions,
 ): Promise<string> => {
   if (payload.directory) return path.resolve(payload.directory);
-  const settings = await requestPiariumApi(port, '/api/config/settings', options);
+  const settings = await requestVarinApi(port, '/api/config/settings', options);
   const project = (Array.isArray(settings?.projects) ? settings.projects : [])
     .map(recordOf)
     .find((entry) => entry.id === payload.projectId);
   const projectPath = asNonEmptyString(project?.path);
   if (!projectPath) {
-    throw new TunnelCliError(`Piarium project not found: ${payload.projectId}`, EXIT_CODE.USAGE_ERROR);
+    throw new TunnelCliError(`Varin project not found: ${payload.projectId}`, EXIT_CODE.USAGE_ERROR);
   }
   return path.resolve(projectPath);
 };
@@ -255,7 +255,7 @@ const createWorktree = async (
   // cannot cancel that filesystem mutation when the HTTP client gives up, so
   // use a window that lets this explicit operation report its real outcome.
   const WORKTREE_CREATION_TIMEOUT_MS = 120_000;
-  const body = await requestPiariumApi(
+  const body = await requestVarinApi(
     port,
     `/api/git/worktrees?directory=${encodeURIComponent(directory)}`,
     {
@@ -275,7 +275,7 @@ const createWorktree = async (
   );
   const worktreePath = asNonEmptyString(body.path);
   if (!worktreePath) {
-    throw new TunnelCliError('Piarium did not return the created worktree path.', EXIT_CODE.GENERAL_ERROR);
+    throw new TunnelCliError('Varin did not return the created worktree path.', EXIT_CODE.GENERAL_ERROR);
   }
   return { directory: path.resolve(worktreePath), worktree: body };
 };
@@ -353,7 +353,7 @@ const lastAssistantMessage = async (port: number, sessionId: string, options: Cl
 
 async function sessionCommand(options: CliOptions = {}, action = 'help'): Promise<void> {
   if (action === 'help') {
-    process.stdout.write(`Piarium Session Commands\n\nUSAGE:\n  piarium session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  piarium session create (--dir <path> | --project <projectId>) [--title <title>] [--wait] [OPTIONS]\n  piarium session send --session <id> --prompt <text> [--wait] [OPTIONS]\n  piarium session fork --session <id> --prompt <text> [--message <entryId>] [--wait] [OPTIONS]\n  piarium session status --session <id> [OPTIONS]\n  piarium session messages --session <id> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target Pi session id\n  --prompt <text>         Prompt or slash command to run\n  --message <entryId>     Fork before this Pi session entry (fork only; default: current leaf)\n  --model <provider/model>  Model for the prompt\n  --thinking <level>      Pi thinking level: off, minimal, low, medium, high, xhigh, max\n  --agent <id>            Pi agent role/profile instruction for the turn\n  --goal                  Treat the prompt as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait until the Pi session becomes idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the Pi session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nMESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Piarium server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    process.stdout.write(`Varin Session Commands\n\nUSAGE:\n  varin session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  varin session create (--dir <path> | --project <projectId>) [--title <title>] [--wait] [OPTIONS]\n  varin session send --session <id> --prompt <text> [--wait] [OPTIONS]\n  varin session fork --session <id> --prompt <text> [--message <entryId>] [--wait] [OPTIONS]\n  varin session status --session <id> [OPTIONS]\n  varin session messages --session <id> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target Pi session id\n  --prompt <text>         Prompt or slash command to run\n  --message <entryId>     Fork before this Pi session entry (fork only; default: current leaf)\n  --model <provider/model>  Model for the prompt\n  --thinking <level>      Pi thinking level: off, minimal, low, medium, high, xhigh, max\n  --agent <id>            Pi agent role/profile instruction for the turn\n  --goal                  Treat the prompt as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait until the Pi session becomes idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the Pi session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nMESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Varin server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
   }
 
@@ -487,7 +487,7 @@ async function sessionCommand(options: CliOptions = {}, action = 'help'): Promis
   } catch (error) {
     if (worktreeResult.worktree) {
       try {
-        await requestPiariumApi(port, `/api/git/worktrees?directory=${encodeURIComponent(projectDirectory)}`, {
+        await requestVarinApi(port, `/api/git/worktrees?directory=${encodeURIComponent(projectDirectory)}`, {
           ...options,
           method: 'DELETE',
           body: JSON.stringify({ directory: worktreeResult.directory, deleteLocalBranch: true }),

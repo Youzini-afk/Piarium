@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { PIARIUM_PROTOCOL_VERSION } from '@piarium/protocol';
-import type { PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+import { VARIN_PROTOCOL_VERSION } from '@varin/protocol';
+import type { PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 import {
   createDesktopPiRuntimeBroker,
   resolveElectronPiHostEntry,
@@ -30,13 +30,13 @@ const pinnedPiVersion = () => {
 };
 
 test('resolves the unpacked Pi host entry in packaged apps', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-host-entry-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-electron-host-entry-'));
   const resourcesPath = path.join(root, 'resources');
   const unpackedEntry = path.join(
     resourcesPath,
     'app.asar.unpacked',
     'node_modules',
-    '@piarium',
+    '@varin',
     'pi-host',
     'dist',
     'host-bootstrap.js',
@@ -51,7 +51,7 @@ test('resolves the unpacked Pi host entry in packaged apps', async () => {
         resourcesPath,
         'app.asar',
         'node_modules',
-        '@piarium',
+        '@varin',
         'pi-host',
         'dist',
         'host-bootstrap.js',
@@ -70,22 +70,22 @@ test('fails closed when the packaged Pi host is absent', () => {
       try {
         resolveElectronPiHostEntry({
           packaged: true,
-          resourcesPath: path.join(os.tmpdir(), 'piarium-missing-resources'),
-          resolvedEntry: path.join(os.tmpdir(), 'piarium-missing-app.asar', 'main.js'),
+          resourcesPath: path.join(os.tmpdir(), 'varin-missing-resources'),
+          resolvedEntry: path.join(os.tmpdir(), 'varin-missing-app.asar', 'main.js'),
         });
       } catch (caught) {
         error = caught;
         throw caught;
       }
     },
-    /Piarium installation files required to start Pi are missing/,
+    /Varin installation files required to start Pi are missing/,
   );
   assert.equal((error as { code?: string }).code, 'host-entry-unavailable');
 });
 
 test('never returns an app.asar entry to an external Node process', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-asar-entry-'));
-  const asarEntry = path.join(root, 'resources', 'app.asar', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-electron-asar-entry-'));
+  const asarEntry = path.join(root, 'resources', 'app.asar', 'node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js');
   await fs.mkdir(path.dirname(asarEntry), { recursive: true });
   await fs.writeFile(asarEntry, 'export {};\n');
   try {
@@ -103,7 +103,7 @@ test('never returns an app.asar entry to an external Node process', async () => 
           throw caught;
         }
       },
-      /Piarium installation files required to start Pi are missing/,
+      /Varin installation files required to start Pi are missing/,
     );
     const err = error as { code?: string; candidates?: string[] };
     assert.equal(err.code, 'host-entry-unavailable');
@@ -114,16 +114,16 @@ test('never returns an app.asar entry to an external Node process', async () => 
 });
 
 test('repairs an ASAR-derived entry even when packaged detection is unavailable', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-asar-detection-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-electron-asar-detection-'));
   const resourcesPath = path.join(root, 'resources');
-  const unpackedEntry = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js');
+  const unpackedEntry = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js');
   await fs.mkdir(path.dirname(unpackedEntry), { recursive: true });
   await fs.writeFile(unpackedEntry, 'export {};\n');
   try {
     assert.equal(resolveElectronPiHostEntry({
       packaged: false,
       resourcesPath,
-      resolvedEntry: path.join(resourcesPath, 'app.asar', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
+      resolvedEntry: path.join(resourcesPath, 'app.asar', 'node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js'),
     }), unpackedEntry);
   } finally {
     await fs.rm(root, { force: true, recursive: true });
@@ -131,7 +131,7 @@ test('repairs an ASAR-derived entry even when packaged detection is unavailable'
 });
 
 test('desktop broker handshakes with the compiled Pi host', async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-broker-'));
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-electron-broker-'));
   const events: PiRuntimeBrokerEvent[] = [];
   const broker = createDesktopPiRuntimeBroker({
     agentDir,
@@ -144,7 +144,7 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
   });
   try {
     const handshake = await broker.warmup();
-    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
+    assert.equal(handshake.protocolVersion, VARIN_PROTOCOL_VERSION);
     assert.equal(handshake.runtime.piVersion, pinnedPiVersion());
   } finally {
     await broker.dispose();

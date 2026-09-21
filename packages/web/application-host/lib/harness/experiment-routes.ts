@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { once } from "node:events";
-import type { ExperimentAttemptState, ExperimentLogsResult, ExperimentSubmitParams } from "@piarium/protocol";
+import type { ExperimentAttemptState, ExperimentLogsResult, ExperimentSubmitParams } from "@varin/protocol";
 import type { ExperimentService } from "./experiments.js";
 import type { ResourceService } from "./resources.js";
 import type { SourceService } from "./sources.js";

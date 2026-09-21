@@ -5,7 +5,7 @@ import baseConfig, { COMMON_TEST_EXCLUDE, KERNEL_VITEST_FILES } from './vitest.c
 /**
  * Native kernel authority suite — the only place these files run. Invoke via
  * `scripts/test-kernel-authority.mjs`, which verifies a manifest-matched
- * release binary and exports PIARIUM_TEST_KERNEL_PATH before this config runs.
+ * release binary and exports VARIN_TEST_KERNEL_PATH before this config runs.
  * Vitest `exclude` filters CLI file arguments too, so the kernel set needs its
  * own config instead of an exclusion plus an explicit list. The base `exclude`
  * names these same files, so `mergeConfig` (which concatenates array options)

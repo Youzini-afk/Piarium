@@ -16,8 +16,8 @@ describe("foundational Pi package manifest", () => {
       source: "https://github.com/example/pi-mcp-adapter.git",
     }), true);
     assert.equal(matchesFoundationalPackage(mcp, {
-      name: "@piarium/pi-mcp-adapter",
-      source: "npm:@piarium/pi-mcp-adapter@2.29.0-piarium.1",
+      name: "@varin/pi-mcp-adapter",
+      source: "npm:@varin/pi-mcp-adapter@2.29.0-varin.1",
     }), true);
   });
 });

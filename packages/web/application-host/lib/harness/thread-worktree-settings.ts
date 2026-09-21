@@ -1,4 +1,4 @@
-import { mergeHarnessSettings, type HarnessWorktreeSettings, type PiSettingsSnapshot } from "@piarium/protocol";
+import { mergeHarnessSettings, type HarnessWorktreeSettings, type PiSettingsSnapshot } from "@varin/protocol";
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
   if (value === undefined) return {};

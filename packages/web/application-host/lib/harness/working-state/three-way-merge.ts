@@ -3,7 +3,7 @@ import type {
   ThreeWayMergePlan,
   ThreeWayPathPlan,
 } from "./types.js";
-import type { ThreadDiffStats } from "@piarium/protocol";
+import type { ThreadDiffStats } from "@varin/protocol";
 import { diffArrays } from "diff";
 import { sameState } from "../../recovery/journal-files.js";
 

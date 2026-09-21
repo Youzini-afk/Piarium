@@ -1,4 +1,4 @@
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import {
   WalkthroughError,
   type WalkthroughResult,
@@ -31,7 +31,7 @@ const isJsonResponse = (response: Response): boolean =>
  * keeps its own failure rather than becoming advice to upgrade.
  */
 const serverUnsupported = () =>
-  new WalkthroughError('This Piarium server has no walkthrough API', { code: 'server-unsupported' });
+  new WalkthroughError('This Varin server has no walkthrough API', { code: 'server-unsupported' });
 
 const looksUnsupported = (response: Response): boolean =>
   !isJsonResponse(response) && (response.ok || response.status === 404);

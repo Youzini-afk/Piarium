@@ -1,4 +1,4 @@
-import type { PiSessionEntry } from '@piarium/protocol';
+import type { PiSessionEntry } from '@varin/protocol';
 import {
   parseExtensionStatus,
   type ExtensionStatusPresentation,
@@ -78,7 +78,7 @@ export const buildMagicContextRuntimeCommand = (
         return { command: `ctx-recomp ${range.start}-${range.end}` };
       }
       // Current Magic Context deliberately requires the exact command twice
-      // within 60 seconds. Piarium invokes it once per user action and renders
+      // within 60 seconds. Varin invokes it once per user action and renders
       // the provider's public confirmation entry instead of guessing whether a
       // previous invocation already armed the confirmation window.
       return { command: 'ctx-recomp' };

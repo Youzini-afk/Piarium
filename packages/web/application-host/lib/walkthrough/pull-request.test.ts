@@ -23,8 +23,8 @@ describe('getPullRequestDiff', () => {
     // The resolver hands back a wrapper, not the repo. Reading `.owner` off the
     // wrapper made every repository look remote-less.
     resolveGitHubRepoFromDirectory = vi.fn().mockResolvedValue({
-      repo: { owner: 'youzini-afk', repo: 'Piarium' },
-      remoteUrl: 'git@github.com:Youzini-afk/Piarium.git',
+      repo: { owner: 'youzini-afk', repo: 'Varin' },
+      remoteUrl: 'git@github.com:Youzini-afk/Varin.git',
     });
     deps = { getOctokitOrNull, resolveGitHubRepoFromDirectory };
   });
@@ -33,10 +33,10 @@ describe('getPullRequestDiff', () => {
     const result = await getPullRequestDiff('/repo', 2122, deps);
 
     expect(result.patch).toBe(PATCH);
-    expect(result.meta).toEqual({ owner: 'youzini-afk', repo: 'Piarium', number: 2122 });
+    expect(result.meta).toEqual({ owner: 'youzini-afk', repo: 'Varin', number: 2122 });
     expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
       owner: 'youzini-afk',
-      repo: 'Piarium',
+      repo: 'Varin',
       pull_number: 2122,
       headers: { accept: 'application/vnd.github.v3.diff' },
     });

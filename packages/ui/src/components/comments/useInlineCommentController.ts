@@ -10,7 +10,7 @@ import {
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 type LineRangeBase = {
   start: number;

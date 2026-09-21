@@ -246,7 +246,7 @@ describe('preview target failure signaling', () => {
     const validResponse = createResponse();
     let continued = false;
     guard({
-      originalUrl: `/api/preview/proxy/${id}/?piarium_preview_token=${previewToken}`,
+      originalUrl: `/api/preview/proxy/${id}/?varin_preview_token=${previewToken}`,
       headers: {},
     }, validResponse, () => {
       continued = true;
@@ -262,7 +262,7 @@ describe('preview target failure signaling', () => {
     await registerTarget({ body: { url: 'http://127.0.0.1:4323/' }, secure: false }, registrationResponse);
     const { id, previewToken } = requirePreviewTargetRegistration(registrationResponse.body);
     const request = {
-      originalUrl: `/api/preview/proxy/${id}/missing?piarium_preview_token=${previewToken}`,
+      originalUrl: `/api/preview/proxy/${id}/missing?varin_preview_token=${previewToken}`,
       headers: {},
     };
     const response = createResponse();
@@ -287,7 +287,7 @@ describe('preview target failure signaling', () => {
 });
 
 describe('preview proxy middleware integration', () => {
-  it('rewrites a real upstream response without forwarding Piarium credentials', async () => {
+  it('rewrites a real upstream response without forwarding Varin credentials', async () => {
     const upstreamRequest: {
       url: string | undefined;
       headers: IncomingHttpHeaders | undefined;
@@ -331,13 +331,13 @@ describe('preview proxy middleware integration', () => {
       const { proxyBasePath, previewToken } = requirePreviewTargetRegistration(await registration.json());
 
       const response = await fetch(
-        `${proxyOrigin}${proxyBasePath}/docs?x=1&piarium_preview_token=${previewToken}`,
+        `${proxyOrigin}${proxyBasePath}/docs?x=1&varin_preview_token=${previewToken}`,
         {
           headers: {
-            authorization: 'Bearer piarium-secret',
-            cookie: 'piarium-secret=1',
+            authorization: 'Bearer varin-secret',
+            cookie: 'varin-secret=1',
             'x-inertia': 'true',
-            'x-piarium-ui-session': 'piarium-secret',
+            'x-varin-ui-session': 'varin-secret',
           },
         },
       );
@@ -346,12 +346,12 @@ describe('preview proxy middleware integration', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get(PREVIEW_TARGET_ERROR_HEADER)).toBeNull();
       expect(response.headers.get('x-frame-options')).toBeNull();
-      expect(body).toContain(`src="${proxyBasePath}/logo.png?piarium_preview_token=${previewToken}"`);
-      expect(body).toContain('id="piarium-preview-bridge"');
+      expect(body).toContain(`src="${proxyBasePath}/logo.png?varin_preview_token=${previewToken}"`);
+      expect(body).toContain('id="varin-preview-bridge"');
       expect(upstreamRequest.url).toBe('/docs?x=1');
       expect(upstreamRequest.headers?.authorization).toBeUndefined();
       expect(upstreamRequest.headers?.cookie).toBeUndefined();
-      expect(upstreamRequest.headers?.['x-piarium-ui-session']).toBeUndefined();
+      expect(upstreamRequest.headers?.['x-varin-ui-session']).toBeUndefined();
       expect(upstreamRequest.headers?.['x-inertia']).toBe('true');
       expect(upstreamRequest.headers?.['accept-encoding']).toBe('identity');
     } finally {
@@ -524,7 +524,7 @@ describe('preview body URL rewriting', () => {
 
   it('adds preview and URL auth tokens to rewritten proxy resources when provided', () => {
     const output = rewritePreviewBody({
-      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&piarium_client_token=legacy">Docs</a>',
+      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&varin_client_token=legacy">Docs</a>',
       kind: 'html',
       proxyBasePath: '/api/preview/proxy/abc123',
       targetOrigin: 'http://127.0.0.1:3000',
@@ -532,10 +532,10 @@ describe('preview body URL rewriting', () => {
       urlAuthToken: 'url-secret',
     });
 
-    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
-    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
-    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
-    expect(output).not.toContain('piarium_client_token');
+    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?varin_preview_token=preview-secret&varin_url_token=url-secret"');
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?varin_preview_token=preview-secret&varin_url_token=url-secret"');
+    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&varin_preview_token=preview-secret&varin_url_token=url-secret"');
+    expect(output).not.toContain('varin_client_token');
   });
 
   it('rewrites only CSS imports and url references in CSS responses', () => {
@@ -575,10 +575,10 @@ describe('preview body URL rewriting', () => {
       urlAuthToken: 'url-secret',
     });
 
-    expect(cssOutput).toContain('@import "/api/preview/proxy/abc123/theme.css?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
-    expect(cssOutput).toContain('url(/api/preview/proxy/abc123/hero.png?piarium_preview_token=preview-secret&piarium_url_token=url-secret)');
-    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret")');
-    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
+    expect(cssOutput).toContain('@import "/api/preview/proxy/abc123/theme.css?varin_preview_token=preview-secret&varin_url_token=url-secret"');
+    expect(cssOutput).toContain('url(/api/preview/proxy/abc123/hero.png?varin_preview_token=preview-secret&varin_url_token=url-secret)');
+    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?varin_preview_token=preview-secret&varin_url_token=url-secret")');
+    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?varin_preview_token=preview-secret&varin_url_token=url-secret"');
   });
 });
 
@@ -606,7 +606,7 @@ describe('preview redirect URL rewriting', () => {
       targetOrigin: 'http://127.0.0.1:3000',
       previewToken: 'preview-secret',
       urlAuthToken: 'url-secret',
-    })).toBe('/api/preview/proxy/abc123/login?next=%2F&piarium_preview_token=preview-secret&piarium_url_token=url-secret#top');
+    })).toBe('/api/preview/proxy/abc123/login?next=%2F&varin_preview_token=preview-secret&varin_url_token=url-secret#top');
   });
 
   it('leaves redirects unchanged when no target origin is provided', () => {

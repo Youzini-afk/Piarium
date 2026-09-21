@@ -1,10 +1,10 @@
-import type { DocumentsAPI, PiariumDocumentReadResult } from '@piarium/application-client';
-import { DocumentsError } from '@piarium/application-client';
+import type { DocumentsAPI, VarinDocumentReadResult } from '@varin/application-client';
+import { DocumentsError } from '@varin/application-client';
 import { documentIdentityForPath } from './path';
 import { requireWorkspaceEpoch } from './mutation-token';
 import type { DocumentIdentity } from './types';
 
-const WORKSPACE_TEXT_OWNER = { kind: 'workspace-text', id: 'piarium-ui' } as const;
+const WORKSPACE_TEXT_OWNER = { kind: 'workspace-text', id: 'varin-ui' } as const;
 
 export const resolveTextDocumentIdentity = async (
   documents: DocumentsAPI,
@@ -19,7 +19,7 @@ export const resolveTextDocumentIdentity = async (
   return identity;
 };
 
-const textFromRead = (result: PiariumDocumentReadResult): string | null => {
+const textFromRead = (result: VarinDocumentReadResult): string | null => {
   if (result.status === 'missing') return null;
   if (result.status === 'ready') return result.content;
   throw new DocumentsError(

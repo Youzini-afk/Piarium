@@ -1,4 +1,4 @@
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import type {
   ExperimentArtifactView,
   ExperimentAttemptView,
@@ -8,7 +8,7 @@ import type {
   ExperimentSubmitResult,
   ResourceMachineView,
   ResearchSourceView,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 /**
  * Research facts loader (7F, D-300): the workbench reads the same durable

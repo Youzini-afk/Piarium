@@ -3,13 +3,13 @@ import { access, mkdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { x as extractTar } from "tar";
 import type {
-  PiariumExtensionPackageSource,
-  PiariumExtensionPackageSourceKind,
-} from "@piarium/extension-contract";
+  VarinExtensionPackageSource,
+  VarinExtensionPackageSourceKind,
+} from "@varin/extension-contract";
 
-export interface PiariumExtensionPackageSourceResolver {
-  readonly kind: PiariumExtensionPackageSourceKind;
-  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string>;
+export interface VarinExtensionPackageSourceResolver {
+  readonly kind: VarinExtensionPackageSourceKind;
+  materialize(source: VarinExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string>;
 }
 
 export interface ExtensionSourceCommandResult {
@@ -44,7 +44,7 @@ const existingPath = async (candidate: string): Promise<string | null> => {
 
 /**
  * Resolve the real Node + npm CLI pair instead of assuming the current executable is Node.
- * Piarium's host is also exercised under Bun and embedded by Electron, where process.execPath
+ * Varin's host is also exercised under Bun and embedded by Electron, where process.execPath
  * points at bun.exe or electron.exe and has no adjacent npm installation.
  */
 export const resolveNpmLaunchTarget = async (options: {
@@ -61,7 +61,7 @@ export const resolveNpmLaunchTarget = async (options: {
     .filter(Boolean);
   const nodeName = platform === "win32" ? "node.exe" : "node";
   const nodeCandidates = [
-    environment.PIARIUM_NODE_PATH,
+    environment.VARIN_NODE_PATH,
     basename(execPath).toLowerCase() === nodeName ? execPath : undefined,
     ...pathDirectories.map((directory) => join(directory, nodeName)),
   ].filter((candidate): candidate is string => Boolean(candidate));
@@ -91,7 +91,7 @@ export const resolveNpmLaunchTarget = async (options: {
   }
   if (nodePath && npmCli) return { argsPrefix: [npmCli], executable: nodePath };
   if (platform !== "win32") return { argsPrefix: [], executable: "npm" };
-  throw new Error("npm could not be resolved. Install Node.js with npm or set PIARIUM_NODE_PATH to its node.exe executable.");
+  throw new Error("npm could not be resolved. Install Node.js with npm or set VARIN_NODE_PATH to its node.exe executable.");
 };
 
 export const runExtensionSourceCommand: ExtensionSourceCommandRunner = (executable, args, options) => new Promise((resolveCommand, reject) => {
@@ -116,12 +116,12 @@ export const runExtensionSourceCommand: ExtensionSourceCommandRunner = (executab
   });
 });
 
-export class PiariumExtensionPackageSourceRegistry {
-  readonly #resolvers = new Map<PiariumExtensionPackageSourceKind, PiariumExtensionPackageSourceResolver>();
+export class VarinExtensionPackageSourceRegistry {
+  readonly #resolvers = new Map<VarinExtensionPackageSourceKind, VarinExtensionPackageSourceResolver>();
 
-  register(resolver: PiariumExtensionPackageSourceResolver): () => void {
+  register(resolver: VarinExtensionPackageSourceResolver): () => void {
     if (this.#resolvers.has(resolver.kind)) {
-      throw new Error(`Piarium extension package source resolver already registered: ${resolver.kind}`);
+      throw new Error(`Varin extension package source resolver already registered: ${resolver.kind}`);
     }
     this.#resolvers.set(resolver.kind, resolver);
     return () => {
@@ -129,22 +129,22 @@ export class PiariumExtensionPackageSourceRegistry {
     };
   }
 
-  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
+  materialize(source: VarinExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const resolver = this.#resolvers.get(source.kind);
-    if (!resolver) throw new Error(`Piarium extension package source is not supported by this host: ${source.kind}`);
+    if (!resolver) throw new Error(`Varin extension package source is not supported by this host: ${source.kind}`);
     return resolver.materialize(source, destination, signal);
   }
 
-  supportedKinds(): PiariumExtensionPackageSourceKind[] {
+  supportedKinds(): VarinExtensionPackageSourceKind[] {
     return [...this.#resolvers.keys()].sort();
   }
 }
 
-export class LocalExtensionPackageSourceResolver implements PiariumExtensionPackageSourceResolver {
+export class LocalExtensionPackageSourceResolver implements VarinExtensionPackageSourceResolver {
   readonly kind = "local" as const;
 
   async materialize(
-    source: PiariumExtensionPackageSource,
+    source: VarinExtensionPackageSource,
     destination: string,
     signal?: AbortSignal,
   ): Promise<string> {
@@ -161,7 +161,7 @@ interface NpmPackResult {
   filename?: unknown;
 }
 
-export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackageSourceResolver {
+export class NpmExtensionPackageSourceResolver implements VarinExtensionPackageSourceResolver {
   readonly kind = "npm" as const;
   readonly #run: ExtensionSourceCommandRunner;
 
@@ -169,7 +169,7 @@ export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackag
     this.#run = options.run ?? runExtensionSourceCommand;
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
+  async materialize(source: VarinExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const staging = join(dirname(destination), ".npm-pack");
     await mkdir(staging, { recursive: true });
     const npm = await resolveNpmLaunchTarget();
@@ -191,7 +191,7 @@ export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackag
       filter: (path, entry) => {
         const entryType = "type" in entry ? entry.type : undefined;
         if (entryType === "SymbolicLink" || entryType === "Link") {
-          throw new Error(`npm Piarium extension package contains a link entry: ${path}`);
+          throw new Error(`npm Varin extension package contains a link entry: ${path}`);
         }
         return true;
       },
@@ -211,7 +211,7 @@ const splitGitSpecifier = (specifier: string): { ref?: string; url: string } => 
   return ref ? { ref, url: specifier.slice(0, hash) } : { url: specifier.slice(0, hash) };
 };
 
-export class GitExtensionPackageSourceResolver implements PiariumExtensionPackageSourceResolver {
+export class GitExtensionPackageSourceResolver implements VarinExtensionPackageSourceResolver {
   readonly kind = "git" as const;
   readonly #run: ExtensionSourceCommandRunner;
 
@@ -219,7 +219,7 @@ export class GitExtensionPackageSourceResolver implements PiariumExtensionPackag
     this.#run = options.run ?? runExtensionSourceCommand;
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
+  async materialize(source: VarinExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const { ref, url } = splitGitSpecifier(source.specifier);
     await mkdir(dirname(destination), { recursive: true });
     const args = ["clone", "--depth", "1", "--single-branch"];
@@ -231,7 +231,7 @@ export class GitExtensionPackageSourceResolver implements PiariumExtensionPackag
   }
 }
 
-export class BuiltinExtensionPackageSourceResolver implements PiariumExtensionPackageSourceResolver {
+export class BuiltinExtensionPackageSourceResolver implements VarinExtensionPackageSourceResolver {
   readonly kind = "builtin" as const;
   readonly #roots: ReadonlyMap<string, string>;
 
@@ -240,12 +240,12 @@ export class BuiltinExtensionPackageSourceResolver implements PiariumExtensionPa
   }
 
   async materialize(
-    source: PiariumExtensionPackageSource,
+    source: VarinExtensionPackageSource,
     destination: string,
     signal?: AbortSignal,
   ): Promise<string> {
     const configured = this.#roots.get(source.specifier);
-    if (!configured) throw new Error(`Unknown built-in Piarium extension package: ${source.specifier}`);
+    if (!configured) throw new Error(`Unknown built-in Varin extension package: ${source.specifier}`);
     // Distribution packages are already immutable, self-contained artifacts. Resolve the
     // physical directory in place so prepare() copies it only once into its content-addressed
     // artifact. In particular, never materialize or install into the distribution directory.
@@ -259,8 +259,8 @@ export class BuiltinExtensionPackageSourceResolver implements PiariumExtensionPa
 
 export const createDefaultExtensionPackageSourceRegistry = (
   options: { builtinRoots?: ReadonlyMap<string, string> | Record<string, string>; run?: ExtensionSourceCommandRunner } = {},
-): PiariumExtensionPackageSourceRegistry => {
-  const registry = new PiariumExtensionPackageSourceRegistry();
+): VarinExtensionPackageSourceRegistry => {
+  const registry = new VarinExtensionPackageSourceRegistry();
   registry.register(new LocalExtensionPackageSourceResolver());
   registry.register(new NpmExtensionPackageSourceResolver(options.run ? { run: options.run } : {}));
   registry.register(new GitExtensionPackageSourceResolver(options.run ? { run: options.run } : {}));

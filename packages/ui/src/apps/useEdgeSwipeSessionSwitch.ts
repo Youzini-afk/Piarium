@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 
 import { comparePiSessions } from '@/components/pi-session/sessionPresentation';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';

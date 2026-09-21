@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from '@piarium/extension-contract';
+import type { JsonObject, JsonValue } from '@varin/extension-contract';
 
 import { BUILTIN_EDITOR_PROVIDER_IDS, type EditorViewState } from './types';
 

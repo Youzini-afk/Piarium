@@ -1,9 +1,9 @@
-import * as gitApiHttp from '@piarium/ui/lib/gitApiHttp';
+import * as gitApiHttp from '@varin/ui/lib/gitApiHttp';
 import type {
   GitAPI,
   CreateGitCommitOptions,
   GitLogOptions,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 export const createWebGitAPI = (): GitAPI => ({
   cloneRepository: gitApiHttp.cloneRepository,

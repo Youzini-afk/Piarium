@@ -4,7 +4,7 @@ import type {
   PiSessionEntry,
   PiSessionMessageEntry,
   SessionSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';

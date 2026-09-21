@@ -1,15 +1,15 @@
 ---
 title: Зворотний проксі
-description: Налаштуйте Piarium коректно за Nginx, Nginx Proxy Manager або іншим зворотним проксі.
+description: Налаштуйте Varin коректно за Nginx, Nginx Proxy Manager або іншим зворотним проксі.
 ---
 
 # Зворотний проксі
 
-Скористайтеся цією сторінкою, якщо запускаєте Piarium за Nginx, Nginx Proxy Manager, Caddy, Cloudflare або іншим зворотним проксі.
+Скористайтеся цією сторінкою, якщо запускаєте Varin за Nginx, Nginx Proxy Manager, Caddy, Cloudflare або іншим зворотним проксі.
 
 ## Перш ніж проксувати
 
-1. Спершу переконайтеся, що Piarium працює напряму.
+1. Спершу переконайтеся, що Varin працює напряму.
 2. Відкрийте `http://<server-ip>:3000` або свій власний порт із тієї самої мережі.
 3. Додавайте зворотний проксі лише після того, як пряме підключення працює.
 
@@ -23,7 +23,7 @@ description: Налаштуйте Piarium коректно за Nginx, Nginx Pro
   - `/api/event`
   - `/api/global/event`
   - `/api/notifications/stream`
-  - `/api/piarium/events`
+  - `/api/varin/events`
   - `/api/terminal/:sessionId/stream`
 - Великі тіла запитів для вкладень і файлових операцій
 - Довгі таймаути читання для живих потоків і термінальних сесій
@@ -32,14 +32,14 @@ description: Налаштуйте Piarium коректно за Nginx, Nginx Pro
 
 - Увімкніть проксування WebSocket.
 - Вимкніть буферизацію на SSE-маршрутах.
-- Вимкніть gzip на проксі, якщо Piarium уже стискає відповіді.
+- Вимкніть gzip на проксі, якщо Varin уже стискає відповіді.
 - Тримайте стиснення увімкненим лише в одному шарі.
 - Передавайте звичайні проксі-заголовки, як-от `Host`, `X-Forwarded-For` та `X-Forwarded-Proto`.
 - Збільшіть ліміти розміру тіла, якщо користувачі завантажують файли.
 
 ## Швидкий чеклист
 
-- Piarium доступний напряму в LAN
+- Varin доступний напряму в LAN
 - WebSocket увімкнено в проксі
 - На SSE-маршрутах вимкнено буферизацію
 - `gzip off` на хості проксі, або стиснення проксі вимкнено інакше
@@ -96,7 +96,7 @@ location = /api/event/ws {
     proxy_send_timeout 3600s;
 }
 
-location ~ ^/api/(event|global/event|notifications/stream|piarium/events)$ {
+location ~ ^/api/(event|global/event|notifications/stream|varin/events)$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";
@@ -230,7 +230,7 @@ location = /api/notifications/stream {
     proxy_connect_timeout 30s;
 }
 
-location = /api/piarium/events {
+location = /api/varin/events {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";
@@ -329,7 +329,7 @@ Caddy обробляє WebSocket-апгрейди автоматично — д�
 
 Якщо ви ставите CDN (наприклад, Cloudflare) перед своїм зворотним проксі, памʼятайте про подвійне стиснення:
 
-- Piarium стискає HTTP-відповіді через gzip (поріг 1 КБ).
+- Varin стискає HTTP-відповіді через gzip (поріг 1 КБ).
 - Cloudflare та інші CDN теж стискають відповіді типово.
 - Це може призвести до подвійно стиснутих відповідей або некоректних заголовків `Content-Encoding`.
 
@@ -339,7 +339,7 @@ Caddy обробляє WebSocket-апгрейди автоматично — д�
 - **Nginx:** `gzip off` (уже показано в прикладах вище).
 - **Caddy:** Caddy не перестискає типово, якщо джерело вже надсилає стиснутий контент.
 
-SSE-маршрути потоків виключені зі стиснення в Piarium, але CDN усе одно може їх буферизувати. Перевірте документацію свого CDN щодо вимкнення буферизації на SSE-шляхах.
+SSE-маршрути потоків виключені зі стиснення в Varin, але CDN усе одно може їх буферизувати. Перевірте документацію свого CDN щодо вимкнення буферизації на SSE-шляхах.
 
 ## Повʼязане
 

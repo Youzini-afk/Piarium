@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Piarium Mini Chat</title>
+    <title>Varin Mini Chat</title>
 
     <script>
       // Apply theme + splash colors before first paint so the window opens on a
       // branded splash instead of flashing white while React/CSS load.
       (function() {
         try {
-          var storedTheme = JSON.parse(localStorage.getItem('piarium.theme.v1') || 'null');
+          var storedTheme = JSON.parse(localStorage.getItem('varin.theme.v1') || 'null');
           var themeMode = storedTheme && storedTheme.mode;
           var isDark;
 
@@ -42,13 +42,13 @@
       })();
     </script>
 
-    <style id="piarium-splash-styles-no-mark">
-      /* The floor, with no cube on it. The mini-chat content renders its own single Piarium cube in its
+    <style id="varin-splash-styles-no-mark">
+      /* The floor, with no cube on it. The mini-chat content renders its own single Varin cube in its
          empty state, so a cube here would briefly show a second one before handing off. The floor alone
          carries the same identity without that collision.
 
          The rules below are a verbatim copy of splashPlaneCss() in
-         packages/ui/src/components/ui/piarium-splash-lattice.ts, which the geometry test asserts
+         packages/ui/src/components/ui/varin-splash-lattice.ts, which the geometry test asserts
          character for character, so edit that function rather than this block. */
       :root {
         --splash-background-dark: #151313;
@@ -86,27 +86,27 @@
 /* A splash/Transition Scene and the application Shell are sibling paint owners. Keep their shared canvas
    colour stable for one committed application frame after either visual owner is removed; otherwise a
    delayed theme/root paint can expose the browser's white default between them. */
-html:root[data-piarium-splash-handoff='true'],
-html:root[data-piarium-workbench-handoff='true'],
-html:root[data-piarium-splash-handoff='true'] body,
-html:root[data-piarium-workbench-handoff='true'] body,
-html:root[data-piarium-splash-handoff='true'] #root,
-html:root[data-piarium-workbench-handoff='true'] #root,
-html:root.desktop-runtime[data-piarium-splash-handoff='true'] body,
-html:root.desktop-runtime[data-piarium-workbench-handoff='true'] body,
-html:root.desktop-runtime[data-piarium-splash-handoff='true'] #root,
-html:root.desktop-runtime[data-piarium-workbench-handoff='true'] #root {
+html:root[data-varin-splash-handoff='true'],
+html:root[data-varin-workbench-handoff='true'],
+html:root[data-varin-splash-handoff='true'] body,
+html:root[data-varin-workbench-handoff='true'] body,
+html:root[data-varin-splash-handoff='true'] #root,
+html:root[data-varin-workbench-handoff='true'] #root,
+html:root.desktop-runtime[data-varin-splash-handoff='true'] body,
+html:root.desktop-runtime[data-varin-workbench-handoff='true'] body,
+html:root.desktop-runtime[data-varin-splash-handoff='true'] #root,
+html:root.desktop-runtime[data-varin-workbench-handoff='true'] #root {
 background: var(--splash-background, var(--color-background, #151313)) !important;
 background-color: var(--splash-background, var(--color-background, #151313)) !important;
 }
-.pi-splash {
+.varin-splash {
 position: fixed;
 inset: 0;
 z-index: 9998;
 overflow: hidden;
 }
-.pi-splash[data-leaving='true'] { pointer-events: none; }
-.pi-splash[data-mode='switch'][data-phase='revealing'] { pointer-events: none; }
+.varin-splash[data-leaving='true'] { pointer-events: none; }
+.varin-splash[data-mode='switch'][data-phase='revealing'] { pointer-events: none; }
 
 /* The cover is the floor's cells, not this element.
    That is the whole exit: each cell is opaque, so when one shrinks away the app shows through the gap it
@@ -116,69 +116,69 @@ overflow: hidden;
 /* A registered custom property, so it interpolates. Read with a zero fallback too: without @property the
    hole never opens and the backdrop resolves with its fade alone, which is the previous behaviour rather
    than a hole in the middle of the cover. */
-@property --pi-splash-open {
+@property --varin-splash-open {
 syntax: '<length>';
 inherits: false;
 initial-value: 0px;
 }
-@property --pi-splash-floor-mask {
+@property --varin-splash-floor-mask {
 syntax: '<percentage>';
 inherits: true;
 initial-value: 30%;
 }
-@property --pi-splash-horizon-lift {
+@property --varin-splash-horizon-lift {
 syntax: '<length>';
 inherits: true;
 initial-value: 0px;
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask 520ms 40ms steps(1, end) both;
+.varin-splash:not([data-mode='switch'])[data-leaving='true'] {
+animation: varin-splash-floor-unmask 520ms 40ms steps(1, end) both;
 }
-@keyframes pi-splash-floor-unmask {
+@keyframes varin-splash-floor-unmask {
 from {
---pi-splash-floor-mask: 30%;
---pi-splash-horizon-lift: 0px;
+--varin-splash-floor-mask: 30%;
+--varin-splash-horizon-lift: 0px;
 }
 to {
---pi-splash-floor-mask: 160%;
---pi-splash-horizon-lift: 160vmax;
+--varin-splash-floor-mask: 160%;
+--varin-splash-horizon-lift: 160vmax;
 }
 }
-@keyframes pi-splash-floor-mask {
+@keyframes varin-splash-floor-mask {
 from {
---pi-splash-floor-mask: 160%;
---pi-splash-horizon-lift: 160vmax;
+--varin-splash-floor-mask: 160%;
+--varin-splash-horizon-lift: 160vmax;
 }
 to {
---pi-splash-floor-mask: 30%;
---pi-splash-horizon-lift: 0px;
+--varin-splash-floor-mask: 30%;
+--varin-splash-horizon-lift: 0px;
 }
 }
 /* The floor is a quadrilateral in projection and a window is a rectangle, so the cells cannot cover the
    screen's corners. The backdrop covers everything they miss, and the hole opens from the cube's feet so
    that where the cells *are* the cover, they are the only cover. */
-.pi-splash-backdrop {
+.varin-splash-backdrop {
 position: absolute;
 inset: 0;
 background: var(--splash-background, var(--color-background, #151313));
--webkit-mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + 64px));
-mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + 64px));
+-webkit-mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--varin-splash-open, 0px), rgba(0,0,0,1) calc(var(--varin-splash-open, 0px) + 64px));
+mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--varin-splash-open, 0px), rgba(0,0,0,1) calc(var(--varin-splash-open, 0px) + 64px));
 }
 /* Boot only, which is also the default: the three hosts that paint before any module is evaluated set no
    mode, and boot is the only thing they cover. Workbench transitions use explicit phase rules above;
    the leaving flag on a switch is only a compatibility fade and does not own their concentric choreography. */
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
+.varin-splash:not([data-mode='switch'])[data-leaving='true'] .varin-splash-backdrop {
 animation:
-pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
-pi-splash-backdrop-out 260ms 1340ms ease both;
+varin-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+varin-splash-backdrop-out 260ms 1340ms ease both;
 }
-.pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
-animation: pi-splash-backdrop-out 740ms ease both;
+.varin-splash[data-mode='switch'][data-leaving='true'] .varin-splash-backdrop {
+animation: varin-splash-backdrop-out 740ms ease both;
 }
-@keyframes pi-splash-open {
-to { --pi-splash-open: 451px; }
+@keyframes varin-splash-open {
+to { --varin-splash-open: 451px; }
 }
-@keyframes pi-splash-backdrop-out {
+@keyframes varin-splash-backdrop-out {
 to { opacity: 0; }
 }
 
@@ -186,43 +186,43 @@ to { opacity: 0; }
    applies in its own element's coordinate space. Masking the floor itself meant a local circle came out
    a sheared ellipse once the camera had run, and the screen's corners were cut first: the floor visibly
    stopped short of them. Nesting instead multiplies the two alphas without needing mask-composite. */
-.pi-splash-ground-clip {
+.varin-splash-ground-clip {
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: radial-gradient(ellipse 50% 56% at 50% 56%, rgba(0,0,0,1) var(--pi-splash-floor-mask, 30%), rgba(0,0,0,0.78) calc(var(--pi-splash-floor-mask, 30%) + 38%), rgba(0,0,0,0.46) calc(var(--pi-splash-floor-mask, 30%) + 70%));
-mask-image: radial-gradient(ellipse 50% 56% at 50% 56%, rgba(0,0,0,1) var(--pi-splash-floor-mask, 30%), rgba(0,0,0,0.78) calc(var(--pi-splash-floor-mask, 30%) + 38%), rgba(0,0,0,0.46) calc(var(--pi-splash-floor-mask, 30%) + 70%));
+-webkit-mask-image: radial-gradient(ellipse 50% 56% at 50% 56%, rgba(0,0,0,1) var(--varin-splash-floor-mask, 30%), rgba(0,0,0,0.78) calc(var(--varin-splash-floor-mask, 30%) + 38%), rgba(0,0,0,0.46) calc(var(--varin-splash-floor-mask, 30%) + 70%));
+mask-image: radial-gradient(ellipse 50% 56% at 50% 56%, rgba(0,0,0,1) var(--varin-splash-floor-mask, 30%), rgba(0,0,0,0.78) calc(var(--varin-splash-floor-mask, 30%) + 38%), rgba(0,0,0,0.46) calc(var(--varin-splash-floor-mask, 30%) + 70%));
 }
 /* The horizon. Receding floor points crowd toward a line 1125px above the
    origin and never reach it, so a floor drawn to any finite depth always ends somewhere, and on a tall
    window that end lands mid-screen where the peripheral fade cannot reach it. Anchoring the ramp to the
    origin's own percentage keeps it in place at every window size. */
-.pi-splash-horizon {
+.varin-splash-horizon {
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
+-webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--varin-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--varin-splash-horizon-lift, 0px)));
+mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--varin-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--varin-splash-horizon-lift, 0px)));
 }
 /* The adaptive Canvas owns the live tilt and writes it here in the same rAF that draws the floor. The
    fallback value is the authored idle camera, so the cube remains valid before the controller mounts. */
-.pi-splash-camera {
+.varin-splash-camera {
 position: absolute;
 left: 50%;
 top: 56%;
 transform-origin: 0 0;
 transform-style: preserve-3d;
-transform: perspective(1800px) rotateX(var(--pi-splash-camera-tilt, 58deg)) rotateZ(45deg) scale(1);
+transform: perspective(1800px) rotateX(var(--varin-splash-camera-tilt, 58deg)) rotateZ(45deg) scale(1);
 }
-.pi-splash:not([data-mode='switch']):not([data-piarium-camera-owner='canvas'])[data-leaving='true'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+.varin-splash:not([data-mode='switch']):not([data-varin-camera-owner='canvas'])[data-leaving='true'] .varin-splash-camera {
+animation: varin-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-@keyframes pi-splash-camera-flatten {
+@keyframes varin-splash-camera-flatten {
 to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(1); }
 }
 /* The logical ground remains in the shared camera only as the cube's registered contact footprint. The
    adaptive tile field is a viewport Canvas beside this camera and performs the same projection itself. */
-.pi-splash-ground {
+.varin-splash-ground {
 position: absolute;
 left: 0;
 top: 0;
@@ -233,7 +233,7 @@ transform: translate(-1392px, -1392px);
 }
 /* The runtime projects an adaptive field of real tiles into this one viewport Canvas. Its opaque fallback
    keeps startup covered if neither renderer can start; it deliberately draws no fake far-field tiles. */
-.pi-splash-ground-canvas {
+.varin-splash-ground-canvas {
 position: absolute;
 inset: 0;
 display: block;
@@ -242,7 +242,7 @@ height: 100%;
 pointer-events: none;
 background-color: var(--splash-background, var(--color-background, #151313));
 }
-.pi-splash-ground-canvas[data-piarium-splash-renderer] {
+.varin-splash-ground-canvas[data-varin-splash-renderer] {
 background: none;
 }
 
@@ -251,14 +251,14 @@ background: none;
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
-.pi-splash:not([data-mode='switch'])[data-leaving='true'],
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
-.pi-splash[data-leaving='true'] .pi-splash-backdrop,
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
+.varin-splash:not([data-mode='switch'])[data-leaving='true'],
+.varin-splash:not([data-mode='switch'])[data-leaving='true'] .varin-splash-camera,
+.varin-splash[data-leaving='true'] .varin-splash-backdrop,
+.varin-splash:not([data-mode='switch'])[data-leaving='true'] .varin-splash-backdrop {
 animation: none;
 }
-.pi-splash { transition: opacity 260ms ease; }
-.pi-splash[data-leaving='true'] { opacity: 0; }
+.varin-splash { transition: opacity 260ms ease; }
+.varin-splash[data-leaving='true'] { opacity: 0; }
 }
       /* SPLASH-CSS-END */
     </style>
@@ -267,17 +267,17 @@ animation: none;
   </head>
   <body class="h-full bg-background text-foreground">
     <!-- The floor, until the mini-chat React app is ready (dismissed in ElectronMiniChatApp through
-         packages/ui/src/lib/splash.ts). No cube here on purpose: the content renders the single Piarium
+         packages/ui/src/lib/splash.ts). No cube here on purpose: the content renders the single Varin
          cube itself.
 
          Outside #root, and before it: `createRoot()` empties its container on the first commit, so a
          splash inside #root was deleted the moment React mounted and its exit never ran. -->
-    <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
-      <div class="pi-splash-backdrop" aria-hidden="true"></div>
-      <div class="pi-splash-ground-clip" aria-hidden="true">
-        <div class="pi-splash-horizon">
-          <div class="pi-splash-camera">
-            <div id="initial-loading-ground" class="pi-splash-ground"></div>
+    <div id="initial-loading" class="varin-splash" data-leaving="false" role="status" aria-label="Loading Varin">
+      <div class="varin-splash-backdrop" aria-hidden="true"></div>
+      <div class="varin-splash-ground-clip" aria-hidden="true">
+        <div class="varin-splash-horizon">
+          <div class="varin-splash-camera">
+            <div id="initial-loading-ground" class="varin-splash-ground"></div>
           </div>
         </div>
       </div>
@@ -287,18 +287,18 @@ animation: none;
 
     <script>
       // Fills the floor. Emitted by splashGroundScript() in
-      // packages/ui/src/components/ui/piarium-splash-lattice.ts and asserted by the geometry test, so
+      // packages/ui/src/components/ui/varin-splash-lattice.ts and asserted by the geometry test, so
       // change that function rather than this block. There is no cube in this window, but the floor is
       // the same floor, so the two windows read as the same place.
       /* SPLASH-JS-BEGIN */
 (function(){
 var ground=document.getElementById("initial-loading-ground");
 if(!ground)return;
-var splash=ground.closest('.pi-splash');
-var horizon=ground.closest('.pi-splash-horizon');
+var splash=ground.closest('.varin-splash');
+var horizon=ground.closest('.varin-splash-horizon');
 if(!horizon)return;
 var canvas=document.createElement('canvas');
-canvas.className='pi-splash-ground-canvas';
+canvas.className='varin-splash-ground-canvas';
 canvas.setAttribute('aria-hidden','true');
 horizon.insertBefore(canvas,horizon.firstChild);
 var build=(function buildAdaptiveSplashTiles(input) {
@@ -384,9 +384,9 @@ var mount=(function mountSplashTileCanvas(canvas, options, buildTileField = buil
         high = candidate;
     }
     return cubicCoordinate(0, 1, (low + high) / 2);
-  }, splashElement = canvas.closest(".pi-splash"), cameraElement = canvas.parentElement?.querySelector(".pi-splash-camera") ?? null;
+  }, splashElement = canvas.closest(".varin-splash"), cameraElement = canvas.parentElement?.querySelector(".varin-splash-camera") ?? null;
   if (splashElement && cameraElement)
-    splashElement.setAttribute("data-piarium-camera-owner", "canvas");
+    splashElement.setAttribute("data-varin-camera-owner", "canvas");
   const colorProbe = canvas.ownerDocument.createElement("span");
   colorProbe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
   (canvas.parentElement ?? canvas.ownerDocument.documentElement).append(colorProbe);
@@ -705,7 +705,7 @@ void main() {
     renderer = createTwoDimensionalRenderer();
   if (renderer) {
     renderer.resize(viewport);
-    canvas.setAttribute("data-piarium-splash-renderer", renderer.kind);
+    canvas.setAttribute("data-varin-splash-renderer", renderer.kind);
   }
   let playback = options.playback, playbackStartedAt = performance.now(), appliedCameraTiltDeg = null, animationFrame = 0, disposed = !1;
   const cameraTiltAt = (elapsed) => {
@@ -810,9 +810,9 @@ void main() {
         renderer?.dispose();
         renderer = null;
         cameraElement?.style.removeProperty(options.camera.tiltProperty);
-        if (splashElement?.getAttribute("data-piarium-camera-owner") === "canvas")
-          splashElement.removeAttribute("data-piarium-camera-owner");
-        canvas.removeAttribute("data-piarium-splash-renderer");
+        if (splashElement?.getAttribute("data-varin-camera-owner") === "canvas")
+          splashElement.removeAttribute("data-varin-camera-owner");
+        canvas.removeAttribute("data-varin-splash-renderer");
       }, retryAtFrame = () => {
         if (canvas.isConnected && typeof view?.requestAnimationFrame === "function") {
           view.requestAnimationFrame(releaseDetachedScene);
@@ -835,7 +835,7 @@ void main() {
     }
   };
 });
-var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltProperty":"--pi-splash-camera-tilt","tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build,breathes);
+var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltProperty":"--varin-splash-camera-tilt","tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build,breathes);
 var reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 var observer=new MutationObserver(function(){
 if(!splash||splash.getAttribute('data-leaving')!=='true')return;

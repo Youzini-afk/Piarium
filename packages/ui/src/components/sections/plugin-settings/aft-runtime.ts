@@ -1,4 +1,4 @@
-import type { PiCommandDescriptor } from '@piarium/protocol';
+import type { PiCommandDescriptor } from '@varin/protocol';
 
 export type AftRuntimeState = 'available' | 'failure' | 'loading' | 'no-session' | 'not-observed';
 

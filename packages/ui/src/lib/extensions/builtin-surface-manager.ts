@@ -1,19 +1,19 @@
 import type {
-  PiariumExtensionActualState,
-  PiariumExtensionCatalogEntry,
-} from '@piarium/extension-contract';
-import type { SurfaceOwnerIdentity } from '@piarium/extension-surface';
+  VarinExtensionActualState,
+  VarinExtensionCatalogEntry,
+} from '@varin/extension-contract';
+import type { SurfaceOwnerIdentity } from '@varin/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   BUILTIN_PI_INTEGRATION_DEFINITIONS,
   activateBuiltinPiIntegration,
 } from './builtin-pi-integrations';
 import {
-  getPiariumExtensionCatalogState,
-  startPiariumExtensionCatalog,
-  subscribePiariumExtensionCatalog,
+  getVarinExtensionCatalogState,
+  startVarinExtensionCatalog,
+  subscribeVarinExtensionCatalog,
 } from './catalog-store';
-import { piariumSurfaceRuntime } from './surface-runtime';
+import { varinSurfaceRuntime } from './surface-runtime';
 
 interface ControllerState {
   active: boolean;
@@ -52,16 +52,16 @@ const extensionsApi = () => (
   getRegisteredRuntimeAPIs()?.extensions
 );
 
-const reportActual = async (entry: PiariumExtensionCatalogEntry): Promise<void> => {
-  const hostId = getPiariumExtensionCatalogState().snapshot?.catalog.hostId;
-  const actual = piariumSurfaceRuntime.getSnapshot().actual.find((state) => (
+const reportActual = async (entry: VarinExtensionCatalogEntry): Promise<void> => {
+  const hostId = getVarinExtensionCatalogState().snapshot?.catalog.hostId;
+  const actual = varinSurfaceRuntime.getSnapshot().actual.find((state) => (
     state.extensionId === entry.manifest.id
     && state.realmId === realmId
     && state.entrypointId === 'main'
     && state.hostId === hostId
   ));
   if (!actual) return;
-  const state: PiariumExtensionActualState = {
+  const state: VarinExtensionActualState = {
     desiredRevision: actual.desiredRevision,
     diagnostics: actual.diagnostics,
     entrypointId: actual.entrypointId,
@@ -75,13 +75,13 @@ const reportActual = async (entry: PiariumExtensionCatalogEntry): Promise<void> 
   await extensionsApi()?.reportActualState(entry.manifest.id, state).catch(() => undefined);
 };
 
-const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void> => {
+const reconcileEntry = async (entry: VarinExtensionCatalogEntry): Promise<void> => {
   const definition = BUILTIN_PI_INTEGRATION_DEFINITIONS.find((candidate) => (
     candidate.manifest.id === entry.manifest.id
   ));
   if (!definition) return;
   const controller = controllerFor(entry.manifest.id);
-  const hostId = getPiariumExtensionCatalogState().snapshot?.catalog.hostId;
+  const hostId = getVarinExtensionCatalogState().snapshot?.catalog.hostId;
   if (!hostId) return;
   if (
     controller.hostId === hostId
@@ -91,7 +91,7 @@ const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void
 
   if (controller.owner && controller.hostId !== hostId) {
     controller.generation += 1;
-    await piariumSurfaceRuntime.deactivate({
+    await varinSurfaceRuntime.deactivate({
       ...controller.owner,
       desiredRevision: controller.owner.desiredRevision + 1,
       generation: controller.generation,
@@ -116,13 +116,13 @@ const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void
   controller.owner = owner;
   try {
     if (entry.desired.enabled) {
-      await piariumSurfaceRuntime.activate(
+      await varinSurfaceRuntime.activate(
         { owner },
-        activateBuiltinPiIntegration(definition, piariumSurfaceRuntime.surface),
+        activateBuiltinPiIntegration(definition, varinSurfaceRuntime.surface),
       );
       controller.active = true;
     } else {
-      await piariumSurfaceRuntime.deactivate(owner);
+      await varinSurfaceRuntime.deactivate(owner);
       controller.active = false;
     }
   } finally {
@@ -132,7 +132,7 @@ const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void
 
 const reconcile = (): Promise<void> => {
   const operation = async () => {
-    const snapshot = getPiariumExtensionCatalogState().snapshot?.catalog;
+    const snapshot = getVarinExtensionCatalogState().snapshot?.catalog;
     if (!snapshot?.authoritative) return;
     for (const definition of BUILTIN_PI_INTEGRATION_DEFINITIONS) {
       const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === definition.manifest.id);
@@ -144,15 +144,15 @@ const reconcile = (): Promise<void> => {
   return result;
 };
 
-export const startBuiltinPiariumExtensions = (): Promise<void> => {
+export const startBuiltinVarinExtensions = (): Promise<void> => {
   if (startPromise) return startPromise;
   if (!extensionsApi()) return Promise.resolve();
-  unsubscribe ??= subscribePiariumExtensionCatalog(() => {
+  unsubscribe ??= subscribeVarinExtensionCatalog(() => {
     void reconcile().catch((error) => {
-      console.error('[Piarium Extensions] Failed to reconcile a built-in integration:', error);
+      console.error('[Varin Extensions] Failed to reconcile a built-in integration:', error);
     });
   });
-  startPromise = startPiariumExtensionCatalog()
+  startPromise = startVarinExtensionCatalog()
     .then(() => reconcile())
     .catch((error) => {
       startPromise = null;

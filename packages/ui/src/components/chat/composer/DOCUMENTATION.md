@@ -12,7 +12,7 @@ through `PiChatView`; they do not own separate send semantics.
 | Prompt text, images, and pending first-turn configuration | `usePiDraftStore` |
 | Existing session model and thinking level | Pi runtime `SessionSnapshot` |
 | Provider/model catalog | `usePiProviderStore` and `ModelPickerList` |
-| New-session defaults | Pi settings, with Piarium project metadata allowed to override the model |
+| New-session defaults | Pi settings, with Varin project metadata allowed to override the model |
 | Prompt parsing and rendering | `language/`, `editor/`, and `piComposerSubmission.ts` |
 | Process execution and model mutation | Pi Host through `usePiSessionStore` |
 
@@ -62,9 +62,9 @@ For a first prompt:
 1. Create the Pi session in the chosen workspace.
 2. Transfer the pending draft to the new session so a later configuration
    failure cannot orphan the user's text.
-3. Apply the explicit draft model, or the Piarium project model when present.
+3. Apply the explicit draft model, or the Varin project model when present.
 4. Apply an explicit thinking level after checking the selected model.
-5. Render Piarium magic prompts, snippets, inline comments, editor context, and
+5. Render Varin magic prompts, snippets, inline comments, editor context, and
    goal state.
 6. Send through Pi `prompt`.
 

@@ -1,5 +1,5 @@
 import { invokeDesktop } from '@/lib/desktop';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 export type PreviewElementMetadata = {
   frame: 'top';
@@ -301,7 +301,7 @@ const describeScrolledElements = (doc: Document, limit = 8): ScrolledElementInfo
   return found;
 };
 
-const FIXED_PIN_ATTR = 'data-piarium-fixed-pin';
+const FIXED_PIN_ATTR = 'data-varin-fixed-pin';
 
 // snapDOM repositions `position: sticky` (freezeSticky) but leaves `position: fixed`
 // alone. In the full-document SVG foreignObject a fixed element resolves against the
@@ -372,7 +372,7 @@ const snapdomFixedPinPlugin = {
   },
 };
 
-const NESTED_SCROLL_ATTR = 'data-piarium-scroll-pin';
+const NESTED_SCROLL_ATTR = 'data-varin-scroll-pin';
 
 // Preparing the capture (asset inlining, layout reflows) resets the scrollTop of
 // overflow containers like the fixed Starlight `.sidebar-pane`. snapDOM bakes nested

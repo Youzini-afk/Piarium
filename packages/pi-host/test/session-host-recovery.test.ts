@@ -3,13 +3,13 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { HostError } from "../src/errors.js";
 import { SessionHost } from "../src/session-host.js";
 
 describe("SessionHost recovery", () => {
   it("keeps conversation recovery Pi-native and never delegates workspace recovery to Pi packages", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-recovery-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-recovery-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
@@ -21,7 +21,7 @@ describe("SessionHost recovery", () => {
       `import { writeFile } from "node:fs/promises";
 export default function optionalRecovery(pi: any) {
   pi.on("session_before_tree", async () => writeFile(${JSON.stringify(treeMarker)}, "tree", "utf8"));
-  pi.events.on("piarium.recovery.discover/v1", (request: any) => request.register({
+  pi.events.on("varin.recovery.discover/v1", (request: any) => request.register({
     actions: ["navigate"], bridgeVersion: 1,
     execute: async () => { await writeFile(${JSON.stringify(bridgeMarker)}, "files", "utf8"); return { outcome: "applied" }; },
     id: "legacy-files-history", modes: ["files", "both"], name: "Legacy files history",

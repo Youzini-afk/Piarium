@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: piarium-ci-${{ github.event.pull_request.number || github.ref }}
+  group: varin-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -123,21 +123,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/piarium-cloud-deploy"
+          ROOT="$RUNNER_TEMP/varin-cloud-deploy"
           DATA_DIR="$ROOT/data"
-          GOOD_ARCHIVE="$RUNNER_TEMP/piarium-cloud-good.tgz"
-          BAD_SOURCE="$RUNNER_TEMP/piarium-cloud-bad-source.tgz"
-          BAD_ARCHIVE="$RUNNER_TEMP/piarium-cloud-bad.tgz"
-          IDEMPOTENT_ARCHIVE="$RUNNER_TEMP/piarium-cloud-idempotent.tgz"
-          INSECURE_ENV_ARCHIVE="$RUNNER_TEMP/piarium-cloud-insecure-env.tgz"
-          INSECURE_ENV_FILE="$RUNNER_TEMP/piarium-cloud-insecure.env"
-          LINK_ARCHIVE="$RUNNER_TEMP/piarium-cloud-link-failure.tgz"
-          LOCK_ARCHIVE="$RUNNER_TEMP/piarium-cloud-lock-failure.tgz"
+          GOOD_ARCHIVE="$RUNNER_TEMP/varin-cloud-good.tgz"
+          BAD_SOURCE="$RUNNER_TEMP/varin-cloud-bad-source.tgz"
+          BAD_ARCHIVE="$RUNNER_TEMP/varin-cloud-bad.tgz"
+          IDEMPOTENT_ARCHIVE="$RUNNER_TEMP/varin-cloud-idempotent.tgz"
+          INSECURE_ENV_ARCHIVE="$RUNNER_TEMP/varin-cloud-insecure-env.tgz"
+          INSECURE_ENV_FILE="$RUNNER_TEMP/varin-cloud-insecure.env"
+          LINK_ARCHIVE="$RUNNER_TEMP/varin-cloud-link-failure.tgz"
+          LOCK_ARCHIVE="$RUNNER_TEMP/varin-cloud-lock-failure.tgz"
           PORT=$(node -e "const server=require('node:net').createServer();server.listen(0,'127.0.0.1',()=>{console.log(server.address().port);server.close();});")
 
           cleanup() {
             if [ -f "$ROOT/current/packages/web/bin/cli.js" ]; then
-              PIARIUM_DATA_DIR="$DATA_DIR" node "$ROOT/current/packages/web/bin/cli.js" stop --port "$PORT" >/dev/null 2>&1 || true
+              VARIN_DATA_DIR="$DATA_DIR" node "$ROOT/current/packages/web/bin/cli.js" stop --port "$PORT" >/dev/null 2>&1 || true
             fi
           }
           trap cleanup EXIT
@@ -149,7 +149,7 @@ jobs:
 
           node scripts/build-cloud-runtime.mjs \
             --skip-build \
-            --output "$RUNNER_TEMP/piarium-cloud-runtime" \
+            --output "$RUNNER_TEMP/varin-cloud-runtime" \
             --archive "$GOOD_ARCHIVE"
           cp "$GOOD_ARCHIVE" "$BAD_SOURCE"
           GOOD_SHA=$(sha256sum "$GOOD_ARCHIVE" | awk '{print $1}')
@@ -178,7 +178,7 @@ jobs:
           verify_good
 
           cp "$BAD_SOURCE" "$INSECURE_ENV_ARCHIVE"
-          printf '%s\n' 'PIARIUM_UI_PASSWORD=not-a-real-secret' > "$INSECURE_ENV_FILE"
+          printf '%s\n' 'VARIN_UI_PASSWORD=not-a-real-secret' > "$INSECURE_ENV_FILE"
           chmod 0644 "$INSECURE_ENV_FILE"
           if bash scripts/deploy-cloud-runtime.sh \
             --root "$ROOT" \
@@ -211,8 +211,8 @@ jobs:
           verify_good
 
           cp "$BAD_SOURCE" "$LINK_ARCHIVE"
-          FAKE_BIN="$RUNNER_TEMP/piarium-cloud-fake-bin"
-          MV_FAILURE_MARKER="$RUNNER_TEMP/piarium-cloud-mv-failed"
+          FAKE_BIN="$RUNNER_TEMP/varin-cloud-fake-bin"
+          MV_FAILURE_MARKER="$RUNNER_TEMP/varin-cloud-mv-failed"
           REAL_MV=$(command -v mv)
           mkdir "$FAKE_BIN"
           cat > "$FAKE_BIN/mv" <<EOF
@@ -238,11 +238,11 @@ jobs:
           test -e "$MV_FAILURE_MARKER"
           verify_good
 
-          mkdir "$RUNNER_TEMP/piarium-cloud-bad"
-          tar -xzf "$BAD_SOURCE" -C "$RUNNER_TEMP/piarium-cloud-bad"
+          mkdir "$RUNNER_TEMP/varin-cloud-bad"
+          tar -xzf "$BAD_SOURCE" -C "$RUNNER_TEMP/varin-cloud-bad"
           node -e "require('node:fs').writeFileSync(process.argv[1], 'throw new Error(\"intentional cloud rollback smoke failure\");\n')" \
-            "$RUNNER_TEMP/piarium-cloud-bad/packages/web/server/index.js"
-          tar -czf "$BAD_ARCHIVE" -C "$RUNNER_TEMP/piarium-cloud-bad" .
+            "$RUNNER_TEMP/varin-cloud-bad/packages/web/server/index.js"
+          tar -czf "$BAD_ARCHIVE" -C "$RUNNER_TEMP/varin-cloud-bad" .
           BAD_SHA=$(sha256sum "$BAD_ARCHIVE" | awk '{print $1}')
 
           if bash scripts/deploy-cloud-runtime.sh \

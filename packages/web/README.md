@@ -1,15 +1,15 @@
-# @piarium/web
+# @varin/web
 
-Piarium's browser, remote, and trusted server runtime.
+Varin's browser, remote, and trusted server runtime.
 
-This package serves the shared Piarium UI and owns the Web-side platform services. Conversation and
+This package serves the shared Varin UI and owns the Web-side platform services. Conversation and
 agent execution are provided by the bundled Pi runtime workspace:
 
 ```text
-@piarium/web
-  -> @piarium/runtime-broker
-     -> @piarium/pi-host
-        -> @piarium/protocol
+@varin/web
+  -> @varin/runtime-broker
+     -> @varin/pi-host
+        -> @varin/protocol
 ```
 
 The four packages and the manifest-verified Rust kernel are one release unit. Publishing or installing
@@ -41,7 +41,7 @@ and preserves the workspace layout required by `resolveBundledPiHostEntry()`.
 `index.html` and `mini-chat.html` paint the splash before any module is evaluated, so they cannot
 import the modules that define it. They embed generated output instead, between `SPLASH-CSS`,
 `SPLASH-MARK`, and `SPLASH-JS` sentinels. After changing anything in
-`packages/ui/src/components/ui/piarium-splash-*.ts`:
+`packages/ui/src/components/ui/varin-splash-*.ts`:
 
 ```bash
 bun run splash:emit
@@ -52,18 +52,18 @@ playback behavior; they do not freeze the generated CSS/HTML or the renderer's s
 
 ## Cloud and remote deployment
 
-Use the Piarium container images, Docker Compose, or the atomic SSH deployment helper. Image names,
+Use the Varin container images, Docker Compose, or the atomic SSH deployment helper. Image names,
 persistent paths, environment variables, remote configuration, health validation, and rollback
 behavior are documented in [Cloud deployment](../../docs/cloud-deployment.md).
 
 ## Runtime data
 
-Set `PIARIUM_DATA_DIR` to choose the persistent data root. The Linux default is
-`~/.config/piarium`. It contains settings, runtime registry files, authentication keys, remote
+Set `VARIN_DATA_DIR` to choose the persistent data root. The Linux default is
+`~/.config/varin`. It contains settings, runtime registry files, authentication keys, remote
 clients, pairing state, notifications, tunnel state, workspace identity, and document recovery
 journals; it must remain outside immutable release directories.
 
-Binding beyond loopback requires `PIARIUM_UI_PASSWORD`. Tunnel tokens and passwords are runtime-only
+Binding beyond loopback requires `VARIN_UI_PASSWORD`. Tunnel tokens and passwords are runtime-only
 configuration and must not be placed in package archives or build arguments.
 
 ## License

@@ -1,14 +1,14 @@
-# Piarium cloud deployment
+# Varin cloud deployment
 
-Piarium has one cloud release layout shared by containers, local deployment checks, and SSH
+Varin has one cloud release layout shared by containers, local deployment checks, and SSH
 deployments. The layout contains the compiled Web server plus the complete private Pi runtime
 closure:
 
-- `@piarium/protocol`;
-- `@piarium/pi-host`;
-- `@piarium/runtime-broker`;
-- `@piarium/settings-store`;
-- `@piarium/web`;
+- `@varin/protocol`;
+- `@varin/pi-host`;
+- `@varin/runtime-broker`;
+- `@varin/settings-store`;
+- `@varin/web`;
 - the target `packages/web/kernel` executable and manifest.
 
 These packages remain one workspace because the broker resolves the bundled host through package
@@ -27,10 +27,10 @@ The Docker workflow publishes four images to GHCR:
 
 | Image | Role |
 | --- | --- |
-| `ghcr.io/youzini-afk/piarium-slim` | Application on the slim runtime. Compose default. |
-| `ghcr.io/youzini-afk/piarium` | Application on the language-toolbelt runtime. |
-| `ghcr.io/youzini-afk/piarium-runtime-slim` | Slim base: Bun, Node, Git, SSH, cloudflared, and the compilers needed to install native production modules. |
-| `ghcr.io/youzini-afk/piarium-runtime-base` | Toolbelt base: the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
+| `ghcr.io/youzini-afk/varin-slim` | Application on the slim runtime. Compose default. |
+| `ghcr.io/youzini-afk/varin` | Application on the language-toolbelt runtime. |
+| `ghcr.io/youzini-afk/varin-runtime-slim` | Slim base: Bun, Node, Git, SSH, cloudflared, and the compilers needed to install native production modules. |
+| `ghcr.io/youzini-afk/varin-runtime-base` | Toolbelt base: the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
 
 All four images are built for `linux/amd64` and `linux/arm64`. Main builds receive `main`, `latest`,
 and `sha-*` tags; version tags also receive semantic-version tags. Each application build consumes
@@ -45,7 +45,7 @@ the coupled slim and toolbelt image pairs against a private runner-local registr
 health and host smoke without publishing to GHCR. A manually supplied slim or toolbelt base tag is
 resolved to its manifest digest before the matching application build begins.
 
-The slim runtime is enough to run the Piarium server, Git, SSH, and tunnels. The toolbelt base
+The slim runtime is enough to run the Varin server, Git, SSH, and tunnels. The toolbelt base
 preserves the maintainer fork's cloud development toolbox: Python, Java/Maven, Go/gopls,
 Rust/rust-analyzer/rustfmt, GitHub CLI, ripgrep, TypeScript language tooling, daemonless rootless
 BuildKit, and cloudflared. Chrome/Playwright is installed on amd64; the arm64 toolbelt image keeps
@@ -53,16 +53,16 @@ the rest of the toolbox and reports the intentional Chrome omission during the i
 
 ### Docker Compose
 
-Prepare writable bind-mount directories for the image's UID/GID `1000:1000`, then start Piarium:
+Prepare writable bind-mount directories for the image's UID/GID `1000:1000`, then start Varin:
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
-export PIARIUM_UI_PASSWORD="$(openssl rand -base64 24)"
+export VARIN_UI_PASSWORD="$(openssl rand -base64 24)"
 docker compose up -d
 ```
 
-Compose pulls `ghcr.io/youzini-afk/piarium-slim:latest` by default. To run the language-toolbelt
+Compose pulls `ghcr.io/youzini-afk/varin-slim:latest` by default. To run the language-toolbelt
 image instead:
 
 ```bash
@@ -73,13 +73,13 @@ The persistent paths are:
 
 | Host path | Container path | Purpose |
 | --- | --- | --- |
-| `data/piarium` | `/home/piarium/.config/piarium` | settings, runtime registry, auth keys, clients, pairing, tunnels, and Rust kernel state/recovery roots |
-| `data/ssh` | `/home/piarium/.ssh` | SSH identity used by workspace Git operations |
-| `data/cloudflared` | `/home/piarium/.cloudflared` | managed-local Cloudflare configuration and credentials |
-| `workspaces` | `/home/piarium/workspaces` | user projects |
+| `data/varin` | `/home/varin/.config/varin` | settings, runtime registry, auth keys, clients, pairing, tunnels, and Rust kernel state/recovery roots |
+| `data/ssh` | `/home/varin/.ssh` | SSH identity used by workspace Git operations |
+| `data/cloudflared` | `/home/varin/.cloudflared` | managed-local Cloudflare configuration and credentials |
+| `workspaces` | `/home/varin/workspaces` | user projects |
 
-On the first runtime generation, Piarium may download any missing foundational Pi packages into the
-agent directory inside `data/piarium`. This bootstrap is deliberately outside `/health`, so a slow or
+On the first runtime generation, Varin may download any missing foundational Pi packages into the
+agent directory inside `data/varin`. This bootstrap is deliberately outside `/health`, so a slow or
 temporarily unavailable package source does not make the Web service unhealthy. Creating the first
 new session waits for the bootstrap result and exposes any per-package failure in Pi Packages;
 existing sessions are not restarted. Keep the data mount persistent so user disable/removal intent
@@ -89,8 +89,8 @@ Verify both the HTTP service and bundled Pi worker:
 
 ```bash
 curl --fail http://127.0.0.1:3000/health
-docker compose exec piarium node --input-type=module -e \
-  "const broker=await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); console.log(broker.resolveBundledPiHostEntry())"
+docker compose exec varin node --input-type=module -e \
+  "const broker=await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); console.log(broker.resolveBundledPiHostEntry())"
 ```
 
 `/health` is ready only when `piRuntime.ready` is true and reports `source: "bundled"`. Published
@@ -102,15 +102,15 @@ the new candidate.
 
 | Variable | Behavior |
 | --- | --- |
-| `PIARIUM_UI_PASSWORD` | Required when the server is reachable beyond loopback |
-| `PIARIUM_HOST` | Bind address; Compose defaults to `0.0.0.0` |
-| `PIARIUM_DATA_DIR` | Persistent Piarium data root |
-| `PIARIUM_WORKSPACE_ROOT` | Root for mounted projects |
-| `PIARIUM_TUNNEL_PROVIDER` | Tunnel provider, currently `cloudflare` when configured |
-| `PIARIUM_TUNNEL_MODE` | `quick`, `managed-remote`, or `managed-local` |
-| `PIARIUM_TUNNEL_HOSTNAME` | Hostname for managed-remote mode |
-| `PIARIUM_TUNNEL_TOKEN` | Runtime-only Cloudflare token for managed-remote mode |
-| `PIARIUM_TUNNEL_CONFIG` | Container path to managed-local cloudflared configuration |
+| `VARIN_UI_PASSWORD` | Required when the server is reachable beyond loopback |
+| `VARIN_HOST` | Bind address; Compose defaults to `0.0.0.0` |
+| `VARIN_DATA_DIR` | Persistent Varin data root |
+| `VARIN_WORKSPACE_ROOT` | Root for mounted projects |
+| `VARIN_TUNNEL_PROVIDER` | Tunnel provider, currently `cloudflare` when configured |
+| `VARIN_TUNNEL_MODE` | `quick`, `managed-remote`, or `managed-local` |
+| `VARIN_TUNNEL_HOSTNAME` | Hostname for managed-remote mode |
+| `VARIN_TUNNEL_TOKEN` | Runtime-only Cloudflare token for managed-remote mode |
+| `VARIN_TUNNEL_CONFIG` | Container path to managed-local cloudflared configuration |
 
 Passwords and tunnel tokens are runtime values. They are never accepted as Docker build arguments or
 embedded in an image.
@@ -126,10 +126,10 @@ Remote requirements:
 - Linux with Node.js 22.19 or newer;
 - Bun available to the non-interactive SSH session;
 - `tar` and normal POSIX filesystem symlink support;
-- a stable directory for Piarium data that is not inside an individual release.
+- a stable directory for Varin data that is not inside an individual release.
 
-Configure targets in `~/.config/piarium/piarium-dev.json`. Start from
-[`scripts/piarium-dev.config.example.json`](../scripts/piarium-dev.config.example.json):
+Configure targets in `~/.config/varin/varin-dev.json`. Start from
+[`scripts/varin-dev.config.example.json`](../scripts/varin-dev.config.example.json):
 
 ```json
 {
@@ -139,10 +139,10 @@ Configure targets in `~/.config/piarium/piarium-dev.json`. Start from
       "label": "Production",
       "host": "user@example-host",
       "port": 3000,
-      "dir": ".local/share/piarium/deployments/production",
+      "dir": ".local/share/varin/deployments/production",
       "bindHost": "0.0.0.0",
-      "dataDir": "~/.config/piarium/production",
-      "envFile": "~/.config/piarium/production.env",
+      "dataDir": "~/.config/varin/production",
+      "envFile": "~/.config/varin/production.env",
       "healthTimeoutSeconds": 60,
       "apiOnly": false
     }
@@ -153,9 +153,9 @@ Configure targets in `~/.config/piarium/piarium-dev.json`. Start from
 Create the referenced environment file on the remote host and restrict its permissions:
 
 ```bash
-install -m 600 /dev/null ~/.config/piarium/production.env
-printf '%s\n' 'PIARIUM_UI_PASSWORD=replace-with-a-long-random-value' \
-  >> ~/.config/piarium/production.env
+install -m 600 /dev/null ~/.config/varin/production.env
+printf '%s\n' 'VARIN_UI_PASSWORD=replace-with-a-long-random-value' \
+  >> ~/.config/varin/production.env
 ```
 
 Add provider or tunnel environment values to the same file when needed. The password is read on the
@@ -166,7 +166,7 @@ Deployment refuses to source the file unless it is owned by the SSH deployment u
 Deploy with:
 
 ```bash
-bun run piarium-dev remote-deploy-web --remote-id production
+bun run varin-dev remote-deploy-web --remote-id production
 ```
 
 The remote directory contains:
@@ -182,7 +182,7 @@ cache/bun/      reusable target-platform dependency cache
 The deploy helper builds and verifies the candidate while the active process keeps serving. It
 atomically switches `current` before stopping that process, so a link-switch failure leaves the
 active runtime untouched. After the switch it stops the old runtime, starts the candidate, and polls
-`/health` for the expected Piarium version and a ready bundled Pi runtime. If startup or health
+`/health` for the expected Varin version and a ready bundled Pi runtime. If startup or health
 validation fails, it stops the candidate, restores `current` to the previous release, restarts it,
 and verifies the rollback. Releases are not pruned automatically; the operator retains the full
 rollback history until deliberately removing old, inactive directories.
@@ -198,7 +198,7 @@ bun run build:cloud-runtime
 ```
 
 By default this writes `artifacts/cloud-runtime` and
-`artifacts/piarium-cloud-runtime.tgz`. To install target-platform production dependencies for a
+`artifacts/varin-cloud-runtime.tgz`. To install target-platform production dependencies for a
 local smoke run:
 
 ```bash

@@ -8,9 +8,9 @@ interface ScheduledTaskRouteDependencies extends ServiceDependencies {
   scheduledTaskService?: ReturnType<typeof createScheduledTaskService>;
 }
 
-export interface PiariumEventRouteDependencies {
+export interface VarinEventRouteDependencies {
   requireAuth: RequestHandler;
-  getPiariumEventClients: () => Set<Response>;
+  getVarinEventClients: () => Set<Response>;
   writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
   /**
    * Optional surface bridge (Stage S): when present, `?surface=<id>&kind=<kind>`
@@ -51,19 +51,19 @@ const asNonEmptyString = (value: unknown): string | null => {
 const parseProjectID = (req: Request) => asNonEmptyString(req.params.projectId);
 const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
-export const registerPiariumEventRoutes = (
+export const registerVarinEventRoutes = (
   app: Express,
   {
-    getPiariumEventClients,
+    getVarinEventClients,
     writeSseEvent,
     surfaceBridge,
     requireAuth,
     resolveSurfaceSession,
     resolveAuthContext,
-  }: PiariumEventRouteDependencies,
+  }: VarinEventRouteDependencies,
 ): void => {
   const authKey = (req: Request, resolved?: unknown): string | null => {
-    const auth = resolved ?? req.piariumAuth;
+    const auth = resolved ?? req.varinAuth;
     if (!auth || typeof auth !== 'object' || Array.isArray(auth)) return null;
     const context = auth as { type?: unknown; clientId?: unknown; token?: unknown };
     const hash = (prefix: string, value: string): string => (
@@ -73,11 +73,11 @@ export const registerPiariumEventRoutes = (
     if (context.type === 'session' && typeof context.token === 'string' && context.token) return hash('session', context.token);
     return null;
   };
-  app.get('/api/piarium/events', requireAuth, async (req, res) => {
+  app.get('/api/varin/events', requireAuth, async (req, res) => {
     // The auth middleware establishes access, while this context gives the
     // bridge one stable principal. Resolve it before flushing SSE headers so a
     // failed/changed auth context can still produce an ordinary HTTP response.
-    const resolvedAuth = req.piariumAuth ?? (resolveAuthContext
+    const resolvedAuth = req.varinAuth ?? (resolveAuthContext
       ? await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
       : null);
     if (resolveAuthContext && !resolvedAuth) {
@@ -88,7 +88,7 @@ export const registerPiariumEventRoutes = (
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-    const clients = getPiariumEventClients();
+    const clients = getVarinEventClients();
     clients.add(res);
     // A surface that identifies itself becomes individually addressable for
     // client-owned settings applies (Stage S). Anonymous connections stay
@@ -99,7 +99,7 @@ export const registerPiariumEventRoutes = (
     let closed = false;
     try {
       writeSseEvent(res, {
-        type: 'piarium:event-stream-ready',
+        type: 'varin:event-stream-ready',
         properties: { connectedAt: Date.now() },
       });
     } catch {
@@ -119,7 +119,7 @@ export const registerPiariumEventRoutes = (
     const heartbeat = setInterval(() => {
       try {
         writeSseEvent(res, {
-          type: 'piarium:heartbeat',
+          type: 'varin:heartbeat',
           properties: { timestamp: Date.now() },
         });
       } catch {
@@ -137,8 +137,8 @@ export const registerPiariumEventRoutes = (
   });
 
   if (surfaceBridge) {
-    app.post('/api/piarium/client-settings/bind', requireAuth, async (req, res) => {
-      const resolvedAuth = req.piariumAuth ?? await (resolveAuthContext
+    app.post('/api/varin/client-settings/bind', requireAuth, async (req, res) => {
+      const resolvedAuth = req.varinAuth ?? await (resolveAuthContext
         ? resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
         : Promise.resolve(null));
       const principal = authKey(req, resolvedAuth);
@@ -154,8 +154,8 @@ export const registerPiariumEventRoutes = (
       surfaceBridge.bindSession(principal, sessionId, surfaceId);
       return res.json({ ok: true, sessionId, surfaceId });
     });
-    app.post('/api/piarium/client-settings/ack', requireAuth, async (req, res) => {
-      const resolvedAuth = req.piariumAuth ?? await (resolveAuthContext
+    app.post('/api/varin/client-settings/ack', requireAuth, async (req, res) => {
+      const resolvedAuth = req.varinAuth ?? await (resolveAuthContext
         ? resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
         : Promise.resolve(null));
       const body = asRecord(req.body) ?? {};
@@ -333,7 +333,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
     }
   });
 
-  app.get('/api/piarium/scheduled-tasks/status', async (_req, res) => {
+  app.get('/api/varin/scheduled-tasks/status', async (_req, res) => {
     try {
       return res.json(await scheduledTaskService.globalStatus());
     } catch (error) {

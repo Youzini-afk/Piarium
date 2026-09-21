@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HarnessEmbedParams, HarnessEmbedResult, PiSettingsSnapshot } from '@piarium/protocol';
+import type { HarnessEmbedParams, HarnessEmbedResult, PiSettingsSnapshot } from '@varin/protocol';
 import { requestWorkspaceInference, resolveInferenceBinding, type WorkspaceInferenceBroker } from './workspace-inference.js';
 
 describe('workspace inference transport', () => {

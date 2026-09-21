@@ -68,7 +68,7 @@ export interface SessionFolderFsPromises {
 export interface SessionFolderRouteDependencies {
   fsPromises: SessionFolderFsPromises;
   path: Pick<typeof import('node:path'), 'dirname' | 'join'>;
-  piariumDataDir: string;
+  varinDataDir: string;
 }
 
 const errorCode = (error: unknown): string | undefined => (
@@ -84,10 +84,10 @@ export const registerSessionFoldersRoutes = (
   const {
     fsPromises,
     path,
-    piariumDataDir,
+    varinDataDir,
   } = dependencies;
 
-  const filePath = path.join(piariumDataDir, 'sessions-directories.json');
+  const filePath = path.join(varinDataDir, 'sessions-directories.json');
   let saveQueue: Promise<unknown> = Promise.resolve();
 
   const ensureDir = async (): Promise<void> => {

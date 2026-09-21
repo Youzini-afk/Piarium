@@ -12,7 +12,7 @@ registerBuiltinSettingsWorkbench();
 const { getSettingsPageMeta, getSettingsPageMetadata, resolveSettingsSlug } = await import('./metadata');
 const {
   ensureBuiltinSettingsContributions,
-  piariumSurfaceRuntime,
+  varinSurfaceRuntime,
   setBuiltinSettingsContributionsEnabled,
 } = await import('./surface-registry');
 const { BUILTIN_PI_INTEGRATION_DEFINITIONS, activateBuiltinPiIntegration } = await import('@/lib/extensions/builtin-pi-integrations');
@@ -20,7 +20,7 @@ const { BUILTIN_PI_INTEGRATION_DEFINITIONS, activateBuiltinPiIntegration } = awa
 await ensureBuiltinSettingsContributions();
 for (const [index, definition] of BUILTIN_PI_INTEGRATION_DEFINITIONS.entries()) {
   if (!definition.manifest.contributions?.some((contribution) => contribution.kind === 'settings-page')) continue;
-  await piariumSurfaceRuntime.activate({
+  await varinSurfaceRuntime.activate({
     owner: {
       desiredRevision: 1,
       entrypointId: 'main',
@@ -108,7 +108,7 @@ describe('settings metadata', () => {
 
   test('adds and withdraws an extension-owned settings page without a document refresh', async () => {
     await ensureBuiltinSettingsContributions();
-    const handle = await piariumSurfaceRuntime.activate({
+    const handle = await varinSurfaceRuntime.activate({
       owner: {
         extensionId: 'dev.example.settings-test',
         extensionVersion: '1.0.0',
@@ -123,7 +123,7 @@ describe('settings metadata', () => {
         id: 'dev.example.settings-test.page',
         kind: 'settings-page',
         contractVersion: 1,
-        supports: [piariumSurfaceRuntime.surface],
+        supports: [varinSurfaceRuntime.surface],
         placement: { slot: 'settings.nav.general', order: 9 },
         data: {
           slug: 'extension-test',
@@ -159,15 +159,15 @@ describe('settings metadata', () => {
 
   test('applies layout visibility through the same live Settings registry', async () => {
     await ensureBuiltinSettingsContributions();
-    piariumSurfaceRuntime.setLayoutReferences([
-      { contributionId: 'piarium.builtin.settings.page.general', visible: false },
+    varinSurfaceRuntime.setLayoutReferences([
+      { contributionId: 'varin.builtin.settings.page.general', visible: false },
       { contributionId: 'dev.example.temporarily-missing', order: 5 },
     ]);
     expect(getSettingsPageMeta('general')).toBe(null);
-    expect(piariumSurfaceRuntime.getSnapshot().layoutReferences[1]?.contributionId)
+    expect(varinSurfaceRuntime.getSnapshot().layoutReferences[1]?.contributionId)
       .toBe('dev.example.temporarily-missing');
 
-    piariumSurfaceRuntime.setLayoutReferences([]);
+    varinSurfaceRuntime.setLayoutReferences([]);
     expect(getSettingsPageMeta('general')).not.toBe(null);
   });
 });

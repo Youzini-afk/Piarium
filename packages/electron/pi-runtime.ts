@@ -5,14 +5,14 @@ import {
   PiHostEntryUnavailableError,
   PiRuntimeBroker,
   resolveBundledPiHostEntry,
-} from '@piarium/runtime-broker';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
-import type { FoundationalPiPackageManifestEntry } from '@piarium/protocol';
-import type { PiRuntimeBrokerEvent, PiRuntimeBrokerOptions } from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
+import type { FoundationalPiPackageManifestEntry } from '@varin/protocol';
+import type { PiRuntimeBrokerEvent, PiRuntimeBrokerOptions } from '@varin/runtime-broker';
 
 const PI_HOST_PACKAGE_ENTRY = path.join(
   'node_modules',
-  '@piarium',
+  '@varin',
   'pi-host',
   'dist',
   'host-bootstrap.js',
@@ -104,7 +104,7 @@ export const createDesktopPiRuntimeBroker = ({
   return new PiRuntimeBroker({
     ...(agentDir ? { agentDir } : {}),
     client: {
-      clientName: 'piarium-electron',
+      clientName: 'varin-electron',
       clientVersion,
       mode: 'desktop',
     },

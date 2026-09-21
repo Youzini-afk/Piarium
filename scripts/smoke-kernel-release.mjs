@@ -10,7 +10,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
  * unrelated working directory. No source loader, Cargo, model call or user data. */
 export async function smokeKernelRelease({ webRoot, kernelDirectory = path.join(webRoot, 'kernel') }) {
   webRoot = path.resolve(webRoot);
-  const executable = process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel';
+  const executable = process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel';
   const manifest = JSON.parse(await fs.readFile(path.join(kernelDirectory, 'manifest.json'), 'utf8'));
   const version = JSON.parse(await fs.readFile(path.join(webRoot, 'package.json'), 'utf8')).version;
   assert.equal(manifest.buildIdentity, version);
@@ -20,7 +20,7 @@ export async function smokeKernelRelease({ webRoot, kernelDirectory = path.join(
   const { createKernelProcessService } = await importHost('lib/kernel/process-service.js');
   const { createKernelComputeService } = await importHost('lib/kernel/compute-service.js');
   const { createTreeSitterStructureProvider } = await importHost('lib/structure/tree-sitter-provider.js');
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-release-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-release-'));
   const workspace = path.join(temporary, 'workspace with spaces');
   const unrelated = path.join(temporary, 'unrelated cwd');
   await fs.mkdir(workspace); await fs.mkdir(unrelated);

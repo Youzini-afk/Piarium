@@ -291,11 +291,11 @@ export class NotificationListener {
   #handleSseData(raw: string): void {
     try {
       const parsed = recordOf(JSON.parse(raw));
-      if (parsed.type !== 'piarium:notification') return;
+      if (parsed.type !== 'varin:notification') return;
       const props = recordOf(parsed.properties);
       if (!props) return;
       this.#onNotification({
-        title: typeof props.title === 'string' && props.title ? props.title : 'Piarium',
+        title: typeof props.title === 'string' && props.title ? props.title : 'Varin',
         body: typeof props.body === 'string' ? props.body : '',
         sessionId: typeof props.sessionId === 'string' ? props.sessionId : null,
         directory: typeof props.directory === 'string' ? props.directory : null,

@@ -1,6 +1,6 @@
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
-import type { PiariumLanguageWorkspaceEdit } from '@piarium/application-client';
+import type { VarinLanguageWorkspaceEdit } from '@varin/application-client';
 import { requestWorkspaceEditReview, type WorkspaceEditReviewKind } from './workspace-edit-review';
 import { toDocumentWorkspaceEditInput } from './workspace-edit';
 
@@ -15,7 +15,7 @@ type WorkspaceEditRegistry = Pick<
 >;
 
 export const applyLanguageWorkspaceEdit = async (options: {
-  edit: PiariumLanguageWorkspaceEdit;
+  edit: VarinLanguageWorkspaceEdit;
   kind: WorkspaceEditReviewKind;
   isCancelled?: () => boolean;
   label?: string;

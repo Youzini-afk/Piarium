@@ -6,7 +6,7 @@ import {
   createRuntimeSuccessResponse,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   PiRuntimeAmbiguousRequestError,
   PiRuntimeClient,

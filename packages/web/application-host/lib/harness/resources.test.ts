@@ -10,11 +10,11 @@ import { createResourceService, type LocalMachineProbe } from "./resources.js";
 import type { GpuProbeResult } from "./gpu-resources.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
-  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH
+  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const available = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") {
+if (!available && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") {
   throw new Error("Resource acceptance requires the release kernel");
 }
 const it = vitestIt.skipIf(!available);
@@ -41,7 +41,7 @@ async function fixture(
   onCapacityAvailable?: (workspaceId: string) => void | Promise<void>,
   gpuProbe?: () => Promise<GpuProbeResult>,
 ) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-resource-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-resource-"));
   roots.push(root);
   const storageRoot = path.join(root, "storage");
   const client = createKernelClient({
@@ -136,15 +136,15 @@ describe("resource facts on the real kernel", () => {
     );
     const resourceGrant = await f.client.issueGrant({
       grantId: `resource-sample-test:${randomUUID()}`,
-      owningWorkspace: "__piarium_host_resources__",
-      executionWorkspace: "__piarium_host_resources__",
+      owningWorkspace: "__varin_host_resources__",
+      executionWorkspace: "__varin_host_resources__",
       capabilities: ["storage.read", "storage.write", "storage.maintenance"],
       pathScopes: [""],
     });
     await f.client.scoped(resourceGrant).putRecord({
       operationId: `resource-sample:${randomUUID()}`,
       recordId: "resource.sample:gpu-1",
-      workspaceId: "__piarium_host_resources__",
+      workspaceId: "__varin_host_resources__",
       recordType: "resource.sample",
       state: "observed",
       payloadJson: JSON.stringify({

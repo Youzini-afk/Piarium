@@ -2,7 +2,7 @@
  * Agent-facing settings service (D-306 / Stage S).
  *
  * Serves the shared `SETTINGS_CATALOG` through the owning authorities:
- *  - `app`         → the Piarium settings document via the serialized store
+ *  - `app`         → the Varin settings document via the serialized store
  *                    (CAS by content-hash revision, atomic multi-field writes).
  *  - `pi-settings` → Pi `settings.get`/`settings.update` on the workspace
  *                    worker (the same path the settings UI uses).
@@ -21,7 +21,7 @@ import {
   querySettingsCatalog,
   type SettingsCatalogEntry,
   type SettingsFieldSpec,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import type {
   PiSettingsSnapshot,
   SettingsActionParams,
@@ -37,10 +37,10 @@ import type {
   SettingsUpdateItem,
   SettingsUpdateParams,
   SettingsUpdateResult,
-} from '@piarium/protocol';
-import { mergeHarnessSettings } from '@piarium/protocol';
+} from '@varin/protocol';
+import { mergeHarnessSettings } from '@varin/protocol';
 import { HarnessServiceError } from './service-error.js';
-import type { PiariumSettingsDocument } from '@piarium/settings-store';
+import type { VarinSettingsDocument } from '@varin/settings-store';
 import type {
   ActionInvocation,
   ActionStatus,
@@ -79,11 +79,11 @@ export interface SettingsActionOperationStore {
 export interface AppPersistOutcome {
   conflict: boolean;
   revision: string;
-  document: PiariumSettingsDocument;
+  document: VarinSettingsDocument;
 }
 
 export interface SettingsServiceDeps {
-  readAppSettings(): Promise<PiariumSettingsDocument>;
+  readAppSettings(): Promise<VarinSettingsDocument>;
   /**
    * Serialized CAS write over the app settings document through the same
    * sanitize/merge/domain-effect pipeline as the UI writer. `changes` and
@@ -156,7 +156,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Deterministic content-hash revision over the app settings document. */
-export const settingsDocumentRevision = (document: PiariumSettingsDocument): string =>
+export const settingsDocumentRevision = (document: VarinSettingsDocument): string =>
   createHash('sha256').update(JSON.stringify(sortDeep(document))).digest('hex').slice(0, 32);
 
 const sortDeep = (value: unknown): unknown => {
@@ -357,7 +357,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     entries: readonly SettingsCatalogEntry[],
   ): Promise<(SettingsSearchItem['summary'] | undefined)[]> => {
-    let appDocument: PiariumSettingsDocument | null = null;
+    let appDocument: VarinSettingsDocument | null = null;
     let piSnapshot: PiSettingsSnapshot | null = null;
     const needApp = entries.some((entry) => entry.owner === 'app');
     const needPi = entries.some((entry) => entry.owner === 'pi-settings');
@@ -1045,7 +1045,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     items: SettingsItemResult[];
     revision?: string;
     effective?: Record<string, unknown>;
-    document?: PiariumSettingsDocument;
+    document?: VarinSettingsDocument;
   }> => {
     const duplicateCheck = rejectConflictingDuplicatePaths(writes);
     writes = duplicateCheck.accepted;

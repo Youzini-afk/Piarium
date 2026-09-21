@@ -1,25 +1,25 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumWorkbenchLayoutLayer,
-  PiariumWorkbenchLayoutUpdateRequest,
-  PiariumWorkbenchProfileSelectionRequest,
-} from '@piarium/extension-contract';
+  VarinApplicationSurface,
+  VarinWorkbenchLayoutLayer,
+  VarinWorkbenchLayoutUpdateRequest,
+  VarinWorkbenchProfileSelectionRequest,
+} from '@varin/extension-contract';
 import {
-  inspectPiariumWorkbenchShell,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  resolvePiariumWorkbenchLayout,
-  resolvePiariumWorkbenchLayoutForProfile,
-  type PiariumWorkbenchShellStatus,
-} from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+  inspectVarinWorkbenchShell,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  resolveVarinWorkbenchLayout,
+  resolveVarinWorkbenchLayoutForProfile,
+  type VarinWorkbenchShellStatus,
+} from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
-import type { PiariumExtensionCatalogStoreState } from './catalog-store';
+import type { VarinExtensionCatalogStoreState } from './catalog-store';
 import {
-  getPiariumExtensionCatalogState,
-  getPiariumExtensionCatalogWatchGeneration,
-  refreshPiariumExtensionCatalog,
-  setPiariumExtensionEnabled,
+  getVarinExtensionCatalogState,
+  getVarinExtensionCatalogWatchGeneration,
+  refreshVarinExtensionCatalog,
+  setVarinExtensionEnabled,
 } from './catalog-store';
 import {
   beginWorkbenchProfileTransition,
@@ -34,10 +34,10 @@ import {
   stageWorkbenchShellRender,
   type WorkbenchShellRenderStagingHandle,
 } from './workbench-shell-staging-store';
-import { piariumSurfaceRuntime } from './surface-runtime';
+import { varinSurfaceRuntime } from './surface-runtime';
 import { prepareWorkbenchTransitionScene } from './workbench-transition-scene';
 
-export type WorkbenchShellUnavailableStatus = Extract<PiariumWorkbenchShellStatus, 'disabled' | 'failed' | 'missing'>;
+export type WorkbenchShellUnavailableStatus = Extract<VarinWorkbenchShellStatus, 'disabled' | 'failed' | 'missing'>;
 
 export class WorkbenchShellUnavailableError extends Error {
   readonly profileId: string;
@@ -75,12 +75,12 @@ export interface WorkbenchProfileTransitionOptions {
 
 export interface WorkbenchShellTransitionDependencies {
   createMountContainer(): HTMLElement;
-  getCatalogState(): PiariumExtensionCatalogStoreState;
+  getCatalogState(): VarinExtensionCatalogStoreState;
   getCatalogWatchGeneration(): number;
-  getSurface(): PiariumApplicationSurface;
+  getSurface(): VarinApplicationSurface;
   getSurfaceSnapshot(): SurfaceRegistrySnapshot;
   refreshCatalog(): Promise<void>;
-  selectProfile(request: PiariumWorkbenchProfileSelectionRequest): Promise<void>;
+  selectProfile(request: VarinWorkbenchProfileSelectionRequest): Promise<void>;
   setEnabled(extensionId: string, enabled: boolean): Promise<void>;
   stageRender(
     contribution: SurfaceContribution,
@@ -89,7 +89,7 @@ export interface WorkbenchShellTransitionDependencies {
   startMount: typeof startWorkbenchMountSession;
   triggerActivation(contributionId: string, extensionId: string): Promise<void>;
   triggerVisible(contributions: readonly SurfaceContribution[]): Promise<void>;
-  updateLayout(request: PiariumWorkbenchLayoutUpdateRequest): Promise<void>;
+  updateLayout(request: VarinWorkbenchLayoutUpdateRequest): Promise<void>;
 }
 
 interface MountImplementation<TProps extends object> {
@@ -130,7 +130,7 @@ const isMountImplementation = <TProps extends object>(
 const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransitionDependencies => ({
   createMountContainer: () => {
     const element = document.createElement('div');
-    element.setAttribute('data-piarium-workbench-shell-staging', '');
+    element.setAttribute('data-varin-workbench-shell-staging', '');
     Object.assign(element.style, {
       inset: '0',
       pointerEvents: 'none',
@@ -141,17 +141,17 @@ const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransit
     document.body.append(element);
     return element;
   },
-  getCatalogState: getPiariumExtensionCatalogState,
-  getCatalogWatchGeneration: getPiariumExtensionCatalogWatchGeneration,
-  getSurface: () => piariumSurfaceRuntime.surface,
-  getSurfaceSnapshot: () => piariumSurfaceRuntime.getSnapshot(),
-  refreshCatalog: refreshPiariumExtensionCatalog,
+  getCatalogState: getVarinExtensionCatalogState,
+  getCatalogWatchGeneration: getVarinExtensionCatalogWatchGeneration,
+  getSurface: () => varinSurfaceRuntime.surface,
+  getSurfaceSnapshot: () => varinSurfaceRuntime.getSnapshot(),
+  refreshCatalog: refreshVarinExtensionCatalog,
   selectProfile: async (request) => {
     const extensions = getRegisteredRuntimeAPIs()?.extensions;
-    if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+    if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
     await extensions.selectWorkbenchProfile(request);
   },
-  setEnabled: setPiariumExtensionEnabled,
+  setEnabled: setVarinExtensionEnabled,
   stageRender: stageWorkbenchShellRender,
   startMount: startWorkbenchMountSession,
   triggerActivation: async (contributionId, extensionId) => {
@@ -174,7 +174,7 @@ const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransit
   },
   updateLayout: async (request) => {
     const extensions = getRegisteredRuntimeAPIs()?.extensions;
-    if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+    if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
     await extensions.updateWorkbenchLayout(request);
   },
 });
@@ -236,7 +236,7 @@ const proveShellReady = async (
   if (isDeclarativeImplementation(contribution.implementation)) {
     throw new Error(`Workbench shell contribution did not activate: ${contributionId}`);
   }
-  const props = { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell };
+  const props = { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell };
   if (!isMountImplementation(contribution.implementation)) {
     const session = await deps.stageRender(contribution, props);
     assertSameIdentity(captured, deps);
@@ -289,7 +289,7 @@ const persistReplacementSelection = async (
   const snapshot = requireAuthoritativeWorkbench(deps).workbench;
   const scope = options?.scope ?? (options?.scopeId ? 'workspace' : 'user');
   const scopeId = options?.scopeId ?? 'default';
-  const resolved = resolvePiariumWorkbenchLayout(snapshot.document, {
+  const resolved = resolveVarinWorkbenchLayout(snapshot.document, {
     surface: deps.getSurface(),
     userId: 'default',
     ...(scope === 'workspace' ? { workspaceId: scopeId } : {}),
@@ -303,7 +303,7 @@ const persistReplacementSelection = async (
   const replacementSelections = { ...(currentLayer?.replacementSelections ?? {}) };
   if (contributionId === null) delete replacementSelections[target];
   else replacementSelections[target] = contributionId;
-  const layer: PiariumWorkbenchLayoutLayer = {
+  const layer: VarinWorkbenchLayoutLayer = {
     profileId: resolved.profileId,
     references: currentLayer?.references ?? [],
     replacementSelections,
@@ -325,10 +325,10 @@ const commitCandidateShell = async (
     persist(expectedRevision: number): Promise<void>;
   },
 ): Promise<void> => {
-  const inspectShell = (): ReturnType<typeof inspectPiariumWorkbenchShell> => {
+  const inspectShell = (): ReturnType<typeof inspectVarinWorkbenchShell> => {
     const current = requireAuthoritativeWorkbench(deps);
     const surface = deps.getSurfaceSnapshot();
-    return inspectPiariumWorkbenchShell(
+    return inspectVarinWorkbenchShell(
       input.replacementSelections,
       current.catalog.extensions,
       deps.getSurface(),
@@ -383,7 +383,7 @@ const commitCandidateShell = async (
   } catch (error) {
     if (autoEnabledExtensionId && !committed) {
       await deps.setEnabled(autoEnabledExtensionId, false).catch((rollbackError) => {
-        console.error('[Piarium Extensions] Failed to roll back workbench shell enablement:', rollbackError);
+        console.error('[Varin Extensions] Failed to roll back workbench shell enablement:', rollbackError);
       });
     }
     throw error;
@@ -397,7 +397,7 @@ export const runSelectActiveWorkbenchProfile = (
   options?: WorkbenchProfileTransitionOptions,
 ): Promise<void> => enqueueWorkbenchShellTransition(async () => {
   const snapshot = requireAuthoritativeWorkbench(deps);
-  const layout = resolvePiariumWorkbenchLayoutForProfile(snapshot.workbench.document, {
+  const layout = resolveVarinWorkbenchLayoutForProfile(snapshot.workbench.document, {
     surface: deps.getSurface(),
     userId: 'default',
     ...(workspaceId ? { workspaceId } : {}),
@@ -425,7 +425,7 @@ const runSetWorkbenchReplacementSelection = (
     options,
     expectedRevision,
   );
-  if (target !== PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell) {
+  if (target !== VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell) {
     await persist(snapshot.workbench.document.revision);
     return;
   }
@@ -434,7 +434,7 @@ const runSetWorkbenchReplacementSelection = (
     userId: 'default',
     ...(options?.scope === 'workspace' && options.scopeId ? { workspaceId: options.scopeId } : {}),
   };
-  const resolved = resolvePiariumWorkbenchLayout(snapshot.workbench.document, context);
+  const resolved = resolveVarinWorkbenchLayout(snapshot.workbench.document, context);
   const replacementSelections = { ...resolved.replacementSelections };
   if (contributionId === null) delete replacementSelections[target];
   else replacementSelections[target] = contributionId;
@@ -456,19 +456,19 @@ export const selectActiveWorkbenchProfile = async (
   workspaceId?: string,
   options?: WorkbenchProfileTransitionOptions,
 ): Promise<void> => {
-  const workbench = getPiariumExtensionCatalogState().snapshot?.workbench;
+  const workbench = getVarinExtensionCatalogState().snapshot?.workbench;
   const profileIds = workbench?.document.profiles.map((profile) => profile.id) ?? [];
   const transitionContext = {
-    surface: piariumSurfaceRuntime.surface,
+    surface: varinSurfaceRuntime.surface,
     userId: 'default',
     ...(workspaceId ? { workspaceId } : {}),
   };
   const fromProfileId = workbench?.authoritative
-    ? resolvePiariumWorkbenchLayout(workbench.document, transitionContext).profileId
+    ? resolveVarinWorkbenchLayout(workbench.document, transitionContext).profileId
     : null;
 
   const targetLayout = workbench?.authoritative
-    ? resolvePiariumWorkbenchLayoutForProfile(workbench.document, transitionContext, profileId)
+    ? resolveVarinWorkbenchLayoutForProfile(workbench.document, transitionContext, profileId)
     : null;
   const scenePreparation = prepareWorkbenchTransitionScene(targetLayout?.replacementSelections ?? {});
   let resolveTransitionId!: (id: number) => void;
@@ -498,7 +498,7 @@ export const selectActiveWorkbenchProfile = async (
 
   const preparedScene = await scenePreparation;
   if (preparedScene.status === 'failed') {
-    console.error('[Piarium Motion] Transition Scene preparation failed; using Core fallback:', preparedScene.error);
+    console.error('[Varin Motion] Transition Scene preparation failed; using Core fallback:', preparedScene.error);
   }
   const transitionId = beginWorkbenchProfileTransition({
     direction: resolveTransitionDirection(profileIds, fromProfileId, profileId),

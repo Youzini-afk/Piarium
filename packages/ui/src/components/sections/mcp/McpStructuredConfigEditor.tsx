@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
@@ -80,7 +80,7 @@ const SourceOptionalBooleanField: React.FC<SourceFieldProps> = ({
   const { t } = useI18n();
   const text = (key: string): string => t(key as never);
   const value = mcpSourceBooleanState(document, path);
-  const selectedLabel = text(`settings.piarium.mcp.structured.sourceValue.${value === 'not-set' ? 'notSet' : value}`);
+  const selectedLabel = text(`settings.varin.mcp.structured.sourceValue.${value === 'not-set' ? 'notSet' : value}`);
 
   return (
     <SettingsFieldRow label={label} info={info} className={className}>
@@ -101,13 +101,13 @@ const SourceOptionalBooleanField: React.FC<SourceFieldProps> = ({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="not-set">
-            {text('settings.piarium.mcp.structured.sourceValue.notSet')}
+            {text('settings.varin.mcp.structured.sourceValue.notSet')}
           </SelectItem>
           <SelectItem value="enabled">
-            {text('settings.piarium.mcp.structured.sourceValue.enabled')}
+            {text('settings.varin.mcp.structured.sourceValue.enabled')}
           </SelectItem>
           <SelectItem value="disabled">
-            {text('settings.piarium.mcp.structured.sourceValue.disabled')}
+            {text('settings.varin.mcp.structured.sourceValue.disabled')}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -139,8 +139,8 @@ const SourceOptionalSelectField: React.FC<SourceFieldProps & {
       : 'not-set';
   const selectedLabel = selected?.label ?? text(
     unsupported
-      ? 'settings.piarium.pluginSettings.field.unsupportedValue'
-      : 'settings.piarium.mcp.structured.sourceValue.notSet',
+      ? 'settings.varin.pluginSettings.field.unsupportedValue'
+      : 'settings.varin.mcp.structured.sourceValue.notSet',
   );
 
   return (
@@ -167,11 +167,11 @@ const SourceOptionalSelectField: React.FC<SourceFieldProps & {
         <SelectContent>
           {unsupported ? (
             <SelectItem value="unsupported" disabled>
-              {text('settings.piarium.pluginSettings.field.unsupportedValue')}
+              {text('settings.varin.pluginSettings.field.unsupportedValue')}
             </SelectItem>
           ) : null}
           <SelectItem value="not-set">
-            {text('settings.piarium.mcp.structured.sourceValue.notSet')}
+            {text('settings.varin.mcp.structured.sourceValue.notSet')}
           </SelectItem>
           {options.map((option) => (
             <SelectItem key={sourceOptionKey(option.value)} value={sourceOptionKey(option.value)}>
@@ -378,8 +378,8 @@ const SourceOptionalNumberField: React.FC<SourceFieldProps & {
         fallbackValue={min}
         disabled={disabled}
         min={min}
-        emptyLabel={t('settings.piarium.mcp.structured.sourceValue.notSet' as never)}
-        placeholder={t('settings.piarium.mcp.structured.sourceValue.notSet' as never)}
+        emptyLabel={t('settings.varin.mcp.structured.sourceValue.notSet' as never)}
+        placeholder={t('settings.varin.mcp.structured.sourceValue.notSet' as never)}
         aria-label={label}
         onClear={() => onRemove(path)}
         onValueChange={(next) => onSet(path, next)}
@@ -488,12 +488,12 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
     <div className="space-y-5">
       {mode !== 'settings' ? <SettingsControlGroup contentClassName="space-y-5">
         {mode === 'new' ? <SettingsFieldRow
-          label={text('settings.piarium.mcp.structured.serverName')}
+          label={text('settings.varin.mcp.structured.serverName')}
         >
           <Input
             value={newServerName}
             disabled={disabled}
-            aria-label={text('settings.piarium.mcp.structured.serverName')}
+            aria-label={text('settings.varin.mcp.structured.serverName')}
             placeholder="github"
             onChange={(event) => setNewServerName(event.target.value)}
             onKeyDown={(event) => {
@@ -510,7 +510,7 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             disabled={disabled || !newServerName.trim() || newServerExists}
             onClick={addServer}
           >
-            {text('settings.piarium.mcp.structured.addServer')}
+            {text('settings.varin.mcp.structured.addServer')}
           </Button>
         </SettingsFieldRow> : null}
 
@@ -533,16 +533,16 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             </div>
 
             <SettingsFieldRow
-              label={text('settings.piarium.mcp.structured.transport')}
+              label={text('settings.varin.mcp.structured.transport')}
             >
               <Select value={transport} disabled={disabled} onValueChange={selectTransport}>
                 <SelectTrigger
                   size="settings"
                   className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-                  aria-label={text('settings.piarium.mcp.structured.transport')}
+                  aria-label={text('settings.varin.mcp.structured.transport')}
                 >
                   <SelectValue>
-                    {text(`settings.piarium.mcp.structured.transport.${transport === 'unconfigured'
+                    {text(`settings.varin.mcp.structured.transport.${transport === 'unconfigured'
                       ? 'inherited'
                       : transport === 'stdio'
                         ? 'localCommand'
@@ -553,16 +553,16 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unconfigured">
-                    {text('settings.piarium.mcp.structured.transport.inherited')}
+                    {text('settings.varin.mcp.structured.transport.inherited')}
                   </SelectItem>
                   <SelectItem value="stdio">
-                    {text('settings.piarium.mcp.structured.transport.localCommand')}
+                    {text('settings.varin.mcp.structured.transport.localCommand')}
                   </SelectItem>
                   <SelectItem value="http">
-                    {text('settings.piarium.mcp.structured.transport.http')}
+                    {text('settings.varin.mcp.structured.transport.http')}
                   </SelectItem>
                   <SelectItem value="socket">
-                    {text('settings.piarium.mcp.structured.transport.localSocket')}
+                    {text('settings.varin.mcp.structured.transport.localSocket')}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -573,28 +573,28 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 <SourceStringField
                   {...sourceFields}
                   path={[...serverPath, 'command']}
-                  label={text('settings.piarium.mcp.structured.server.command')}
+                  label={text('settings.varin.mcp.structured.server.command')}
                   placeholder="npx"
                 />
                 <SourceStringListField
                   {...sourceFields}
                   path={[...serverPath, 'args']}
-                  label={text('settings.piarium.mcp.structured.server.arguments')}
+                  label={text('settings.varin.mcp.structured.server.arguments')}
                   placeholder={'-y\n@modelcontextprotocol/server-github'}
                 />
                 <SourceStringField
                   {...sourceFields}
                   path={[...serverPath, 'cwd']}
-                  label={text('settings.piarium.mcp.structured.server.workingDirectory')}
+                  label={text('settings.varin.mcp.structured.server.workingDirectory')}
                   placeholder="path/to/working-directory"
                 />
                 <SourceKeyValueField
                   {...sourceFields}
                   path={[...serverPath, 'env']}
-                  label={text('settings.piarium.mcp.structured.server.environment')}
+                  label={text('settings.varin.mcp.structured.server.environment')}
                   keyPlaceholder="API_KEY"
                   valuePlaceholder="value"
-                  addLabel={text('settings.piarium.mcp.structured.add')}
+                  addLabel={text('settings.varin.mcp.structured.add')}
                 />
               </div>
             ) : null}
@@ -602,13 +602,13 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             {transport === 'http' ? (
               <div className="space-y-4 border-t border-border/60 pt-4">
                 <SettingsFieldRow
-                  label={text('settings.piarium.mcp.structured.server.url')}
+                  label={text('settings.varin.mcp.structured.server.url')}
                   controlClassName="w-full max-w-lg"
                 >
                   <Input
                     value={typeof server.url === 'string' ? server.url : ''}
                     disabled={disabled}
-                    aria-label={text('settings.piarium.mcp.structured.server.url')}
+                    aria-label={text('settings.varin.mcp.structured.server.url')}
                     placeholder="https://example.com/mcp"
                     onChange={(event) => setUrl(event.target.value)}
                     className="min-w-0 flex-1"
@@ -617,26 +617,26 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 <SourceOptionalSelectField
                   {...sourceFields}
                   path={[...serverPath, 'auth']}
-                  label={text('settings.piarium.mcp.structured.server.authentication')}
+                  label={text('settings.varin.mcp.structured.server.authentication')}
                   options={[
-                    { value: 'oauth', label: text('settings.piarium.mcp.structured.server.authentication.oauth') },
-                    { value: 'bearer', label: text('settings.piarium.mcp.structured.server.authentication.bearer') },
-                    { value: false, label: text('settings.piarium.mcp.structured.server.authentication.none') },
+                    { value: 'oauth', label: text('settings.varin.mcp.structured.server.authentication.oauth') },
+                    { value: 'bearer', label: text('settings.varin.mcp.structured.server.authentication.bearer') },
+                    { value: false, label: text('settings.varin.mcp.structured.server.authentication.none') },
                   ]}
                 />
                 <SourceStringField
                   {...sourceFields}
                   path={[...serverPath, 'bearerTokenEnv']}
-                  label={text('settings.piarium.mcp.structured.server.bearerTokenEnv')}
+                  label={text('settings.varin.mcp.structured.server.bearerTokenEnv')}
                   placeholder="MCP_TOKEN"
                 />
                 <SourceKeyValueField
                   {...sourceFields}
                   path={[...serverPath, 'headers']}
-                  label={text('settings.piarium.mcp.structured.server.headers')}
+                  label={text('settings.varin.mcp.structured.server.headers')}
                   keyPlaceholder="Authorization"
                   valuePlaceholder="Bearer …"
-                  addLabel={text('settings.piarium.mcp.structured.add')}
+                  addLabel={text('settings.varin.mcp.structured.add')}
                 />
               </div>
             ) : null}
@@ -646,11 +646,11 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 <SourceStringField
                   {...sourceFields}
                   path={[...serverPath, 'socket']}
-                  label={text('settings.piarium.mcp.structured.server.socketPath')}
+                  label={text('settings.varin.mcp.structured.server.socketPath')}
                   placeholder="~/.rmcp-servers/rmcp-mux/sockets/server.sock"
                 />
                 <p className="typography-meta text-[var(--status-warning)]">
-                  {text('settings.piarium.mcp.structured.server.socketWarning')}
+                  {text('settings.varin.mcp.structured.server.socketWarning')}
                 </p>
               </div>
             ) : null}
@@ -659,128 +659,128 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
               <SourceOptionalNumberField
                 {...sourceFields}
                 path={[...serverPath, 'idleTimeout']}
-                label={text('settings.piarium.mcp.structured.server.idleTimeout')}
+                label={text('settings.varin.mcp.structured.server.idleTimeout')}
                 min={0}
-                unit={text('settings.piarium.mcp.structured.unit.minutes')}
+                unit={text('settings.varin.mcp.structured.unit.minutes')}
               />
               <SourceOptionalNumberField
                 {...sourceFields}
                 path={[...serverPath, 'requestTimeoutMs']}
-                label={text('settings.piarium.mcp.structured.server.requestTimeout')}
+                label={text('settings.varin.mcp.structured.server.requestTimeout')}
                 min={0}
-                unit={text('settings.piarium.mcp.structured.unit.milliseconds')}
+                unit={text('settings.varin.mcp.structured.unit.milliseconds')}
               />
               <SourceOptionalBooleanField
                 {...sourceFields}
                 path={[...serverPath, 'exposeResources']}
-                label={text('settings.piarium.mcp.structured.server.exposeResources')}
+                label={text('settings.varin.mcp.structured.server.exposeResources')}
               />
               <SourceOptionalBooleanField
                 {...sourceFields}
                 path={[...serverPath, 'disabled']}
-                label={text('settings.piarium.mcp.structured.server.disabled')}
+                label={text('settings.varin.mcp.structured.server.disabled')}
               />
             </div>
           </div>
         ) : (
           <p className="typography-meta text-muted-foreground">
-            {text('settings.piarium.mcp.structured.noServers')}
+            {text('settings.varin.mcp.structured.noServers')}
           </p>
         )}
       </SettingsControlGroup> : null}
 
       {mode === 'settings' ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
-        title={text('settings.piarium.mcp.structured.behavior.title')}
+        title={text('settings.varin.mcp.structured.behavior.title')}
         contentClassName="space-y-4"
       >
         <SourceStringListField
           {...sourceFields}
           path={['imports']}
-          label={text('settings.piarium.mcp.structured.behavior.imports')}
+          label={text('settings.varin.mcp.structured.behavior.imports')}
           placeholder={'cursor\nclaude-code\nclaude-desktop\ncodex\nopencode\nwindsurf\nvscode'}
         />
         <SourceOptionalSelectField
           {...sourceFields}
           path={['settings', 'toolPrefix']}
-          label={text('settings.piarium.mcp.structured.behavior.toolPrefix')}
+          label={text('settings.varin.mcp.structured.behavior.toolPrefix')}
           options={[
-            { value: 'server', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.server') },
-            { value: 'short', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.short') },
-            { value: 'mcp', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.mcp') },
-            { value: 'none', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.none') },
+            { value: 'server', label: text('settings.varin.mcp.structured.behavior.toolPrefix.server') },
+            { value: 'short', label: text('settings.varin.mcp.structured.behavior.toolPrefix.short') },
+            { value: 'mcp', label: text('settings.varin.mcp.structured.behavior.toolPrefix.mcp') },
+            { value: 'none', label: text('settings.varin.mcp.structured.behavior.toolPrefix.none') },
           ]}
         />
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'showStatusIcon']}
-          label={text('settings.piarium.mcp.structured.behavior.statusIcon')}
+          label={text('settings.varin.mcp.structured.behavior.statusIcon')}
         />
         <SourceOptionalSelectField
           {...sourceFields}
           path={['settings', 'mcpFooterStatus']}
-          label={text('settings.piarium.mcp.structured.behavior.footerStatus')}
+          label={text('settings.varin.mcp.structured.behavior.footerStatus')}
           options={[
-            { value: 'full', label: text('settings.piarium.mcp.structured.behavior.footerStatus.full') },
-            { value: 'compact', label: text('settings.piarium.mcp.structured.behavior.footerStatus.compact') },
-            { value: 'off', label: text('settings.piarium.mcp.structured.behavior.footerStatus.off') },
+            { value: 'full', label: text('settings.varin.mcp.structured.behavior.footerStatus.full') },
+            { value: 'compact', label: text('settings.varin.mcp.structured.behavior.footerStatus.compact') },
+            { value: 'off', label: text('settings.varin.mcp.structured.behavior.footerStatus.off') },
           ]}
         />
         <SourceOptionalNumberField
           {...sourceFields}
           path={['settings', 'idleTimeout']}
-          label={text('settings.piarium.mcp.structured.behavior.idleTimeout')}
+          label={text('settings.varin.mcp.structured.behavior.idleTimeout')}
           min={0}
-          unit={text('settings.piarium.mcp.structured.unit.minutes')}
+          unit={text('settings.varin.mcp.structured.unit.minutes')}
         />
         <SourceOptionalNumberField
           {...sourceFields}
           path={['settings', 'requestTimeoutMs']}
-          label={text('settings.piarium.mcp.structured.behavior.requestTimeout')}
+          label={text('settings.varin.mcp.structured.behavior.requestTimeout')}
           min={0}
-          unit={text('settings.piarium.mcp.structured.unit.milliseconds')}
+          unit={text('settings.varin.mcp.structured.unit.milliseconds')}
         />
       </SettingsControlGroup> : null}
 
       {mode === 'settings' ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
-        title={text('settings.piarium.mcp.structured.interaction.title')}
+        title={text('settings.varin.mcp.structured.interaction.title')}
         contentClassName="space-y-4"
       >
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'autoAuth']}
-          label={text('settings.piarium.mcp.structured.interaction.autoAuth')}
+          label={text('settings.varin.mcp.structured.interaction.autoAuth')}
         />
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'sampling']}
-          label={text('settings.piarium.mcp.structured.interaction.sampling')}
+          label={text('settings.varin.mcp.structured.interaction.sampling')}
         />
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'samplingAutoApprove']}
-          label={text('settings.piarium.mcp.structured.interaction.samplingAutoApprove')}
+          label={text('settings.varin.mcp.structured.interaction.samplingAutoApprove')}
         />
         {sampling === true && samplingAutoApprove === true ? (
           <p className="typography-meta text-[var(--status-warning)]">
-            {text('settings.piarium.mcp.structured.interaction.samplingAutoApprove.warning')}
+            {text('settings.varin.mcp.structured.interaction.samplingAutoApprove.warning')}
           </p>
         ) : null}
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'elicitation']}
-          label={text('settings.piarium.mcp.structured.interaction.elicitation')}
+          label={text('settings.varin.mcp.structured.interaction.elicitation')}
         />
         {typeof outputGuard === 'object' && outputGuard !== null && !Array.isArray(outputGuard) ? (
           <p className="typography-meta text-muted-foreground">
-            {text('settings.piarium.mcp.structured.outputGuardAdvanced')}
+            {text('settings.varin.mcp.structured.outputGuardAdvanced')}
           </p>
         ) : (
           <SourceOptionalBooleanField
             {...sourceFields}
             path={['settings', 'outputGuard']}
-            label={text('settings.piarium.mcp.structured.interaction.outputGuard')}
+            label={text('settings.varin.mcp.structured.interaction.outputGuard')}
           />
         )}
       </SettingsControlGroup> : null}

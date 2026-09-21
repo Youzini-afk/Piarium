@@ -10,7 +10,7 @@ import {
   type HarnessEmbeddingSettings,
   type HarnessResolvedEmbeddingBinding,
   type PiSettingsSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { SemanticEmbedder } from "./embedder.js";
 import { createRemoteEmbedder, type RemoteEmbedClient } from "./remote-embedder.js";
 

@@ -48,7 +48,7 @@ export const createDapClient = ({
         request_seq: message.seq,
         success: false,
         command: typeof message.command === 'string' ? message.command : '',
-        message: `Piarium does not implement reverse DAP request: ${String(message.command ?? '')}`,
+        message: `Varin does not implement reverse DAP request: ${String(message.command ?? '')}`,
       });
     }
   });

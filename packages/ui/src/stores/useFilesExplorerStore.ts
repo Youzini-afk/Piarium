@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 export interface LegacyEditorTabsSnapshot {
@@ -220,7 +220,7 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
         },
       }),
       {
-        name: 'piarium.filesExplorer.v1',
+        name: 'varin.filesExplorer.v1',
         storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           activeRuntimeKey: state.activeRuntimeKey,
@@ -246,6 +246,6 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
         },
       },
     ),
-    { name: 'piarium-files-explorer' },
+    { name: 'varin-files-explorer' },
   ),
 );

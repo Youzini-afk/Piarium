@@ -46,7 +46,7 @@ describe("workspace search routes", () => {
 
     const failed = await request(app)
       .post("/api/workspace/search/content")
-      .set("x-piarium-generation", "7")
+      .set("x-varin-generation", "7")
       .send({ workspaceId: "ws", query: "alpha" })
       .expect(200);
     expect(failed.body).toEqual({ status: "failure", generation: 7, message: "native search failed" });
@@ -82,7 +82,7 @@ describe("workspace search routes", () => {
     const streamed = await request(app)
       .post("/api/workspace/search/content")
       .set("accept", "application/x-ndjson")
-      .set("x-piarium-generation", "8")
+      .set("x-varin-generation", "8")
       .send({ workspaceId: "ws", query: "alpha" })
       .expect(200);
     const frames = streamed.text.trim().split("\n").map((line) => JSON.parse(line));

@@ -1,11 +1,11 @@
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { SettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { SettingsFileStore } from '@varin/settings-store';
 import type cryptoModule from 'node:crypto';
 import type fsPromisesModule from 'node:fs/promises';
 import type pathModule from 'node:path';
 
 const STORE_VERSION = 2;
-const TOKEN_PREFIX = 'piarium_client_';
+const TOKEN_PREFIX = 'varin_client_';
 const TOKEN_BYTES = 32;
 const MAX_LABEL_LENGTH = 80;
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
@@ -426,9 +426,9 @@ export const createRemoteClientAuthRuntime = ({
       return null;
     }
     // Which transport carried this request: the relay tunnel proxy stamps every
-    // forwarded request with x-piarium-relay-connection; anything else is a
+    // forwarded request with x-varin-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
-    const transport = req?.headers?.['x-piarium-relay-connection'] ? 'relay' : 'direct';
+    const transport = req?.headers?.['x-varin-relay-connection'] ? 'relay' : 'direct';
     return mutateStore<AuthenticatedClient | null>(async (store) => {
       const tokenHash = hashToken(token);
       const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));

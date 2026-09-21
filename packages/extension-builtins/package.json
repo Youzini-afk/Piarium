@@ -1,10 +1,10 @@
 {
-  "name": "@piarium/extension-builtins",
+  "name": "@varin/extension-builtins",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Browser-safe manifests for Piarium's built-in integration extensions.",
+  "description": "Browser-safe manifests for Varin's built-in integration extensions.",
   "files": [
     "dist"
   ],
@@ -29,10 +29,10 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-contract": "workspace:*"
+    "@varin/extension-contract": "workspace:*"
   },
   "devDependencies": {
-    "@piarium/extension-sdk": "workspace:*",
+    "@varin/extension-sdk": "workspace:*",
     "bash-language-server": "5.8.0",
     "esbuild": "^0.28.1",
     "pyright": "1.1.414",

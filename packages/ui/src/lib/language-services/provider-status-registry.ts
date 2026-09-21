@@ -1,11 +1,11 @@
-import type { PiariumLanguageProviderStatus } from '@piarium/application-client';
+import type { VarinLanguageProviderStatus } from '@varin/application-client';
 
 const listeners = new Set<() => void>();
-const snapshots = new Map<string, PiariumLanguageProviderStatus>();
+const snapshots = new Map<string, VarinLanguageProviderStatus>();
 
 const keyFor = (workspaceId: string, languageId: string): string => `${workspaceId}\0${languageId}`;
 
-const generationOf = (snapshot: PiariumLanguageProviderStatus | undefined): number => (
+const generationOf = (snapshot: VarinLanguageProviderStatus | undefined): number => (
   snapshot && 'generation' in snapshot && typeof snapshot.generation === 'number'
     ? snapshot.generation
     : -1
@@ -23,7 +23,7 @@ export const subscribeLanguageProviderStatus = (listener: () => void): (() => vo
 export const getLanguageProviderStatus = (
   workspaceId: string,
   languageId: string,
-): PiariumLanguageProviderStatus => snapshots.get(keyFor(workspaceId, languageId)) ?? {
+): VarinLanguageProviderStatus => snapshots.get(keyFor(workspaceId, languageId)) ?? {
   status: 'absent',
   workspaceId,
   languageId,
@@ -32,9 +32,9 @@ export const getLanguageProviderStatus = (
 export const peekLanguageProviderStatus = (
   workspaceId: string,
   languageId: string,
-): PiariumLanguageProviderStatus | undefined => snapshots.get(keyFor(workspaceId, languageId));
+): VarinLanguageProviderStatus | undefined => snapshots.get(keyFor(workspaceId, languageId));
 
-export const replaceLanguageProviderStatus = (next: PiariumLanguageProviderStatus): void => {
+export const replaceLanguageProviderStatus = (next: VarinLanguageProviderStatus): void => {
   const key = keyFor(next.workspaceId, next.languageId);
   const current = snapshots.get(key);
   if (generationOf(next) >= 0 && generationOf(current) > generationOf(next)) return;

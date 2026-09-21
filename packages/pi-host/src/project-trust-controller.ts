@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { createDeferred, type Deferred } from "./deferred.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;

@@ -8,7 +8,7 @@ import request from 'supertest';
 import { registerExternalAccessRoutes } from './routes.js';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import type { DocumentAuthority } from '../documents/authority.js';
-import type { PiariumRequestAuthContext } from '../client-auth/request-context.js';
+import type { VarinRequestAuthContext } from '../client-auth/request-context.js';
 
 let tempDir = '';
 let deploymentRoot = '';
@@ -16,13 +16,13 @@ let dataDir = '';
 
 const createApp = ({ auth, documents, activeWorkspace }: {
   activeWorkspace?: string;
-  auth?: PiariumRequestAuthContext;
+  auth?: VarinRequestAuthContext;
   documents?: DocumentAuthority;
 } = {}) => {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
   app.use((req, _res, next) => {
-    req.piariumAuth = auth || {
+    req.varinAuth = auth || {
       type: 'client',
       clientId: 'client-1',
       client: {
@@ -47,8 +47,8 @@ const createApp = ({ auth, documents, activeWorkspace }: {
     process,
     spawn,
     buildAugmentedPath: () => process.env.PATH || '',
-    piariumDataDir: dataDir,
-    piariumVersion: '1.0.0-test',
+    varinDataDir: dataDir,
+    varinVersion: '1.0.0-test',
     runtimeName: 'test',
     serverStartedAt: '2026-01-01T00:00:00.000Z',
     remoteClientAuthRuntime: {
@@ -71,7 +71,7 @@ describe('external access routes', () => {
     fs.mkdirSync(path.join(deploymentRoot, 'workspace'), { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(path.join(deploymentRoot, 'package.json'), '{"name":"openchamber-test"}');
-    fs.writeFileSync(path.join(deploymentRoot, 'packages', 'web', 'package.json'), '{"name":"@piarium/web"}');
+    fs.writeFileSync(path.join(deploymentRoot, 'packages', 'web', 'package.json'), '{"name":"@varin/web"}');
   });
 
   afterEach(() => {

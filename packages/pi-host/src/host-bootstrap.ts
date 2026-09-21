@@ -10,7 +10,7 @@ function readFlag(argv: string[], name: string): string | undefined {
 }
 
 const argv = process.argv.slice(2);
-const packageRoot = readFlag(argv, "--package-root") ?? process.env.PIARIUM_PI_PACKAGE_ROOT;
+const packageRoot = readFlag(argv, "--package-root") ?? process.env.VARIN_PI_PACKAGE_ROOT;
 if (packageRoot) {
   register(new URL("./pi-sdk-resolver.js", import.meta.url), {
     data: { packageRoot },

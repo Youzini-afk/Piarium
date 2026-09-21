@@ -5,7 +5,7 @@ import type {
   RetrievalReceiptAuthority,
   RetrievalUrlReceipt,
   Thread,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 

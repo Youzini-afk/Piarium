@@ -4,16 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt, vi } from "vitest";
-import { sliceUtf8ByBytes, type ExperimentArtifactView, type ExperimentAttemptView } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type ExperimentArtifactView, type ExperimentAttemptView } from "@varin/protocol";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { createFollowUpService, type FollowUpCaller, type FollowUpExternalSource, type FollowUpResourceSample, type FollowUpServiceDeps, type FollowUpShellEvent } from "./followups.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
-  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH
+  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const available = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") {
+if (!available && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") {
   throw new Error("Follow-up acceptance requires the release kernel");
 }
 const it = vitestIt.skipIf(!available);
@@ -92,9 +92,9 @@ async function fixture(options: {
   getAttempt?: (harness: Harness, attemptId: string, caller: FollowUpCaller) => Promise<ExperimentAttemptView | null>;
   watchReady?: Promise<boolean>;
   continueRun?: (harness: Harness, input: Parameters<FollowUpServiceDeps["sendToThread"]>[0]) => Promise<{ runId?: string }>;
-  sendToThread?: (harness: Harness, input: Parameters<FollowUpServiceDeps["sendToThread"]>[0]) => Promise<{ delivery: import("@piarium/protocol").FollowUpOccurrenceDelivery; runId?: string }>;
+  sendToThread?: (harness: Harness, input: Parameters<FollowUpServiceDeps["sendToThread"]>[0]) => Promise<{ delivery: import("@varin/protocol").FollowUpOccurrenceDelivery; runId?: string }>;
 } = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-followup-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-followup-"));
   roots.push(root);
   const client = createKernelClient({
     hostId: "followup-test",

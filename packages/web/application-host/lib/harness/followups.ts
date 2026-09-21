@@ -34,11 +34,11 @@ import type {
   FollowUpUpdateResult,
   JsonValue,
   ThreadParent,
-} from "@piarium/protocol";
-import { sliceUtf8ByBytes } from "@piarium/protocol";
+} from "@varin/protocol";
+import { sliceUtf8ByBytes } from "@varin/protocol";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
-import type { ExperimentArtifactView, ExperimentAttemptView } from "@piarium/protocol";
+import type { ExperimentArtifactView, ExperimentAttemptView } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
 
 const DEFINITION_PREFIX = "followup.definition:";

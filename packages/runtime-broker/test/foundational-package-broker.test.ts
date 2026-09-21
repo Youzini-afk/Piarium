@@ -12,7 +12,7 @@ const delay = (milliseconds: number) => new Promise((resolveDelay) => {
 });
 
 test("foundational package authority reconciles before a new session executes extensions", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-foundation-broker-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-foundation-broker-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const homeDir = join(root, "home");
@@ -182,7 +182,7 @@ export default function (pi: any) {
 });
 
 test("foundational package authority never loads project extensions from the server cwd", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-foundation-neutral-cwd-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-foundation-neutral-cwd-"));
   const serverCwd = join(root, "server-project");
   const agentDir = join(root, "agent");
   const homeDir = join(root, "home");
@@ -247,7 +247,7 @@ test("foundational package authority never loads project extensions from the ser
 });
 
 test("a broken global extension remains removable through the package authority", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-package-recovery-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-package-recovery-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const packageRoot = join(root, "blocking-package");

@@ -4,8 +4,8 @@ import {
   type EventEnvelope,
   type HostEvent,
   type HostEventData,
-  PIARIUM_PROTOCOL_VERSION,
-} from "@piarium/protocol";
+  VARIN_PROTOCOL_VERSION,
+} from "@varin/protocol";
 import { ExtensionUiBridge } from "../src/extension-ui-bridge.js";
 
 function createHarness() {
@@ -18,7 +18,7 @@ function createHarness() {
         event,
         kind: "event",
         seq: sequence++,
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       } as EventEnvelope);
     },
     () => "session-1",

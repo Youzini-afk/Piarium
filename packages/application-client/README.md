@@ -1,6 +1,6 @@
-# @piarium/application-client
+# @varin/application-client
 
-Framework-neutral Piarium application client boundary.
+Framework-neutral Varin application client boundary.
 
 ## Purpose
 
@@ -17,24 +17,24 @@ add an Agent tool or a second state store.
 
 The desktop contract defines:
 
-- `PiariumDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands
-- `PiariumDesktopBridge` — the typed bridge interface implemented by Electron preload and consumed by the UI
+- `VarinDesktopCommandMap` — typed `{ args, result }` for all 58 `desktop_*` commands
+- `VarinDesktopBridge` — the typed bridge interface implemented by Electron preload and consumed by the UI
 - `PreloadBootstrapPayload` — discriminated union carrying credentials only for local pages
-- `PiariumDesktopEventMap` — typed desktop events (update progress, SSH status, menu actions, etc.)
-- exhaustive command/event catalogs and runtime guards, plus `PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS`
+- `VarinDesktopEventMap` — typed desktop events (update progress, SSH status, menu actions, etc.)
+- exhaustive command/event catalogs and runtime guards, plus `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS`
 
-It has no React, Zustand, or UI component dependencies. It depends only on `@piarium/protocol` and
-`@piarium/extension-contract`.
+It has no React, Zustand, or UI component dependencies. It depends only on `@varin/protocol` and
+`@varin/extension-contract`.
 
 ## Consumers
 
 - `packages/web` — Web/remote surface API implementations
 - `packages/ui` — shared React presentation and client-side kernels
-- `packages/electron` — Electron main/preload import the focused `@piarium/application-client/desktop`
+- `packages/electron` — Electron main/preload import the focused `@varin/application-client/desktop`
   subpath so bundling the native bridge does not pull in unrelated HTTP/relay transport modules
 
 All three product consumers import contracts and transport primitives directly from
-`@piarium/application-client`; the former UI forwarding modules have been removed. Relay is injected
+`@varin/application-client`; the former UI forwarding modules have been removed. Relay is injected
 through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
 the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.
 

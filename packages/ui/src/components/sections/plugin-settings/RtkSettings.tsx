@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue, RuntimeContextTarget } from '@piarium/protocol';
+import type { JsonValue, RuntimeContextTarget } from '@varin/protocol';
 import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -62,12 +62,12 @@ const RtkIssueNote: React.FC<{ issues: readonly RtkDraftIssue[] }> = ({ issues }
       {issues.map((issue) => (
         <p key={`${issue.code}:${issue.field}`}>
           {issue.code === 'unknown-field'
-            ? t('settings.piarium.pluginSettings.rtk.diagnostic.unknownField', { field: issue.field })
+            ? t('settings.varin.pluginSettings.rtk.diagnostic.unknownField', { field: issue.field })
             : issue.code === 'invalid-boolean'
-              ? t('settings.piarium.pluginSettings.validation.invalidBoolean', { field: issue.field })
+              ? t('settings.varin.pluginSettings.validation.invalidBoolean', { field: issue.field })
               : issue.code === 'invalid-number'
-                ? t('settings.piarium.pluginSettings.validation.invalidNumber', { field: issue.field })
-                : t('settings.piarium.pluginSettings.validation.invalidValue', { field: issue.field })}
+                ? t('settings.varin.pluginSettings.validation.invalidNumber', { field: issue.field })
+                : t('settings.varin.pluginSettings.validation.invalidValue', { field: issue.field })}
         </p>
       ))}
     </div>
@@ -78,65 +78,65 @@ const useRtkOptions = (values: readonly string[]) => {
   const { t } = useI18n();
   return values.map((value) => ({
     value,
-    label: t(`settings.piarium.pluginSettings.rtk.value.${value}` as never),
+    label: t(`settings.varin.pluginSettings.rtk.value.${value}` as never),
   }));
 };
 
 const GeneralSettings: React.FC<{ fields: RtkFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
     <SettingsControlGroup
-      title={t('settings.piarium.pluginSettings.rtk.section.general')}
+      title={t('settings.varin.pluginSettings.rtk.section.general')}
       contentClassName="space-y-4"
     >
-      <PluginOptionalBooleanField {...fields} path={['enabled']} label={t('settings.piarium.pluginSettings.rtk.field.enabled')} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['mode']} label={t('settings.piarium.pluginSettings.rtk.field.mode')} options={useRtkOptions(RTK_MODES)} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['guardWhenRtkMissing']} label={t('settings.piarium.pluginSettings.rtk.field.guardWhenRtkMissing')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['showRewriteNotifications']} label={t('settings.piarium.pluginSettings.rtk.field.showRewriteNotifications')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['enabled']} label={t('settings.varin.pluginSettings.rtk.field.enabled')} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['mode']} label={t('settings.varin.pluginSettings.rtk.field.mode')} options={useRtkOptions(RTK_MODES)} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['guardWhenRtkMissing']} label={t('settings.varin.pluginSettings.rtk.field.guardWhenRtkMissing')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['showRewriteNotifications']} label={t('settings.varin.pluginSettings.rtk.field.showRewriteNotifications')} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
 
 const OutputSettings: React.FC<{ fields: RtkFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.rtk.section.output')} contentClassName="space-y-4">
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'enabled']} label={t('settings.piarium.pluginSettings.rtk.field.outputEnabled')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'stripAnsi']} label={t('settings.piarium.pluginSettings.rtk.field.stripAnsi')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'aggregateTestOutput']} label={t('settings.piarium.pluginSettings.rtk.field.aggregateTestOutput')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'filterBuildOutput']} label={t('settings.piarium.pluginSettings.rtk.field.filterBuildOutput')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'compactGitOutput']} label={t('settings.piarium.pluginSettings.rtk.field.compactGitOutput')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'aggregateLinterOutput']} label={t('settings.piarium.pluginSettings.rtk.field.aggregateLinterOutput')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'groupSearchOutput']} label={t('settings.piarium.pluginSettings.rtk.field.groupSearchOutput')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'trackSavings']} label={t('settings.piarium.pluginSettings.rtk.field.trackSavings')} unsetLabel={notSet} />
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.rtk.section.output')} contentClassName="space-y-4">
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'enabled']} label={t('settings.varin.pluginSettings.rtk.field.outputEnabled')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'stripAnsi']} label={t('settings.varin.pluginSettings.rtk.field.stripAnsi')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'aggregateTestOutput']} label={t('settings.varin.pluginSettings.rtk.field.aggregateTestOutput')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'filterBuildOutput']} label={t('settings.varin.pluginSettings.rtk.field.filterBuildOutput')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'compactGitOutput']} label={t('settings.varin.pluginSettings.rtk.field.compactGitOutput')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'aggregateLinterOutput']} label={t('settings.varin.pluginSettings.rtk.field.aggregateLinterOutput')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'groupSearchOutput']} label={t('settings.varin.pluginSettings.rtk.field.groupSearchOutput')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'trackSavings']} label={t('settings.varin.pluginSettings.rtk.field.trackSavings')} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
 
 const ReadSettings: React.FC<{ fields: RtkFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.rtk.section.read')} contentClassName="space-y-4">
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'readCompaction', 'enabled']} label={t('settings.piarium.pluginSettings.rtk.field.readCompactionEnabled')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'sourceCodeFilteringEnabled']} label={t('settings.piarium.pluginSettings.rtk.field.sourceCodeFilteringEnabled')} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['outputCompaction', 'sourceCodeFiltering']} label={t('settings.piarium.pluginSettings.rtk.field.sourceCodeFiltering')} options={useRtkOptions(RTK_SOURCE_FILTER_LEVELS)} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'preserveExactSkillReads']} label={t('settings.piarium.pluginSettings.rtk.field.preserveExactSkillReads')} unsetLabel={notSet} />
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.rtk.section.read')} contentClassName="space-y-4">
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'readCompaction', 'enabled']} label={t('settings.varin.pluginSettings.rtk.field.readCompactionEnabled')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'sourceCodeFilteringEnabled']} label={t('settings.varin.pluginSettings.rtk.field.sourceCodeFilteringEnabled')} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['outputCompaction', 'sourceCodeFiltering']} label={t('settings.varin.pluginSettings.rtk.field.sourceCodeFiltering')} options={useRtkOptions(RTK_SOURCE_FILTER_LEVELS)} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'preserveExactSkillReads']} label={t('settings.varin.pluginSettings.rtk.field.preserveExactSkillReads')} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
 
 const TruncationSettings: React.FC<{ fields: RtkFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.rtk.section.truncation')} contentClassName="space-y-4">
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'smartTruncate', 'enabled']} label={t('settings.piarium.pluginSettings.rtk.field.smartTruncateEnabled')} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['outputCompaction', 'smartTruncate', 'maxLines']} label={t('settings.piarium.pluginSettings.rtk.field.smartTruncateMaxLines')} min={40} max={4_000} step={1} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'truncate', 'enabled']} label={t('settings.piarium.pluginSettings.rtk.field.truncateEnabled')} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['outputCompaction', 'truncate', 'maxChars']} label={t('settings.piarium.pluginSettings.rtk.field.truncateMaxChars')} min={1_000} max={200_000} step={1} unsetLabel={notSet} />
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.rtk.section.truncation')} contentClassName="space-y-4">
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'smartTruncate', 'enabled']} label={t('settings.varin.pluginSettings.rtk.field.smartTruncateEnabled')} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['outputCompaction', 'smartTruncate', 'maxLines']} label={t('settings.varin.pluginSettings.rtk.field.smartTruncateMaxLines')} min={40} max={4_000} step={1} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['outputCompaction', 'truncate', 'enabled']} label={t('settings.varin.pluginSettings.rtk.field.truncateEnabled')} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['outputCompaction', 'truncate', 'maxChars']} label={t('settings.varin.pluginSettings.rtk.field.truncateMaxChars')} min={1_000} max={200_000} step={1} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
@@ -157,7 +157,7 @@ export const RtkSettings: React.FC<RtkSettingsProps> = ({ runtimeTarget, targetK
   return (
     <div className="space-y-7">
       <PluginConfigSource controller={controller} />
-      <PluginRuntimeNote>{t('settings.piarium.pluginSettings.rtk.authority')}</PluginRuntimeNote>
+      <PluginRuntimeNote>{t('settings.varin.pluginSettings.rtk.authority')}</PluginRuntimeNote>
       <RtkIssueNote issues={issues} />
       <GeneralSettings fields={fields} />
       <OutputSettings fields={fields} />
@@ -168,7 +168,7 @@ export const RtkSettings: React.FC<RtkSettingsProps> = ({ runtimeTarget, targetK
         controller={controller}
         blocked={validationBlocked}
         blockedMessage={validationBlocked
-          ? t('settings.piarium.pluginSettings.rtk.validation.fixBeforeSave')
+          ? t('settings.varin.pluginSettings.rtk.validation.fixBeforeSave')
           : undefined}
       />
       <RtkRuntimePanel runtimeTarget={runtimeTarget} targetKey={targetKey} />

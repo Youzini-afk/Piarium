@@ -17,7 +17,7 @@ import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import {
@@ -46,7 +46,7 @@ const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
 // the panel: the first question users asked about it was whether its marks were
 // review findings. The guide answers that, so it is reachable from the surface
 // itself rather than only from the release announcement.
-const WALKTHROUGH_GUIDE_URL = 'https://github.com/Youzini-afk/Piarium/blob/main/packages/web/application-host/lib/walkthrough/DOCUMENTATION.md';
+const WALKTHROUGH_GUIDE_URL = 'https://github.com/Youzini-afk/Varin/blob/main/packages/web/application-host/lib/walkthrough/DOCUMENTATION.md';
 
 // DropdownMenuLabel defaults to the same size and weight as its items, which
 // makes a heading read as another choice. This matches SelectLabel, the

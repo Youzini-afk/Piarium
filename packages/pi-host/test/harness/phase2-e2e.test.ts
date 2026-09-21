@@ -226,13 +226,13 @@ describe("Phase 2 e2e integration", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       const providerMessages = JSON.stringify(outgoing[0]?.messages ?? []);
-      assert.match(providerMessages, /piarium-context/, "assembled Zone 2 content must reach the provider request");
+      assert.match(providerMessages, /varin-context/, "assembled Zone 2 content must reach the provider request");
       assert.match(providerMessages, /plan/, "the current plan must reach the provider request");
-      assert.match(providerMessages, /piarium-status/, "the request boundary must append a transient current roster status");
+      assert.match(providerMessages, /varin-status/, "the request boundary must append a transient current roster status");
       const retained = manager.getBranch().filter((entry) => entry.type === "custom_message");
       assert.equal(retained.length, 1, "delivered environment content must become one durable receipt");
-      assert.match(JSON.stringify(retained), /piarium-context/);
-      assert.doesNotMatch(JSON.stringify(retained), /piarium-status/, "the current roster must remain request-scoped");
+      assert.match(JSON.stringify(retained), /varin-context/);
+      assert.doesNotMatch(JSON.stringify(retained), /varin-status/, "the current roster must remain request-scoped");
     } finally {
       boundary?.dispose();
       await harnessServiceHost.dispose();

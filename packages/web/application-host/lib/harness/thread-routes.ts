@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
-import type { ThreadConflictResolution } from "@piarium/protocol";
-import type { ThreadResultHistoryReleaseParams } from "@piarium/application-client";
+import type { ThreadConflictResolution } from "@varin/protocol";
+import type { ThreadResultHistoryReleaseParams } from "@varin/application-client";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 import { HarnessServiceError } from "./service-error.js";

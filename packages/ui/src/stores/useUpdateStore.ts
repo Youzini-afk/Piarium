@@ -8,7 +8,7 @@ import {
   isElectronShell,
   isWebRuntime,
 } from '@/lib/desktop';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
 declare const __APP_VERSION__: string | undefined;
@@ -39,7 +39,7 @@ type ClientRuntime = 'desktop' | 'web' | 'mobile';
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
   const electronArch = typeof window !== 'undefined'
-    ? window.__PIARIUM_ELECTRON__?.arch?.toLowerCase?.()
+    ? window.__VARIN_ELECTRON__?.arch?.toLowerCase?.()
     : undefined;
   if (electronArch === 'arm64' || electronArch === 'aarch64') return 'arm64';
   if (electronArch === 'x64' || electronArch === 'amd64' || electronArch === 'x86_64') return 'x64';
@@ -88,7 +88,7 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
   try {
     const params = mapRuntimeParams(runtime);
     if (currentVersion) params.set('currentVersion', currentVersion);
-    const response = await runtimeFetch(`/api/piarium/update-check?${params.toString()}`, {
+    const response = await runtimeFetch(`/api/varin/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       // Background check — keep sockets free for interactive traffic at startup.

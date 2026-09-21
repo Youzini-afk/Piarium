@@ -125,7 +125,7 @@ in its cache entry, so reopening a panel resolves the picker as *explicit choice
 of the cache key, switching models and back returns the earlier review for free.
 
 The server blocks models the catalog reports as `structured_output: false`
-before spending tokens. Piarium's Pi-native model catalog does not yet expose
+before spending tokens. Varin's Pi-native model catalog does not yet expose
 that metadata to the shared picker, so an explicitly chosen unsupported model
 may still be visible there and receives the same actionable refusal. Like the
 small-model picker, it only shows providers with a usable login. The picker on a blocked
@@ -226,13 +226,13 @@ return nothing when it runs out, which is a bill for no answer.
 
 The ask is therefore derived from the resolved model rather than fixed:
 `min(32k, max(4k, one eighth of the context))`, then capped by the catalog's
-`limit.output`. Four thousand tokens is Piarium's existing small-model reserve;
+`limit.output`. Four thousand tokens is Varin's existing small-model reserve;
 the context share grows room for reasoning without taking most of a smaller
 model's usable diff input, and 32k is already far above the expected JSON answer.
 
 The **same number is reserved from the input allowance**, so the ceiling and the
 context share are what stop a generous answer budget from eating the diff it is
-supposed to describe; the 4k floor preserves Piarium's existing small-model
+supposed to describe; the 4k floor preserves Varin's existing small-model
 budget. A
 model whose own `limit.output` is below the floor gets its limit, because asking
 for more than a provider allows is rejected by some and ignored by others.
@@ -387,7 +387,7 @@ be used for this: it re-runs the whole git pipeline.
 There is deliberately no delete route: regeneration covers the need, and an
 endpoint nothing calls is a maintenance surface that rots untested.
 
-Registered from Piarium's platform route runtime while the service itself stays
+Registered from Varin's platform route runtime while the service itself stays
 lazy. `/api/walkthrough` is in the
 JSON body-parser allowlist in `core-routes.js`.
 
@@ -407,5 +407,5 @@ telling someone to upgrade would send them after the wrong thing.
 ## Runtime availability
 
 Web and desktop reach these routes normally.
-Piarium mobile currently has no context-panel surface, so this phase does not
+Varin mobile currently has no context-panel surface, so this phase does not
 claim a mobile UI that cannot be reached.

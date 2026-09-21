@@ -1,5 +1,5 @@
-import type { ApnsTokenPayload, PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+import type { ApnsTokenPayload, PushAPI, PushSubscribePayload, PushUnsubscribePayload } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 const fetchJson = async <T>(input: string | URL | Request, init?: RequestInit): Promise<T | null> => {
   try {

@@ -4,7 +4,7 @@ import {
   type JsonValue,
   type PiSettingsSnapshot,
   type ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
 import type { PiComposerModelSelection } from './piComposerSessionConfig';

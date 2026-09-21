@@ -7,22 +7,22 @@ description: Typowe problemy z konfiguracją i działaniem oraz szybkie poprawki
 
 Coś nie działa? Znajdź objaw poniżej i spróbuj poprawki.
 
-## Polecenie Piarium kończy się lub nie startuje
+## Polecenie Varin kończy się lub nie startuje
 
 - potwierdź Node.js `>=22.19` (wspieraną linią bazową rozwoju jest Node.js 24)
 - z checkoutu źródeł uruchom `bun run dev` albo `bun run start:web`
-- jeśli masz opublikowane CLI, uruchom `piarium --version` i w razie potrzeby zainstaluj ponownie
+- jeśli masz opublikowane CLI, uruchom `varin --version` i w razie potrzeby zainstaluj ponownie
 
 ## UI webowe jest nieosiągalne
 
 - z checkoutu źródeł przeczytaj terminal, który uruchomił `bun run dev`
-- jeśli masz opublikowane CLI, sprawdź logi serwera poleceniem `piarium logs`
+- jeśli masz opublikowane CLI, sprawdź logi serwera poleceniem `varin logs`
 - zweryfikuj aktywny port (w rozwoju używany jest adres Vite; domyślny port serwera to `3000`)
 - najpierw otwórz bezpośrednio `http://localhost:3000`, zanim testujesz linki tuneli
 
 ## Link zdalny / tunel nie działa
 
-- uruchom `piarium tunnel status --all`, gdy CLI jest zainstalowane
+- uruchom `varin tunnel status --all`, gdy CLI jest zainstalowane
 - zrestartuj tunel z tej samej instancji / portu
 - wygeneruj ponownie link połączenia, jeśli poprzedni token został już użyty
 

@@ -31,7 +31,7 @@ const chunk = (documentId: string, body: string, startLine = 1, endLine = 3): Se
 
 describe("semantic generation store", () => {
   it("keeps two scopeIds isolated and accepts a non-path documentId", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-scope-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-scope-"));
     dirs.push(dataDir);
     const embedder = createHashEmbedder();
     const alpha = createSemanticGenerationStore({
@@ -70,7 +70,7 @@ describe("semantic generation store", () => {
   });
 
   it("computes scoped vector Top-K before truncating global candidates", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-scoped-topk-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-scoped-topk-"));
     dirs.push(dataDir);
     const space = {
       provider: "test",
@@ -142,7 +142,7 @@ describe("semantic generation store", () => {
   });
 
   it("reports partial coverage and only returns published documents while a generation is half-built", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-partial-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-partial-"));
     dirs.push(dataDir);
     const embedder = createHashEmbedder();
     const store = createSemanticGenerationStore({
@@ -169,7 +169,7 @@ describe("semantic generation store", () => {
   });
 
   it("skips publishing when the embedder is unavailable", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-unavail-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-unavail-"));
     dirs.push(dataDir);
     const embedder = createHashEmbedder();
     embedder.status = "unavailable";
@@ -192,7 +192,7 @@ describe("semantic generation store", () => {
   });
 
   it("maintains published document counts across batches, replacements, removals, and reopen", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-count-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-count-"));
     dirs.push(dataDir);
     const embedder = createHashEmbedder();
     const scope = workspaceScope("ws-count");
@@ -234,7 +234,7 @@ describe("semantic generation store", () => {
   });
 
   it("rejects incomplete embedding batches without publishing zero vectors", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-vector-count-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-vector-count-"));
     dirs.push(dataDir);
     const embedder = createHashEmbedder();
     embedder.embed = async () => [];
@@ -257,7 +257,7 @@ describe("semantic generation store", () => {
   });
 
   it("recovers and recounts a partial generation left by an exited writer", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-recovery-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-recovery-"));
     dirs.push(dataDir);
     const semanticDir = dirname(fileURLToPath(import.meta.url));
     const storeUrl = pathToFileURL(join(semanticDir, "store.ts")).href;
@@ -269,7 +269,7 @@ describe("semantic generation store", () => {
       const { blockIdentity, workspaceScope } = await import(${JSON.stringify(identityUrl)});
       const documentId = "src/crashed.ts";
       const store = createSemanticGenerationStore({
-        dataDir: process.env.PIARIUM_TEST_DATA_DIR,
+        dataDir: process.env.VARIN_TEST_DATA_DIR,
         hostId: "host",
         scope: workspaceScope("ws-recovery"),
         embedder: createHashEmbedder(),
@@ -297,7 +297,7 @@ describe("semantic generation store", () => {
       process.exit(0);
     `], {
       cwd: process.cwd(),
-      env: { ...process.env, PIARIUM_TEST_DATA_DIR: dataDir },
+      env: { ...process.env, VARIN_TEST_DATA_DIR: dataDir },
       encoding: "utf8",
     });
     expect(child.status, child.stderr).toBe(0);

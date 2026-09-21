@@ -6,7 +6,7 @@ import path from 'node:path';
 import { inspectHostProductionGraph, isLegacyHostArtifact, pruneLegacyHostArtifacts } from './host-production-boundary.mjs';
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-production-boundary-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-production-boundary-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const write = (file, text = 'export {};\n') => {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });

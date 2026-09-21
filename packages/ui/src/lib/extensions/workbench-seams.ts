@@ -1,16 +1,16 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumExtensionCatalogEntry,
-  PiariumWorkbenchResolvedLayout,
-} from '@piarium/extension-contract';
+  VarinApplicationSurface,
+  VarinExtensionCatalogEntry,
+  VarinWorkbenchResolvedLayout,
+} from '@varin/extension-contract';
 import {
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  parsePiariumWorkbenchShellContributionData,
-  resolvePiariumWorkbenchShellSurfaceSeams,
-  type PiariumWorkbenchShellContributionDataV1,
-  type PiariumWorkbenchShellSurfaceSeams,
-} from '@piarium/extension-contract';
-import type { SurfaceContribution } from '@piarium/extension-surface';
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  parseVarinWorkbenchShellContributionData,
+  resolveVarinWorkbenchShellSurfaceSeams,
+  type VarinWorkbenchShellContributionDataV1,
+  type VarinWorkbenchShellSurfaceSeams,
+} from '@varin/extension-contract';
+import type { SurfaceContribution } from '@varin/extension-surface';
 
 export type WorkbenchSeamProjection =
   | { status: 'supported'; target: string; selected: string; candidates: SurfaceContribution[] }
@@ -19,22 +19,22 @@ export type WorkbenchSeamProjection =
   | { status: 'platform'; target: string; selected: string; candidates: SurfaceContribution[] };
 
 export interface WorkbenchSeamProjectionInput {
-  layout: PiariumWorkbenchResolvedLayout;
+  layout: VarinWorkbenchResolvedLayout;
   shellContributionId?: string;
   shellExtensionId?: string;
   shellStatus: 'builtin' | 'disabled' | 'failed' | 'missing' | 'ready';
-  catalog: readonly PiariumExtensionCatalogEntry[];
-  surface: PiariumApplicationSurface;
+  catalog: readonly VarinExtensionCatalogEntry[];
+  surface: VarinApplicationSurface;
   visibleContributions: readonly SurfaceContribution[];
 }
 
 const PLATFORM_TARGETS = new Set<string>([
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition,
 ]);
 
 interface ResolvedShell {
-  data: PiariumWorkbenchShellContributionDataV1 | null;
+  data: VarinWorkbenchShellContributionDataV1 | null;
   contractFailed: boolean;
 }
 
@@ -42,8 +42,8 @@ const resolveShellData = (
   shellContributionId: string | undefined,
   shellExtensionId: string | undefined,
   shellStatus: 'builtin' | 'disabled' | 'failed' | 'missing' | 'ready',
-  catalog: readonly PiariumExtensionCatalogEntry[],
-  surface: PiariumApplicationSurface,
+  catalog: readonly VarinExtensionCatalogEntry[],
+  surface: VarinApplicationSurface,
 ): ResolvedShell => {
   if (!shellContributionId || shellStatus === 'missing') return { data: null, contractFailed: false };
   const entry = catalog.find((candidate) => candidate.manifest.id === shellExtensionId);
@@ -52,7 +52,7 @@ const resolveShellData = (
   if (!contribution) return { data: null, contractFailed: false };
   if (!contribution.supports.includes(surface)) return { data: null, contractFailed: false };
   try {
-    const data = parsePiariumWorkbenchShellContributionData(contribution.data, contribution.supports);
+    const data = parseVarinWorkbenchShellContributionData(contribution.data, contribution.supports);
     return { data, contractFailed: false };
   } catch {
     return { data: null, contractFailed: true };
@@ -75,8 +75,8 @@ const resolveShellData = (
 export const projectWorkbenchSeams = (input: WorkbenchSeamProjectionInput): WorkbenchSeamProjection[] => {
   const { layout, shellContributionId, shellExtensionId, shellStatus, catalog, surface, visibleContributions } = input;
   const resolved = resolveShellData(shellContributionId, shellExtensionId, shellStatus, catalog, surface);
-  const seams: PiariumWorkbenchShellSurfaceSeams | null = resolved.data
-    ? resolvePiariumWorkbenchShellSurfaceSeams(resolved.data, surface)
+  const seams: VarinWorkbenchShellSurfaceSeams | null = resolved.data
+    ? resolveVarinWorkbenchShellSurfaceSeams(resolved.data, surface)
     : null;
   const supportedTargets = new Set(seams?.replacementTargets ?? []);
   const candidatesByTarget = new Map<string, SurfaceContribution[]>();

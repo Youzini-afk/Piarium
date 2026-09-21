@@ -18,13 +18,13 @@
 		8E7A4F1A2C4B4C749E0A1001 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 8E7A4F192C4B4C749E0A1001 /* AppIcon.icon */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		D0A2000000000000000000B1 /* WidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A1 /* WidgetShared.swift */; };
-		D0A2000000000000000000B2 /* PiariumWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A2 /* PiariumWidgets.swift */; };
-		D0A2000000000000000000B3 /* PiariumControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* PiariumControl.swift */; };
-		D0A2000000000000000000B6 /* PiariumControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* PiariumControl.swift */; };
+		D0A2000000000000000000B2 /* VarinWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A2 /* VarinWidgets.swift */; };
+		D0A2000000000000000000B3 /* VarinControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* VarinControl.swift */; };
+		D0A2000000000000000000B6 /* VarinControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* VarinControl.swift */; };
 		D0A2000000000000000000B4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A4 /* Assets.xcassets */; };
-		D0A2000000000000000000B5 /* PiariumWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A7 /* PiariumWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D0A2000000000000000000B5 /* VarinWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A7 /* VarinWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0B2000000000000000000B1 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A1 /* NotificationService.swift */; };
-		D0B2000000000000000000B5 /* PiariumNotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A7 /* PiariumNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D0B2000000000000000000B5 /* VarinNotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A7 /* VarinNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,16 +43,16 @@
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 		D0A1000000000000000000A1 /* WidgetShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetShared.swift; sourceTree = "<group>"; };
-		D0A1000000000000000000A2 /* PiariumWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiariumWidgets.swift; sourceTree = "<group>"; };
-		D0A1000000000000000000A3 /* PiariumControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiariumControl.swift; sourceTree = "<group>"; };
+		D0A1000000000000000000A2 /* VarinWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VarinWidgets.swift; sourceTree = "<group>"; };
+		D0A1000000000000000000A3 /* VarinControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VarinControl.swift; sourceTree = "<group>"; };
 		D0A1000000000000000000A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D0A1000000000000000000A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		D0A1000000000000000000A6 /* PiariumWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PiariumWidget.entitlements; sourceTree = "<group>"; };
-		D0A1000000000000000000A7 /* PiariumWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PiariumWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0A1000000000000000000A6 /* VarinWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VarinWidget.entitlements; sourceTree = "<group>"; };
+		D0A1000000000000000000A7 /* VarinWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VarinWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0B1000000000000000000A1 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		D0B1000000000000000000A2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		D0B1000000000000000000A3 /* PiariumNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PiariumNotificationService.entitlements; sourceTree = "<group>"; };
-		D0B1000000000000000000A7 /* PiariumNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PiariumNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0B1000000000000000000A3 /* VarinNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VarinNotificationService.entitlements; sourceTree = "<group>"; };
+		D0B1000000000000000000A7 /* VarinNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VarinNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,14 +86,14 @@
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = D0A4000000000000000000D1;
-			remoteInfo = PiariumWidget;
+			remoteInfo = VarinWidget;
 		};
 		D0B4000000000000000000D3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = D0B4000000000000000000D1;
-			remoteInfo = PiariumNotificationService;
+			remoteInfo = VarinNotificationService;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -104,8 +104,8 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				D0A2000000000000000000B5 /* PiariumWidget.appex in Embed App Extensions */,
-				D0B2000000000000000000B5 /* PiariumNotificationService.appex in Embed App Extensions */,
+				D0A2000000000000000000B5 /* VarinWidget.appex in Embed App Extensions */,
+				D0B2000000000000000000B5 /* VarinNotificationService.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -125,8 +125,8 @@
 			isa = PBXGroup;
 			children = (
 				504EC3061FED79650016851F /* App */,
-				D0A6000000000000000000F1 /* PiariumWidget */,
-				D0B6000000000000000000F1 /* PiariumNotificationService */,
+				D0A6000000000000000000F1 /* VarinWidget */,
+				D0B6000000000000000000F1 /* VarinNotificationService */,
 				504EC3051FED79650016851F /* Products */,
 				7F8756D8B27F46E3366F6CEA /* Pods */,
 				27E2DDA53C4D2A4D1A88CE4A /* Frameworks */,
@@ -137,33 +137,33 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
-				D0A1000000000000000000A7 /* PiariumWidget.appex */,
-				D0B1000000000000000000A7 /* PiariumNotificationService.appex */,
+				D0A1000000000000000000A7 /* VarinWidget.appex */,
+				D0B1000000000000000000A7 /* VarinNotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		D0A6000000000000000000F1 /* PiariumWidget */ = {
+		D0A6000000000000000000F1 /* VarinWidget */ = {
 			isa = PBXGroup;
 			children = (
 				D0A1000000000000000000A1 /* WidgetShared.swift */,
-				D0A1000000000000000000A2 /* PiariumWidgets.swift */,
-				D0A1000000000000000000A3 /* PiariumControl.swift */,
+				D0A1000000000000000000A2 /* VarinWidgets.swift */,
+				D0A1000000000000000000A3 /* VarinControl.swift */,
 				D0A1000000000000000000A4 /* Assets.xcassets */,
 				D0A1000000000000000000A5 /* Info.plist */,
-				D0A1000000000000000000A6 /* PiariumWidget.entitlements */,
+				D0A1000000000000000000A6 /* VarinWidget.entitlements */,
 			);
-			path = PiariumWidget;
+			path = VarinWidget;
 			sourceTree = "<group>";
 		};
-		D0B6000000000000000000F1 /* PiariumNotificationService */ = {
+		D0B6000000000000000000F1 /* VarinNotificationService */ = {
 			isa = PBXGroup;
 			children = (
 				D0B1000000000000000000A1 /* NotificationService.swift */,
 				D0B1000000000000000000A2 /* Info.plist */,
-				D0B1000000000000000000A3 /* PiariumNotificationService.entitlements */,
+				D0B1000000000000000000A3 /* VarinNotificationService.entitlements */,
 			);
-			path = PiariumNotificationService;
+			path = VarinNotificationService;
 			sourceTree = "<group>";
 		};
 		504EC3061FED79650016851F /* App */ = {
@@ -217,9 +217,9 @@
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
 		};
-		D0A4000000000000000000D1 /* PiariumWidget */ = {
+		D0A4000000000000000000D1 /* VarinWidget */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D0A5000000000000000000E1 /* Build configuration list for PBXNativeTarget "PiariumWidget" */;
+			buildConfigurationList = D0A5000000000000000000E1 /* Build configuration list for PBXNativeTarget "VarinWidget" */;
 			buildPhases = (
 				D0A3000000000000000000C1 /* Sources */,
 				D0A3000000000000000000C2 /* Frameworks */,
@@ -229,14 +229,14 @@
 			);
 			dependencies = (
 			);
-			name = PiariumWidget;
-			productName = PiariumWidget;
-			productReference = D0A1000000000000000000A7 /* PiariumWidget.appex */;
+			name = VarinWidget;
+			productName = VarinWidget;
+			productReference = D0A1000000000000000000A7 /* VarinWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		D0B4000000000000000000D1 /* PiariumNotificationService */ = {
+		D0B4000000000000000000D1 /* VarinNotificationService */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D0B5000000000000000000E1 /* Build configuration list for PBXNativeTarget "PiariumNotificationService" */;
+			buildConfigurationList = D0B5000000000000000000E1 /* Build configuration list for PBXNativeTarget "VarinNotificationService" */;
 			buildPhases = (
 				D0B3000000000000000000C1 /* Sources */,
 				D0B3000000000000000000C2 /* Frameworks */,
@@ -245,9 +245,9 @@
 			);
 			dependencies = (
 			);
-			name = PiariumNotificationService;
-			productName = PiariumNotificationService;
-			productReference = D0B1000000000000000000A7 /* PiariumNotificationService.appex */;
+			name = VarinNotificationService;
+			productName = VarinNotificationService;
+			productReference = D0B1000000000000000000A7 /* VarinNotificationService.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -291,8 +291,8 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
-				D0A4000000000000000000D1 /* PiariumWidget */,
-				D0B4000000000000000000D1 /* PiariumNotificationService */,
+				D0A4000000000000000000D1 /* VarinWidget */,
+				D0B4000000000000000000D1 /* VarinNotificationService */,
 			);
 		};
 /* End PBXProject section */
@@ -365,7 +365,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
-				D0A2000000000000000000B6 /* PiariumControl.swift in Sources */,
+				D0A2000000000000000000B6 /* VarinControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -374,8 +374,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D0A2000000000000000000B1 /* WidgetShared.swift in Sources */,
-				D0A2000000000000000000B2 /* PiariumWidgets.swift in Sources */,
-				D0A2000000000000000000B3 /* PiariumControl.swift in Sources */,
+				D0A2000000000000000000B2 /* VarinWidgets.swift in Sources */,
+				D0A2000000000000000000B3 /* VarinControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -392,12 +392,12 @@
 /* Begin PBXTargetDependency section */
 		D0A4000000000000000000D2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = D0A4000000000000000000D1 /* PiariumWidget */;
+			target = D0A4000000000000000000D1 /* VarinWidget */;
 			targetProxy = D0A4000000000000000000D3 /* PBXContainerItemProxy */;
 		};
 		D0B4000000000000000000D2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = D0B4000000000000000000D1 /* PiariumNotificationService */;
+			target = D0B4000000000000000000D1 /* VarinNotificationService */;
 			targetProxy = D0B4000000000000000000D3 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -553,7 +553,7 @@
 					CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Piarium;
+				INFOPLIST_KEY_CFBundleDisplayName = Varin;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -562,7 +562,7 @@
 				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
@@ -579,7 +579,7 @@
 					CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Piarium;
+				INFOPLIST_KEY_CFBundleDisplayName = Varin;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -587,7 +587,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
@@ -598,12 +598,12 @@
 		D0A5000000000000000000E2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = PiariumWidget/PiariumWidget.entitlements;
+				CODE_SIGN_ENTITLEMENTS = VarinWidget/VarinWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PiariumWidget/Info.plist;
+				INFOPLIST_FILE = VarinWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -611,7 +611,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -623,12 +623,12 @@
 		D0A5000000000000000000E3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = PiariumWidget/PiariumWidget.entitlements;
+				CODE_SIGN_ENTITLEMENTS = VarinWidget/VarinWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PiariumWidget/Info.plist;
+				INFOPLIST_FILE = VarinWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -636,7 +636,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile.widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
@@ -647,12 +647,12 @@
 		D0B5000000000000000000E2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = PiariumNotificationService/PiariumNotificationService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = VarinNotificationService/VarinNotificationService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PiariumNotificationService/Info.plist;
+				INFOPLIST_FILE = VarinNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -660,7 +660,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile.notification-service;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile.notification-service;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -672,12 +672,12 @@
 		D0B5000000000000000000E3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = PiariumNotificationService/PiariumNotificationService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = VarinNotificationService/VarinNotificationService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PiariumNotificationService/Info.plist;
+				INFOPLIST_FILE = VarinNotificationService/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -685,7 +685,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.piarium.mobile.notification-service;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.varin.mobile.notification-service;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
@@ -714,7 +714,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D0A5000000000000000000E1 /* Build configuration list for PBXNativeTarget "PiariumWidget" */ = {
+		D0A5000000000000000000E1 /* Build configuration list for PBXNativeTarget "VarinWidget" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D0A5000000000000000000E2 /* Debug */,
@@ -723,7 +723,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D0B5000000000000000000E1 /* Build configuration list for PBXNativeTarget "PiariumNotificationService" */ = {
+		D0B5000000000000000000E1 /* Build configuration list for PBXNativeTarget "VarinNotificationService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D0B5000000000000000000E2 /* Debug */,

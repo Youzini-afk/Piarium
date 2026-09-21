@@ -5,7 +5,7 @@ import {
   isRuntimeMethod,
   type RuntimeWireEnvelope,
 } from "./runtime.js";
-import { type JsonValue, PIARIUM_PROTOCOL_VERSION } from "./types.js";
+import { type JsonValue, VARIN_PROTOCOL_VERSION } from "./types.js";
 
 export class ProtocolDecodeError extends Error {
   readonly code: string;
@@ -38,7 +38,7 @@ export function decodeEnvelope(frame: string): WireEnvelope {
   if (!isRecord(value)) {
     throw new ProtocolDecodeError("invalid_envelope", "Protocol frame must be a JSON object");
   }
-  if (value.v !== PIARIUM_PROTOCOL_VERSION) {
+  if (value.v !== VARIN_PROTOCOL_VERSION) {
     throw new ProtocolDecodeError(
       "unsupported_version",
       `Unsupported protocol version: ${String(value.v)}`,
@@ -88,7 +88,7 @@ export function encodeEnvelope(envelope: WireEnvelope): string {
   return `${JSON.stringify(envelope)}\n`;
 }
 
-/** Decode one frame received from a Piarium surface transport. */
+/** Decode one frame received from a Varin surface transport. */
 export function decodeRuntimeEnvelope(frame: string): RuntimeWireEnvelope {
   const envelope = decodeEnvelope(frame);
   if (envelope.kind === "request" && !isRuntimeMethod(envelope.method)) {

@@ -31,7 +31,7 @@ const restoreGlobals = () => {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
 };
 
-const STORAGE_KEY = 'piarium.mobile.connections.v1';
+const STORAGE_KEY = 'varin.mobile.connections.v1';
 
 const testRelay: MobileRelayConfig = {
   relayUrl: 'wss://relay.example/tunnel',
@@ -95,7 +95,7 @@ describe('mobile connection storage', () => {
       await upsertMobileConnection({
         label: 'My Desktop',
         candidates: [{ kind: 'relay', relay: testRelay }],
-        clientToken: 'piarium_client_secret',
+        clientToken: 'varin_client_secret',
       });
 
       const connections = await loadMobileConnections();
@@ -103,7 +103,7 @@ describe('mobile connection storage', () => {
       const saved = connections[0]!;
       expect(saved.candidates).toEqual([{ kind: 'relay', relay: testRelay }]);
       // Web surface: token stays inline like direct connections.
-      expect(saved.clientToken).toBe('piarium_client_secret');
+      expect(saved.clientToken).toBe('varin_client_secret');
 
       // Persisted metadata carries only the three transport fields — no grant/token.
       const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;

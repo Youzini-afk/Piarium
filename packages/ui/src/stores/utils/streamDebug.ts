@@ -1,13 +1,13 @@
 export const streamDebugEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem('piarium_stream_debug') === '1';
+        return window.localStorage.getItem('varin_stream_debug') === '1';
     } catch {
         return false;
     }
 };
 
-const STREAM_PERF_STORAGE_KEY = 'piarium_stream_perf';
+const STREAM_PERF_STORAGE_KEY = 'varin_stream_perf';
 
 type PerfCounter = {
     count: number;
@@ -41,8 +41,8 @@ export type StreamPerfSnapshot = {
 
 declare global {
     interface Window {
-        __piariumStreamPerfState?: StreamPerfState;
-        __piariumStreamPerformance?: {
+        __varinStreamPerfState?: StreamPerfState;
+        __varinStreamPerformance?: {
             setEnabled: (enabled: boolean) => void;
             reset: () => void;
             getSnapshot: () => StreamPerfSnapshot;
@@ -73,16 +73,16 @@ const ensureStreamPerfState = (): StreamPerfState | null => {
         return null;
     }
 
-    if (!window.__piariumStreamPerfState) {
+    if (!window.__varinStreamPerfState) {
         const startedAt = Date.now();
-        window.__piariumStreamPerfState = {
+        window.__varinStreamPerfState = {
             counters: new Map<string, PerfCounter>(),
             startedAt,
             lastUpdatedAt: startedAt,
         };
     }
 
-    return window.__piariumStreamPerfState;
+    return window.__varinStreamPerfState;
 };
 
 const normalizePerfEntries = (counters: Map<string, PerfCounter>): StreamPerfEntry[] => {
@@ -122,7 +122,7 @@ export const setStreamPerfEnabled = (enabled: boolean): void => {
     try {
         if (enabled) {
             window.localStorage.setItem(STREAM_PERF_STORAGE_KEY, '1');
-            window.__piariumStreamPerfState = {
+            window.__varinStreamPerfState = {
                 counters: new Map<string, PerfCounter>(),
                 startedAt: Date.now(),
                 lastUpdatedAt: Date.now(),
@@ -131,7 +131,7 @@ export const setStreamPerfEnabled = (enabled: boolean): void => {
         }
 
         window.localStorage.removeItem(STREAM_PERF_STORAGE_KEY);
-        delete window.__piariumStreamPerfState;
+        delete window.__varinStreamPerfState;
     } catch {
         // ignore storage failures in debug helper
     }
@@ -143,7 +143,7 @@ export const resetStreamPerf = (): void => {
     }
 
     if (streamPerfEnabled) {
-        window.__piariumStreamPerfState = {
+        window.__varinStreamPerfState = {
             counters: new Map<string, PerfCounter>(),
             startedAt: Date.now(),
             lastUpdatedAt: Date.now(),
@@ -163,7 +163,7 @@ export const getStreamPerfSnapshot = (): StreamPerfSnapshot => {
         };
     }
 
-    const state = window.__piariumStreamPerfState;
+    const state = window.__varinStreamPerfState;
     if (!streamPerfEnabled || !state) {
         return {
             enabled: false,
@@ -205,7 +205,7 @@ export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {
 };
 
 if (typeof window !== 'undefined') {
-    window.__piariumStreamPerformance = {
+    window.__varinStreamPerformance = {
         setEnabled: setStreamPerfEnabled,
         reset: resetStreamPerf,
         getSnapshot: getStreamPerfSnapshot,

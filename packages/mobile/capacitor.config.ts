@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'dev.piarium.mobile',
-  appName: 'Piarium',
+  appId: 'dev.varin.mobile',
+  appName: 'Varin',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

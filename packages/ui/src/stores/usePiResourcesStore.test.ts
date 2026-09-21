@@ -6,7 +6,7 @@ import type {
   PiResourceKind,
   PiResourceScope,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 
 let runtimeKey = 'runtime-a';
@@ -47,7 +47,7 @@ let copyImpl: (
   name?: string,
 ) => Promise<PiResourceDocumentSnapshot>;
 
-mock.module('@piarium/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
+mock.module('@varin/application-client', () => ({ getRuntimeKey: () => runtimeKey }));
 mock.module('@/lib/pi-runtime/resources', () => ({
   listPiResources: (...args: Parameters<typeof listImpl>) => listImpl(...args),
   getPiResource: (...args: Parameters<typeof getImpl>) => getImpl(...args),

@@ -1,7 +1,7 @@
 import type {
   PiResourceCatalogSnapshot,
   RuntimeMethodResult,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import type { DraftStarterType } from '@/lib/draftStarters';
 
 export interface PiDraftStarterCatalogItem {

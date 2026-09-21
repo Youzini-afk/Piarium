@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { createSettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
 import { RecoveryPrimitiveError } from './errors.js';
 
 const SCHEMA_VERSION = 1;

@@ -26,7 +26,7 @@ afterEach(async () => {
 
 describe("nested thread production chain", () => {
   it("fixes a grandchild from the parent branch view and merges back without copying the grandchild transcript", async () => {
-    const root = await fs.promises.mkdtemp(join(os.tmpdir(), "piarium-nested-threads-"));
+    const root = await fs.promises.mkdtemp(join(os.tmpdir(), "varin-nested-threads-"));
     roots.push(root);
     const workspace = join(root, "workspace");
     await fs.promises.mkdir(workspace, { recursive: true });
@@ -173,7 +173,7 @@ describe("nested thread production chain", () => {
   });
 
   it("inherits the parent branch captureScopes and ignores later live copyIgnored settings", async () => {
-    const root = await fs.promises.mkdtemp(join(os.tmpdir(), "piarium-nested-scopes-"));
+    const root = await fs.promises.mkdtemp(join(os.tmpdir(), "varin-nested-scopes-"));
     roots.push(root);
     const workspace = join(root, "workspace");
     await fs.promises.mkdir(workspace, { recursive: true });

@@ -267,17 +267,17 @@ export const resolveRecoveryStorageRoot = async ({
   identity,
   location,
   pathModule = path,
-  storageOwnerId = 'piarium.builtin.recovery',
+  storageOwnerId = 'varin.builtin.recovery',
 }: ResolveRecoveryStorageRootOptions): Promise<string> => {
   const selected = normalizeLocation(location);
-  const ownerSegments = storageOwnerId === 'piarium.builtin.recovery' ? [] : [storageOwnerId];
+  const ownerSegments = storageOwnerId === 'varin.builtin.recovery' ? [] : [storageOwnerId];
   if (selected.mode === 'workspace-local') {
-    return pathModule.join(identity.canonicalRoot, '.piarium', 'recovery', ...ownerSegments, 'v1');
+    return pathModule.join(identity.canonicalRoot, '.varin', 'recovery', ...ownerSegments, 'v1');
   }
   if (selected.mode === 'workspace-adjacent') {
     return pathModule.join(
       pathModule.dirname(identity.canonicalRoot),
-      '.piarium-recovery',
+      '.varin-recovery',
       identity.workspaceId,
       ...ownerSegments,
       'v1',
@@ -310,7 +310,7 @@ export const createRecoveryLocationRegistry = ({
   defaultRecoveryDir,
   fsPromises = fs.promises,
   pathModule = path,
-  storageOwnerId = 'piarium.builtin.recovery',
+  storageOwnerId = 'varin.builtin.recovery',
 }: CreateRecoveryLocationRegistryOptions): RecoveryLocationRegistry => {
   const registryPath = pathModule.join(
     dataDir,

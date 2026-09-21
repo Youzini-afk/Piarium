@@ -1,18 +1,18 @@
 import { expect, test } from 'bun:test';
 import type {
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionHostStateSnapshot,
-} from '@piarium/extension-contract';
+  VarinExtensionCatalogEntry,
+  VarinExtensionHostStateSnapshot,
+} from '@varin/extension-contract';
 import {
-  defaultPiariumWorkbenchProfileDocument,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-} from '@piarium/extension-contract';
-import type { SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+  defaultVarinWorkbenchProfileDocument,
+  VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+  VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  VARIN_WORKBENCH_IDE_PROFILE_ID,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+} from '@varin/extension-contract';
+import type { SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
 
 const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
@@ -22,7 +22,7 @@ const surfaceSnapshot = (failed = false): SurfaceRegistrySnapshot => ({
     desiredRevision: 1,
     diagnostics: [],
     entrypointId: 'main',
-    extensionId: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+    extensionId: VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
     extensionVersion: '1.0.0',
     generation: 1,
     hostId,
@@ -40,7 +40,7 @@ const surfaceSnapshot = (failed = false): SurfaceRegistrySnapshot => ({
   visibleContributions: [],
 });
 
-const agentEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEntry => ({
+const agentEntry = (enabled: boolean, failed = false): VarinExtensionCatalogEntry => ({
   actual: failed
     ? [{
       desiredRevision: 1,
@@ -61,20 +61,20 @@ const agentEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
     contributions: [{
       contractVersion: 1,
       data: {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: { replacementTargets: [], slots: [] },
           desktop: { replacementTargets: [], slots: [] },
           mobile: { replacementTargets: [], slots: [] },
         },
       },
-      id: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+      id: VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
       kind: 'shell',
       replacement: { target: 'workbench.shell' },
       supports: ['web', 'desktop', 'mobile'],
     }],
-    engines: { piarium: '*' },
-    id: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+    engines: { varin: '*' },
+    id: VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
     schemaVersion: 1,
     version: '1.0.0',
   },
@@ -85,9 +85,9 @@ const agentEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEn
 });
 
 const hostSnapshot = (
-  entry: PiariumExtensionCatalogEntry,
+  entry: VarinExtensionCatalogEntry,
   options?: { authoritative?: boolean },
-): PiariumExtensionHostStateSnapshot => ({
+): VarinExtensionHostStateSnapshot => ({
   catalog: {
     authoritative: true,
     diagnostics: [],
@@ -110,7 +110,7 @@ const hostSnapshot = (
   workbench: {
     authoritative: options?.authoritative ?? true,
     diagnostics: [],
-    document: defaultPiariumWorkbenchProfileDocument(),
+    document: defaultVarinWorkbenchProfileDocument(),
     hostId,
     storageState: 'missing',
   },
@@ -125,12 +125,12 @@ test('disabling the Agent Workspace extension recovers without treating the cata
   const disabled = resolveWorkbenchShellView(hostSnapshot(agentEntry(false)), 'web');
   expect(disabled.view).toBe('recovery');
   expect(disabled.resolved?.status).toBe('disabled');
-  expect(disabled.resolved?.shellExtensionId).toBe(PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID);
+  expect(disabled.resolved?.shellExtensionId).toBe(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID);
 
   const restored = resolveWorkbenchShellView(hostSnapshot(agentEntry(true)), 'web');
   expect(restored.view).toBe('ready');
   expect(restored.resolved?.status).toBe('ready');
-  expect(restored.resolved?.shellContributionId).toBe(PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  expect(restored.resolved?.shellContributionId).toBe(VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
 });
 
 test('a failed Agent Workspace actual state stays in Recovery', () => {
@@ -159,21 +159,21 @@ test('a failed Surface in another window does not put this window in Recovery', 
 });
 
 test('the IDE profile is ready on web and recovers on mobile where it has no shell', () => {
-  const ideEntry: PiariumExtensionCatalogEntry = {
+  const ideEntry: VarinExtensionCatalogEntry = {
     ...agentEntry(true),
     manifest: {
       ...agentEntry(true).manifest,
-      id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+      id: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
       contributions: [{
         contractVersion: 1,
         data: {
-          contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+          contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
           seams: {
             web: { replacementTargets: [], slots: [] },
             desktop: { replacementTargets: [], slots: [] },
           },
         },
-        id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+        id: VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
         kind: 'shell',
         replacement: { target: 'workbench.shell' },
         supports: ['web', 'desktop'],
@@ -184,11 +184,11 @@ test('the IDE profile is ready on web and recovers on mobile where it has no she
   const snapshot = hostSnapshot(ideEntry);
   snapshot.workbench.document = {
     ...snapshot.workbench.document,
-    activeProfileId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    activeProfileId: VARIN_WORKBENCH_IDE_PROFILE_ID,
   };
   const web = resolveWorkbenchShellView(snapshot, 'web');
   expect(web.view).toBe('ready');
-  expect(web.resolved?.shellContributionId).toBe(PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  expect(web.resolved?.shellContributionId).toBe(VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
   const mobile = resolveWorkbenchShellView(snapshot, 'mobile');
   expect(mobile.view).toBe('recovery');
   expect(mobile.resolved?.status).toBe('builtin');

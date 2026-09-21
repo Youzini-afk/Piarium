@@ -1,9 +1,9 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionCatalogSnapshot,
-  PiariumExtensionDiagnostic,
-  PiariumExtensionStorageSnapshot,
+  VarinApplicationSurface,
+  VarinExtensionCatalogEntry,
+  VarinExtensionCatalogSnapshot,
+  VarinExtensionDiagnostic,
+  VarinExtensionStorageSnapshot,
 } from "./types.js";
 
 const record = (value: unknown): Record<string, unknown> | null => (
@@ -12,25 +12,25 @@ const record = (value: unknown): Record<string, unknown> | null => (
     : null
 );
 
-export const PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
+export const VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
 
-export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID = "default";
-export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
-export const PIARIUM_WORKBENCH_IDE_PROFILE_ID = "piarium.ide";
-export const PIARIUM_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
-export const PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID = "piarium.research";
-export const PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
-export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "piarium.builtin.agent-workspace";
-export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "piarium.builtin.agent-workspace.shell";
-export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
-export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID = "piarium.builtin.ide-workbench";
-export const PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID = "piarium.builtin.ide-workbench.shell";
-export const PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES: PiariumApplicationSurface[] = ["web", "desktop"];
-export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID = "piarium.builtin.research-workbench";
-export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID = "piarium.builtin.research-workbench.shell";
-export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
+export const VARIN_WORKBENCH_DEFAULT_PROFILE_ID = "default";
+export const VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
+export const VARIN_WORKBENCH_IDE_PROFILE_ID = "varin.ide";
+export const VARIN_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
+export const VARIN_WORKBENCH_RESEARCH_PROFILE_ID = "varin.research";
+export const VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
+export const VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "varin.builtin.agent-workspace";
+export const VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "varin.builtin.agent-workspace.shell";
+export const VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
+export const VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID = "varin.builtin.ide-workbench";
+export const VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID = "varin.builtin.ide-workbench.shell";
+export const VARIN_BUILTIN_IDE_WORKBENCH_SURFACES: VarinApplicationSurface[] = ["web", "desktop"];
+export const VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID = "varin.builtin.research-workbench";
+export const VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID = "varin.builtin.research-workbench.shell";
+export const VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
 
-export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
+export const VARIN_WORKBENCH_REPLACEMENT_TARGETS = {
   agents: "agents.workbench",
   chatComposer: "chat.composer",
   chatTimeline: "chat.timeline",
@@ -48,7 +48,7 @@ export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
   transition: "workbench.transition",
 } as const;
 
-export const PIARIUM_WORKBENCH_SLOTS = {
+export const VARIN_WORKBENCH_SLOTS = {
   activityItems: "workbench.activity.items",
   primarySidebarViews: "workbench.primary-sidebar.views",
   editorActions: "workbench.editor.actions",
@@ -67,7 +67,7 @@ export const PIARIUM_WORKBENCH_SLOTS = {
 // ---------------------------------------------------------------------------
 
 /** Props for `workbench.editor.actions` — rendered in the active editor group's action strip. */
-export interface PiariumWorkbenchEditorActionsSlotProps {
+export interface VarinWorkbenchEditorActionsSlotProps {
   workspaceId: string;
   groupId: string;
   resourceId?: string;
@@ -75,33 +75,33 @@ export interface PiariumWorkbenchEditorActionsSlotProps {
 }
 
 /** Props for `workbench.panel.views` — rendered in the panel content area. */
-export interface PiariumWorkbenchPanelViewsSlotProps {
+export interface VarinWorkbenchPanelViewsSlotProps {
   workspaceId: string;
   activePanelId: string;
 }
 
 /** Props for `workbench.activity.items` — rendered in the activity bar. */
-export interface PiariumWorkbenchActivityItemsSlotProps {
+export interface VarinWorkbenchActivityItemsSlotProps {
   workspaceId: string;
 }
 
 /** Props for `workbench.primary-sidebar.views` — rendered in the primary sidebar. */
-export interface PiariumWorkbenchPrimarySidebarViewsSlotProps {
+export interface VarinWorkbenchPrimarySidebarViewsSlotProps {
   workspaceId: string;
   activeActivityId: string;
 }
 
 /** Props for `workbench.secondary-sidebar.views` — rendered in the secondary sidebar. */
-export interface PiariumWorkbenchSecondarySidebarViewsSlotProps {
+export interface VarinWorkbenchSecondarySidebarViewsSlotProps {
   workspaceId: string;
 }
 
 /** Props for `workbench.status.items` — rendered in the status bar. */
-export interface PiariumWorkbenchStatusItemsSlotProps {
+export interface VarinWorkbenchStatusItemsSlotProps {
   workspaceId: string;
 }
 
-export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
+export const VARIN_WORKBENCH_CONTEXT_KEYS = {
   editorHasSelection: "editorHasSelection",
   editorIsDirty: "editorIsDirty",
   editorIsOpen: "editorIsOpen",
@@ -120,35 +120,35 @@ export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
 // missing selections instead of showing every target as available.
 // ---------------------------------------------------------------------------
 
-export const PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT = "piarium-workbench-shell/v1" as const;
+export const VARIN_WORKBENCH_SHELL_DATA_CONTRACT = "varin-workbench-shell/v1" as const;
 
-export interface PiariumWorkbenchShellSurfaceSeams {
+export interface VarinWorkbenchShellSurfaceSeams {
   replacementTargets: string[];
   slots: string[];
 }
 
-export type PiariumWorkbenchShellContributionDataV1 = {
-  contract: typeof PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT;
-  seams: Partial<Record<PiariumApplicationSurface, PiariumWorkbenchShellSurfaceSeams>>;
+export type VarinWorkbenchShellContributionDataV1 = {
+  contract: typeof VARIN_WORKBENCH_SHELL_DATA_CONTRACT;
+  seams: Partial<Record<VarinApplicationSurface, VarinWorkbenchShellSurfaceSeams>>;
 };
 
 const SHELL_SEAM_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const FORBIDDEN_NESTED_TARGETS: Set<string> = new Set([
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition,
 ]);
 
-export class PiariumWorkbenchShellContractError extends Error {
+export class VarinWorkbenchShellContractError extends Error {
   readonly issues: string[];
 
   constructor(message: string, issues: string[]) {
     super(message);
-    this.name = "PiariumWorkbenchShellContractError";
+    this.name = "VarinWorkbenchShellContractError";
     this.issues = issues;
   }
 }
 
-const isShellSurface = (value: unknown): value is PiariumApplicationSurface => (
+const isShellSurface = (value: unknown): value is VarinApplicationSurface => (
   value === "desktop" || value === "mobile" || value === "web"
 );
 
@@ -185,10 +185,10 @@ const validateSeamIdentifiers = (
 
 /**
  * Parse and validate shell contribution data. Throws
- * `PiariumWorkbenchShellContractError` on validation failure.
+ * `VarinWorkbenchShellContractError` on validation failure.
  *
  * Rules:
- * - `contract` must equal `PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT`
+ * - `contract` must equal `VARIN_WORKBENCH_SHELL_DATA_CONTRACT`
  * - every surface in `supports` must have a `seams` entry
  * - `seams` must not declare surfaces not in `supports`
  * - `replacementTargets` and `slots` must be unique within and across each
@@ -197,12 +197,12 @@ const validateSeamIdentifiers = (
  *   (prevents recursive nesting)
  * - identifiers must match the standard contribution ID pattern
  */
-export const parsePiariumWorkbenchShellContributionData = (
+export const parseVarinWorkbenchShellContributionData = (
   data: unknown,
-  supports: readonly PiariumApplicationSurface[],
-): PiariumWorkbenchShellContributionDataV1 => {
+  supports: readonly VarinApplicationSurface[],
+): VarinWorkbenchShellContributionDataV1 => {
   const raw = record(data);
-  if (!raw) throw new PiariumWorkbenchShellContractError("Shell contribution data must be an object", ["data must be an object"]);
+  if (!raw) throw new VarinWorkbenchShellContractError("Shell contribution data must be an object", ["data must be an object"]);
   const issues: string[] = [];
   // Reject unknown top-level fields (matches schema additionalProperties: false)
   const allowedTopLevel = new Set(["contract", "seams"]);
@@ -210,15 +210,15 @@ export const parsePiariumWorkbenchShellContributionData = (
     if (!allowedTopLevel.has(key)) issues.push(`data.${key} is not a recognized field`);
   }
   const contract = raw.contract;
-  if (contract !== PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT) {
-    issues.push(`data.contract must be ${PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT}`);
+  if (contract !== VARIN_WORKBENCH_SHELL_DATA_CONTRACT) {
+    issues.push(`data.contract must be ${VARIN_WORKBENCH_SHELL_DATA_CONTRACT}`);
   }
   const rawSeams = record(raw.seams);
   if (!rawSeams) {
     issues.push("data.seams must be an object");
   }
   const supportSet = new Set(supports);
-  const seams: Partial<Record<PiariumApplicationSurface, PiariumWorkbenchShellSurfaceSeams>> = {};
+  const seams: Partial<Record<VarinApplicationSurface, VarinWorkbenchShellSurfaceSeams>> = {};
   const processedSurfaces = new Set<string>();
   if (rawSeams) {
     for (const [surfaceKey, surfaceValue] of Object.entries(rawSeams)) {
@@ -270,10 +270,10 @@ export const parsePiariumWorkbenchShellContributionData = (
     }
   }
   if (issues.length > 0) {
-    throw new PiariumWorkbenchShellContractError("Shell contribution data is invalid", issues);
+    throw new VarinWorkbenchShellContractError("Shell contribution data is invalid", issues);
   }
   return {
-    contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+    contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
     seams,
   };
 };
@@ -282,26 +282,26 @@ export const parsePiariumWorkbenchShellContributionData = (
  * Resolve the seams for a specific surface from a parsed shell contribution
  * data. Returns empty seams if the surface is not declared.
  */
-export const resolvePiariumWorkbenchShellSurfaceSeams = (
-  data: PiariumWorkbenchShellContributionDataV1,
-  surface: PiariumApplicationSurface,
-): PiariumWorkbenchShellSurfaceSeams => (
+export const resolveVarinWorkbenchShellSurfaceSeams = (
+  data: VarinWorkbenchShellContributionDataV1,
+  surface: VarinApplicationSurface,
+): VarinWorkbenchShellSurfaceSeams => (
   data.seams[surface] ?? { replacementTargets: [], slots: [] }
 );
 
-export type PiariumWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";
+export type VarinWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";
 
-export interface PiariumWorkbenchResolvedProfile {
-  layout: PiariumWorkbenchResolvedLayout;
+export interface VarinWorkbenchResolvedProfile {
+  layout: VarinWorkbenchResolvedLayout;
   profileId: string;
   shellContributionId?: string;
   shellExtensionId?: string;
-  status: PiariumWorkbenchShellStatus;
+  status: VarinWorkbenchShellStatus;
 }
 
-export type PiariumWorkbenchLayoutScope = "distribution" | "user" | "workspace";
+export type VarinWorkbenchLayoutScope = "distribution" | "user" | "workspace";
 
-export interface PiariumWorkbenchLayoutReference {
+export interface VarinWorkbenchLayoutReference {
   contributionId: string;
   order?: number;
   region?: string;
@@ -309,84 +309,84 @@ export interface PiariumWorkbenchLayoutReference {
   visible?: boolean;
 }
 
-export interface PiariumWorkbenchLayoutLayer {
+export interface VarinWorkbenchLayoutLayer {
   profileId: string;
-  references: PiariumWorkbenchLayoutReference[];
+  references: VarinWorkbenchLayoutReference[];
   replacementSelections: Record<string, string>;
-  scope: PiariumWorkbenchLayoutScope;
+  scope: VarinWorkbenchLayoutScope;
   scopeId: string;
-  surface: PiariumApplicationSurface;
+  surface: VarinApplicationSurface;
 }
 
-export interface PiariumWorkbenchDistributionProfile {
+export interface VarinWorkbenchDistributionProfile {
   extensionIds?: string[];
   id: string;
   label: string;
 }
 
-export interface PiariumWorkbenchProfileSelections {
+export interface VarinWorkbenchProfileSelections {
   users: Record<string, string>;
 }
 
-export interface PiariumWorkbenchProfileDocument {
+export interface VarinWorkbenchProfileDocument {
   activeProfileId: string;
-  layouts: PiariumWorkbenchLayoutLayer[];
-  profileSelections: PiariumWorkbenchProfileSelections;
-  profiles: PiariumWorkbenchDistributionProfile[];
+  layouts: VarinWorkbenchLayoutLayer[];
+  profileSelections: VarinWorkbenchProfileSelections;
+  profiles: VarinWorkbenchDistributionProfile[];
   revision: number;
-  schemaVersion: typeof PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION;
   updatedAt: string;
 }
 
-export interface PiariumWorkbenchProfileSnapshot {
+export interface VarinWorkbenchProfileSnapshot {
   authoritative: boolean;
-  diagnostics: PiariumExtensionDiagnostic[];
-  document: PiariumWorkbenchProfileDocument;
+  diagnostics: VarinExtensionDiagnostic[];
+  document: VarinWorkbenchProfileDocument;
   hostId: string;
   storageState: "missing" | "ready" | "stale";
 }
 
-export interface PiariumWorkbenchLayoutUpdateRequest {
+export interface VarinWorkbenchLayoutUpdateRequest {
   expectedRevision: number;
-  layer: PiariumWorkbenchLayoutLayer;
+  layer: VarinWorkbenchLayoutLayer;
 }
 
-export interface PiariumWorkbenchProfileSelectionRequest {
+export interface VarinWorkbenchProfileSelectionRequest {
   expectedRevision: number;
   profileId: string;
   scope: "application" | "user";
   scopeId?: string;
 }
 
-export interface PiariumWorkbenchProfileUpsertRequest {
+export interface VarinWorkbenchProfileUpsertRequest {
   expectedRevision: number;
-  profile: PiariumWorkbenchDistributionProfile;
+  profile: VarinWorkbenchDistributionProfile;
 }
 
-export interface PiariumWorkbenchProfileRemoveRequest {
+export interface VarinWorkbenchProfileRemoveRequest {
   expectedRevision: number;
   profileId: string;
 }
 
-export interface PiariumWorkbenchProfileApplyRequest {
+export interface VarinWorkbenchProfileApplyRequest {
   expectedCatalogRevision: number;
   profileId: string;
 }
 
-export interface PiariumWorkbenchResolutionContext {
-  surface: PiariumApplicationSurface;
+export interface VarinWorkbenchResolutionContext {
+  surface: VarinApplicationSurface;
   userId: string;
   workspaceId?: string;
 }
 
-export interface PiariumWorkbenchResolvedLayout {
+export interface VarinWorkbenchResolvedLayout {
   profileId: string;
-  references: PiariumWorkbenchLayoutReference[];
+  references: VarinWorkbenchLayoutReference[];
   replacementSelections: Record<string, string>;
 }
 
-const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "web"]);
-const SCOPES = new Set<PiariumWorkbenchLayoutScope>(["distribution", "user", "workspace"]);
+const SURFACES = new Set<VarinApplicationSurface>(["desktop", "mobile", "web"]);
+const SCOPES = new Set<VarinWorkbenchLayoutScope>(["distribution", "user", "workspace"]);
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
 const text = (value: unknown, label: string): string => {
@@ -411,7 +411,7 @@ const contributionId = (value: unknown, label: string): string => {
   return parsed;
 };
 
-const parseProfile = (value: unknown, label: string): PiariumWorkbenchDistributionProfile => {
+const parseProfile = (value: unknown, label: string): VarinWorkbenchDistributionProfile => {
   const raw = record(value);
   if (!raw) throw new Error(`${label} must be an object`);
   let extensionIds: string[] | undefined;
@@ -427,10 +427,10 @@ const parseProfile = (value: unknown, label: string): PiariumWorkbenchDistributi
   };
 };
 
-const parseReference = (value: unknown, label: string): PiariumWorkbenchLayoutReference => {
+const parseReference = (value: unknown, label: string): VarinWorkbenchLayoutReference => {
   const raw = record(value);
   if (!raw) throw new Error(`${label} must be an object`);
-  const result: PiariumWorkbenchLayoutReference = {
+  const result: VarinWorkbenchLayoutReference = {
     contributionId: contributionId(raw.contributionId, `${label}.contributionId`),
   };
   if (raw.order !== undefined) {
@@ -449,12 +449,12 @@ const parseReference = (value: unknown, label: string): PiariumWorkbenchLayoutRe
   return result;
 };
 
-export const parsePiariumWorkbenchLayoutLayer = (value: unknown): PiariumWorkbenchLayoutLayer => {
+export const parseVarinWorkbenchLayoutLayer = (value: unknown): VarinWorkbenchLayoutLayer => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench layout layer must be an object");
-  const surface = text(raw.surface, "layer.surface") as PiariumApplicationSurface;
+  const surface = text(raw.surface, "layer.surface") as VarinApplicationSurface;
   if (!SURFACES.has(surface)) throw new Error("layer.surface is unsupported");
-  const scope = text(raw.scope, "layer.scope") as PiariumWorkbenchLayoutScope;
+  const scope = text(raw.scope, "layer.scope") as VarinWorkbenchLayoutScope;
   if (!SCOPES.has(scope)) throw new Error("layer.scope is unsupported");
   if (!Array.isArray(raw.references)) throw new Error("layer.references must be an array");
   const references = raw.references.map((item, index) => parseReference(item, `layer.references[${index}]`));
@@ -491,15 +491,15 @@ const parseStringMap = (value: unknown, label: string): Record<string, string> =
   return result;
 };
 
-export const parsePiariumWorkbenchProfileDocument = (value: unknown): PiariumWorkbenchProfileDocument => {
+export const parseVarinWorkbenchProfileDocument = (value: unknown): VarinWorkbenchProfileDocument => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile document must be an object");
-  if (raw.schemaVersion !== PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION) throw new Error("Workbench profile schemaVersion is unsupported");
+  if (raw.schemaVersion !== VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION) throw new Error("Workbench profile schemaVersion is unsupported");
   if (!Array.isArray(raw.profiles) || raw.profiles.length === 0) throw new Error("Workbench profiles must contain at least one profile");
   const profiles = raw.profiles.map((item, index) => parseProfile(item, `profiles[${index}]`));
   if (new Set(profiles.map((item) => item.id)).size !== profiles.length) throw new Error("Workbench profile IDs must be unique");
   if (!Array.isArray(raw.layouts)) throw new Error("Workbench layouts must be an array");
-  const layouts = raw.layouts.map(parsePiariumWorkbenchLayoutLayer);
+  const layouts = raw.layouts.map(parseVarinWorkbenchLayoutLayer);
   const layoutKeys = layouts.map((layer) => `${layer.profileId}\0${layer.surface}\0${layer.scope}\0${layer.scopeId}`);
   if (new Set(layoutKeys).size !== layoutKeys.length) throw new Error("Workbench layout layer identities must be unique");
   const selections = record(raw.profileSelections);
@@ -524,12 +524,12 @@ export const parsePiariumWorkbenchProfileDocument = (value: unknown): PiariumWor
     profileSelections,
     profiles,
     revision: revision(raw.revision, "revision"),
-    schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
+    schemaVersion: VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
     updatedAt,
   };
 };
 
-export const parsePiariumWorkbenchProfileSnapshot = (value: unknown): PiariumWorkbenchProfileSnapshot => {
+export const parseVarinWorkbenchProfileSnapshot = (value: unknown): VarinWorkbenchProfileSnapshot => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile snapshot must be an object");
   const storageState = raw.storageState;
@@ -540,23 +540,23 @@ export const parsePiariumWorkbenchProfileSnapshot = (value: unknown): PiariumWor
   if (!Array.isArray(raw.diagnostics)) throw new Error("Workbench profile diagnostics must be an array");
   return {
     authoritative: raw.authoritative,
-    diagnostics: raw.diagnostics as PiariumExtensionDiagnostic[],
-    document: parsePiariumWorkbenchProfileDocument(raw.document),
+    diagnostics: raw.diagnostics as VarinExtensionDiagnostic[],
+    document: parseVarinWorkbenchProfileDocument(raw.document),
     hostId: text(raw.hostId, "hostId"),
     storageState,
   };
 };
 
-export const parsePiariumWorkbenchLayoutUpdateRequest = (value: unknown): PiariumWorkbenchLayoutUpdateRequest => {
+export const parseVarinWorkbenchLayoutUpdateRequest = (value: unknown): VarinWorkbenchLayoutUpdateRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench layout update request must be an object");
   return {
     expectedRevision: revision(raw.expectedRevision, "expectedRevision"),
-    layer: parsePiariumWorkbenchLayoutLayer(raw.layer),
+    layer: parseVarinWorkbenchLayoutLayer(raw.layer),
   };
 };
 
-export const parsePiariumWorkbenchProfileSelectionRequest = (value: unknown): PiariumWorkbenchProfileSelectionRequest => {
+export const parseVarinWorkbenchProfileSelectionRequest = (value: unknown): VarinWorkbenchProfileSelectionRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile selection request must be an object");
   const scope = raw.scope;
@@ -572,19 +572,19 @@ export const parsePiariumWorkbenchProfileSelectionRequest = (value: unknown): Pi
   };
 };
 
-export const parsePiariumWorkbenchProfileUpsertRequest = (value: unknown): PiariumWorkbenchProfileUpsertRequest => {
+export const parseVarinWorkbenchProfileUpsertRequest = (value: unknown): VarinWorkbenchProfileUpsertRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile upsert request must be an object");
   return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), profile: parseProfile(raw.profile, "profile") };
 };
 
-export const parsePiariumWorkbenchProfileRemoveRequest = (value: unknown): PiariumWorkbenchProfileRemoveRequest => {
+export const parseVarinWorkbenchProfileRemoveRequest = (value: unknown): VarinWorkbenchProfileRemoveRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile remove request must be an object");
   return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), profileId: profileId(raw.profileId, "profileId") };
 };
 
-export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): PiariumWorkbenchProfileApplyRequest => {
+export const parseVarinWorkbenchProfileApplyRequest = (value: unknown): VarinWorkbenchProfileApplyRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile apply request must be an object");
   return {
@@ -595,13 +595,13 @@ export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): Piariu
 
 const distributionShellLayer = (
   profileId: string,
-  surface: PiariumApplicationSurface,
+  surface: VarinApplicationSurface,
   shellContributionId: string,
-): PiariumWorkbenchLayoutLayer => ({
+): VarinWorkbenchLayoutLayer => ({
   profileId,
   references: [],
   replacementSelections: {
-    [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
+    [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
   },
   scope: "distribution",
   scopeId: profileId,
@@ -609,9 +609,9 @@ const distributionShellLayer = (
 });
 
 const ensureDistributionShellLayouts = (
-  document: PiariumWorkbenchProfileDocument,
+  document: VarinWorkbenchProfileDocument,
   profileId: string,
-  surfaces: readonly PiariumApplicationSurface[],
+  surfaces: readonly VarinApplicationSurface[],
   shellContributionId: string,
 ): boolean => {
   let changed = false;
@@ -628,12 +628,12 @@ const ensureDistributionShellLayouts = (
       continue;
     }
     const layer = document.layouts[index];
-    if (!layer || layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]) continue;
+    if (!layer || layer.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]) continue;
     document.layouts[index] = {
       ...layer,
       replacementSelections: {
         ...layer.replacementSelections,
-        [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
+        [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
       },
     };
     changed = true;
@@ -641,85 +641,85 @@ const ensureDistributionShellLayouts = (
   return changed;
 };
 
-export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfileDocument => ({
-  activeProfileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+export const defaultVarinWorkbenchProfileDocument = (): VarinWorkbenchProfileDocument => ({
+  activeProfileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
   layouts: [
-    ...PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => (
+    ...VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => (
       distributionShellLayer(
-        PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+        VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
         surface,
-        PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+        VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
       )
     )),
-    ...PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => (
+    ...VARIN_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => (
       distributionShellLayer(
-        PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+        VARIN_WORKBENCH_IDE_PROFILE_ID,
         surface,
-        PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+        VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
       )
     )),
-    ...PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => (
+    ...VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => (
       distributionShellLayer(
-        PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+        VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
         surface,
-        PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+        VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
       )
     )),
   ],
   profileSelections: { users: {} },
   profiles: [
-    { id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL },
-    { id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL },
-    { id: PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID, label: PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL },
+    { id: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, label: VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL },
+    { id: VARIN_WORKBENCH_IDE_PROFILE_ID, label: VARIN_WORKBENCH_IDE_PROFILE_LABEL },
+    { id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL },
   ],
   revision: 0,
-  schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
+  schemaVersion: VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
   updatedAt: new Date(0).toISOString(),
 });
 
-export const migratePiariumWorkbenchProfileDocument = (
-  document: PiariumWorkbenchProfileDocument,
+export const migrateVarinWorkbenchProfileDocument = (
+  document: VarinWorkbenchProfileDocument,
 ): boolean => {
   let changed = false;
-  const profile = document.profiles.find((candidate) => candidate.id === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  const profile = document.profiles.find((candidate) => candidate.id === VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
   if (profile && profile.label === "Default") {
-    profile.label = PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL;
+    profile.label = VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL;
     changed = true;
   }
-  if (!document.profiles.some((candidate) => candidate.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID)) {
-    document.profiles.push({ id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL });
+  if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_IDE_PROFILE_ID)) {
+    document.profiles.push({ id: VARIN_WORKBENCH_IDE_PROFILE_ID, label: VARIN_WORKBENCH_IDE_PROFILE_LABEL });
     changed = true;
   }
-  if (!document.profiles.some((candidate) => candidate.id === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID)) {
-    document.profiles.push({ id: PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID, label: PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL });
+  if (!document.profiles.some((candidate) => candidate.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID)) {
+    document.profiles.push({ id: VARIN_WORKBENCH_RESEARCH_PROFILE_ID, label: VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL });
     changed = true;
   }
   changed = ensureDistributionShellLayouts(
     document,
-    PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-    PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
-    PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+    VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
+    VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
+    VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   ) || changed;
   changed = ensureDistributionShellLayouts(
     document,
-    PIARIUM_WORKBENCH_IDE_PROFILE_ID,
-    PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
-    PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    VARIN_WORKBENCH_IDE_PROFILE_ID,
+    VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
+    VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   ) || changed;
   changed = ensureDistributionShellLayouts(
     document,
-    PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
-    PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
-    PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
+    VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
+    VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
   ) || changed;
   return changed;
 };
 
-export const resolvePiariumWorkbenchLayout = (
-  documentValue: PiariumWorkbenchProfileDocument | unknown,
-  context: PiariumWorkbenchResolutionContext,
-): PiariumWorkbenchResolvedLayout => {
-  const document = parsePiariumWorkbenchProfileDocument(documentValue);
+export const resolveVarinWorkbenchLayout = (
+  documentValue: VarinWorkbenchProfileDocument | unknown,
+  context: VarinWorkbenchResolutionContext,
+): VarinWorkbenchResolvedLayout => {
+  const document = parseVarinWorkbenchProfileDocument(documentValue);
   if (!SURFACES.has(context.surface)) throw new Error("Workbench resolution surface is unsupported");
   const userId = text(context.userId, "userId");
   const workspaceId = context.workspaceId?.trim() || undefined;
@@ -740,7 +740,7 @@ export const resolvePiariumWorkbenchLayout = (
     ["distribution", "user", "workspace"].indexOf(left.scope)
     - ["distribution", "user", "workspace"].indexOf(right.scope)
   ));
-  const references = new Map<string, PiariumWorkbenchLayoutReference>();
+  const references = new Map<string, VarinWorkbenchLayoutReference>();
   const replacementSelections: Record<string, string> = {};
   for (const layer of layers) {
     for (const reference of layer.references) {
@@ -755,18 +755,18 @@ export const resolvePiariumWorkbenchLayout = (
 };
 
 const catalogExtensions = (
-  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
-): readonly PiariumExtensionCatalogEntry[] => (
+  catalog: Pick<VarinExtensionCatalogSnapshot, "extensions"> | readonly VarinExtensionCatalogEntry[],
+): readonly VarinExtensionCatalogEntry[] => (
   "extensions" in catalog ? catalog.extensions : catalog
 );
 
-export const inspectPiariumWorkbenchShell = (
+export const inspectVarinWorkbenchShell = (
   replacementSelections: Readonly<Record<string, string>>,
-  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
-  surface: PiariumApplicationSurface,
+  catalog: Pick<VarinExtensionCatalogSnapshot, "extensions"> | readonly VarinExtensionCatalogEntry[],
+  surface: VarinApplicationSurface,
   actualScope?: { hostId?: string; realmIds?: readonly string[] },
-): Pick<PiariumWorkbenchResolvedProfile, "shellContributionId" | "shellExtensionId" | "status"> => {
-  const shellContributionId = replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]?.trim();
+): Pick<VarinWorkbenchResolvedProfile, "shellContributionId" | "shellExtensionId" | "status"> => {
+  const shellContributionId = replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]?.trim();
   if (!shellContributionId) return { status: "builtin" };
   const extensions = catalogExtensions(catalog);
   for (const entry of extensions) {
@@ -793,34 +793,34 @@ export const inspectPiariumWorkbenchShell = (
   return { status: "missing", shellContributionId };
 };
 
-export const resolvePiariumWorkbenchLayoutForProfile = (
-  documentValue: PiariumWorkbenchProfileDocument | unknown,
-  context: PiariumWorkbenchResolutionContext,
+export const resolveVarinWorkbenchLayoutForProfile = (
+  documentValue: VarinWorkbenchProfileDocument | unknown,
+  context: VarinWorkbenchResolutionContext,
   profileIdValue: string,
-): PiariumWorkbenchResolvedLayout => {
-  const document = parsePiariumWorkbenchProfileDocument(documentValue);
+): VarinWorkbenchResolvedLayout => {
+  const document = parseVarinWorkbenchProfileDocument(documentValue);
   const selected = profileId(profileIdValue, "profileId");
   if (!document.profiles.some((profile) => profile.id === selected)) {
     throw new Error(`Workbench profile is not installed: ${selected}`);
   }
   const userId = text(context.userId, "userId");
-  const nextDocument: PiariumWorkbenchProfileDocument = {
+  const nextDocument: VarinWorkbenchProfileDocument = {
     ...document,
     activeProfileId: selected,
     profileSelections: {
       users: { ...document.profileSelections.users, [userId]: selected },
     },
   };
-  return resolvePiariumWorkbenchLayout(nextDocument, context);
+  return resolveVarinWorkbenchLayout(nextDocument, context);
 };
 
-export const resolvePiariumWorkbenchProfile = (
-  documentValue: PiariumWorkbenchProfileDocument | unknown,
-  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
-  context: PiariumWorkbenchResolutionContext,
-): PiariumWorkbenchResolvedProfile => {
-  const layout = resolvePiariumWorkbenchLayout(documentValue, context);
-  const inspected = inspectPiariumWorkbenchShell(layout.replacementSelections, catalog, context.surface);
+export const resolveVarinWorkbenchProfile = (
+  documentValue: VarinWorkbenchProfileDocument | unknown,
+  catalog: Pick<VarinExtensionCatalogSnapshot, "extensions"> | readonly VarinExtensionCatalogEntry[],
+  context: VarinWorkbenchResolutionContext,
+): VarinWorkbenchResolvedProfile => {
+  const layout = resolveVarinWorkbenchLayout(documentValue, context);
+  const inspected = inspectVarinWorkbenchShell(layout.replacementSelections, catalog, context.surface);
   return {
     layout,
     profileId: layout.profileId,
@@ -831,10 +831,10 @@ export const resolvePiariumWorkbenchProfile = (
 };
 
 export const workbenchDocumentFromStorage = (
-  snapshot: PiariumExtensionStorageSnapshot,
-): PiariumWorkbenchProfileDocument => parsePiariumWorkbenchProfileDocument({
-  ...(snapshot.exists ? snapshot.document.data : defaultPiariumWorkbenchProfileDocument()),
+  snapshot: VarinExtensionStorageSnapshot,
+): VarinWorkbenchProfileDocument => parseVarinWorkbenchProfileDocument({
+  ...(snapshot.exists ? snapshot.document.data : defaultVarinWorkbenchProfileDocument()),
   revision: snapshot.document.revision,
-  schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
+  schemaVersion: VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
   updatedAt: snapshot.document.updatedAt,
 });

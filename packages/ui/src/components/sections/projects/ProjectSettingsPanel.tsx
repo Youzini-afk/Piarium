@@ -1,5 +1,5 @@
 import React from 'react';
-import { WorktreeSectionContent } from '@/components/sections/piarium/WorktreeSectionContent';
+import { WorktreeSectionContent } from '@/components/sections/varin/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
 import { ProjectIdentityFields } from '@/components/sections/projects/ProjectIdentityFields';
 import {
@@ -7,7 +7,7 @@ import {
   type ProjectIdentitySaveData,
 } from '@/components/sections/projects/useProjectIdentityForm';
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;

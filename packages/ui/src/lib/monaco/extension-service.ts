@@ -1,14 +1,14 @@
 import type { editor, IDisposable, IRange } from 'monaco-editor/editor';
 import {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-  type PiariumEditorMonacoFailureResultV1,
-  type PiariumEditorMonacoRangeV1,
-  type PiariumEditorMonacoServiceV1,
-  type PiariumEditorMonacoStateResultV1,
-  type PiariumEditorMonacoViewRequestV1,
-} from '@piarium/extension-contract';
-import type { SurfaceExternalService, SurfaceOwnerIdentity } from '@piarium/extension-surface';
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  type VarinEditorMonacoFailureResultV1,
+  type VarinEditorMonacoRangeV1,
+  type VarinEditorMonacoServiceV1,
+  type VarinEditorMonacoStateResultV1,
+  type VarinEditorMonacoViewRequestV1,
+} from '@varin/extension-contract';
+import type { SurfaceExternalService, SurfaceOwnerIdentity } from '@varin/extension-surface';
 
 import type { DocumentIdentity } from '@/lib/documents/types';
 
@@ -34,7 +34,7 @@ type OwnedDecorations = {
   viewId: string;
 };
 
-type MonacoExtensionServiceFailure = PiariumEditorMonacoFailureResultV1;
+type MonacoExtensionServiceFailure = VarinEditorMonacoFailureResultV1;
 
 type MonacoExtensionInspectorSnapshot = {
   activeViewId: string | null;
@@ -68,12 +68,12 @@ const registrationKey = (owner: SurfaceOwnerIdentity, sourceId: string): string 
 
 const ownerIdentity = (owner: SurfaceOwnerIdentity): SurfaceOwnerIdentity => ({ ...owner });
 
-const publicRange = (value: IRange): PiariumEditorMonacoRangeV1 => ({
+const publicRange = (value: IRange): VarinEditorMonacoRangeV1 => ({
   start: { line: value.startLineNumber, column: value.startColumn },
   end: { line: value.endLineNumber, column: value.endColumn },
 });
 
-const monacoRange = (value: PiariumEditorMonacoRangeV1): IRange => ({
+const monacoRange = (value: VarinEditorMonacoRangeV1): IRange => ({
   startLineNumber: value.start.line,
   startColumn: value.start.column,
   endLineNumber: value.end.line,
@@ -83,8 +83,8 @@ const monacoRange = (value: PiariumEditorMonacoRangeV1): IRange => ({
 const documentVersion = (view: LiveMonacoView): number => view.getDocumentVersion();
 
 const serviceDescriptor = {
-  id: PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  version: PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+  id: VARIN_EDITOR_MONACO_SERVICE_ID,
+  version: VARIN_EDITOR_MONACO_SERVICE_VERSION,
 } as const;
 
 class MonacoExtensionServiceRegistry {
@@ -121,7 +121,7 @@ class MonacoExtensionServiceRegistry {
 
   getViewRevision = (): number => this.#viewRevision;
 
-  getViewStateResult = (): PiariumEditorMonacoStateResultV1 => ({
+  getViewStateResult = (): VarinEditorMonacoStateResultV1 => ({
     state: {
       activeViewId: this.#activeViewId,
       revision: this.#viewRevision,
@@ -157,7 +157,7 @@ class MonacoExtensionServiceRegistry {
     };
   }
 
-  externalService(ownerValue: SurfaceOwnerIdentity): SurfaceExternalService<PiariumEditorMonacoServiceV1> {
+  externalService(ownerValue: SurfaceOwnerIdentity): SurfaceExternalService<VarinEditorMonacoServiceV1> {
     const owner = ownerIdentity(ownerValue);
     const key = ownerKey(owner);
     this.#owners.set(key, owner);
@@ -172,17 +172,17 @@ class MonacoExtensionServiceRegistry {
       this.#owners.delete(key);
       this.#publish();
     };
-    const staleOwner = (): PiariumEditorMonacoFailureResultV1 => ({
+    const staleOwner = (): VarinEditorMonacoFailureResultV1 => ({
       reason: 'owner-generation-changed',
       status: 'stale',
     });
     const implementation = {
       getActiveView: () => disposed ? staleOwner() : this.#viewSnapshot(this.#target({})),
       getState: () => disposed ? staleOwner() : this.getViewStateResult(),
-      getView: (request: PiariumEditorMonacoViewRequestV1 = {}) => disposed
+      getView: (request: VarinEditorMonacoViewRequestV1 = {}) => disposed
         ? staleOwner()
         : this.#withView(request, (view) => this.#viewSnapshot(view)),
-      focus: (request: PiariumEditorMonacoViewRequestV1 = {}) => disposed ? staleOwner() : this.#withView(request, (view) => {
+      focus: (request: VarinEditorMonacoViewRequestV1 = {}) => disposed ? staleOwner() : this.#withView(request, (view) => {
         const previousRevision = this.#viewRevision;
         this.#activeViewId = view.viewId;
         view.editor.focus();
@@ -265,9 +265,9 @@ class MonacoExtensionServiceRegistry {
         if (request.afterRevision !== this.getViewRevision()) {
           return Promise.resolve(this.getViewStateResult());
         }
-        return new Promise<PiariumEditorMonacoStateResultV1>((resolve) => {
+        return new Promise<VarinEditorMonacoStateResultV1>((resolve) => {
           let settled = false;
-          const finish = (result: PiariumEditorMonacoStateResultV1): void => {
+          const finish = (result: VarinEditorMonacoStateResultV1): void => {
             if (settled) return;
             settled = true;
             unsubscribe();
@@ -281,11 +281,11 @@ class MonacoExtensionServiceRegistry {
           pendingStateWaiters.add(cancel);
         });
       },
-    } satisfies PiariumEditorMonacoServiceV1;
+    } satisfies VarinEditorMonacoServiceV1;
     return {
       descriptor: serviceDescriptor,
       implementation,
-      providerId: 'piarium.builtin.text',
+      providerId: 'varin.builtin.text',
       dispose,
     };
   }
@@ -302,7 +302,7 @@ class MonacoExtensionServiceRegistry {
   }
 
   #withView<T>(
-    request: PiariumEditorMonacoViewRequestV1,
+    request: VarinEditorMonacoViewRequestV1,
     action: (view: LiveMonacoView) => T,
   ): T | MonacoExtensionServiceFailure {
     const view = this.#target(request);
@@ -319,7 +319,7 @@ class MonacoExtensionServiceRegistry {
     return action(view);
   }
 
-  #target(request: PiariumEditorMonacoViewRequestV1): LiveMonacoView | null {
+  #target(request: VarinEditorMonacoViewRequestV1): LiveMonacoView | null {
     if (request.viewId) return this.#views.get(request.viewId) ?? null;
     if (this.#activeViewId) return this.#views.get(this.#activeViewId) ?? null;
     return this.#views.values().next().value ?? null;
@@ -424,7 +424,7 @@ export const registerMonacoExtensionView = (input: MonacoViewRegistration): (() 
 
 export const createMonacoExtensionExternalService = (
   owner: SurfaceOwnerIdentity,
-): SurfaceExternalService<PiariumEditorMonacoServiceV1> => (
+): SurfaceExternalService<VarinEditorMonacoServiceV1> => (
   registry.externalService(owner)
 );
 

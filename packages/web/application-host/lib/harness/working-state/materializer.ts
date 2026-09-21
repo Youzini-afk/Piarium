@@ -33,7 +33,7 @@ export interface MaterializeResult {
 const normalizeRelPath = (p: string): string => p.replace(/\\/g, "/");
 
 /**
- * Scans target directory recursively for relative paths (excluding .git and .piarium).
+ * Scans target directory recursively for relative paths (excluding .git and .varin).
  */
 async function scanDirectory(
   dir: string,
@@ -51,7 +51,7 @@ async function scanDirectory(
     throw error;
   }
   for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === ".piarium") continue;
+    if (entry.name === ".git" || entry.name === ".varin") continue;
     const full = pathModule.join(dir, entry.name);
     const rel = normalizeRelPath(pathModule.relative(baseDir, full));
     if (entry.isDirectory()) {

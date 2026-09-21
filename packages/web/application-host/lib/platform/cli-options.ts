@@ -11,18 +11,18 @@ export const parseServeCliOptions = ({
   managedLocalMode,
 }: ParseServeCliOptionsInput): ParsedServeCliArgs => {
   const args = Array.isArray(argv) ? [...argv] : [];
-  const envPassword = env.PIARIUM_UI_PASSWORD || null;
-  const envCfTunnel = env.PIARIUM_TRY_CF_TUNNEL === 'true';
-  const envTunnelProvider = env.PIARIUM_TUNNEL_PROVIDER || undefined;
-  const envTunnelMode = env.PIARIUM_TUNNEL_MODE || undefined;
-  const envTunnelConfigRaw = env.PIARIUM_TUNNEL_CONFIG;
+  const envPassword = env.VARIN_UI_PASSWORD || null;
+  const envCfTunnel = env.VARIN_TRY_CF_TUNNEL === 'true';
+  const envTunnelProvider = env.VARIN_TUNNEL_PROVIDER || undefined;
+  const envTunnelMode = env.VARIN_TUNNEL_MODE || undefined;
+  const envTunnelConfigRaw = env.VARIN_TUNNEL_CONFIG;
   const envTunnelConfig = typeof envTunnelConfigRaw === 'string'
     ? (envTunnelConfigRaw.trim().length > 0 ? envTunnelConfigRaw.trim() : null)
     : undefined;
-  const envTunnelToken = env.PIARIUM_TUNNEL_TOKEN || undefined;
-  const envTunnelHostname = env.PIARIUM_TUNNEL_HOSTNAME || undefined;
-  const envApiOnly = env.PIARIUM_API_ONLY === '1' || env.PIARIUM_API_ONLY === 'true';
-  const parsedEnvPort = Number.parseInt(env.PIARIUM_PORT ?? '', 10);
+  const envTunnelToken = env.VARIN_TUNNEL_TOKEN || undefined;
+  const envTunnelHostname = env.VARIN_TUNNEL_HOSTNAME || undefined;
+  const envApiOnly = env.VARIN_API_ONLY === '1' || env.VARIN_API_ONLY === 'true';
+  const parsedEnvPort = Number.parseInt(env.VARIN_PORT ?? '', 10);
   const effectiveDefaultPort = Number.isInteger(parsedEnvPort) && parsedEnvPort >= 0
     ? parsedEnvPort
     : defaultPort;

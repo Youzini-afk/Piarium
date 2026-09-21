@@ -34,7 +34,7 @@ const manifest = parseGrammarPackManifest({
   skipped: {},
 });
 
-const storeOf = () => createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-grammar-install-")));
+const storeOf = () => createGrammarStore(mkdtempSync(join(tmpdir(), "varin-grammar-install-")));
 
 const files = (entries: Record<string, Uint8Array>) => async (
   _tarball: Uint8Array,

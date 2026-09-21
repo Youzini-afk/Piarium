@@ -1,7 +1,7 @@
 import { buildSessionContext, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-export const THREAD_NOTIFICATION_TYPE = "piarium.thread.notification";
+export const THREAD_NOTIFICATION_TYPE = "varin.thread.notification";
 
 const notificationId = (message: AgentMessage): string | undefined => {
   if (message.role !== "custom" || message.customType !== THREAD_NOTIFICATION_TYPE) return undefined;

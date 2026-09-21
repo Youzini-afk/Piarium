@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { HostEvent, HostEventData } from '@piarium/protocol';
+import type { HostEvent, HostEventData } from '@varin/protocol';
 import { SessionHost } from '../src/session-host.js';
 
 describe('SessionHost parent sessions', () => {
   it('persists a newly created child session relationship in the Pi header', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'piarium-parent-session-'));
+    const root = await mkdtemp(join(tmpdir(), 'varin-parent-session-'));
     const cwd = join(root, 'workspace');
     await mkdir(cwd, { recursive: true });
     const host = new SessionHost({

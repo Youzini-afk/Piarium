@@ -11,11 +11,11 @@ import type {
   DesktopSshInstallMethod,
   DesktopSshSecretStore,
   DesktopSshStoredSecret,
-  PiariumDesktopBridge,
-  PiariumDesktopCommand,
-  PiariumDesktopCommandInvocation,
-  PiariumDesktopCommandResult,
-} from '@piarium/application-client';
+  VarinDesktopBridge,
+  VarinDesktopCommand,
+  VarinDesktopCommandInvocation,
+  VarinDesktopCommandResult,
+} from '@varin/application-client';
 export type {
   DesktopSshImportCandidate,
   DesktopSshInstance,
@@ -28,14 +28,14 @@ export type {
   DesktopSshInstallMethod,
   DesktopSshSecretStore,
   DesktopSshStoredSecret,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
-type DesktopInvoke = <K extends PiariumDesktopCommand>(
+type DesktopInvoke = <K extends VarinDesktopCommand>(
   cmd: K,
-  ...invocation: PiariumDesktopCommandInvocation<K>
-) => Promise<PiariumDesktopCommandResult<K> | null>;
+  ...invocation: VarinDesktopCommandInvocation<K>
+) => Promise<VarinDesktopCommandResult<K> | null>;
 
-type DesktopBridgeGlobal = Partial<Pick<PiariumDesktopBridge, 'listen'>>;
+type DesktopBridgeGlobal = Partial<Pick<VarinDesktopBridge, 'listen'>>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
@@ -119,7 +119,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
       }
     : undefined;
 
-  const remoteRaw = isRecord(value.remotePiarium) ? value.remotePiarium : {};
+  const remoteRaw = isRecord(value.remoteVarin) ? value.remoteVarin : {};
 
   const localRaw = isRecord(value.localForward)
     ? value.localForward
@@ -161,7 +161,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
   const preferredLocalPort =
     readNumber(localRaw, 'preferredLocalPort') ?? readNumber(localRaw, 'preferred_local_port');
   const sshPassword = parseStoredSecret(authRaw.sshPassword || authRaw.ssh_password);
-  const piariumPassword = parseStoredSecret(authRaw.piariumPassword);
+  const varinPassword = parseStoredSecret(authRaw.varinPassword);
 
   return {
     id,
@@ -172,7 +172,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
       readNumber(value, 'connectionTimeoutSec') ??
       readNumber(value, 'connection_timeout_sec') ??
       60,
-    remotePiarium: {
+    remoteVarin: {
       mode,
       keepRunning: readBoolean(remoteRaw, 'keepRunning') ?? readBoolean(remoteRaw, 'keep_running') ?? true,
       ...(preferredPort ? { preferredPort } : {}),
@@ -188,7 +188,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
     },
     auth: {
       ...(sshPassword ? { sshPassword } : {}),
-      ...(piariumPassword ? { piariumPassword } : {}),
+      ...(varinPassword ? { varinPassword } : {}),
     },
     portForwards,
   };
@@ -260,7 +260,7 @@ export const createDesktopSshInstance = (id: string, sshCommand: string): Deskto
     id,
     sshCommand,
     connectionTimeoutSec: 60,
-    remotePiarium: {
+    remoteVarin: {
       mode: 'managed',
       keepRunning: true,
       installMethod: 'bun',
@@ -367,13 +367,13 @@ export const listenDesktopSshStatus = async (
     return async () => {};
   }
 
-  const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+  const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
   const listen = desktop?.listen;
   if (typeof listen !== 'function') {
     return async () => {};
   }
 
-  const unlisten = await listen('piarium:ssh-instance-status', (event) => {
+  const unlisten = await listen('varin:ssh-instance-status', (event) => {
     const status = parseStatus(event?.payload);
     if (!status) return;
     listener(status);

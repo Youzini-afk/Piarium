@@ -24,13 +24,13 @@ import {
   deleteProjectPlanFile,
   getProjectContextData,
   importProjectPlanFileFromContent,
-  PIARIUM_PROJECT_NOTES_MAX_LENGTH,
+  VARIN_PROJECT_NOTES_MAX_LENGTH,
   readProjectPlanFile,
-  PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH,
+  VARIN_PROJECT_TODO_TEXT_MAX_LENGTH,
   saveProjectNotesAndTodos,
-  type PiariumProjectPlanFileLink,
-  type PiariumProjectTodoItem,
-  type PiariumProjectRef as ProjectRef,
+  type VarinProjectPlanFileLink,
+  type VarinProjectTodoItem,
+  type VarinProjectRef as ProjectRef,
 } from '@/lib/project-config';
 import { requestFileAccess } from '@/lib/desktop';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -43,7 +43,7 @@ import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { TodoSendDialog, type TodoSendExecution } from './TodoSendDialog';
 
 const TODO_PANEL_MIN_ITEMS = 5;
@@ -86,13 +86,13 @@ type PendingSendTarget = {
   todoText: string;
 };
 
-type ProjectPlanListItem = PiariumProjectPlanFileLink & {
+type ProjectPlanListItem = VarinProjectPlanFileLink & {
   title: string;
 };
 
 const toPlanListItem = async (
   project: ProjectRef,
-  plan: PiariumProjectPlanFileLink,
+  plan: VarinProjectPlanFileLink,
   fallbackTitle: string,
 ): Promise<ProjectPlanListItem> => {
   const file = await readProjectPlanFile(project, plan.path);
@@ -109,12 +109,12 @@ const createTodoId = (): string => {
   return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const sortTodosWithCompletedLast = (items: PiariumProjectTodoItem[]): PiariumProjectTodoItem[] => [
+const sortTodosWithCompletedLast = (items: VarinProjectTodoItem[]): VarinProjectTodoItem[] => [
   ...items.filter((todo) => !todo.completed),
   ...items.filter((todo) => todo.completed),
 ];
 
-const insertTodoBeforeCompleted = (items: PiariumProjectTodoItem[], item: PiariumProjectTodoItem): PiariumProjectTodoItem[] => {
+const insertTodoBeforeCompleted = (items: VarinProjectTodoItem[], item: VarinProjectTodoItem): VarinProjectTodoItem[] => {
   const firstCompletedIndex = items.findIndex((todo) => todo.completed);
   if (firstCompletedIndex === -1) {
     return [...items, item];
@@ -167,7 +167,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const { t } = useI18n();
   const [isLoading, setIsLoading] = React.useState(false);
   const [notes, setNotes] = React.useState('');
-  const [todos, setTodos] = React.useState<PiariumProjectTodoItem[]>([]);
+  const [todos, setTodos] = React.useState<VarinProjectTodoItem[]>([]);
   const [newTodoText, setNewTodoText] = React.useState('');
   const [sendingTodoId, setSendingTodoId] = React.useState<string | null>(null);
   const [expandedTodoIds, setExpandedTodoIds] = React.useState<Set<string>>(() => new Set());
@@ -195,7 +195,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const padding = useUIStore((state) => state.padding);
 
   const persistProjectData = React.useCallback(
-    async (nextNotes: string, nextTodos: PiariumProjectTodoItem[]) => {
+    async (nextNotes: string, nextTodos: VarinProjectTodoItem[]) => {
       if (!projectRef) {
         return false;
       }
@@ -288,11 +288,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       setContextReloadTick((previous) => previous + 1);
     };
 
-    window.addEventListener('piarium:project-plan-saved', handleProjectContextRefresh);
-    window.addEventListener('piarium:project-notes-updated', handleProjectContextRefresh);
+    window.addEventListener('varin:project-plan-saved', handleProjectContextRefresh);
+    window.addEventListener('varin:project-notes-updated', handleProjectContextRefresh);
     return () => {
-      window.removeEventListener('piarium:project-plan-saved', handleProjectContextRefresh);
-      window.removeEventListener('piarium:project-notes-updated', handleProjectContextRefresh);
+      window.removeEventListener('varin:project-plan-saved', handleProjectContextRefresh);
+      window.removeEventListener('varin:project-notes-updated', handleProjectContextRefresh);
     };
   }, [projectRef]);
 
@@ -389,7 +389,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
     const nextTodos = insertTodoBeforeCompleted(todos, {
       id: createTodoId(),
-      text: trimmed.slice(0, PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH),
+      text: trimmed.slice(0, VARIN_PROJECT_TODO_TEXT_MAX_LENGTH),
       completed: false,
       createdAt: Date.now(),
     });
@@ -467,7 +467,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
-  const todoInputValue = newTodoText.slice(0, PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH);
+  const todoInputValue = newTodoText.slice(0, VARIN_PROJECT_TODO_TEXT_MAX_LENGTH);
   const completedTodoCount = todos.reduce((count, todo) => count + (todo.completed ? 1 : 0), 0);
 
   const routeToChat = React.useCallback(() => {
@@ -597,7 +597,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           return;
         }
         setPlans((previous) => previous.filter((entry) => entry.id !== planId));
-        window.dispatchEvent(new CustomEvent('piarium:project-plan-saved', {
+        window.dispatchEvent(new CustomEvent('varin:project-plan-saved', {
           detail: { projectId: projectRef.id },
         }));
       } finally {
@@ -644,7 +644,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           toast.error(t('rightSidebar.contextNotesTodo.toast.importPlanFailed'));
           return;
         }
-        window.dispatchEvent(new CustomEvent('piarium:project-plan-saved', {
+        window.dispatchEvent(new CustomEvent('varin:project-plan-saved', {
           detail: { projectId: projectRef.id },
         }));
         toast.success(t('rightSidebar.contextNotesTodo.toast.planImported'));
@@ -678,7 +678,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           toast.error(t('rightSidebar.contextNotesTodo.toast.importPlanFailed'));
           return;
         }
-        window.dispatchEvent(new CustomEvent('piarium:project-plan-saved', {
+        window.dispatchEvent(new CustomEvent('varin:project-plan-saved', {
           detail: { projectId: projectRef.id },
         }));
         toast.success(t('rightSidebar.contextNotesTodo.toast.planImported'));
@@ -728,11 +728,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               project: projectLabel?.trim() || projectRef.path.split('/').filter(Boolean).pop() || projectRef.path,
             })}
           </h3>
-          <span className="typography-meta text-muted-foreground">{notes.length}/{PIARIUM_PROJECT_NOTES_MAX_LENGTH}</span>
+          <span className="typography-meta text-muted-foreground">{notes.length}/{VARIN_PROJECT_NOTES_MAX_LENGTH}</span>
         </div>
         <Textarea
           value={notes}
-          onChange={(event) => setNotes(event.target.value.slice(0, PIARIUM_PROJECT_NOTES_MAX_LENGTH))}
+          onChange={(event) => setNotes(event.target.value.slice(0, VARIN_PROJECT_NOTES_MAX_LENGTH))}
           onBlur={handleNotesBlur}
           placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
           resizedHeight={notesPanelHeight}
@@ -763,13 +763,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
             </button>
           </div>
-          <span className="typography-meta text-muted-foreground">{todoInputValue.length}/{PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH}</span>
+          <span className="typography-meta text-muted-foreground">{todoInputValue.length}/{VARIN_PROJECT_TODO_TEXT_MAX_LENGTH}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <Input
             value={todoInputValue}
-            onChange={(event) => setNewTodoText(event.target.value.slice(0, PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH))}
+            onChange={(event) => setNewTodoText(event.target.value.slice(0, VARIN_PROJECT_TODO_TEXT_MAX_LENGTH))}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();

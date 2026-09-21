@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
-import type { PiRuntimeInstallPlan } from "@piarium/protocol";
-import { compareVersions } from "@piarium/pi-host/discovery";
+import type { PiRuntimeInstallPlan } from "@varin/protocol";
+import { compareVersions } from "@varin/pi-host/discovery";
 import { assertNotDowngrade } from "./runtime-install-plan.js";
 import {
   readStandaloneManifest,

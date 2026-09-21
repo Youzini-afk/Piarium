@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { addEditorContextAttachment } from './attachments';

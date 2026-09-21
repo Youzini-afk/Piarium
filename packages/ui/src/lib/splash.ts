@@ -1,7 +1,7 @@
 import {
   SPLASH_EXIT_DURATION_MS,
   SPLASH_HANDOFF_ATTRIBUTE,
-} from '@/components/ui/piarium-splash-lattice';
+} from '@/components/ui/varin-splash-lattice';
 
 /**
  * Talks to the pre-paint splash in `packages/web/index.html`.

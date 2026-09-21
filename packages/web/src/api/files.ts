@@ -3,12 +3,12 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import {
   FilesystemError,
   parseFilesystemErrorReason,
-} from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+} from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 
@@ -55,7 +55,7 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
 
 const directoryHeaders = (getDirectory?: () => string | undefined, override?: string): Record<string, string> | undefined => {
   const directory = override || getDirectory?.();
-  return directory ? { 'x-piarium-directory': directory } : undefined;
+  return directory ? { 'x-varin-directory': directory } : undefined;
 };
 
 export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({

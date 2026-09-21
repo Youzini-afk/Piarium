@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ThreadWorktree } from "@piarium/protocol";
+import type { ThreadWorktree } from "@varin/protocol";
 
 const normalizeComparePath = (value: string, pathModule: typeof path): string => {
   const resolved = pathModule.resolve(value).replace(/\\/g, "/");

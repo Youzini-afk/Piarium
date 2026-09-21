@@ -2,16 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import type {
   DocumentsAPI,
   FilesAPI,
-  PiariumDocumentReadResult,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinDocumentReadResult,
+  VarinResourceReference,
+} from '@varin/application-client';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import {
-  createPiariumProjectConfigStore,
-  PiariumProjectConfigError,
-  type PiariumProjectConfigRuntime,
+  createVarinProjectConfigStore,
+  VarinProjectConfigError,
+  type VarinProjectConfigRuntime,
 } from './storage';
-import type { PiariumProjectRef } from './types';
+import type { VarinProjectRef } from './types';
 
 interface StoredFile {
   content: string;
@@ -22,14 +22,14 @@ const HOME = '/home/user';
 const REPO = '/repo';
 const HOME_WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const REPO_WORKSPACE = '22222222-2222-4222-8222-222222222222';
-const project: PiariumProjectRef = { id: createProjectIdFromPath(REPO), path: REPO };
+const project: VarinProjectRef = { id: createProjectIdFromPath(REPO), path: REPO };
 
 const createRuntime = () => {
   const files = new Map<string, StoredFile>();
   let revision = 1;
   let beforeWrite: ((request: Parameters<DocumentsAPI['write']>[0]) => void | Promise<void>) | null = null;
-  const keyOf = (resource: PiariumResourceReference) => `${resource.workspaceId}\0${resource.resourceId}`;
-  const resourceForPath = (path: string): PiariumResourceReference => {
+  const keyOf = (resource: VarinResourceReference) => `${resource.workspaceId}\0${resource.resourceId}`;
+  const resourceForPath = (path: string): VarinResourceReference => {
     if (path === HOME || path.startsWith(`${HOME}/`)) {
       return { workspaceId: HOME_WORKSPACE, resourceId: path.slice(HOME.length).replace(/^\//, '') };
     }
@@ -55,7 +55,7 @@ const createRuntime = () => {
         encoding: 'utf-8',
         bom: false,
         byteLength: current.content.length,
-      } satisfies PiariumDocumentReadResult;
+      } satisfies VarinDocumentReadResult;
     },
     write: async (request) => {
       await beforeWrite?.(request);
@@ -115,7 +115,7 @@ const createRuntime = () => {
     search: async () => [],
     createDirectory: async (path) => ({ success: true, path }),
   };
-  const runtime: PiariumProjectConfigRuntime = {
+  const runtime: VarinProjectConfigRuntime = {
     documents,
     files: fileApi,
     currentDirectory: REPO,
@@ -130,10 +130,10 @@ const createRuntime = () => {
   };
 };
 
-describe('Piarium project configuration store', () => {
+describe('Varin project configuration store', () => {
   test('refuses to overwrite a malformed canonical file', async () => {
     const harness = createRuntime();
-    const store = createPiariumProjectConfigStore(() => harness.runtime);
+    const store = createVarinProjectConfigStore(() => harness.runtime);
     const paths = await store.getPaths(project);
     const resource = harness.resourceForPath(paths.canonicalConfig);
     harness.files.set(`${resource.workspaceId}\0${resource.resourceId}`, { content: '{broken', revision: 'd1_bad' });
@@ -146,16 +146,16 @@ describe('Piarium project configuration store', () => {
         await operation();
         throw new Error('expected malformed project configuration');
       } catch (error) {
-        expect(error).toBeInstanceOf(PiariumProjectConfigError);
-        expect((error as PiariumProjectConfigError).reason).toBe('malformed');
+        expect(error).toBeInstanceOf(VarinProjectConfigError);
+        expect((error as VarinProjectConfigError).reason).toBe('malformed');
       }
     }
     expect(harness.files.get(`${resource.workspaceId}\0${resource.resourceId}`)?.content).toBe('{broken');
   });
 
-  test('preserves unknown canonical fields across a Piarium update', async () => {
+  test('preserves unknown canonical fields across a Varin update', async () => {
     const harness = createRuntime();
-    const store = createPiariumProjectConfigStore(() => harness.runtime);
+    const store = createVarinProjectConfigStore(() => harness.runtime);
     const paths = await store.getPaths(project);
     const canonical = harness.resourceForPath(paths.canonicalConfig);
     const canonicalKey = `${canonical.workspaceId}\0${canonical.resourceId}`;
@@ -177,7 +177,7 @@ describe('Piarium project configuration store', () => {
 
   test('serializes in-process patches so independent fields are preserved', async () => {
     const harness = createRuntime();
-    const store = createPiariumProjectConfigStore(() => harness.runtime);
+    const store = createVarinProjectConfigStore(() => harness.runtime);
     expect(await Promise.all([
       store.update(project, { projectNotes: 'note' }),
       store.update(project, { waitForWorktreeSetup: true }),
@@ -189,7 +189,7 @@ describe('Piarium project configuration store', () => {
 
   test('serializes read-modify-write mutations so concurrent list appends are preserved', async () => {
     const harness = createRuntime();
-    const store = createPiariumProjectConfigStore(() => harness.runtime);
+    const store = createVarinProjectConfigStore(() => harness.runtime);
     const append = (id: string) => store.mutate(project, (config) => ({
       projectPlanFiles: [
         { id, path: `/plans/${id}.md`, createdAt: id === 'first' ? 1 : 2 },
@@ -203,7 +203,7 @@ describe('Piarium project configuration store', () => {
 
   test('surfaces an external revision conflict without overwriting the external edit', async () => {
     const harness = createRuntime();
-    const store = createPiariumProjectConfigStore(() => harness.runtime);
+    const store = createVarinProjectConfigStore(() => harness.runtime);
     expect(await store.update(project, { projectNotes: 'original' })).toBe(true);
     const paths = await store.getPaths(project);
     const canonical = harness.resourceForPath(paths.canonicalConfig);

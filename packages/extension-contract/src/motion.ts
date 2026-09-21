@@ -1,51 +1,51 @@
-export const PIARIUM_TRANSITION_SCENE_DATA_CONTRACT = "piarium-transition-scene/v1" as const;
-export const PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION = 1 as const;
-export const PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE = "workbench-profile" as const;
-export const PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION_ID = "piarium.builtin.transition-scene" as const;
-export const PIARIUM_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID = "piarium.builtin.transition-scene.default" as const;
+export const VARIN_TRANSITION_SCENE_DATA_CONTRACT = "varin-transition-scene/v1" as const;
+export const VARIN_TRANSITION_SCENE_CONTRACT_VERSION = 1 as const;
+export const VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE = "workbench-profile" as const;
+export const VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION_ID = "varin.builtin.transition-scene" as const;
+export const VARIN_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID = "varin.builtin.transition-scene.default" as const;
 
-export type PiariumTransitionSceneId = typeof PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE;
-export type PiariumTransitionSceneDirection = "backward" | "forward";
-export type PiariumTransitionScenePhase = "covered" | "covering" | "revealing";
-export type PiariumTransitionSceneAnimatedPhase = Exclude<PiariumTransitionScenePhase, "covered">;
-export type PiariumTransitionSceneTempo = "quick" | "standard";
+export type VarinTransitionSceneId = typeof VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE;
+export type VarinTransitionSceneDirection = "backward" | "forward";
+export type VarinTransitionScenePhase = "covered" | "covering" | "revealing";
+export type VarinTransitionSceneAnimatedPhase = Exclude<VarinTransitionScenePhase, "covered">;
+export type VarinTransitionSceneTempo = "quick" | "standard";
 
-export interface PiariumTransitionSceneDurationSet {
+export interface VarinTransitionSceneDurationSet {
   quick: number;
   reduced: number;
   standard: number;
 }
 
-export interface PiariumTransitionScenePhaseDurations {
-  covering: PiariumTransitionSceneDurationSet;
-  revealing: PiariumTransitionSceneDurationSet;
+export interface VarinTransitionScenePhaseDurations {
+  covering: VarinTransitionSceneDurationSet;
+  revealing: VarinTransitionSceneDurationSet;
 }
 
-export interface PiariumTransitionSceneContributionDataV1 {
-  contract: typeof PIARIUM_TRANSITION_SCENE_DATA_CONTRACT;
-  durations: Record<PiariumTransitionSceneId, PiariumTransitionScenePhaseDurations>;
+export interface VarinTransitionSceneContributionDataV1 {
+  contract: typeof VARIN_TRANSITION_SCENE_DATA_CONTRACT;
+  durations: Record<VarinTransitionSceneId, VarinTransitionScenePhaseDurations>;
   fallback?: boolean;
-  scenes: PiariumTransitionSceneId[];
+  scenes: VarinTransitionSceneId[];
 }
 
-export interface PiariumTransitionSceneFrameV1 {
-  contractVersion: typeof PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION;
-  direction: PiariumTransitionSceneDirection;
+export interface VarinTransitionSceneFrameV1 {
+  contractVersion: typeof VARIN_TRANSITION_SCENE_CONTRACT_VERSION;
+  direction: VarinTransitionSceneDirection;
   fromProfileId: string | null;
-  phase: PiariumTransitionScenePhase;
+  phase: VarinTransitionScenePhase;
   reducedMotion: boolean;
-  scene: PiariumTransitionSceneId;
-  tempo: PiariumTransitionSceneTempo;
+  scene: VarinTransitionSceneId;
+  tempo: VarinTransitionSceneTempo;
   toProfileId: string;
   transitionId: number;
 }
 
-export class PiariumTransitionSceneContractError extends Error {
+export class VarinTransitionSceneContractError extends Error {
   readonly issues: readonly string[];
 
   constructor(message: string, issues: readonly string[]) {
     super(message);
-    this.name = "PiariumTransitionSceneContractError";
+    this.name = "VarinTransitionSceneContractError";
     this.issues = [...issues];
   }
 }
@@ -68,7 +68,7 @@ const durationSet = (
   value: unknown,
   path: string,
   issues: string[],
-): PiariumTransitionSceneDurationSet => {
+): VarinTransitionSceneDurationSet => {
   const source = record(value);
   if (!source) {
     issues.push(`${path} must be an object`);
@@ -85,7 +85,7 @@ const phaseDurations = (
   value: unknown,
   path: string,
   issues: string[],
-): PiariumTransitionScenePhaseDurations => {
+): VarinTransitionScenePhaseDurations => {
   const source = record(value);
   if (!source) {
     issues.push(`${path} must be an object`);
@@ -100,26 +100,26 @@ const phaseDurations = (
   };
 };
 
-export const parsePiariumTransitionSceneContributionData = (
+export const parseVarinTransitionSceneContributionData = (
   value: unknown,
-): PiariumTransitionSceneContributionDataV1 => {
+): VarinTransitionSceneContributionDataV1 => {
   const issues: string[] = [];
   const source = record(value);
   if (!source) {
-    throw new PiariumTransitionSceneContractError(
-      "Piarium transition scene contribution data is invalid",
+    throw new VarinTransitionSceneContractError(
+      "Varin transition scene contribution data is invalid",
       ["data must be an object"],
     );
   }
-  if (source.contract !== PIARIUM_TRANSITION_SCENE_DATA_CONTRACT) {
-    issues.push(`data.contract must be ${PIARIUM_TRANSITION_SCENE_DATA_CONTRACT}`);
+  if (source.contract !== VARIN_TRANSITION_SCENE_DATA_CONTRACT) {
+    issues.push(`data.contract must be ${VARIN_TRANSITION_SCENE_DATA_CONTRACT}`);
   }
   const rawScenes = Array.isArray(source.scenes) ? source.scenes : [];
   if (!Array.isArray(source.scenes)) issues.push("data.scenes must be an array");
-  const scenes: PiariumTransitionSceneId[] = [];
+  const scenes: VarinTransitionSceneId[] = [];
   const seen = new Set<string>();
   for (const [index, rawScene] of rawScenes.entries()) {
-    if (rawScene !== PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE) {
+    if (rawScene !== VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE) {
       issues.push(`data.scenes[${index}] is unsupported`);
       continue;
     }
@@ -135,34 +135,34 @@ export const parsePiariumTransitionSceneContributionData = (
   const rawDurations = record(source.durations);
   if (!rawDurations) issues.push("data.durations must be an object");
   const workbenchProfile = phaseDurations(
-    rawDurations?.[PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE],
-    `data.durations.${PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE}`,
+    rawDurations?.[VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE],
+    `data.durations.${VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE}`,
     issues,
   );
   if (source.fallback !== undefined && typeof source.fallback !== "boolean") {
     issues.push("data.fallback must be a boolean");
   }
   if (issues.length > 0) {
-    throw new PiariumTransitionSceneContractError(
-      "Piarium transition scene contribution data is invalid",
+    throw new VarinTransitionSceneContractError(
+      "Varin transition scene contribution data is invalid",
       issues,
     );
   }
   return {
-    contract: PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
-    durations: { [PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE]: workbenchProfile },
+    contract: VARIN_TRANSITION_SCENE_DATA_CONTRACT,
+    durations: { [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE]: workbenchProfile },
     ...(typeof source.fallback === "boolean" ? { fallback: source.fallback } : {}),
     scenes,
   };
 };
 
-export const piariumTransitionSceneDuration = (
-  data: PiariumTransitionSceneContributionDataV1,
+export const varinTransitionSceneDuration = (
+  data: VarinTransitionSceneContributionDataV1,
   input: {
-    phase: PiariumTransitionSceneAnimatedPhase;
+    phase: VarinTransitionSceneAnimatedPhase;
     reducedMotion: boolean;
-    scene: PiariumTransitionSceneId;
-    tempo: PiariumTransitionSceneTempo;
+    scene: VarinTransitionSceneId;
+    tempo: VarinTransitionSceneTempo;
   },
 ): number => {
   const timings = data.durations[input.scene][input.phase];

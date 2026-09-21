@@ -14,16 +14,16 @@ const stage = stageIndex >= 0 && args[stageIndex + 1]
   ? path.resolve(process.cwd(), args[stageIndex + 1])
   : null;
 const targetIndex = args.indexOf('--target');
-const target = targetIndex >= 0 ? args[targetIndex + 1] : (process.env.PIARIUM_TARGET_TRIPLE || undefined);
+const target = targetIndex >= 0 ? args[targetIndex + 1] : (process.env.VARIN_TARGET_TRIPLE || undefined);
 const platformIndex = args.indexOf('--platform');
-const platform = platformIndex >= 0 ? args[platformIndex + 1] : (process.env.PIARIUM_TARGET_PLATFORM || process.platform);
+const platform = platformIndex >= 0 ? args[platformIndex + 1] : (process.env.VARIN_TARGET_PLATFORM || process.platform);
 const archIndex = args.indexOf('--arch');
-const arch = normalizeKernelArchitecture(archIndex >= 0 ? args[archIndex + 1] : (process.env.PIARIUM_TARGET_ARCH || process.arch));
+const arch = normalizeKernelArchitecture(archIndex >= 0 ? args[archIndex + 1] : (process.env.VARIN_TARGET_ARCH || process.arch));
 const identityIndex = args.indexOf('--build-identity');
 const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-const buildIdentity = identityIndex >= 0 ? args[identityIndex + 1] : (process.env.PIARIUM_KERNEL_BUILD_IDENTITY || packageVersion);
+const buildIdentity = identityIndex >= 0 ? args[identityIndex + 1] : (process.env.VARIN_KERNEL_BUILD_IDENTITY || packageVersion);
 if (!buildIdentity?.trim()) throw new Error('kernel build identity is required');
-const prebuilt = process.env.PIARIUM_KERNEL_PREBUILT?.trim();
+const prebuilt = process.env.VARIN_KERNEL_PREBUILT?.trim();
 const targetTriple = target ?? defaultKernelTargetTriple(platform, arch);
 const expectedTriple = defaultKernelTargetTriple(platform, arch);
 if (targetTriple !== expectedTriple) throw new Error(`Kernel target triple ${targetTriple} does not match ${platform}/${arch} (${expectedTriple}).`);
@@ -40,37 +40,37 @@ const locateVsDevCmd = () => {
     ]);
   return roots.find((candidate) => fs.existsSync(candidate)) ?? null;
 };
-const executable = platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel';
+const executable = platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel';
 let source;
 if (prebuilt) {
   source = path.resolve(process.cwd(), prebuilt);
   if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
-    throw new Error(`Prebuilt Piarium kernel does not exist or is not a file: ${source}`);
+    throw new Error(`Prebuilt Varin kernel does not exist or is not a file: ${source}`);
   }
 } else {
   const hostArch = normalizeKernelArchitecture(process.arch);
   const cargoTarget = target || platform !== process.platform || arch !== hostArch ? targetTriple : undefined;
-  const cargoArgs = ['build', '--manifest-path', path.join(root, 'kernel', 'Cargo.toml'), '--release', '--bin', 'piarium-kernel', '--locked'];
+  const cargoArgs = ['build', '--manifest-path', path.join(root, 'kernel', 'Cargo.toml'), '--release', '--bin', 'varin-kernel', '--locked'];
   if (cargoTarget) cargoArgs.push('--target', cargoTarget);
   const vsDevCmd = locateVsDevCmd();
   const useWindowsEnvironment = process.platform === 'win32' && vsDevCmd;
   const command = useWindowsEnvironment ? 'cmd.exe' : (process.platform === 'win32' ? 'cargo.exe' : 'cargo');
   const commandArgs = useWindowsEnvironment
-    ? ['/d', '/s', '/c', `set "PIARIUM_KERNEL_BUILD_IDENTITY=${buildIdentity.replaceAll('"', '')}" && set "PIARIUM_KERNEL_TARGET=${targetTriple.replaceAll('"', '')}" && set "PIARIUM_KERNEL_ARCH=${arch.replaceAll('"', '')}" && call ${windowsQuote(vsDevCmd)} -arch=${arch} -host_arch=${hostArch} && cargo.exe ${cargoArgs.map(windowsQuote).join(' ')}`]
+    ? ['/d', '/s', '/c', `set "VARIN_KERNEL_BUILD_IDENTITY=${buildIdentity.replaceAll('"', '')}" && set "VARIN_KERNEL_TARGET=${targetTriple.replaceAll('"', '')}" && set "VARIN_KERNEL_ARCH=${arch.replaceAll('"', '')}" && call ${windowsQuote(vsDevCmd)} -arch=${arch} -host_arch=${hostArch} && cargo.exe ${cargoArgs.map(windowsQuote).join(' ')}`]
     : cargoArgs;
   const result = useWindowsEnvironment
     ? spawnSync(commandArgs[3], {
       cwd: root,
       stdio: 'inherit',
       windowsHide: true,
-      env: { ...process.env, PIARIUM_KERNEL_BUILD_IDENTITY: buildIdentity, PIARIUM_KERNEL_TARGET: targetTriple, PIARIUM_KERNEL_ARCH: arch },
+      env: { ...process.env, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
       shell: true,
     })
     : spawnSync(command, commandArgs, {
       cwd: root,
       stdio: 'inherit',
       windowsHide: true,
-      env: { ...process.env, PIARIUM_KERNEL_BUILD_IDENTITY: buildIdentity, PIARIUM_KERNEL_TARGET: targetTriple, PIARIUM_KERNEL_ARCH: arch },
+      env: { ...process.env, VARIN_KERNEL_BUILD_IDENTITY: buildIdentity, VARIN_KERNEL_TARGET: targetTriple, VARIN_KERNEL_ARCH: arch },
     });
   if (result.status !== 0) process.exit(result.status ?? 1);
   source = path.join(root, 'kernel', 'target', ...(cargoTarget ? [cargoTarget] : []), 'release', executable);
@@ -81,7 +81,7 @@ if (binaryIdentity.platform !== platform || binaryIdentity.arch !== arch) {
   throw new Error(`Rust kernel binary is ${binaryIdentity.platform}/${binaryIdentity.arch}, expected ${platform}/${arch}.`);
 }
 if (!stage) {
-  console.log(`${prebuilt ? 'Verified prebuilt' : 'Built'} Piarium kernel without staging (${binaryIdentity.platform}/${binaryIdentity.arch}).`);
+  console.log(`${prebuilt ? 'Verified prebuilt' : 'Built'} Varin kernel without staging (${binaryIdentity.platform}/${binaryIdentity.arch}).`);
   process.exit(0);
 }
 fs.mkdirSync(stage, { recursive: true });

@@ -7,12 +7,12 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, afterEach } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 import { createRelationCollector, identifierAt } from "./relations.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 
 // Scratch stores live in the OS temp dir; see store.test.ts.
-const TEST_DIR = join(tmpdir(), "piarium-test-relations");
+const TEST_DIR = join(tmpdir(), "varin-test-relations");
 let storeCounter = 0;
 let store: KnowledgeStore | null = null;
 
@@ -67,7 +67,7 @@ describe("relation collector", () => {
       language.registerProvider({
         providerId: "fixture",
         command: process.execPath,
-        args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+        args: VARIN_LSP_FIXTURE_SERVER_ARGS,
         languageIds: ["typescript"],
         source: "host",
       });

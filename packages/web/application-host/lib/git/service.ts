@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import * as childProcess from 'child_process';
 import { promisify } from 'util';
-import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import { resolveVarinDataDir } from '../platform/data-paths.js';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import type { ExecFileOptions } from 'node:child_process';
@@ -243,7 +243,7 @@ const resolveGitBinary = (): string => {
     return resolvedGitBinary;
   }
 
-  const explicit = [process.env.GIT_BINARY, process.env.PIARIUM_GIT_BINARY]
+  const explicit = [process.env.GIT_BINARY, process.env.VARIN_GIT_BINARY]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
@@ -606,7 +606,7 @@ const cleanBranchName = (branch: string): string => {
   return branch;
 };
 
-const PIARIUM_WORKTREE_ADJECTIVES = [
+const VARIN_WORKTREE_ADJECTIVES = [
   'brave',
   'calm',
   'clever',
@@ -638,7 +638,7 @@ const PIARIUM_WORKTREE_ADJECTIVES = [
   'witty',
 ];
 
-const PIARIUM_WORKTREE_NOUNS = [
+const VARIN_WORKTREE_NOUNS = [
   'cabin',
   'cactus',
   'canyon',
@@ -672,12 +672,12 @@ const PIARIUM_WORKTREE_NOUNS = [
   'wolf',
 ];
 
-const PIARIUM_WORKTREE_ATTEMPTS = 26;
+const VARIN_WORKTREE_ATTEMPTS = 26;
 
-const pickRandom = (values: string[]): string => values[Math.floor(Math.random() * values.length)] ?? 'piarium';
+const pickRandom = (values: string[]): string => values[Math.floor(Math.random() * values.length)] ?? 'varin';
 
-const generatePiariumWorktreeName = (): string => (
-  `${pickRandom(PIARIUM_WORKTREE_ADJECTIVES)}-${pickRandom(PIARIUM_WORKTREE_NOUNS)}`
+const generateVarinWorktreeName = (): string => (
+  `${pickRandom(VARIN_WORKTREE_ADJECTIVES)}-${pickRandom(VARIN_WORKTREE_NOUNS)}`
 );
 
 const slugWorktreeName = (value: unknown): string => {
@@ -1079,7 +1079,7 @@ const getFileIdentity = async (filePath: string): Promise<string | null> => {
   }
 };
 
-// Managed worktrees live under Piarium's data directory, which can make an
+// Managed worktrees live under Varin's data directory, which can make an
 // otherwise valid repository path exceed Git for Windows' default path limit.
 // The command override guarantees bootstrap itself can populate the tree; the
 // shared local config keeps later Git operations in the same repository
@@ -1097,7 +1097,7 @@ const formatWorktreePopulateError = (message: unknown): string => {
   return [
     text,
     'The worktree checkout path exceeds this system\'s path-length limit.',
-    'Piarium enabled Git `core.longpaths` for worktree population. If this still fails on Windows, enable OS long paths (LongPathsEnabled) or open the repository from a shorter absolute path.',
+    'Varin enabled Git `core.longpaths` for worktree population. If this still fails on Windows, enable OS long paths (LongPathsEnabled) or open the repository from a shorter absolute path.',
   ].join('\n');
 };
 
@@ -1155,7 +1155,7 @@ export const populateWorktreeWithLockRecovery = async (directory: string): Promi
 // `git worktree add --no-checkout` followed by `reset --hard` skips Git's
 // normal post-checkout hook. Restore that documented checkout semantic after
 // the tree has been populated. A hook failure is reported but does not turn an
-// otherwise usable worktree into a failed Piarium bootstrap.
+// otherwise usable worktree into a failed Varin bootstrap.
 const runPostCheckoutHook = async (directory: string): Promise<void> => {
   const headResult = await runGitCommand(directory, ['rev-parse', 'HEAD']);
   if (!headResult.success) return;
@@ -1365,9 +1365,9 @@ export async function computeIntegratePlan(input: InputRecord = {}): Promise<Int
 }
 
 const createIntegrateTempWorktree = async (repoRoot: string, targetBranch: string): Promise<string> => {
-  const tmpParent = path.join(resolvePiariumDataDir(process), 'tmp');
+  const tmpParent = path.join(resolveVarinDataDir(process), 'tmp');
   await fsp.mkdir(tmpParent, { recursive: true });
-  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'piarium-integrate-'));
+  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'varin-integrate-'));
   try {
     await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--force', tmpDir, targetBranch], 'Failed to create temp worktree');
     return tmpDir;
@@ -1665,9 +1665,9 @@ const resolveWorktreeProjectContext = async (directory: unknown): Promise<Worktr
   const primaryWorktree = path.dirname(commonDir);
   const projectId = createProjectIdFromPath(primaryWorktree);
   if (!projectId) {
-    throw new Error('Failed to derive Piarium project ID');
+    throw new Error('Failed to derive Varin project ID');
   }
-  const worktreeRoot = path.join(resolvePiariumDataDir(process), 'worktrees', projectId);
+  const worktreeRoot = path.join(resolveVarinDataDir(process), 'worktrees', projectId);
 
   return {
     sandbox,
@@ -1688,13 +1688,13 @@ const listWorktreeEntries = async (directory: string): Promise<WorktreePorcelain
 const resolveWorktreeNameCandidates = (baseName: unknown): string[] => {
   const normalizedBase = slugWorktreeName(baseName || '');
   if (!normalizedBase) {
-    return Array.from({ length: PIARIUM_WORKTREE_ATTEMPTS }, () => generatePiariumWorktreeName());
+    return Array.from({ length: VARIN_WORKTREE_ATTEMPTS }, () => generateVarinWorktreeName());
   }
-  return Array.from({ length: PIARIUM_WORKTREE_ATTEMPTS }, (_, index) => {
+  return Array.from({ length: VARIN_WORKTREE_ATTEMPTS }, (_, index) => {
     if (index === 0) {
       return normalizedBase;
     }
-    return `${normalizedBase}-${generatePiariumWorktreeName()}`;
+    return `${normalizedBase}-${generateVarinWorktreeName()}`;
   });
 };
 
@@ -1716,7 +1716,7 @@ const resolveCandidateDirectory = async (
       return { name, directory, branch: explicitBranchName };
     }
 
-    const branch = `piarium/${name}`;
+    const branch = `varin/${name}`;
     const branchRef = `refs/heads/${branch}`;
     const branchExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', branchRef]);
     if (branchExists.success) {
@@ -3039,7 +3039,7 @@ const extractPatchTargetPath = (patch: string): string | null => {
 
 const writeTempPatchFile = async (patch: string): Promise<string> => {
   const tmpDir = os.tmpdir();
-  const tmpPath = path.join(tmpDir, `piarium-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+  const tmpPath = path.join(tmpDir, `varin-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
   await fsp.writeFile(tmpPath, patch, 'utf8');
   return tmpPath;
 };
@@ -3197,7 +3197,7 @@ export async function stashPush(directory: string, options: { message?: string }
   const { git } = await createRepositoryGitContext(directory);
   const message = typeof options.message === 'string' && options.message.trim()
     ? options.message.trim()
-    : `Piarium stash ${new Date().toISOString()}`;
+    : `Varin stash ${new Date().toISOString()}`;
   const output = await git.raw(['stash', 'push', '--include-untracked', '-m', message]);
   return {
     success: true,

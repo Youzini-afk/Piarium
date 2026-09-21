@@ -164,11 +164,11 @@ const pruneNonRuntimeFiles = (root) => {
 };
 
 const createRuntimeRootPackage = (rootPackage) => ({
-  name: 'piarium-cloud-runtime',
+  name: 'varin-cloud-runtime',
   version: rootPackage.version,
   private: true,
   type: 'module',
-  description: 'Self-contained Piarium cloud runtime workspace.',
+  description: 'Self-contained Varin cloud runtime workspace.',
   license: rootPackage.license,
   packageManager: rootPackage.packageManager,
   engines: {
@@ -223,7 +223,7 @@ export const findUndeclaredWorkspaceImports = (serverDir, manifest) => {
         walk(entryPath);
       } else if (entry.isFile() && entry.name.endsWith('.js')) {
         const source = readFileSync(entryPath, 'utf8');
-        for (const match of source.matchAll(/(?:from|import)\s*['"](@piarium\/[^'"]+)['"]/g)) {
+        for (const match of source.matchAll(/(?:from|import)\s*['"](@varin\/[^'"]+)['"]/g)) {
           if (!productionDependencies.has(match[1])) {
             offenders.push(`${path.relative(serverDir, entryPath)} -> ${match[1]}`);
           }
@@ -254,7 +254,7 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   if (runtimeManifest.schemaVersion !== CLOUD_RUNTIME_SCHEMA_VERSION) {
     throw new Error(`Unsupported cloud runtime schema: ${runtimeManifest.schemaVersion}`);
   }
-  if (rootManifest.name !== 'piarium-cloud-runtime') {
+  if (rootManifest.name !== 'varin-cloud-runtime') {
     throw new Error(`Unexpected cloud runtime package name: ${rootManifest.name}`);
   }
   if (rootManifest.license !== 'AGPL-3.0-only') {
@@ -286,7 +286,7 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
     const manifest = readJson(path.join(outputDir, 'packages', directory, 'package.json'));
     for (const [dependencyName, dependencyVersion] of Object.entries(manifest.dependencies || {})) {
-      if (dependencyName.startsWith('@piarium/') && !packageNames.has(dependencyName)) {
+      if (dependencyName.startsWith('@varin/') && !packageNames.has(dependencyName)) {
         throw new Error(`Runtime package ${manifest.name} depends on missing workspace ${dependencyName}.`);
       }
       if (dependencyVersion.startsWith('workspace:') && !packageNames.has(dependencyName)) {
@@ -305,14 +305,14 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   }
 
   if (requireInstall) {
-    const brokerLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'runtime-broker');
-    if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/runtime-broker.');
-    const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-host');
-    if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-host.');
-    const extensionBuiltinsLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-builtins');
-    if (!existsSync(extensionBuiltinsLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-builtins.');
-    const settingsStoreLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'settings-store');
-    if (!existsSync(settingsStoreLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/settings-store.');
+    const brokerLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'runtime-broker');
+    if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @varin/runtime-broker.');
+    const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'extension-host');
+    if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @varin/extension-host.');
+    const extensionBuiltinsLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'extension-builtins');
+    if (!existsSync(extensionBuiltinsLink)) throw new Error('Installed cloud runtime cannot resolve @varin/extension-builtins.');
+    const settingsStoreLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@varin', 'settings-store');
+    if (!existsSync(settingsStoreLink)) throw new Error('Installed cloud runtime cannot resolve @varin/settings-store.');
   }
 
   verifyCloudRuntimeIdentity(outputDir);
@@ -355,7 +355,7 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); const builtins = await import('./packages/web/node_modules/@piarium/extension-builtins/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); if (!Array.isArray(builtins.PIARIUM_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Piarium extension builtins are unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
+    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@varin/extension-host/dist/index.js'); const builtins = await import('./packages/web/node_modules/@varin/extension-builtins/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Varin extension host is unavailable'); if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Varin extension builtins are unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
   ], {
     cwd: resolvedOutput,
     json,
@@ -367,7 +367,7 @@ export const installCloudRuntimeDependencies = (
 const buildSourcePackages = ({ json }) => {
   run('bun', ['run', '--cwd', 'packages/extension-host', 'build'], {
     json,
-    label: 'Piarium extension host build',
+    label: 'Varin extension host build',
   });
   run('bun', ['run', '--cwd', 'packages/runtime-broker', 'build'], {
     json,
@@ -379,16 +379,16 @@ const buildSourcePackages = ({ json }) => {
   });
   run('bun', ['run', '--cwd', 'packages/application-client', 'build'], {
     json,
-    label: 'Piarium application client build',
+    label: 'Varin application client build',
   });
   run('bun', ['run', '--cwd', 'packages/extension-loader', 'build'], {
     json,
-    label: 'Piarium managed extension Surface build',
+    label: 'Varin managed extension Surface build',
   });
   run('bun', ['run', '--cwd', 'packages/web', 'build'], {
-    env: { PIARIUM_LOW_MEMORY_BUILD: '1' },
+    env: { VARIN_LOW_MEMORY_BUILD: '1' },
     json,
-    label: 'Piarium web build',
+    label: 'Varin web build',
   });
 };
 
@@ -429,14 +429,14 @@ const stageRuntimeTree = (outputDir) => {
 
   pruneNonRuntimeFiles(path.join(outputDir, 'packages'));
 
-  const sourceRevision = process.env.PIARIUM_SOURCE_REVISION?.trim()
+  const sourceRevision = process.env.VARIN_SOURCE_REVISION?.trim()
     || gitOutput(['rev-parse', 'HEAD'])
     || null;
-  const sourceDirty = process.env.PIARIUM_SOURCE_DIRTY === 'true'
+  const sourceDirty = process.env.VARIN_SOURCE_DIRTY === 'true'
     || Boolean(gitOutput(['status', '--porcelain', '--untracked-files=no']));
   const runtimeManifest = {
     schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
-    name: 'Piarium Cloud Runtime',
+    name: 'Varin Cloud Runtime',
     version: rootPackage.version,
     sourceRevision,
     sourceDirty,
@@ -487,18 +487,19 @@ export const buildCloudRuntime = ({
   }
 
   if (generateLock) {
-    if (!updateLock) {
-      if (!existsSync(canonicalLockPath)) {
-        throw new Error(`Canonical cloud runtime lockfile is missing: ${canonicalLockPath}`);
-      }
+    // Refresh workspace identities from the existing graph without upgrading unrelated dependencies.
+    if (existsSync(canonicalLockPath)) {
       cpSync(canonicalLockPath, path.join(resolvedOutput, 'bun.lock'), { force: true });
+    } else if (!updateLock) {
+      throw new Error(`Canonical cloud runtime lockfile is missing: ${canonicalLockPath}`);
     }
     run('bun', [
       'install',
       '--lockfile-only',
-      '--production',
       '--ignore-scripts',
-      ...(updateLock ? [] : ['--frozen-lockfile']),
+      // Staged manifests already omit devDependencies. Bun's production install freezes an
+      // existing lock; refresh without that flag, then consumers verify it in production mode.
+      ...(updateLock ? [] : ['--production', '--frozen-lockfile']),
     ], {
       cwd: resolvedOutput,
       json,
@@ -532,7 +533,7 @@ export const buildCloudRuntime = ({
 const parseArgs = (argv) => {
   const options = {
     outputDir: path.join(repoRoot, 'artifacts', 'cloud-runtime'),
-    archivePath: path.join(repoRoot, 'artifacts', 'piarium-cloud-runtime.tgz'),
+    archivePath: path.join(repoRoot, 'artifacts', 'varin-cloud-runtime.tgz'),
     build: true,
     generateLock: true,
     updateLock: false,
@@ -578,7 +579,7 @@ if (isDirectExecution) {
       const result = buildCloudRuntime(options);
       if (options.json) console.log(JSON.stringify(result));
       else {
-        console.log(`Piarium cloud runtime: ${result.outputDir}`);
+        console.log(`Varin cloud runtime: ${result.outputDir}`);
         if (result.archivePath) console.log(`Archive: ${result.archivePath} (${result.archiveSha256})`);
       }
     }

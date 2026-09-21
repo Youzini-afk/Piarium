@@ -4,13 +4,13 @@ Server-owned Pi scheduled task runtime, Markdown loops, and HTTP routes.
 
 ## Ownership
 
-- GUI-created task definitions and all runtime state live in the Piarium project config owned by `projects/project-config.js`.
+- GUI-created task definitions and all runtime state live in the Varin project config owned by `projects/project-config.js`.
 - A loop definition lives in its `.agents/loops/*.md` file. Its JSON row is only the scheduler projection and runtime-state record.
 - Pi sessions, model selection, thinking, goals, commands, and prompts are executed through `pi-executor.js`; this module has no OpenCode runtime owner or compatibility route.
 
 ## Markdown loops
 
-Piarium discovers `~/.agents/loops/*.md` and project `.agents/loops/*.md` from the selected directory upward to its Git worktree root. The nearest project definition wins, then farther project ancestors, then the user definition.
+Varin discovers `~/.agents/loops/*.md` and project `.agents/loops/*.md` from the selected directory upward to its Git worktree root. The nearest project definition wins, then farther project ancestors, then the user definition.
 
 ```markdown
 ---
@@ -31,15 +31,15 @@ Summarize repository changes since yesterday.
 
 Loop identity is the canonical file path, not its name. A same-named GUI task remains a separate JSON-owned task. Renaming a loop changes the existing loop task in place. A malformed file keeps the last good projection and exposes its parse error; removing the file removes only that projection. Higher-precedence malformed files continue to shadow lower definitions, preventing duplicate execution during an edit or merge conflict.
 
-The list route reconciles disk files before returning tasks, and the runtime watches every discovered `.agents/loops` directory (project ancestors plus the user scope) — a Markdown edit, creation, or deletion triggers a debounced resync without anyone opening the task list. Piarium writers serialize the loop revision check with update/delete in one process, so two Agent/UI operations using the same stale revision cannot both succeed. The filesystem has no cross-process compare-and-swap primitive; an unrelated external editor is still checked immediately before atomic rename/unlink but is not claimed as globally locked. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
+The list route reconciles disk files before returning tasks, and the runtime watches every discovered `.agents/loops` directory (project ancestors plus the user scope) — a Markdown edit, creation, or deletion triggers a debounced resync without anyone opening the task list. Varin writers serialize the loop revision check with update/delete in one process, so two Agent/UI operations using the same stale revision cannot both succeed. The filesystem has no cross-process compare-and-swap primitive; an unrelated external editor is still checked immediately before atomic rename/unlink but is not claimed as globally locked. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
 
 ## Routes
 
 - `GET|PUT|DELETE /api/projects/:projectId/scheduled-tasks`
 - `GET|PUT|PATCH|DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
 - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
-- `GET /api/piarium/scheduled-tasks/status`
-- `GET /api/piarium/events`
+- `GET /api/varin/scheduled-tasks/status`
+- `GET /api/varin/events`
 
 ## Completion tracking and follow-ups (D-307)
 

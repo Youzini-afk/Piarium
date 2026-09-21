@@ -1,5 +1,5 @@
 /**
- * Product skills (Stage S / D-309 S4): a small set of Piarium-authored Pi
+ * Product skills (Stage S / D-309 S4): a small set of Varin-authored Pi
  * skills seeded into the user-scope resource root (`<agentDir>/skills/`).
  *
  * These are product skills — they teach composition over the live settings
@@ -9,7 +9,7 @@
  *
  * Seeding semantics: a skill directory is product-managed only while its
  * SKILL.md still matches the hash this host last wrote (tracked in
- * `.piarium-managed`). Once the user edits the file it becomes theirs and is
+ * `.varin-managed`). Once the user edits the file it becomes theirs and is
  * never overwritten; deleting the directory removes the skill entirely.
  */
 
@@ -26,19 +26,19 @@ interface ProductSkill {
   body: string;
 }
 
-const MANAGED_MARKER = '.piarium-managed';
+const MANAGED_MARKER = '.varin-managed';
 
 const PRODUCT_SKILLS: readonly ProductSkill[] = [
   {
-    id: 'piarium-research-environment',
-    name: 'piarium-research-environment',
+    id: 'varin-research-environment',
+    name: 'varin-research-environment',
     description:
-      'Configure a research working environment in Piarium: model routing for research roles, ' +
+      'Configure a research working environment in Varin: model routing for research roles, ' +
       'retrieval sources, notifications, and durable experiments. Use when asked to prepare ' +
       'or audit a research workspace setup.',
     body: `# Configure a research working environment
 
-This skill composes existing Piarium settings and tools. It never stores
+This skill composes existing Varin settings and tools. It never stores
 current values — always query the live catalog first.
 
 ## Method
@@ -85,8 +85,8 @@ current values — always query the live catalog first.
 `,
   },
   {
-    id: 'piarium-multi-agent-models',
-    name: 'piarium-multi-agent-models',
+    id: 'varin-multi-agent-models',
+    name: 'varin-multi-agent-models',
     description:
       'Configure multi-agent model division of labour: per-role model slots, ' +
       'provider credentials state, fallback order, and thread dispatch readiness. ' +
@@ -119,10 +119,10 @@ domain actions. Compose, never duplicate authority.
 `,
   },
   {
-    id: 'piarium-retrieval-setup',
-    name: 'piarium-retrieval-setup',
+    id: 'varin-retrieval-setup',
+    name: 'varin-retrieval-setup',
     description:
-      'Configure web retrieval and local/remote semantic retrieval in Piarium: ' +
+      'Configure web retrieval and local/remote semantic retrieval in Varin: ' +
       'domain allowlists, search providers, local semantic components, and ' +
       'language-support structure. Use when setting up evidence-gathering for agents.',
     body: `# Configure retrieval (web + semantic)
@@ -150,10 +150,10 @@ Retrieval spans ordinary settings (domain policy) and domain actions
 `,
   },
   {
-    id: 'piarium-remote-experiments',
-    name: 'piarium-remote-experiments',
+    id: 'varin-remote-experiments',
+    name: 'varin-remote-experiments',
     description:
-      'Configure remote/managed experiment execution in Piarium: machine ' +
+      'Configure remote/managed experiment execution in Varin: machine ' +
       'registration, capacity, remote targets, and follow-up waits on remote ' +
       'jobs. Use when preparing cluster or remote-host experiment runs.',
     body: `# Configure remote experiment execution

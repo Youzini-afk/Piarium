@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { FetchResult } from "@piarium/protocol";
+import type { FetchResult } from "@varin/protocol";
 
 const WebFetchParams = Type.Object({
   url: Type.String(),

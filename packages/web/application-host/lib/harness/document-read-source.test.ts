@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@varin/protocol";
 import { createNativeAuthorityTestRuntime } from "../kernel/native-authority.test-helper.js";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
@@ -16,7 +16,7 @@ const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-document-read-source-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-document-read-source-"));
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace);
   const documents = createDocumentAuthority({

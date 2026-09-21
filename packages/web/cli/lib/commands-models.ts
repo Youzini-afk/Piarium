@@ -1,6 +1,6 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
-import { requestPiariumApi, requestRuntimeMethod } from './cli-runtime.js';
+import { requestVarinApi, requestRuntimeMethod } from './cli-runtime.js';
 import { isJsonMode, printJson } from '../cli-output.js';
 import { recordOf, type CliOptions } from './cli-types.js';
 
@@ -49,7 +49,7 @@ const formatModelsOutput = (settings: Record<string, unknown> = {}): string => {
 
 async function modelsCommand(options: CliOptions = {}, action = 'show'): Promise<void> {
   if (action === 'help') {
-    process.stdout.write(`Piarium Models Commands\n\nUSAGE:\n  piarium models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Piarium server port\n  --json                  Output machine-readable JSON\n`);
+    process.stdout.write(`Varin Models Commands\n\nUSAGE:\n  varin models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Varin server port\n  --json                  Output machine-readable JSON\n`);
     return;
   }
   if (action !== 'show') {
@@ -58,7 +58,7 @@ async function modelsCommand(options: CliOptions = {}, action = 'show'): Promise
 
   const port = await resolveTargetPort(options);
   const [settings, availableModels] = await Promise.all([
-    requestPiariumApi(port, '/api/config/settings', options),
+    requestVarinApi(port, '/api/config/settings', options),
     requestRuntimeMethod(port, 'model.list', { cwd: process.cwd() }, options),
   ]);
   const result = { ...settings, availableModels: Array.isArray(availableModels) ? availableModels : [] };

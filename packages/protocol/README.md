@@ -1,6 +1,6 @@
-# @piarium/protocol
+# @varin/protocol
 
-Piarium protocol types, schemas, and event/method definitions.
+Varin protocol types, schemas, and event/method definitions.
 
 ## Harness events and methods
 

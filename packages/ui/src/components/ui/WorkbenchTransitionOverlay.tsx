@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue } from '@piarium/extension-contract';
+import type { JsonValue } from '@varin/extension-contract';
 import { useI18n } from '@/lib/i18n';
 import {
   WorkbenchSurfaceContributionHost,
@@ -175,7 +175,7 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
       role="status"
       aria-live="polite"
       aria-label={t('splash.aria.switching')}
-      data-piarium-transition-scene={contribution?.descriptor.id ?? 'core-fallback'}
+      data-varin-transition-scene={contribution?.descriptor.id ?? 'core-fallback'}
       style={{ isolation: 'isolate', opacity: 1, willChange: 'opacity' }}
     >
       {contribution ? (

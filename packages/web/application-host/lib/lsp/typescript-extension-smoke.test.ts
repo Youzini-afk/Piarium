@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
-} from '@piarium/extension-builtins/host';
+  VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS,
+} from '@varin/extension-builtins/host';
 import {
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-} from '@piarium/extension-builtins';
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+} from '@varin/extension-builtins';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from './supervisor.js';
 
@@ -32,8 +32,8 @@ const waitUntil = async <Value>(probe: () => Value | Promise<Value>, timeoutMs =
 
 describe('built-in TypeScript language extension', () => {
   it('serves a real project through the same Host authority used by extensions', async () => {
-    const packageRoot = PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS.get(
-      PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+    const packageRoot = VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS.get(
+      VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
     );
     if (!packageRoot) throw new Error('TypeScript language extension package root is unavailable');
     const harness = await createDocumentAuthorityHarness();
@@ -59,7 +59,7 @@ describe('built-in TypeScript language extension', () => {
       await fs.promises.writeFile(path.join(harness.workspaceRoot, 'util.ts'), utilityContent);
       await fs.promises.writeFile(path.join(harness.workspaceRoot, 'main.ts'), 'const value = gre\n');
       language.registerProvider({
-        providerId: 'piarium.typescript-language',
+        providerId: 'varin.typescript-language',
         command: process.execPath,
         args: [path.join(packageRoot, 'runtime', 'typescript-language-server.mjs'), '--stdio'],
         initializationOptions: {
@@ -117,7 +117,7 @@ describe('built-in TypeScript language extension', () => {
       const resolvedValue = featureValue<Record<string, unknown>>(resolvedCompletion);
       expect(Array.isArray(resolvedValue.additionalTextEdits) ? resolvedValue.additionalTextEdits.length : 0).toBeGreaterThan(0);
 
-      const mainContent = "import { greet } from './util';\nconst value = greet('Piarium');\n";
+      const mainContent = "import { greet } from './util';\nconst value = greet('Varin');\n";
       await language.syncDocument({
         resource: main,
         languageId: 'typescript',
@@ -154,7 +154,7 @@ describe('built-in TypeScript language extension', () => {
         formatting: { tabSize: 2, insertSpaces: true },
       })).toMatchObject({ status: 'ready', value: expect.any(Array) });
 
-      const missingImportContent = "const value = greet('Piarium');\n";
+      const missingImportContent = "const value = greet('Varin');\n";
       await language.syncDocument({
         resource: main,
         languageId: 'typescript',

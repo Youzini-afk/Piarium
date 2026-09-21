@@ -1,15 +1,15 @@
 import { recordOf } from './runtime-types.js';
 import {
-  PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS,
-  type PiariumDesktopCommand,
+  VARIN_REMOTE_SAFE_DESKTOP_COMMANDS,
+  type VarinDesktopCommand,
   type PreloadBootstrapPayload,
   type PreloadBootstrapShared,
-} from '@piarium/application-client/desktop';
+} from '@varin/application-client/desktop';
 
 const asTrimmedString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
-export const REMOTE_SAFE_DESKTOP_COMMANDS: ReadonlySet<PiariumDesktopCommand> = new Set(
-  PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS,
+export const REMOTE_SAFE_DESKTOP_COMMANDS: ReadonlySet<VarinDesktopCommand> = new Set(
+  VARIN_REMOTE_SAFE_DESKTOP_COMMANDS,
 );
 
 export const normalizeExternalHttpUrl = (raw: unknown): string | null => {
@@ -36,7 +36,7 @@ export const isTrustedLocalRendererUrl = (raw: unknown, options: RendererTrustOp
 
   try {
     const url = new URL(value);
-    const uiProtocol = asTrimmedString(options.uiProtocol) || 'piarium-ui';
+    const uiProtocol = asTrimmedString(options.uiProtocol) || 'varin-ui';
     if (url.protocol === `${uiProtocol}:` && url.hostname === 'app') return true;
 
     const developmentUiOrigin = asTrimmedString(options.developmentUiOrigin);

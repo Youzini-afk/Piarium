@@ -3,7 +3,7 @@ import {
   type WorkspaceRecoveryAPI,
   type WorkspaceRecoveryFailedResult,
   type WorkspaceRecoveryFailure,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 export class WorkspaceRecoveryServiceError extends Error {

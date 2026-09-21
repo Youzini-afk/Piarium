@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
+import type { RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@varin/protocol";
 
 export type WebFetchReceiptDraft = Omit<RetrievalUrlReceipt, "artifact">;
 

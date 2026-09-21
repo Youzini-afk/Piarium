@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "node:test";
-import type { PiConfigWatchChangeReason, PiConfigWatchSubscription } from "@piarium/protocol";
+import type { PiConfigWatchChangeReason, PiConfigWatchSubscription } from "@varin/protocol";
 import { ConfigWatchManager } from "../src/config-watch-manager.js";
 
 interface WatchEvent {
@@ -27,7 +27,7 @@ async function waitForWatch(
 
 describe("ConfigWatchManager", () => {
   it("emits after an atomic rename without closing the watcher from its callback", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-watch-atomic-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-watch-atomic-"));
     const filePath = join(root, "native.json");
     const events: WatchEvent[] = [];
     const manager = new ConfigWatchManager((subscription, reason) => {
@@ -50,7 +50,7 @@ describe("ConfigWatchManager", () => {
   });
 
   it("matches Windows-insensitive filenames and stops after unwatch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-watch-case-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-watch-case-"));
     const filePath = join(root, "settings.json");
     const events: WatchEvent[] = [];
     const manager = new ConfigWatchManager((subscription, reason) => {
@@ -85,7 +85,7 @@ describe("ConfigWatchManager", () => {
   });
 
   it("rebinds after a missing parent directory appears", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-watch-nested-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-watch-nested-"));
     const nested = join(root, ".plugin", "native.jsonc");
     const events: WatchEvent[] = [];
     const manager = new ConfigWatchManager((subscription: PiConfigWatchSubscription, reason) => {

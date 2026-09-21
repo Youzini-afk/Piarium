@@ -9,7 +9,7 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } from "./terminal-projection.js";
 import type { TerminalCommandRecord } from "../terminal/session-api.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-knowledge-context-runtime");
+const TEST_DIR = join(tmpdir(), "varin-knowledge-context-runtime");
 
 describe("knowledge context runtime", () => {
   let store: KnowledgeStore;

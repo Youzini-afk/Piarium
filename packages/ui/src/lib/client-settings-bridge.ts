@@ -3,13 +3,13 @@
  *
  * This surface owns the `client`-authority catalog entries — device-local
  * state in Zustand stores, localStorage, or the Electron shell. The Host
- * addresses the surface through `piarium:client-settings-request` events on
+ * addresses the surface through `varin:client-settings-request` events on
  * the shared stream and resolves the request on `POST
- * /api/piarium/client-settings/ack` with the values this surface actually
+ * /api/varin/client-settings/ack` with the values this surface actually
  * wrote — never an assumed success.
  */
 
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { useI18nStore } from '@/lib/i18n';
 import { useUIStore, type FileEditorKeymap } from '@/stores/useUIStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
@@ -25,7 +25,7 @@ import {
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
-const SURFACE_ID_STORAGE_KEY = 'piarium.client-surface.window.v1';
+const SURFACE_ID_STORAGE_KEY = 'varin.client-surface.window.v1';
 let cachedSurfaceId: string | null = null;
 
 export type ClientSurfaceKind = 'desktop' | 'web' | 'mobile';
@@ -66,7 +66,7 @@ export const clientSurfaceQuery = (): Record<string, string> => ({
 
 /** Establish the Host-side session binding before opening the targetable SSE stream. */
 export const bindClientSurfaceSession = async (sessionId: string): Promise<void> => {
-  const response = await runtimeFetch('/api/piarium/client-settings/bind', {
+  const response = await runtimeFetch('/api/varin/client-settings/bind', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId, surfaceId: getClientSurfaceId() }),
@@ -127,7 +127,7 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
   'appearance.window-transparency': canUseElectronDesktopIPC()
     ? {
         read: async () => ({
-          enabled: (window as { __PIARIUM_ELECTRON__?: { macVibrancy?: boolean } }).__PIARIUM_ELECTRON__?.macVibrancy === true,
+          enabled: (window as { __VARIN_ELECTRON__?: { macVibrancy?: boolean } }).__VARIN_ELECTRON__?.macVibrancy === true,
         }),
         apply: async (values) => {
           const enabled = boolField(values, 'enabled');
@@ -255,7 +255,7 @@ const CLIENT_DEFAULTS: Record<string, Record<string, unknown>> = {
 };
 
 /**
- * Handle one `piarium:client-settings-request` envelope. Runs every entry
+ * Handle one `varin:client-settings-request` envelope. Runs every entry
  * through its real surface authority and posts the per-entry facts back.
  */
 export const handleClientSettingsRequest = async (properties: Record<string, unknown>): Promise<void> => {
@@ -294,7 +294,7 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
   }
 
   try {
-    await runtimeFetch('/api/piarium/client-settings/ack', {
+    await runtimeFetch('/api/varin/client-settings/ack', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId, surfaceId, connectionId, results }),

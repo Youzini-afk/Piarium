@@ -1,4 +1,4 @@
-import type { PiRuntimeInstallationSource } from '@piarium/protocol';
+import type { PiRuntimeInstallationSource } from '@varin/protocol';
 import type { I18nKey } from '@/lib/i18n/store';
 
 export const piRuntimeSourceLabelKey = (source: PiRuntimeInstallationSource): I18nKey => {

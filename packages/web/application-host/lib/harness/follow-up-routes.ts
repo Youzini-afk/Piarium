@@ -5,7 +5,7 @@ import { ThreadRuntimeError } from "./thread-runtime.js";
 import { HarnessServiceError } from "./service-error.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { resolveResearchCaller } from "./research-access.js";
-import type { FollowUpSource } from "@piarium/protocol";
+import type { FollowUpSource } from "@varin/protocol";
 
 /**
  * UI-facing follow-up routes (W3, D-307): the session surface reads and steers

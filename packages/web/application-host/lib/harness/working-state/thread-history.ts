@@ -1,5 +1,5 @@
-import type { Thread, ThreadRun } from "@piarium/protocol";
-import type { ThreadResultHistory, ThreadResultRetentionReason } from "@piarium/application-client";
+import type { Thread, ThreadRun } from "@varin/protocol";
+import type { ThreadResultHistory, ThreadResultRetentionReason } from "@varin/application-client";
 import type { WorkingResult, WorkingStateRootStore } from "./types.js";
 
 export type RetentionThreadSnapshot = { thread: Thread; activeRun: ThreadRun | null };

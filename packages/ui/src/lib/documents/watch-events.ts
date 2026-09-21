@@ -1,14 +1,14 @@
-import type { PiariumWorkspaceFileEvent } from '@piarium/application-client';
+import type { VarinWorkspaceFileEvent } from '@varin/application-client';
 
-type WatchPosition = Pick<PiariumWorkspaceFileEvent, 'sourceId' | 'generation' | 'sequence'>;
+type WatchPosition = Pick<VarinWorkspaceFileEvent, 'sourceId' | 'generation' | 'sequence'>;
 
 export const createDocumentWatchEventTracker = (
-  listener: (event: PiariumWorkspaceFileEvent) => void,
+  listener: (event: VarinWorkspaceFileEvent) => void,
 ) => {
   let previous: WatchPosition | null = null;
 
   const reset = (
-    reason: Extract<PiariumWorkspaceFileEvent, { kind: 'reset' }>['reason'],
+    reason: Extract<VarinWorkspaceFileEvent, { kind: 'reset' }>['reason'],
     position = previous,
   ) => {
     listener({
@@ -21,7 +21,7 @@ export const createDocumentWatchEventTracker = (
   };
 
   return {
-    accept(event: PiariumWorkspaceFileEvent): void {
+    accept(event: VarinWorkspaceFileEvent): void {
       if (previous && event.sourceId !== previous.sourceId) {
         previous = event;
         reset('authority-changed', event);

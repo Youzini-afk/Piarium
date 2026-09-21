@@ -13,8 +13,8 @@ import {
   parseWorkspaceRecoveryTurnSettledInput,
   parseWorkspaceRecoveryTurnStartInput,
   type JsonValue,
-} from '@piarium/extension-contract';
-import type { HostCapabilityCallContext, HostCapabilityHandler } from '@piarium/extension-host';
+} from '@varin/extension-contract';
+import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
 import type { WorkspaceRecoveryEngine } from './engine.js';
 
 const asRecord = (value: unknown, label: string): Record<string, unknown> => {

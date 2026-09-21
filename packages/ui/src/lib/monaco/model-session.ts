@@ -1,5 +1,5 @@
 import { getDocumentRegistry } from '@/lib/documents/session';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { listEditorGroups } from '@/lib/workbench/editors/groups';
 import {
   listEditorWorkbenches,

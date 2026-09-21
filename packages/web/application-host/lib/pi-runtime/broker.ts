@@ -1,9 +1,9 @@
-import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@piarium/runtime-broker';
+import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@varin/runtime-broker';
 import type {
   PiRuntimeBrokerOptions,
   PiSessionExecutionAdmission,
-} from '@piarium/runtime-broker';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
+} from '@varin/runtime-broker';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
 
 export function attachPiSessionExecutionAdmission<Broker extends Pick<PiRuntimeBroker, 'setSessionExecutionAdmission'>>(
   broker: Broker,
@@ -80,7 +80,7 @@ export function createWebPiRuntimeBroker({
         harnessWebSearch,
         workspaceMutationJournal: true,
       },
-      clientName: 'piarium-web-server',
+      clientName: 'varin-web-server',
       clientVersion: typeof clientVersion === 'string' && clientVersion ? clientVersion : '0.1.0',
       mode: 'headless',
     },

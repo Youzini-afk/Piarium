@@ -1,4 +1,4 @@
-import type { PiRuntimeInstallPlan, PiRuntimeInstallation } from "@piarium/protocol";
+import type { PiRuntimeInstallPlan, PiRuntimeInstallation } from "@varin/protocol";
 import {
   compareVersions,
   detectOwningPackageManager,
@@ -8,7 +8,7 @@ import {
   inferGlobalPrefix,
   type DetectedPackageManager,
   type PiPackageManagerKind,
-} from "@piarium/pi-host/discovery";
+} from "@varin/pi-host/discovery";
 import { standaloneRuntimeLocations } from "./standalone-runtime.js";
 
 export const PI_INSTALL_PACKAGE = "@earendil-works/pi-coding-agent";

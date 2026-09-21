@@ -6,9 +6,9 @@ import type {
   GitBranch,
   GitLogResponse,
   GitIdentitySummary,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -201,7 +201,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
 // refresh runs in the background (see ChatInput's draft-branch effect). Only the
 // branch list is cached — never status/log/diff.
 // ---------------------------------------------------------------------------
-const GIT_BRANCH_CACHE_KEY = 'piarium.gitBranchCache.v1';
+const GIT_BRANCH_CACHE_KEY = 'varin.gitBranchCache.v1';
 const MAX_BRANCH_CACHE_RUNTIMES = 8;
 const MAX_BRANCH_CACHE_DIRECTORIES = 50;
 type BranchCacheEnvelope = {

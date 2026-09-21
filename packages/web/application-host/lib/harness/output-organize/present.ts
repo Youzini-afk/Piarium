@@ -1,4 +1,4 @@
-import type { ShellOutputOrganization } from "@piarium/protocol";
+import type { ShellOutputOrganization } from "@varin/protocol";
 import type { OutputStore } from "../output-store.js";
 import { organizeShellOutput } from "./index.js";
 

@@ -168,7 +168,7 @@ const startLoopbackOrigin = (): Promise<LoopbackOrigin> =>
         res.end(JSON.stringify({
           ok: true,
           service: 'stub',
-          relayConn: req.headers['x-piarium-relay-connection'] || null,
+          relayConn: req.headers['x-varin-relay-connection'] || null,
           origin: req.headers.origin,
         }));
         return;

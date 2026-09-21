@@ -16,7 +16,7 @@ function createHost(agentDir: string, trusted: boolean): SessionHost {
 
 describe("SessionHost agent providers", () => {
   it("aggregates pi-subagents and Magic Context without overriding plugin ownership", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-agent-providers-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-agent-providers-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const home = join(root, "home");
@@ -91,7 +91,7 @@ export default function (pi: any) {
     await writeFile(
       join(agentDir, "extensions", "generic-agent-provider.ts"),
       `export default function (pi: any) {
-  pi.events.on("piarium.agent-provider.discover/v1", (discovery: any) => {
+  pi.events.on("varin.agent-provider.discover/v1", (discovery: any) => {
     discovery.register({
       bridgeVersion: 1,
       descriptor: {
@@ -294,7 +294,7 @@ export default function (pi: any) {
   });
 
   it("routes every advertised pi-subagents entity action through the plugin tool", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-actions-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-agent-provider-actions-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const actionLog = join(root, "actions.jsonl");
@@ -356,7 +356,7 @@ export default function (pi: any) {
   });
 
   it("rejects project-scoped provider mutations when the project is untrusted", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-trust-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-agent-provider-trust-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "extensions"), { recursive: true });
@@ -388,7 +388,7 @@ export default function (pi: any) {
   });
 
   it("prefers a plugin-owned provider bridge over the built-in fallback adapter", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-priority-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-agent-provider-priority-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "extensions"), { recursive: true });
@@ -405,7 +405,7 @@ export default function (pi: any) {
       return { content: [{ type: "text", text: "Executable agents:\\n- fallback (user): Must not win" }], details: {} };
     },
   });
-  pi.events.on("piarium.agent-provider.discover/v1", (discovery: any) => {
+  pi.events.on("varin.agent-provider.discover/v1", (discovery: any) => {
     discovery.register({
       bridgeVersion: 1,
       descriptor: {

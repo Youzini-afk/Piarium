@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { HostHandshakeResult, SessionSnapshot, SessionSummary } from "@piarium/protocol";
-import type { RuntimeCandidate } from "@piarium/pi-host/discovery";
+import type { HostHandshakeResult, SessionSnapshot, SessionSummary } from "@varin/protocol";
+import type { RuntimeCandidate } from "@varin/pi-host/discovery";
 import { PiRuntimeNotReadyError } from "../src/errors.js";
 import { dispatchRuntimeRequest } from "../src/runtime-dispatcher.js";
 import { PiRuntimeLifecycle } from "../src/runtime-lifecycle.js";
@@ -153,7 +153,7 @@ const recordingBroker = (
 };
 
 test("starts without a broker when Pi is missing", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     const lifecycle = new PiRuntimeLifecycle({
       dataDir,
@@ -178,7 +178,7 @@ test("starts without a broker when Pi is missing", async () => {
 });
 
 test("starts the real broker once and publishes ready only after its handshake", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     const created: string[] = [];
     const lifecycle = new PiRuntimeLifecycle({
@@ -210,7 +210,7 @@ test("starts the real broker once and publishes ready only after its handshake",
 });
 
 test("reports broker activation failure instead of publishing a false ready state", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     let disposed = false;
     const lifecycle = new PiRuntimeLifecycle({
@@ -249,7 +249,7 @@ test("reports broker activation failure instead of publishing a false ready stat
 });
 
 test("keeps the previous broker generation after activating another install", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     const first = fakeBroker(SYSTEM_ROOT, ["session-old"]);
     const second = fakeBroker(CUSTOM_ROOT);
@@ -280,7 +280,7 @@ test("keeps the previous broker generation after activating another install", as
 });
 
 test("routes old-session and worker operations to their owning generation", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     const calls: string[] = [];
     const first = recordingBroker("old", SYSTEM_ROOT, ["session-old"], calls);
@@ -349,7 +349,7 @@ test("routes old-session and worker operations to their owning generation", asyn
 });
 
 test("stops workers that use the global install before upgrading", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-lifecycle-"));
   try {
     let disposed = false;
     const lifecycle = new PiRuntimeLifecycle({

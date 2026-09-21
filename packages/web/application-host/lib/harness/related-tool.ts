@@ -18,7 +18,7 @@ import type {
   RelatedQueryStatus,
   RelatedReferenceSite,
   RelatedRelationStatus,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { resolveImportSpecifier } from "../knowledge/import-resolve.js";
 import type { RelationCollectOutcome } from "../knowledge/relations.js";
 import type { KnowledgeStore, SymbolGraphRelationRecord } from "../knowledge/store.js";

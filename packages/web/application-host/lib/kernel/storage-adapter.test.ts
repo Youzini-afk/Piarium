@@ -17,12 +17,12 @@ import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDi
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel", "target", "release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel", "target", "release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 
 it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant regardless of construction order", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-grant-identity-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-grant-identity-"));
   const client = createKernelClient({ hostId: "grant-identity", storageRoot: path.join(root, "storage"),
     buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "grant-identity", storageRoot: path.join(root, "storage"),
@@ -45,7 +45,7 @@ it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant reg
 });
 
 it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned reads, scoped lists, virtual writes, and base reverts", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-state-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-working-state-"));
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   await fs.mkdir(path.join(workspace, "src"), { recursive: true });
@@ -243,7 +243,7 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
 }, 30_000);
 
 it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the durable integration journal", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-integration-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-integration-"));
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   const dataDir = path.join(root, "data");
@@ -325,7 +325,7 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
 });
 
 it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integration and undo", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-surface-integration-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-surface-integration-"));
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   const dataDir = path.join(root, "data");
@@ -396,7 +396,7 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
 });
 
 it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a concurrent write", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-publish-race-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-publish-race-"));
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   const workspaceId = "kernel-publish-race-workspace";
@@ -449,7 +449,7 @@ it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a c
 });
 
 it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal response is lost and the Host restarts", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-branch-reconcile-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-branch-reconcile-"));
   const workspace = path.join(root, "workspace");
   const storageRoot = path.join(root, "storage");
   const dataDir = path.join(root, "data");

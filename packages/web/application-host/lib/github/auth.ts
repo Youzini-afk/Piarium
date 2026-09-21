@@ -1,14 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import { resolvePiariumDataDir } from '../platform/data-paths.js';
-import { createSettingsFileStore } from '@piarium/settings-store';
+import { resolveVarinDataDir } from '../platform/data-paths.js';
+import { createSettingsFileStore } from '@varin/settings-store';
 import type { GitHubAuthEntry, GitHubUser, SetGitHubAuthInput } from './types.js';
 
-const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
+const VARIN_DATA_DIR = resolveVarinDataDir(process);
 
-const STORAGE_DIR = PIARIUM_DATA_DIR;
+const STORAGE_DIR = VARIN_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'github-auth.json');
-const SETTINGS_FILE = path.join(PIARIUM_DATA_DIR, 'settings.json');
+const SETTINGS_FILE = path.join(VARIN_DATA_DIR, 'settings.json');
 const settingsStore = createSettingsFileStore({ filePath: SETTINGS_FILE });
 
 const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
@@ -46,7 +46,7 @@ function readJsonFile(): unknown {
 function writeJsonFile(payload: unknown): void {
   ensureStorageDir();
 
-  // Atomic write so multiple Piarium instances can safely share the same file.
+  // Atomic write so multiple Varin instances can safely share the same file.
   const tmpFile = `${STORAGE_FILE}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf8');
   try {
@@ -284,7 +284,7 @@ const isMissingFileError = (error: unknown): boolean => (
 );
 
 export function getGitHubClientId(): string {
-  const raw = process.env.PIARIUM_GITHUB_CLIENT_ID;
+  const raw = process.env.VARIN_GITHUB_CLIENT_ID;
   const clientId = typeof raw === 'string' ? raw.trim() : '';
   if (clientId) return clientId;
 
@@ -299,7 +299,7 @@ export function getGitHubClientId(): string {
 }
 
 export function getGitHubScopes(): string {
-  const raw = process.env.PIARIUM_GITHUB_SCOPES;
+  const raw = process.env.VARIN_GITHUB_SCOPES;
   const fromEnv = typeof raw === 'string' ? raw.trim() : '';
   if (fromEnv) return fromEnv;
 

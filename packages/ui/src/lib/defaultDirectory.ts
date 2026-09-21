@@ -1,4 +1,4 @@
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { normalizeFilePath } from '@/lib/path-utils';
 
 const isFilesystemRoot = (value: string): boolean => (

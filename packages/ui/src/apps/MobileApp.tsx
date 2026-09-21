@@ -7,10 +7,10 @@ import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import { AboutSettings } from '@/components/sections/piarium/AboutSettings';
+import { AboutSettings } from '@/components/sections/varin/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { SettingsView } from '@/components/views/SettingsView';
@@ -31,7 +31,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import type { ProjectEntry, RuntimeAPIs } from '@piarium/application-client';
+import type { ProjectEntry, RuntimeAPIs } from '@varin/application-client';
 import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
@@ -40,8 +40,8 @@ import { resolveProjectForDirectory } from '@/lib/projectResolution';
 import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useMobileAppViewport } from '@/lib/mobileAppRuntime';
 import { useMobileLayoutInfo, useMobileLayoutRootAttributes } from '@/lib/mobileLayoutTier';
@@ -721,10 +721,10 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
     void conn.connect({ url: serverUrl, clientToken, label: connectionName });
   }, [clientToken, conn, connectionName, serverUrl]);
 
-  // Accept a pasted pairing link (piarium://connect?...) in the URL field and
+  // Accept a pasted pairing link (varin://connect?...) in the URL field and
   // split it back into the server URL + token.
   const handleUrlChange = React.useCallback((value: string) => {
-    if (/^piarium:\/\//i.test(value.trim())) {
+    if (/^varin:\/\//i.test(value.trim())) {
       const payload = parseConnectionPayload(value);
       if (payload) {
         if ('pairing' in payload) {
@@ -808,7 +808,7 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
     <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+28px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+28px)] text-foreground">
       <div className="m-auto flex w-full max-w-[360px] shrink-0 flex-col items-center gap-9 py-8">
         <div className="flex flex-col items-center gap-5 text-center">
-          <PiariumLogo width={72} height={72} className="size-[72px]" />
+          <VarinLogo width={72} height={72} className="size-[72px]" />
           <h1 className="typography-h2 text-foreground">{t('mobile.connect.welcome.title')}</h1>
         </div>
 
@@ -2165,8 +2165,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, [ipadRightPanel, isIPad]);
   const renderedIpadRightPanel = ipadRightPanel ?? lastIpadRightPanelRef.current;
 
-  const leftResize = useIpadSidebarResize('left', 'piarium.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
-  const rightResize = useIpadSidebarResize('right', 'piarium.ipad.rightSidebarWidth', IPAD_RIGHT_SIDEBAR_WIDTH);
+  const leftResize = useIpadSidebarResize('left', 'varin.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
+  const rightResize = useIpadSidebarResize('right', 'varin.ipad.rightSidebarWidth', IPAD_RIGHT_SIDEBAR_WIDTH);
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
@@ -2187,7 +2187,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setPendingChangesDiff(null);
   }, []);
 
-  // Expose the shell's panel-opening actions to the deep-link layer so piarium:// URLs
+  // Expose the shell's panel-opening actions to the deep-link layer so varin:// URLs
   // (and notification taps / widgets) can navigate to these surfaces. Session and
   // new-session intents resolve directly against the store, so they aren't wired here.
   const deepLinkHandlers = React.useMemo(
@@ -2621,8 +2621,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                       type="button"
                       className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
                       onClick={openMcpSettings}
-                      aria-label={t('settings.piarium.mcp.config.title')}
-                      title={t('settings.piarium.mcp.config.title')}
+                      aria-label={t('settings.varin.mcp.config.title')}
+                      title={t('settings.varin.mcp.config.title')}
                       style={{ touchAction: 'manipulation' }}
                     >
                       <Icon name="settings-3" className="h-5 w-5" />
@@ -2632,8 +2632,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                       className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] disabled:opacity-60"
                       onClick={reconnectMcpOverlay}
                       disabled={isMcpReconnecting || !currentPiSessionId}
-                      aria-label={t('settings.piarium.mcp.actions.reconnect')}
-                      title={t('settings.piarium.mcp.actions.reconnect')}
+                      aria-label={t('settings.varin.mcp.actions.reconnect')}
+                      title={t('settings.varin.mcp.actions.reconnect')}
                       style={{ touchAction: 'manipulation' }}
                     >
                       <Icon name="refresh" className={cn('h-5 w-5', isMcpReconnecting && 'animate-spin')} />
@@ -2923,7 +2923,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     // the user in an empty shell after a disconnect.
     if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
     void loadPiCatalog().catch((catalogError) => {
-      console.warn('[Piarium] failed to load the mobile Pi session catalog:', catalogError);
+      console.warn('[Varin] failed to load the mobile Pi session catalog:', catalogError);
     });
   }, [isNativeMobileApp, loadPiCatalog, runtimeEndpointEpoch]);
 
@@ -2982,7 +2982,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
   useNativePushRegistration({ enabled: isNativeMobileApp && piCatalogLoaded });
-  // Single native deep-link entry point: notification taps AND the piarium:// URL
+  // Single native deep-link entry point: notification taps AND the varin:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
   // the app is ready (connected + initialized) and shell handlers are registered.
@@ -3001,7 +3001,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   if (!fontsReady) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
-        <PiariumLogo width={120} height={120} isAnimated />
+        <VarinLogo width={120} height={120} isAnimated />
       </main>
     );
   }
@@ -3019,7 +3019,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       return (
         <main className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-foreground">
           <div className="flex max-w-sm flex-col items-center gap-4">
-            <PiariumLogo width={120} height={120} isAnimated={!showConnectionRecovery} />
+            <VarinLogo width={120} height={120} isAnimated={!showConnectionRecovery} />
             {showConnectionRecovery ? (
               <>
                 <div className="space-y-2">
@@ -3049,7 +3049,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     if (autoConnectPhase !== 'done') {
       return (
         <main className="relative flex min-h-dvh items-center justify-center bg-background text-foreground">
-          <PiariumLogo width={120} height={120} isAnimated />
+          <VarinLogo width={120} height={120} isAnimated />
           {/* Absolutely positioned below the (still perfectly centered) logo so
               the text never pushes it up. 50% + half the 120px logo + a gap. */}
           {autoConnectLabel ? (
@@ -3074,7 +3074,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     if (!showConnectionRecovery) {
       return (
         <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
-          <PiariumLogo width={120} height={120} isAnimated />
+          <VarinLogo width={120} height={120} isAnimated />
         </main>
       );
     }

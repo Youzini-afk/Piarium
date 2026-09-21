@@ -3,7 +3,7 @@ import {
   type ModelsMetadata,
 } from '../platform/models-metadata.js';
 
-// The models.dev catalog is shared with the /api/piarium/models-metadata
+// The models.dev catalog is shared with the /api/varin/models-metadata
 // route through one in-process cache — no extra fetches, no cache files.
 export async function getModelCatalog(): Promise<ModelsMetadata> {
   const { metadata } = await getModelsMetadata();

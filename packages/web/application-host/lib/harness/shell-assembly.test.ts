@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorContext, HarnessActorIdentity } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessActorIdentity } from "@varin/protocol";
 import { createShellExecService } from "./harness-services.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
@@ -11,7 +11,7 @@ import { createHarnessServiceHost } from "./service-host.js";
 import { createVerificationCoordinator } from "./verification-coordinator.js";
 import type { ResultVerificationBundle, WorkingStateRootStore } from "./working-state/types.js";
 
-const nativeAuthorityIt = process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1" ? it : it.skip;
+const nativeAuthorityIt = process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1" ? it : it.skip;
 
 const actor = (sessionId: string): HarnessActorIdentity => ({
   authorityInstanceId: "authority-1",
@@ -153,13 +153,13 @@ describe("production shell assembly", () => {
     const interpreter = host.getInterpreter("session-live");
     expect(interpreter && "kind" in interpreter).toBe(true);
     const result = await createShellExecService(host).handle(
-      { command: "echo piarium-shell-assembly", waitMs: 15_000 },
+      { command: "echo varin-shell-assembly", waitMs: 15_000 },
       serviceContext("session-live", "ws-live"),
     );
     expect(result.kind).toBe("completed");
     if (result.kind === "completed") {
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toMatch(/piarium-shell-assembly/);
+      expect(result.stdout).toMatch(/varin-shell-assembly/);
     }
   }, 30_000);
 
@@ -182,11 +182,11 @@ describe("production shell assembly", () => {
     });
     const ctx = serviceContext("session-powershell", "ws-powershell");
     const first = await createShellExecService(host).handle(
-      { command: "Write-Output piarium-powershell-one", cwd: workspace, waitMs: 15_000 },
+      { command: "Write-Output varin-powershell-one", cwd: workspace, waitMs: 15_000 },
       ctx,
     );
     const second = await createShellExecService(host).handle(
-      { command: "Write-Output piarium-powershell-two", waitMs: 15_000 },
+      { command: "Write-Output varin-powershell-two", waitMs: 15_000 },
       ctx,
     );
     const failed = await createShellExecService(host).handle(
@@ -196,8 +196,8 @@ describe("production shell assembly", () => {
     expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
     expect(second).toMatchObject({ kind: "completed", exitCode: 0 });
     expect(failed).toMatchObject({ kind: "completed", exitCode: 7 });
-    if (first.kind === "completed") expect(first.stdout).toContain("piarium-powershell-one");
-    if (second.kind === "completed") expect(second.stdout).toContain("piarium-powershell-two");
+    if (first.kind === "completed") expect(first.stdout).toContain("varin-powershell-one");
+    if (second.kind === "completed") expect(second.stdout).toContain("varin-powershell-two");
   }, 45_000);
 
   nativeAuthorityIt("completes background verification from the real command lifecycle without shell.read", async () => {

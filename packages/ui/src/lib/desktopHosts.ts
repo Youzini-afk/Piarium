@@ -6,21 +6,21 @@ import type {
   DesktopHostRelay,
   DesktopHostsConfig,
   DesktopHostsConfigInput,
-  PiariumDesktopCommand,
-  PiariumDesktopCommandInvocation,
-  PiariumDesktopCommandResult,
-} from '@piarium/application-client';
+  VarinDesktopCommand,
+  VarinDesktopCommandInvocation,
+  VarinDesktopCommandResult,
+} from '@varin/application-client';
 export type {
   DesktopHost,
   DesktopHostRelay,
   DesktopHostsConfig,
   DesktopHostsConfigInput,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
-type DesktopInvoke = <K extends PiariumDesktopCommand>(
+type DesktopInvoke = <K extends VarinDesktopCommand>(
   cmd: K,
-  ...invocation: PiariumDesktopCommandInvocation<K>
-) => Promise<PiariumDesktopCommandResult<K> | null>;
+  ...invocation: VarinDesktopCommandInvocation<K>
+) => Promise<VarinDesktopCommandResult<K> | null>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
@@ -85,9 +85,9 @@ export const importDesktopHostPairing = async (
     body: JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
-      clientLabel: payload.label || 'Piarium Desktop',
+      clientLabel: payload.label || 'Varin Desktop',
       clientKind: 'desktop',
-      deviceName: 'Piarium Desktop',
+      deviceName: 'Varin Desktop',
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
     }),

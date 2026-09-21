@@ -1,4 +1,4 @@
-# @piarium/extension-loader
+# @varin/extension-loader
 
 Surface-side lifecycle loader for external declarative, managed, isolated, and trusted-native
 extensions. Manifest contributions use a public data-only implementation and require no asset or

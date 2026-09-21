@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
-import type { HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@piarium/protocol';
+import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
+import type { HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@varin/protocol';
 import type { DocumentAuthority, DocumentMutationObservation } from '../../documents/authority.js';
 import type { HarnessServiceHost } from '../../harness/service-host.js';
 import type { createWorkingBranchLookups } from '../../harness/working-state/working-branch-lookups.js';

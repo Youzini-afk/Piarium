@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSnapshot } from '@piarium/protocol';
+import type { SessionSnapshot } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
@@ -9,7 +9,7 @@ import {
   listEditorContextAttachments,
   subscribeEditorContextAttachments,
 } from '@/lib/agent-editor/attachments';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
 
 export const PiActiveEditorContextSuggestion: React.FC<{ snapshot: SessionSnapshot }> = ({ snapshot }) => {

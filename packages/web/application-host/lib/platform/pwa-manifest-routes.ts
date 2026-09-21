@@ -1,4 +1,4 @@
-const DEFAULT_PWA_APP_NAME = 'Piarium - Pi Coding Workspace';
+const DEFAULT_PWA_APP_NAME = 'Varin - Agent Workspace';
 
 export interface PwaManifestRequest {
   query?: Record<string, unknown> | undefined;
@@ -135,7 +135,7 @@ export const registerPwaManifestRoute = (
     const manifest = {
       name: appName,
       short_name: appName.slice(0, 30),
-      description: 'Pi-native coding workspace for the Pi agent ecosystem',
+      description: 'Agent workspace and harness for coding and research',
       id: '/',
       start_url: '/',
       scope: '/',

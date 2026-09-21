@@ -2,7 +2,7 @@ import React from 'react';
 import {
   PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE,
   type PiRuntimeSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -16,7 +16,7 @@ interface LocalPiRuntimeCardProps {
   onContinue: () => Promise<void> | void;
 }
 
-const PIARIUM_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases/latest';
+const VARIN_RELEASES_URL = 'https://github.com/Youzini-afk/Varin/releases/latest';
 
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
@@ -324,9 +324,9 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
               size="lg"
               className="w-full"
               disabled={busyStatus}
-              onClick={() => void openExternalUrl(PIARIUM_RELEASES_URL)}
+              onClick={() => void openExternalUrl(VARIN_RELEASES_URL)}
             >
-              {t('onboarding.localSetup.actions.downloadPiariumAgain')}
+              {t('onboarding.localSetup.actions.downloadVarinAgain')}
             </Button>
           ) : null}
           <Button

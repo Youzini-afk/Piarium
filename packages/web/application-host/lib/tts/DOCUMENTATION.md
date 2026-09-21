@@ -132,7 +132,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 ## Verification notes
 
 ### Manual verification
-1. Configure an OpenAI API key via the environment or Piarium settings.
+1. Configure an OpenAI API key via the environment or Varin settings.
 2. Test `ttsService.isAvailable()` returns true.
 3. Call `ttsService.generateSpeechStream({ text: 'Hello world' })` and verify stream is returned.
 4. Call `ttsService.generateSpeechBuffer({ text: 'Hello world' })` and verify Buffer is returned.

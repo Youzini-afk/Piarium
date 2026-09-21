@@ -8,13 +8,13 @@ import path from 'path';
 // means the user has to degrade one feature to fix the other.
 
 const SETTINGS_FILE = path.join(
-  process.env.PIARIUM_DATA_DIR
-    ? path.resolve(process.env.PIARIUM_DATA_DIR)
+  process.env.VARIN_DATA_DIR
+    ? path.resolve(process.env.VARIN_DATA_DIR)
     : process.platform === 'win32'
-      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Piarium')
+      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Varin')
       : process.platform === 'darwin'
-        ? path.join(os.homedir(), 'Library', 'Application Support', 'Piarium')
-        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'piarium'),
+        ? path.join(os.homedir(), 'Library', 'Application Support', 'Varin')
+        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'varin'),
   'settings.json',
 );
 

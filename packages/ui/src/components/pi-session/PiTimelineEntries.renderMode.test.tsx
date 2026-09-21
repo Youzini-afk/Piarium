@@ -1,8 +1,8 @@
 import React from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@piarium/protocol';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { PiAssistantMessage, PiSessionEntry, Thread, ThreadRun } from '@varin/protocol';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { I18nProvider } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';

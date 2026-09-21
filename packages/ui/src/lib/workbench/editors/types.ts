@@ -1,4 +1,4 @@
-import type { JsonValue } from '@piarium/extension-contract';
+import type { JsonValue } from '@varin/extension-contract';
 
 export type EditorProviderViewState = {
   providerId: string;
@@ -73,19 +73,19 @@ export type EditorProviderContribution = {
 };
 
 export const BUILTIN_EDITOR_PROVIDER_IDS = {
-  text: 'piarium.builtin.text',
-  markdown: 'piarium.builtin.markdown',
-  json: 'piarium.builtin.json',
-  html: 'piarium.builtin.html',
-  drawio: 'piarium.builtin.drawio',
-  image: 'piarium.builtin.image',
-  pdf: 'piarium.builtin.pdf',
-  diff: 'piarium.builtin.diff',
+  text: 'varin.builtin.text',
+  markdown: 'varin.builtin.markdown',
+  json: 'varin.builtin.json',
+  html: 'varin.builtin.html',
+  drawio: 'varin.builtin.drawio',
+  image: 'varin.builtin.image',
+  pdf: 'varin.builtin.pdf',
+  diff: 'varin.builtin.diff',
   /**
    * Git working-tree/staged diff for a tracked file. Declares no languages and is never a
    * fallback, so resolution never selects it; callers request it explicitly with a pinned tab.
    */
-  gitDiff: 'piarium.builtin.git-diff',
+  gitDiff: 'varin.builtin.git-diff',
 } as const;
 
 export type BuiltinEditorProviderId = typeof BUILTIN_EDITOR_PROVIDER_IDS[keyof typeof BUILTIN_EDITOR_PROVIDER_IDS];

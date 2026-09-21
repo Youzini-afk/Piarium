@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import { describe, expect, it } from "vitest";
 import { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
 import {
@@ -367,7 +367,7 @@ describe("createTreeSitterStructureProvider", () => {
   });
 
   it("reports unavailable when the runtime wasm cannot be read", async () => {
-    const empty = mkdtempSync(join(tmpdir(), "piarium-structure-runtime-"));
+    const empty = mkdtempSync(join(tmpdir(), "varin-structure-runtime-"));
     const provider = createTreeSitterStructureProvider({
       runtimeFromUrl: pathToFileURL(join(empty, "missing.js")).href,
     });
@@ -421,7 +421,7 @@ describe("createTreeSitterStructureProvider", () => {
     const provider = parsingProvider();
     const text = [
       "{",
-      "  \"name\": \"piarium\",",
+      "  \"name\": \"varin\",",
       "  \"config\": {",
       "    \"enabled\": true,",
       "    \"nested\": { \"needle\": 1 }",

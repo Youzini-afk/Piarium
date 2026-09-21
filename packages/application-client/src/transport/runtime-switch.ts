@@ -29,8 +29,8 @@ export type RuntimeEndpointSwitchBlocker = (
   detail: RuntimeEndpointChangedDetail,
 ) => void | Promise<void>;
 
-const RUNTIME_ENDPOINT_CHANGED_EVENT = 'piarium:runtime-endpoint-changed';
-const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'piarium:runtime-endpoint-will-change';
+const RUNTIME_ENDPOINT_CHANGED_EVENT = 'varin:runtime-endpoint-changed';
+const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'varin:runtime-endpoint-will-change';
 
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
@@ -38,11 +38,11 @@ let runtimeEndpointGeneration = 1;
 const runtimeEndpointSwitchBlockers = new Set<RuntimeEndpointSwitchBlocker>();
 let safeSwitchQueue: Promise<void> = Promise.resolve();
 
-const setWindowRuntimeValue = <K extends '__PIARIUM_API_BASE_URL__' | '__PIARIUM_CLIENT_TOKEN__' | '__PIARIUM_RUNTIME_HEADERS__'>(
+const setWindowRuntimeValue = <K extends '__VARIN_API_BASE_URL__' | '__VARIN_CLIENT_TOKEN__' | '__VARIN_RUNTIME_HEADERS__'>(
   runtimeWindow: typeof window & {
-    __PIARIUM_API_BASE_URL__?: string;
-    __PIARIUM_CLIENT_TOKEN__?: string;
-    __PIARIUM_RUNTIME_HEADERS__?: Record<string, string>;
+    __VARIN_API_BASE_URL__?: string;
+    __VARIN_CLIENT_TOKEN__?: string;
+    __VARIN_RUNTIME_HEADERS__?: Record<string, string>;
   },
   key: K,
   value: (typeof runtimeWindow)[K],
@@ -72,13 +72,13 @@ const normalizeRuntimeUrlKey = (value: string): string => {
 
 const readInjectedApiBaseUrl = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __PIARIUM_API_BASE_URL__?: string }).__PIARIUM_API_BASE_URL__;
+  const injected = (window as typeof window & { __VARIN_API_BASE_URL__?: string }).__VARIN_API_BASE_URL__;
   return typeof injected === 'string' ? injected.trim() : '';
 };
 
 const readInjectedLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__;
+  const injected = (window as typeof window & { __VARIN_LOCAL_ORIGIN__?: string }).__VARIN_LOCAL_ORIGIN__;
   return typeof injected === 'string' ? injected.trim() : '';
 };
 
@@ -99,12 +99,12 @@ let cachedRawApiBaseUrl: string | undefined;
 let cachedRawLocalOrigin: string | undefined;
 
 const readRawRuntimeGlobal = (
-  key: '__PIARIUM_API_BASE_URL__' | '__PIARIUM_LOCAL_ORIGIN__',
+  key: '__VARIN_API_BASE_URL__' | '__VARIN_LOCAL_ORIGIN__',
 ): string | undefined => {
   if (typeof window === 'undefined') return undefined;
   const value = (window as typeof window & {
-    __PIARIUM_API_BASE_URL__?: string;
-    __PIARIUM_LOCAL_ORIGIN__?: string;
+    __VARIN_API_BASE_URL__?: string;
+    __VARIN_LOCAL_ORIGIN__?: string;
   })[key];
   return typeof value === 'string' ? value : undefined;
 };
@@ -114,8 +114,8 @@ export const getRuntimeEndpointGeneration = (): number => runtimeEndpointGenerat
 export const getRuntimeKey = (): string => {
   if (activeRuntimeKey) return activeRuntimeKey;
 
-  const rawApiBaseUrl = readRawRuntimeGlobal('__PIARIUM_API_BASE_URL__');
-  const rawLocalOrigin = readRawRuntimeGlobal('__PIARIUM_LOCAL_ORIGIN__');
+  const rawApiBaseUrl = readRawRuntimeGlobal('__VARIN_API_BASE_URL__');
+  const rawLocalOrigin = readRawRuntimeGlobal('__VARIN_LOCAL_ORIGIN__');
   if (
     cachedActiveApiBaseUrl === activeApiBaseUrl
     && cachedRawApiBaseUrl === rawApiBaseUrl
@@ -162,13 +162,13 @@ export const switchRuntimeEndpoint = (options: RuntimeEndpointSwitchOptions): vo
   activeRuntimeKey = runtimeKey;
   if (typeof window !== 'undefined') {
     const runtimeWindow = window as typeof window & {
-      __PIARIUM_API_BASE_URL__?: string;
-      __PIARIUM_CLIENT_TOKEN__?: string;
-      __PIARIUM_RUNTIME_HEADERS__?: Record<string, string>;
+      __VARIN_API_BASE_URL__?: string;
+      __VARIN_CLIENT_TOKEN__?: string;
+      __VARIN_RUNTIME_HEADERS__?: Record<string, string>;
     };
-    setWindowRuntimeValue(runtimeWindow, '__PIARIUM_API_BASE_URL__', apiBaseUrl);
-    setWindowRuntimeValue(runtimeWindow, '__PIARIUM_CLIENT_TOKEN__', options.clientToken || undefined);
-    setWindowRuntimeValue(runtimeWindow, '__PIARIUM_RUNTIME_HEADERS__', options.requestHeaders || undefined);
+    setWindowRuntimeValue(runtimeWindow, '__VARIN_API_BASE_URL__', apiBaseUrl);
+    setWindowRuntimeValue(runtimeWindow, '__VARIN_CLIENT_TOKEN__', options.clientToken || undefined);
+    setWindowRuntimeValue(runtimeWindow, '__VARIN_RUNTIME_HEADERS__', options.requestHeaders || undefined);
   }
   configureRuntimeUrlResolver({ apiBaseUrl, realtimeBaseUrl: apiBaseUrl });
   setRuntimeExtraHeaders(options.requestHeaders || null);

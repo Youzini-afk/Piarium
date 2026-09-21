@@ -1,4 +1,4 @@
-import type { PiCommandDescriptor } from '@piarium/protocol';
+import type { PiCommandDescriptor } from '@varin/protocol';
 
 export type RtkRuntimeAction = 'clear-stats' | 'show' | 'stats' | 'verify';
 type RtkRuntimeState = 'available' | 'failure' | 'loading' | 'no-session' | 'not-observed';

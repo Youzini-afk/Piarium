@@ -8,7 +8,7 @@ describe('typescript language workspace', () => {
   it('reports a type error and hover for an in-memory TypeScript file', () => {
     const workspace = createTypescriptLanguageWorkspace();
     try {
-      const fileName = path.join(os.tmpdir(), 'piarium-ts-service.ts');
+      const fileName = path.join(os.tmpdir(), 'varin-ts-service.ts');
       workspace.setFile(fileName, 'const greeting: number = "hi";\n', 1);
       const messages = workspace.diagnostics(fileName);
       expect(messages.some((message) => /string|number|assignable/i.test(message))).toBe(true);
@@ -20,7 +20,7 @@ describe('typescript language workspace', () => {
   });
 
   it('resolves cross-file references through disk reads, and call hierarchy both directions', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-refs-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ts-refs-'));
     const defFile = path.join(dir, 'def.ts');
     const callerFile = path.join(dir, 'caller.ts');
     fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
@@ -54,7 +54,7 @@ describe('typescript language workspace', () => {
   });
 
   it('uses the LSP initialize root, not the first opened file parent, so a caller in a sibling directory resolves', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-root-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ts-root-'));
     const srcA = path.join(dir, 'src', 'a');
     const srcB = path.join(dir, 'src', 'b');
     fs.mkdirSync(srcA, { recursive: true });
@@ -83,7 +83,7 @@ describe('typescript language workspace', () => {
     // Without a workspace root, the service must not guess from the first
     // opened file's parent — a file in src/a must not make src/a the root
     // (D-240 rework). The caller in a sibling dir is unreachable.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-no-root-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ts-no-root-'));
     const srcA = path.join(dir, 'src', 'a');
     const srcB = path.join(dir, 'src', 'b');
     fs.mkdirSync(srcA, { recursive: true });
@@ -108,7 +108,7 @@ describe('typescript language workspace', () => {
   });
 
   it('accepts setWorkspaceRoot after construction, matching the LSP initialize lifecycle', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-set-root-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ts-set-root-'));
     const defFile = path.join(dir, 'def.ts');
     const callerFile = path.join(dir, 'caller.ts');
     fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');

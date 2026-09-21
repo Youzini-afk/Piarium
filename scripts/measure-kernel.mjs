@@ -46,7 +46,7 @@ function memorySample(pids) {
 
 async function worker(input) {
   const { backend, corpus, count, webRoot, baselineRoot, samples } = input;
-  const state = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-r6-measure-state-'));
+  const state = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-r6-measure-state-'));
   const hostRoot = backend === 'rust' ? path.join(webRoot, 'server') : baselineRoot;
   const [{ createWorkspaceContentSearch }, { createFsSearchRuntime }, { createTreeSitterStructureProvider }] = await Promise.all([
     load(hostRoot, 'lib/search/content.js'), load(hostRoot, 'lib/fs/search.js'), load(hostRoot, 'lib/structure/tree-sitter-provider.js'),
@@ -65,7 +65,7 @@ async function worker(input) {
       ({ runKernelCompute } = await load(hostRoot, 'lib/kernel/compute-runner.js'));
       const version = JSON.parse(await fsp.readFile(path.join(webRoot, 'package.json'), 'utf8')).version;
       client = createKernelClient({ hostId: 'r6-measure', storageRoot: state, buildVersion: version,
-        kernelPath: path.join(webRoot, 'kernel', process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel'),
+        kernelPath: path.join(webRoot, 'kernel', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel'),
         allowCargoDevRunner: false, requireKernelManifest: true,
         spawnProcess: (...args) => { const child = spawn(...args); if (child.pid) pids.push(child.pid); return child; },
       });
@@ -231,7 +231,7 @@ if (process.argv[2] === '--worker') {
   const output = path.resolve(process.argv[2] ?? path.join(repo, 'artifacts/r6-performance.json'));
   const webRoot = path.resolve(process.argv[3] ?? path.join(repo, 'packages/web'));
   const baselineRef = execFileSync('git', ['rev-parse', 'b621db6a^{commit}'], { cwd: repo, encoding: 'utf8' }).trim();
-  const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-r6-comparison-'));
+  const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-r6-comparison-'));
   try {
     const baselineRoot = await emitBaseline(temporary, baselineRef);
     const runs = [], corpora = [];

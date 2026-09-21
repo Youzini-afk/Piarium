@@ -1,5 +1,5 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
-import type { DiagnosticItem } from "@piarium/protocol";
+import type { DiagnosticItem } from "@varin/protocol";
 import type { ObservationCursorStore } from "./observation-cursors.js";
 
 export type BindDocumentResult =
@@ -140,7 +140,7 @@ export function createLspDiagnosticsSnapshotService(
         }
         const canonicalResourceId = ctx.authorizedPaths[0]?.canonicalResourceId ?? params.path;
         const objectId = `${ctx.workspaceId}\0${canonicalResourceId}`;
-        const pending = await cursors.prepare<DiagnosticsCursor, import("@piarium/protocol").DiagnosticsResult>(
+        const pending = await cursors.prepare<DiagnosticsCursor, import("@varin/protocol").DiagnosticsResult>(
           ctx.sessionId,
           "diagnostics",
           objectId,

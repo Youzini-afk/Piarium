@@ -2,7 +2,7 @@ import type {
   PiCommandDescriptor,
   PiResourceCatalogSnapshot,
   PiResourceScope,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface PiChatSkill {
   description?: string;

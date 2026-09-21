@@ -9,13 +9,13 @@ import {
 } from './renderer-security-policy.js';
 
 const trustOptions = {
-  uiProtocol: 'piarium-ui',
+  uiProtocol: 'varin-ui',
   developmentUiOrigin: 'http://127.0.0.1:5173',
   localOrigins: ['http://127.0.0.1:57123'],
 };
 
 test('opens only HTTP and HTTPS URLs through the operating system', () => {
-  assert.equal(normalizeExternalHttpUrl('https://piarium.dev/docs'), 'https://piarium.dev/docs');
+  assert.equal(normalizeExternalHttpUrl('https://varin.dev/docs'), 'https://varin.dev/docs');
   assert.equal(normalizeExternalHttpUrl('http://127.0.0.1:57123/path'), 'http://127.0.0.1:57123/path');
   for (const value of ['file:///C:/Windows/System32', 'javascript:alert(1)', 'mailto:user@example.com', 'not a url']) {
     assert.equal(normalizeExternalHttpUrl(value), null);
@@ -23,8 +23,8 @@ test('opens only HTTP and HTTPS URLs through the operating system', () => {
 });
 
 test('recognizes only packaged, exact development, and exact local renderer origins', () => {
-  assert.equal(isTrustedLocalRendererUrl('piarium-ui://app/index.html', trustOptions), true);
-  assert.equal(isTrustedLocalRendererUrl('piarium-ui://other/index.html', trustOptions), false);
+  assert.equal(isTrustedLocalRendererUrl('varin-ui://app/index.html', trustOptions), true);
+  assert.equal(isTrustedLocalRendererUrl('varin-ui://other/index.html', trustOptions), false);
   assert.equal(isTrustedLocalRendererUrl('http://127.0.0.1:5173/index.html', trustOptions), true);
   assert.equal(isTrustedLocalRendererUrl('http://127.0.0.1:57123/chat', trustOptions), true);
   assert.equal(isTrustedLocalRendererUrl('http://127.0.0.1:57124/chat', trustOptions), false);
@@ -58,7 +58,7 @@ test('preload bootstrap discloses runtime credentials only to a trusted local re
     assert.equal(Object.hasOwn(remote, key), false);
   }
 
-  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'piarium-ui://app/index.html' });
+  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'varin-ui://app/index.html' });
   assert.equal(local.localPage, true);
   assert.equal(local.clientToken, 'secret-token');
   assert.deepEqual(local.requestHeaders, { 'CF-Access-Client-Secret': 'secret-header' });

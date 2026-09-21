@@ -12,7 +12,7 @@ import process from "node:process"
 const HELP = `Usage: bun run profile:browser -- [options]
 
 Options:
-  --url <url>             Piarium URL (default: http://localhost:3000)
+  --url <url>             Varin URL (default: http://localhost:3000)
   --duration <seconds>    Recording duration after Enter (default: 60)
   --output <directory>    Artifact directory (default: artifacts/browser-profile-<time>)
   --chrome <path>         Chrome/Chromium executable
@@ -23,7 +23,7 @@ Options:
   --help                  Show this help
 
 The command records a Chrome performance trace, a redacted HAR, browser metrics,
-and Piarium's numeric streaming/render counters. It never records response bodies.`
+and Varin's numeric streaming/render counters. It never records response bodies.`
 
 const parseArgs = (argv) => {
   const options = {
@@ -31,7 +31,7 @@ const parseArgs = (argv) => {
     duration: 60,
     output: null,
     chrome: null,
-    profileDir: join(homedir(), ".config", "piarium", "browser-profile-google-chrome"),
+    profileDir: join(homedir(), ".config", "varin", "browser-profile-google-chrome"),
     headless: false,
     prompt: true,
     reload: false,
@@ -199,7 +199,7 @@ class CdpClient {
   }
 }
 
-const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-(?:piarium|openchamber)/i
+const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-(?:varin|openchamber)/i
 const SENSITIVE_QUERY = /token|secret|password|auth|key|code|credential/i
 
 const redactHeaders = (headers = {}) => Object.entries(headers).map(([name, value]) => ({
@@ -251,8 +251,8 @@ const writeTraceFile = (path, traceEvents) => new Promise((resolveWrite, rejectW
 const createHar = (records, pageUrl, startedAt) => ({
   log: {
     version: "1.2",
-    creator: { name: "Piarium browser profiler", version: "1" },
-    pages: [{ startedDateTime: startedAt, id: "page_1", title: "Piarium profile", pageTimings: {} }],
+    creator: { name: "Varin browser profiler", version: "1" },
+    pages: [{ startedDateTime: startedAt, id: "page_1", title: "Varin profile", pageTimings: {} }],
     entries: [...records.values()].map((record) => {
       const start = record.wallTime ? new Date(record.wallTime * 1000).toISOString() : startedAt
       const duration = record.finishedAt && record.startedAt
@@ -346,7 +346,7 @@ const main = async () => {
     const loaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.navigate", { url: options.url })
     await loaded
-    await evaluateValue(client, `localStorage.setItem("piarium_stream_perf", "1")`)
+    await evaluateValue(client, `localStorage.setItem("varin_stream_perf", "1")`)
     const reloaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.reload", { ignoreCache: true })
     await reloaded
@@ -361,8 +361,8 @@ const main = async () => {
       await wait(5_000)
     }
 
-    await evaluateValue(client, `window.__piariumStreamPerformance?.setEnabled(true)`)
-    await evaluateValue(client, `window.__piariumStreamPerformance?.reset()`)
+    await evaluateValue(client, `window.__varinStreamPerformance?.setEnabled(true)`)
+    await evaluateValue(client, `window.__varinStreamPerformance?.reset()`)
     const records = new Map()
     const traceEvents = []
     const startedAt = new Date().toISOString()
@@ -410,7 +410,7 @@ const main = async () => {
       ].join(","),
     })
 
-    console.log(`Recording for ${options.duration} seconds. Use Piarium normally during this window.`)
+    console.log(`Recording for ${options.duration} seconds. Use Varin normally during this window.`)
     const recordingStartedAt = Date.now()
     if (options.reload) {
       const recordedReload = client.once("Page.loadEventFired", 30_000)
@@ -420,7 +420,7 @@ const main = async () => {
     await wait(Math.max(0, options.duration * 1000 - (Date.now() - recordingStartedAt)))
     const afterMetrics = metricMap((await client.send("Performance.getMetrics")).metrics)
     const afterHeap = await client.send("Runtime.getHeapUsage")
-    const streamPerformance = await evaluateValue(client, `window.__piariumStreamPerformance?.getSnapshot() ?? null`)
+    const streamPerformance = await evaluateValue(client, `window.__varinStreamPerformance?.getSnapshot() ?? null`)
     const traceCompleteEvent = client.once("Tracing.tracingComplete", 120_000)
     let traceComplete = true
     try {

@@ -41,7 +41,7 @@ const chunk = (documentId: string, body: string, startLine = 1): SemanticChunk =
 
 describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   it("reuses the same embedText and only re-embeds a changed block", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-reuse-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-reuse-"));
     dirs.push(dataDir);
     const sent: string[] = [];
     const base = createHashEmbedder();
@@ -97,7 +97,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   });
 
   it("masks disk vectors immediately and does not mix overlay gaps with missing bodies", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-overlay-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-overlay-"));
     dirs.push(dataDir);
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
@@ -156,7 +156,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   });
 
   it("still applies scoped Top-K after a query vector cache hit", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-cache-scope-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-cache-scope-"));
     dirs.push(dataDir);
     const embedder = {
       status: "ready" as const,
@@ -195,7 +195,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   });
 
   it("does not let an older revision overwrite a newer publication", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-revision-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-revision-"));
     dirs.push(dataDir);
     const store = createSemanticGenerationStore({
       dataDir,
@@ -224,7 +224,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   });
 
   it("does not let an embedding already in flight resurrect a later deletion", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-delete-race-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-delete-race-"));
     dirs.push(dataDir);
     const base = createHashEmbedder();
     let release!: () => void;
@@ -253,7 +253,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
   });
 
   it("uses the remote space for both publish and query and does not mix local vectors", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-remote-space-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-remote-space-"));
     dirs.push(dataDir);
     const configurationId = "remote-config-1";
     const remote = createRemoteEmbedder({
@@ -414,7 +414,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
     writeFileSync(join(documents.workspaceRoot, "keep.ts"), "export const keep = \"checkpoint pineapple\";\n", "utf8");
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-scan-merge-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-scan-merge-"));
     dirs.push(dataDir);
     let embeds = 0;
     const base = createHashEmbedder();
@@ -473,7 +473,7 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
         "utf8",
       );
     }
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-partial-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-partial-"));
     dirs.push(dataDir);
     let releaseSecond!: () => void;
     const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });

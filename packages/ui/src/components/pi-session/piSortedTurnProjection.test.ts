@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiAssistantMessage, PiSessionMessageEntry } from '@piarium/protocol';
+import type { PiAssistantMessage, PiSessionMessageEntry } from '@varin/protocol';
 import { PI_SORTED_LIVE_ASSISTANT_ID, projectPiSortedTurn } from './piSortedTurnProjection';
 
 const assistant = (

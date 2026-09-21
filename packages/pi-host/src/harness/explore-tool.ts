@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@piarium/protocol";
+import type { AgentInputContext, ExploreModelParticipation, ExploreModelStageStatus } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import {
   EXPLORE_PLAN_SYSTEM,

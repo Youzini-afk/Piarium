@@ -1,8 +1,8 @@
-English | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/SECURITY.zh-CN.md)
+English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/SECURITY.zh-CN.md)
 
-# Piarium security policy
+# Varin security policy
 
-Piarium handles source code, terminal access, Git and SSH operations, model-provider credentials,
+Varin handles source code, terminal access, Git and SSH operations, model-provider credentials,
 Pi session history, extension configuration, and remote connections. A defect at one of these
 boundaries can have consequences beyond the application UI, so private and reproducible reports are
 appreciated.
@@ -12,7 +12,7 @@ The implementation threat model and release gates are documented separately in
 
 ## Supported versions
 
-Piarium is currently pre-1.0 and does not maintain LTS branches.
+Varin is currently pre-1.0 and does not maintain LTS branches.
 
 | Channel | Security support |
 | --- | --- |
@@ -29,10 +29,10 @@ Do not disclose a suspected vulnerability in a public issue, discussion, pull re
 terminal log, or chat transcript.
 
 1. Prefer GitHub's
-   [private vulnerability reporting form](https://github.com/Youzini-afk/Piarium/security/advisories/new)
+   [private vulnerability reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new)
    when the repository exposes it to reporters.
 2. If GitHub does not offer the private form,
-   [open a minimal contact issue](https://github.com/Youzini-afk/Piarium/issues/new?title=Private%20security%20report%20requested)
+   [open a minimal contact issue](https://github.com/Youzini-afk/Varin/issues/new?title=Private%20security%20report%20requested)
    titled **`Private security report requested`** with no technical details, secrets, affected
    paths, or proof of concept. A maintainer will establish a private channel before you send the
    report.
@@ -52,7 +52,7 @@ Remove real credentials, private prompts, source files, SSH keys, session data, 
 information. If a secret was exposed during testing, revoke it before sending the report and use a
 redacted replacement in the reproduction.
 
-Piarium does not yet provide a contractual response-time SLA or a bug-bounty program. Maintainers
+Varin does not yet provide a contractual response-time SLA or a bug-bounty program. Maintainers
 will aim to acknowledge a complete report promptly, confirm scope, agree on disclosure timing, and
 provide material status changes through the private thread.
 
@@ -76,13 +76,13 @@ Reports are especially useful when they demonstrate a violation of an intended b
   through logs, diagnostics, URLs, notifications, or renderer state.
 
 Vulnerabilities in Pi or a third-party extension should normally be reported to that project. Still
-report the issue to Piarium when its integration bypasses a Piarium trust boundary, activates code
+report the issue to Varin when its integration bypasses a Varin trust boundary, activates code
 before approval, exposes data beyond the capability shown to the user, or prevents an upstream fix
 from taking effect.
 
 ## Trust model and expected behavior
 
-The following facts are important when deciding whether behavior is a Piarium vulnerability:
+The following facts are important when deciding whether behavior is a Varin vulnerability:
 
 - **Pi packages are trusted executable code.** They run with the user's operating-system
   permissions in an isolated worker process. Capability labels support an informed trust decision;
@@ -99,7 +99,7 @@ The following facts are important when deciding whether behavior is a Piarium vu
 - **Providers and research services are external recipients.** Sending an approved prompt or tool
   request to the selected provider is expected; sending unrelated workspace or credential data is
   not.
-- **Local administrators control the machine.** Piarium does not attempt to protect its data from an
+- **Local administrators control the machine.** Varin does not attempt to protect its data from an
   operating-system administrator who can read the user's files and process memory.
 
 If you are unsure whether observed behavior crosses one of these boundaries, report it privately and
@@ -107,7 +107,7 @@ let the maintainers triage it.
 
 ## Safe research and coordinated disclosure
 
-When testing Piarium:
+When testing Varin:
 
 - use systems, workspaces, accounts, credentials, and remote instances you own or are authorized to
   test;
@@ -124,12 +124,12 @@ given according to the reporter's preference.
 
 ## Deployment and user hardening
 
-- Do not bind the Web service beyond loopback without a strong `PIARIUM_UI_PASSWORD`.
+- Do not bind the Web service beyond loopback without a strong `VARIN_UI_PASSWORD`.
 - Use TLS through a trusted reverse proxy or an approved tunnel for traffic leaving the machine.
 - Treat every Pi package and project-local executable resource as code; review its source and
   requested capabilities before approval.
-- Keep Piarium, Pi, maintained extensions, and the host operating system updated.
-- Keep persistent Piarium data, workspaces, SSH material, and deployment environment files outside
+- Keep Varin, Pi, maintained extensions, and the host operating system updated.
+- Keep persistent Varin data, workspaces, SSH material, and deployment environment files outside
   immutable release directories and protect them with appropriate filesystem permissions.
 - Pin production containers by digest, retain a known-good deployment, and verify `/health` reports
   a ready bundled Pi runtime and the expected release identity.

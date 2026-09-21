@@ -11,7 +11,7 @@ import type { HostResourceOperation } from "../../recovery/durable-file-operatio
 const roots: string[] = [];
 
 const harness = async () => {
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-working-state-"));
+  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-working-state-"));
   roots.push(parent);
   const workspace = path.join(parent, "workspace");
   const root = path.join(parent, "recovery");
@@ -434,10 +434,10 @@ describe("WorkingStateStore", () => {
         kind: "regular-file",
         mode: expect.any(Number),
       });
-      expect(writes.some((file) => file.includes(".piarium-mode-probe-"))).toBe(false);
+      expect(writes.some((file) => file.includes(".varin-mode-probe-"))).toBe(false);
       const after = await fs.promises.readdir(h.workspace);
-      expect(after.filter((name) => name.startsWith(".piarium-mode-probe-"))).toEqual([]);
-      expect(before.filter((name) => name.startsWith(".piarium-mode-probe-"))).toEqual([]);
+      expect(after.filter((name) => name.startsWith(".varin-mode-probe-"))).toEqual([]);
+      expect(before.filter((name) => name.startsWith(".varin-mode-probe-"))).toEqual([]);
     } finally {
       h.database.close();
     }

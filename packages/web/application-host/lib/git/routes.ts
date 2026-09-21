@@ -1502,7 +1502,7 @@ export function registerGitRoutes(app: Express, {
       // Worktrees are an optional feature. Avoid repeated 500s (and repeated client retries)
       // when the directory isn't a git repo or uses shell shorthand like "~/".
       console.warn('Failed to get worktrees, returning empty list:', errorMessage(error, 'Git operation failed'));
-      res.setHeader('X-Piarium-Warning', 'git worktrees unavailable');
+      res.setHeader('X-Varin-Warning', 'git worktrees unavailable');
       res.json([]);
     }
   });

@@ -133,7 +133,7 @@ const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }:
 };
 
 const createCommandTimeoutMs = (): number => {
-  const raw = Number(process.env.PIARIUM_FS_EXEC_TIMEOUT_MS);
+  const raw = Number(process.env.VARIN_FS_EXEC_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw > 0) return raw;
   return 5 * 60 * 1000;
 };
@@ -143,13 +143,13 @@ const createCommandTimeoutMs = (): number => {
 // absorbs the burst of identical lookups a fresh client (e.g. right after a
 // page reload) fires for every project. Set to 0 to disable caching.
 const createGitReadCacheTtlMs = (): number => {
-  const raw = Number(process.env.PIARIUM_GIT_READ_CACHE_TTL_MS);
+  const raw = Number(process.env.VARIN_GIT_READ_CACHE_TTL_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 30 * 1000;
 };
 
 const createGitCheckIgnoreTimeoutMs = (): number => {
-  const raw = Number(process.env.PIARIUM_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  const raw = Number(process.env.VARIN_GIT_CHECK_IGNORE_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 2500;
 };
@@ -220,11 +220,11 @@ interface WorkspacePathOptions {
   normalizeDirectoryPath<Value>(path: Value): Value | string;
   os: OsModule;
   path: PathModule;
-  piariumUserConfigRoot: string;
+  varinUserConfigRoot: string;
   targetPath: unknown;
 }
 
-const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspacePathOptions): WorkspacePathResult => {
+const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, varinUserConfigRoot }: WorkspacePathOptions): WorkspacePathResult => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -237,14 +237,14 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
     return { ok: true, base: resolvedBase, resolved, workspaceRoot: true };
   }
 
-  if (isPathWithinRoot(resolved, piariumUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(piariumUserConfigRoot), resolved, workspaceRoot: false };
+  if (isPathWithinRoot(resolved, varinUserConfigRoot, path, os)) {
+    return { ok: true, base: path.resolve(varinUserConfigRoot), resolved, workspaceRoot: false };
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath }: Omit<WorkspacePathOptions, 'piariumUserConfigRoot'>): Promise<WorkspacePathResult> => {
+const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath }: Omit<WorkspacePathOptions, 'varinUserConfigRoot'>): Promise<WorkspacePathResult> => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -280,7 +280,7 @@ interface WorkspaceContextOptions extends Omit<WorkspacePathOptions, 'baseDirect
   resolveProjectDirectory: ResolveProjectDirectory;
 }
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspaceContextOptions): Promise<WorkspacePathResult> => {
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, varinUserConfigRoot }: WorkspaceContextOptions): Promise<WorkspacePathResult> => {
   const resolvedProject = await resolveProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
@@ -292,7 +292,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     path,
     os,
     normalizeDirectoryPath,
-    piariumUserConfigRoot,
+    varinUserConfigRoot,
   });
   if (resolved.ok || resolved.error !== 'Path is outside of active workspace') {
     return resolved;
@@ -307,7 +307,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, piariumUserConfigRoot }: WorkspaceContextOptions & {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, varinUserConfigRoot }: WorkspaceContextOptions & {
   fsPromises: FsPromises;
   scope?: string;
 }): Promise<WorkspacePathResult> => {
@@ -332,7 +332,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     path,
     os,
     normalizeDirectoryPath,
-    piariumUserConfigRoot,
+    varinUserConfigRoot,
   });
 };
 
@@ -425,7 +425,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
     resolveProjectDirectory,
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
-    piariumUserConfigRoot,
+    varinUserConfigRoot,
     documents,
     fileResources,
   } = dependencies;
@@ -690,7 +690,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
           path,
           os,
           normalizeDirectoryPath,
-          piariumUserConfigRoot,
+          varinUserConfigRoot,
         });
         if (!resolved.ok) {
           return res.status(400).json({ error: resolved.error });
@@ -741,7 +741,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         os,
         fsPromises,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -798,7 +798,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         os,
         fsPromises,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -869,7 +869,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         os,
         fsPromises,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         if (req.query?.allowOutsideWorkspace === 'true') {
@@ -964,7 +964,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         fsPromises,
         scope: 'read',
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1023,7 +1023,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         path,
         os,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1116,7 +1116,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         path,
         os,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -1171,7 +1171,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         path,
         os,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolvedOld.ok) {
         return res.status(400).json({ error: resolvedOld.error });
@@ -1184,7 +1184,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         path,
         os,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolvedNew.ok) {
         return res.status(400).json({ error: resolvedNew.error });
@@ -1324,7 +1324,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         path,
         os,
         normalizeDirectoryPath,
-        piariumUserConfigRoot,
+        varinUserConfigRoot,
       });
       if (!resolvedForWorkspace.ok) {
         console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);

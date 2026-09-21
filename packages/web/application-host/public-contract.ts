@@ -5,12 +5,12 @@ import type {
   PiRuntimeBrokerFactoryOptions,
   PiRuntimeBrokerOptions,
   PiRuntimeLifecycle,
-} from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
 import type {
   ApplicationExtensionCatalog,
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
-} from '@piarium/extension-host';
+} from '@varin/extension-host';
 
 export interface DesktopNotificationPayload {
   badge?: number | undefined;

@@ -1,7 +1,7 @@
-import { defineLanguageProvider } from "@piarium/extension-sdk";
+import { defineLanguageProvider } from "@varin/extension-sdk";
 
 export default defineLanguageProvider((context) => ({
-  providerId: "piarium.typescript-language",
+  providerId: "varin.typescript-language",
   command: process.execPath,
   args: [context.assets.path("runtime/typescript-language-server.mjs"), "--stdio"],
   languageIds: ["javascript", "javascriptreact", "typescript", "typescriptreact"],

@@ -1,4 +1,4 @@
-import type { JsonValue, LspNavigationResult } from "@piarium/protocol";
+import type { JsonValue, LspNavigationResult } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
@@ -60,7 +60,7 @@ const resourcePath = (value: unknown): string | null => {
 };
 
 /**
- * Piarium synchronizes the queried document, so its positions are bound to a
+ * Varin synchronizes the queried document, so its positions are bound to a
  * named revision. Positions in other files come from the language server's own
  * read of those files and LSP does not report the version it used, so they are
  * reported as unpinned rather than claimed against a revision (D-087).

@@ -1,65 +1,65 @@
 import type { DraftStarterRef } from '@/lib/draftStarters';
 
-export interface PiariumProjectRef {
+export interface VarinProjectRef {
   id: string;
   path: string;
 }
 
-export type PiariumProjectActionPlatform = 'macos' | 'linux' | 'windows';
+export type VarinProjectActionPlatform = 'macos' | 'linux' | 'windows';
 
-export interface PiariumProjectAction {
+export interface VarinProjectAction {
   id: string;
   name: string;
   command: string;
   icon?: string | null;
-  platforms?: PiariumProjectActionPlatform[];
+  platforms?: VarinProjectActionPlatform[];
   autoOpenUrl?: boolean;
   openUrl?: string;
   desktopOpenSshForward?: string;
 }
 
-export interface PiariumProjectActionsState {
-  actions: PiariumProjectAction[];
+export interface VarinProjectActionsState {
+  actions: VarinProjectAction[];
   primaryActionId: string | null;
 }
 
-export interface PiariumProjectTodoItem {
+export interface VarinProjectTodoItem {
   id: string;
   text: string;
   completed: boolean;
   createdAt: number;
 }
 
-export interface PiariumProjectPlanFileLink {
+export interface VarinProjectPlanFileLink {
   id: string;
   path: string;
   createdAt: number;
 }
 
-export interface PiariumProjectPlanFile {
+export interface VarinProjectPlanFile {
   title: string;
   body: string;
   raw: string;
   path: string;
 }
 
-export interface PiariumProjectNotesTodos {
+export interface VarinProjectNotesTodos {
   notes: string;
-  todos: PiariumProjectTodoItem[];
+  todos: VarinProjectTodoItem[];
 }
 
-export interface PiariumProjectContextData extends PiariumProjectNotesTodos {
-  plans: PiariumProjectPlanFileLink[];
+export interface VarinProjectContextData extends VarinProjectNotesTodos {
+  plans: VarinProjectPlanFileLink[];
 }
 
-export interface PiariumProjectConfig extends Record<string, unknown> {
+export interface VarinProjectConfig extends Record<string, unknown> {
   projectPath?: string;
   setupWorktree?: string[];
   waitForWorktreeSetup?: boolean;
   projectNotes?: string;
-  projectTodos?: PiariumProjectTodoItem[];
-  projectPlanFiles?: PiariumProjectPlanFileLink[];
-  projectActions?: PiariumProjectAction[];
+  projectTodos?: VarinProjectTodoItem[];
+  projectPlanFiles?: VarinProjectPlanFileLink[];
+  projectActions?: VarinProjectAction[];
   projectActionsPrimaryId?: string;
   draftStarters?: DraftStarterRef[];
 }

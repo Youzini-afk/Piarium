@@ -4,7 +4,7 @@ import type {
   PiCommandSource,
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { buildPiDraftStarterCatalog } from './piDraftStarterCatalog';
 
 const descriptor = (

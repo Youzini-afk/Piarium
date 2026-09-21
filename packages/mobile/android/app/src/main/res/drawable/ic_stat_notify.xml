@@ -1,4 +1,4 @@
-<!-- Notification small icon: the monochrome Piarium π mark. Android tints every
+<!-- Notification small icon: the monochrome Varin π mark. Android tints every
      non-transparent pixel white or the system accent, so color is intentionally omitted. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

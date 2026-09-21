@@ -1,4 +1,4 @@
-import type { DirectoryPermissionRequest, PermissionsAPI, StartAccessingResult } from '@piarium/application-client';
+import type { DirectoryPermissionRequest, PermissionsAPI, StartAccessingResult } from '@varin/application-client';
 
 export const createWebPermissionsAPI = (): PermissionsAPI => ({
   async requestDirectoryAccess(request: DirectoryPermissionRequest) {

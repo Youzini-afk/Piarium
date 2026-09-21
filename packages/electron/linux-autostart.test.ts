@@ -15,29 +15,29 @@ import {
 test('prefers APPIMAGE path for Linux autostart Exec', () => {
   assert.equal(
     resolveLinuxLaunchExecutable({
-      env: { APPIMAGE: '/home/user/Piarium.AppImage' },
-      execPath: '/tmp/.mount_Piarium/piarium',
+      env: { APPIMAGE: '/home/user/Varin.AppImage' },
+      execPath: '/tmp/.mount_Varin/varin',
     }),
-    '/home/user/Piarium.AppImage',
+    '/home/user/Varin.AppImage',
   );
 });
 
 test('builds a background autostart desktop entry', () => {
   const entry = buildLinuxAutostartDesktopEntry({
-    executable: '/home/user/Piarium Desktop.AppImage',
+    executable: '/home/user/Varin Desktop.AppImage',
     backgroundArg: '--background',
   });
   assert.match(entry, /Type=Application/);
-  assert.match(entry, /Exec="\/home\/user\/Piarium Desktop\.AppImage" --background/);
-  assert.match(entry, /StartupWMClass=piarium/);
+  assert.match(entry, /Exec="\/home\/user\/Varin Desktop\.AppImage" --background/);
+  assert.match(entry, /StartupWMClass=varin/);
   assert.match(entry, /X-GNOME-Autostart-enabled=true/);
 });
 
 test('writes and removes the XDG autostart file', async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-autostart-'));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-autostart-'));
   const env = { XDG_CONFIG_HOME: path.join(homeDir, 'config') };
   const filePath = resolveLinuxAutostartFilePath({ env, homeDir });
-  assert.equal(path.basename(filePath), 'piarium.desktop');
+  assert.equal(path.basename(filePath), 'varin.desktop');
 
   try {
     assert.equal(await readLinuxAutostartEnabled({ env, homeDir }), false);
@@ -45,7 +45,7 @@ test('writes and removes the XDG autostart file', async () => {
     const enabled = await setLinuxAutostartEnabled({
       enabled: true,
       backgroundArg: '--background',
-      env: { ...env, APPIMAGE: '/opt/Piarium.AppImage' },
+      env: { ...env, APPIMAGE: '/opt/Varin.AppImage' },
       homeDir,
     });
     assert.equal(enabled.enabled, true);
@@ -53,7 +53,7 @@ test('writes and removes the XDG autostart file', async () => {
     assert.equal(await readLinuxAutostartEnabled({ env, homeDir }), true);
 
     const contents = await fs.readFile(filePath, 'utf8');
-    assert.match(contents, /Exec=\/opt\/Piarium\.AppImage --background/);
+    assert.match(contents, /Exec=\/opt\/Varin\.AppImage --background/);
 
     const disabled = await setLinuxAutostartEnabled({
       enabled: false,

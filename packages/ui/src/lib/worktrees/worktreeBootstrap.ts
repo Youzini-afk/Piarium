@@ -1,4 +1,4 @@
-import type { GitWorktreeBootstrapStatus } from '@piarium/application-client';
+import type { GitWorktreeBootstrapStatus } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
@@ -82,7 +82,7 @@ const getGitWorktreeBootstrapStatus = async (directory: string): Promise<GitWork
   if (runtimeGit?.getGitWorktreeBootstrapStatus) {
     return runtimeGit.getGitWorktreeBootstrapStatus(directory);
   }
-  throw new Error('Worktree bootstrap status is unavailable in this Piarium runtime');
+  throw new Error('Worktree bootstrap status is unavailable in this Varin runtime');
 };
 
 export const markWorktreeBootstrapPending = (directory: string): void => {

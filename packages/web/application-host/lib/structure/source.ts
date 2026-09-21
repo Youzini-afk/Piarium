@@ -1,4 +1,4 @@
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import { structureContainerPredicate } from "./kinds.js";
 import { outlineCoversHitLines } from "./slice.js";
 import type {

@@ -1,4 +1,4 @@
-import type { SessionSnapshot } from '@piarium/protocol';
+import type { SessionSnapshot } from '@varin/protocol';
 import { createPiSessionFromNavigation, type PiSessionCreateTarget } from './sessionNavigation';
 import { usePiDraftStore } from '@/stores/usePiDraftStore';
 import { usePiSessionStore, type PiSessionStoreState } from '@/stores/usePiSessionStore';

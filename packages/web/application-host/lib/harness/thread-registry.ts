@@ -14,7 +14,7 @@ import {
   normalizeFrozenHarnessPermissions,
   sealRetrievalEvidence,
   summarizeRetrievalEvidence,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { normalizeThreadScopePath } from "./thread-nesting.js";
 import type {
   RetrievalAttempt,
@@ -49,7 +49,7 @@ import type {
   ThreadVerificationProjection,
   ThreadWaitingFor,
   ThreadWorktree,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export type { ThreadSessionBinding };
 
@@ -142,7 +142,7 @@ export interface CreateThreadInput {
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
   tools: string[];
-  workFocus?: import("@piarium/protocol").WorkFocusId;
+  workFocus?: import("@varin/protocol").WorkFocusId;
   research?: ThreadResearchManifest;
   permissions: unknown;
   systemPromptFragment?: string;

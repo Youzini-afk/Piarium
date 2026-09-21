@@ -1,5 +1,5 @@
 import { markMonacoPerformance } from './performance';
-import { registerPiariumTokenizationLanguages } from './local-language-definitions';
+import { registerVarinTokenizationLanguages } from './local-language-definitions';
 
 export type MonacoRuntime = typeof import('monaco-editor/editor');
 
@@ -27,7 +27,7 @@ export type MonacoRuntimeSnapshot = {
 };
 
 type MonacoEnvironment = {
-  __piariumOwner?: 'piarium';
+  __varinOwner?: 'varin';
   getWorker?(moduleId: string, label: string): Promise<Worker> | Worker;
 };
 
@@ -79,7 +79,7 @@ export const createMonacoRuntimeController = (
 
   const installEnvironment = (workerUrl: string): void => {
     const existing = dependencies.environmentHost.MonacoEnvironment;
-    if (existing && existing.__piariumOwner !== 'piarium') {
+    if (existing && existing.__varinOwner !== 'varin') {
       throw new MonacoRuntimeError(
         'environment-owned',
         'MonacoEnvironment is already owned by another runtime.',
@@ -87,7 +87,7 @@ export const createMonacoRuntimeController = (
     }
 
     dependencies.environmentHost.MonacoEnvironment = {
-      __piariumOwner: 'piarium',
+      __varinOwner: 'varin',
       getWorker(_moduleId, label) {
         if (!isEditorWorkerLabel(label)) {
           publish({
@@ -96,7 +96,7 @@ export const createMonacoRuntimeController = (
           });
           throw new MonacoRuntimeError(
             'unexpected-worker-label',
-            `Piarium does not register Monaco's built-in semantic worker: ${label || '<empty>'}`,
+            `Varin does not register Monaco's built-in semantic worker: ${label || '<empty>'}`,
           );
         }
         const worker = dependencies.createWorker(workerUrl);
@@ -173,7 +173,7 @@ export const createMonacoRuntimeController = (
 
 const defaultController = createMonacoRuntimeController({
   createWorker: (workerUrl) => new Worker(workerUrl, {
-    name: 'piarium-monaco-editor',
+    name: 'varin-monaco-editor',
     type: 'module',
   }),
   environmentHost: globalThis as unknown as MonacoEnvironmentHost,
@@ -191,7 +191,7 @@ const defaultController = createMonacoRuntimeController({
       import('monaco-editor/editor'),
       import('monaco-editor/basic-languages/monaco.contribution'),
     ]);
-    registerPiariumTokenizationLanguages(monaco);
+    registerVarinTokenizationLanguages(monaco);
   },
   loadEditorWorkerUrl: () => import('monaco-editor/editor/editor.worker?worker&url')
     .then(({ default: workerUrl }) => workerUrl),

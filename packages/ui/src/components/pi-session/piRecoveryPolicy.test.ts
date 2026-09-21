@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { WorkspaceCombinedRecoveryPlan } from '@piarium/extension-contract';
+import type { WorkspaceCombinedRecoveryPlan } from '@varin/extension-contract';
 import { shouldOpenRecoveryDialog } from './piRecoveryPolicy';
 
 const plan = (input: Partial<WorkspaceCombinedRecoveryPlan> = {}): WorkspaceCombinedRecoveryPlan => ({

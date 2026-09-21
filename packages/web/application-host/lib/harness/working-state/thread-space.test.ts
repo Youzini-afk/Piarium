@@ -5,7 +5,7 @@ import {
   projectThreadOccupancy,
   projectWorkspaceSpace,
 } from "./thread-space.js";
-import type { Thread } from "@piarium/protocol";
+import type { Thread } from "@varin/protocol";
 
 const thread = (overrides: Partial<Thread> = {}): Thread => ({
   id: "thread-1",

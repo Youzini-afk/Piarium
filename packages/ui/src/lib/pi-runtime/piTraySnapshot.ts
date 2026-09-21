@@ -1,5 +1,5 @@
-import type { SessionSnapshot, SessionSummary } from '@piarium/protocol';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { SessionSnapshot, SessionSummary } from '@varin/protocol';
+import type { ProjectEntry } from '@varin/application-client';
 import { findPiProjectForCwd } from './sessionNavigation';
 
 export type PiTraySessionStatus = 'idle' | 'busy' | 'retry';

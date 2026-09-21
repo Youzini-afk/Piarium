@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { AGENT_LANGUAGE_VIEW, SURFACE_LANGUAGE_VIEW, createLanguageSupervisor } from "../lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "./diagnostics-adapter.js";
 import { createLspDiagnosticsService, type DiagnosticsProvider } from "./diagnostics-service.js";
 import type { HarnessServiceContext } from "./router.js";
@@ -40,7 +40,7 @@ describe("LanguageSupervisor diagnostics adapter", () => {
       language.registerProvider({
         providerId: "fixture",
         command: process.execPath,
-        args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+        args: VARIN_LSP_FIXTURE_SERVER_ARGS,
         languageIds: ["typescript"],
         source: "host",
       });

@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import type { SessionSnapshot } from '@piarium/protocol';
-import type { CreateGitWorktreePayload, RuntimeAPIs } from '@piarium/application-client';
+import type { SessionSnapshot } from '@varin/protocol';
+import type { CreateGitWorktreePayload, RuntimeAPIs } from '@varin/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { useDirectoryStore } from './useDirectoryStore';
 import { usePiSessionStore } from './usePiSessionStore';
@@ -148,7 +148,7 @@ describe('useMultiRunStore', () => {
     expect(currentSessionId).toBe('ses_1');
   });
 
-  test('uses fast worktree creation through the Piarium Git runtime', async () => {
+  test('uses fast worktree creation through the Varin Git runtime', async () => {
     isGitRepository = true;
 
     const result = await useMultiRunStore.getState().createMultiRun({

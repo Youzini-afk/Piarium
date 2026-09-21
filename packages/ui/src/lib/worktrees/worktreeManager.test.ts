@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { GitWorktreeCreateResult } from '@piarium/application-client';
+import type { GitWorktreeCreateResult } from '@varin/application-client';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type WorktreeListEntry = {

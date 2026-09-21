@@ -1,6 +1,6 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type expressModule from 'express';
-import type { PiariumAuthenticatedClient, PiariumRequestAuthContext } from '../client-auth/request-context.js';
+import type { VarinAuthenticatedClient, VarinRequestAuthContext } from '../client-auth/request-context.js';
 
 type TunnelAuthController = ReturnType<typeof import('./tunnel-auth.js').createTunnelAuth>;
 type UiAuthController = ReturnType<typeof import('../ui-auth/ui-auth.js').createUiAuth>;
@@ -14,7 +14,7 @@ export interface ServerStatusDependencies {
   getServerPort?(): number | null;
   getTunnelUrl?(): string | null;
   gracefulShutdown(options: { exitProcess: boolean }): Promise<void>;
-  piariumVersion: string;
+  varinVersion: string;
   process?: NodeJS.Process;
   runtimeName: string;
   serverStartedAt?: unknown;
@@ -102,7 +102,7 @@ const getCookieValue = (req: Request, name: string): string => {
 
 const hasPreviewProxyCredential = (req: Request): boolean => {
   if (!getRequestPathname(req).startsWith('/api/preview/proxy/')) return false;
-  return Boolean(getQueryParam(req, 'piarium_preview_token') || getCookieValue(req, 'piarium_preview_token'));
+  return Boolean(getQueryParam(req, 'varin_preview_token') || getCookieValue(req, 'varin_preview_token'));
 };
 
 const redactAuditText = (value: unknown): string | null => {
@@ -136,7 +136,7 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
   const {
     express,
     process: processLike = globalThis.process,
-    piariumVersion,
+    varinVersion,
     runtimeName,
     serverStartedAt,
     gracefulShutdown,
@@ -207,7 +207,7 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
   const isDevShutdownAllowed = (): boolean => {
     // Dev-only escape hatch: allow terminating the whole dev process group.
     // This should never be enabled in production runtimes.
-    return processLike.env.PIARIUM_DEV_SHUTDOWN === 'true';
+    return processLike.env.VARIN_DEV_SHUTDOWN === 'true';
   };
 
   const isSameOriginRequest = (req: Request): boolean => {
@@ -317,7 +317,7 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      piariumVersion,
+      varinVersion,
       runtime: runtimeName,
       compatibility,
       ...(serverId ? { serverId } : {}),
@@ -329,7 +329,7 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     const serverId = await resolveServerId();
     res.json({
       status: 'ok',
-      piariumVersion,
+      varinVersion,
       runtime: runtimeName,
       startedAt: serverStartedAt,
       compatibility,
@@ -438,7 +438,7 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     const rawPort = getServerPort();
     const rawTunnelUrl = getTunnelUrl();
     res.json({
-      piariumVersion,
+      varinVersion,
       runtime: runtimeName,
       pid: processLike.pid,
       startedAt: serverStartedAt,
@@ -493,13 +493,13 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     getServerId = async () => null,
     // Display name a paired device shows for THIS server (issuing machine's
     // hostname), distinct from the per-device pairing label typed by the operator.
-    getServerLabel = () => 'Piarium',
+    getServerLabel = () => 'Varin',
   } = dependencies;
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
   const pairingRedeemAttempts = new Map<string, { count: number; firstAttemptAt: number }>();
 
-  const normalizeAuthContext = (value: unknown): PiariumRequestAuthContext | null => {
+  const normalizeAuthContext = (value: unknown): VarinRequestAuthContext | null => {
     const context = errorRecord(value);
     if (context.type === 'client') {
       const client = errorRecord(context.client);
@@ -507,7 +507,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         ? context.clientId
         : (typeof client.id === 'string' ? client.id : '');
       if (!clientId || typeof client.id !== 'string') return null;
-      return { type: 'client', clientId, client: client as PiariumAuthenticatedClient };
+      return { type: 'client', clientId, client: client as VarinAuthenticatedClient };
     }
     if (context.type === 'session') {
       return {
@@ -541,7 +541,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     req: Request,
     res: Response,
     next: NextFunction,
-    handler: (context: PiariumRequestAuthContext) => Promise<unknown>,
+    handler: (context: VarinRequestAuthContext) => Promise<unknown>,
   ): Promise<void> => {
     try {
       if (typeof uiAuthController.resolveAuthContext === 'function') {
@@ -567,7 +567,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     req: Request,
     res: Response,
     next: NextFunction,
-    handler: (context: PiariumRequestAuthContext & { client?: PiariumAuthenticatedClient }) => Promise<unknown>,
+    handler: (context: VarinRequestAuthContext & { client?: VarinAuthenticatedClient }) => Promise<unknown>,
   ): Promise<void> => {
     try {
       if (typeof uiAuthController.resolveAuthContext === 'function') {
@@ -598,12 +598,12 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     }
   };
 
-  const clientIdFromAuthContext = (context: PiariumRequestAuthContext): string | null => {
+  const clientIdFromAuthContext = (context: VarinRequestAuthContext): string | null => {
     const raw = context?.client?.id || context?.clientId;
     return typeof raw === 'string' && raw.length > 0 ? raw : null;
   };
 
-  const clientRecordFromAuthContext = async (context: PiariumRequestAuthContext): Promise<PiariumAuthenticatedClient | null> => {
+  const clientRecordFromAuthContext = async (context: VarinRequestAuthContext): Promise<VarinAuthenticatedClient | null> => {
     if (context?.client && typeof context.client === 'object') {
       return context.client;
     }
@@ -613,13 +613,13 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     return clients.find((client) => client.id === clientId) || null;
   };
 
-  const attachExternalAudit = (req: Request, res: Response, context: PiariumRequestAuthContext): void => {
-    if (req.__piariumExternalAuditAttached) return;
+  const attachExternalAudit = (req: Request, res: Response, context: VarinRequestAuthContext): void => {
+    if (req.__varinExternalAuditAttached) return;
     if (context?.type !== 'client') return;
     const client = context.client && typeof context.client === 'object' ? context.client : null;
     const clientId = clientIdFromAuthContext(context);
     if (!clientId || typeof remoteClientAuthRuntime?.recordAuditEvent !== 'function') return;
-    req.__piariumExternalAuditAttached = true;
+    req.__varinExternalAuditAttached = true;
     const startedAt = Date.now();
     res.on('finish', () => {
       void remoteClientAuthRuntime.recordAuditEvent({
@@ -791,7 +791,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         allowUrlToken: true,
       }));
       if (context) {
-        req.piariumAuth = context;
+        req.varinAuth = context;
         attachExternalAudit(req, res, context);
         return next();
       }
@@ -1292,8 +1292,8 @@ export const registerCommonRequestMiddleware = (
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
-      req.path.startsWith('/api/piarium/extensions') ||
-      req.path.startsWith('/api/piarium/tunnel')
+      req.path.startsWith('/api/varin/extensions') ||
+      req.path.startsWith('/api/varin/tunnel')
     ) {
       express.json({ limit: '50mb' })(req, res, next);
     } else if (req.path.startsWith('/api')) {

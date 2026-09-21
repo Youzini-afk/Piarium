@@ -1,4 +1,4 @@
-import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import type { HarnessPathAuthority } from "./path-authority.js";
 

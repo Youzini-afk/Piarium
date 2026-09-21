@@ -5,7 +5,7 @@ import type {
   ExploreQueryStartResult,
   ExploreQueryView,
   ExploreQueryViewsResult,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 const MECHANISM = /\b(how|why|mechanism|flow|wired|through)\b/iu;
 const MECHANISM_HAN = /怎么|如何|为何|机制|流程|为什么|怎样/;

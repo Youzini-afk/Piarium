@@ -1,12 +1,12 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { consumePluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import {
   pluginSettingsAdapterForPackage,
@@ -103,14 +103,14 @@ export const PluginSettingsPage: React.FC = () => {
       {!selectedPackage ? (
         <SettingsPageLayout
           title={t('settings.page.pluginSettings.title')}
-          description={t('settings.piarium.pluginSettings.description')}
+          description={t('settings.varin.pluginSettings.description')}
           showSaveStatus={false}
         >
           <SettingsSection divider={false} settingsItem="plugin-settings.configuration">
             <div className="py-8 text-center typography-ui text-muted-foreground">
               {catalog.loading && !catalog.loaded
                 ? <Icon name="loader-4" className="mx-auto size-5 animate-spin" />
-                : catalog.error ?? t('settings.piarium.pluginSettings.installed.empty')}
+                : catalog.error ?? t('settings.varin.pluginSettings.installed.empty')}
             </div>
           </SettingsSection>
         </SettingsPageLayout>

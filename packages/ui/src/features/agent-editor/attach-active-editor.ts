@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { addEditorContextAttachment } from '@/lib/agent-editor/attachments';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';

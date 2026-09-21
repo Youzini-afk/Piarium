@@ -37,7 +37,7 @@ describe("resolveImportSpecifier", () => {
   });
 
   it("leaves package names and aliases unresolved instead of guessing", () => {
-    expect(resolveImportSpecifier("src/a.ts", "@piarium/protocol", files)).toEqual({ status: "non-relative" });
+    expect(resolveImportSpecifier("src/a.ts", "@varin/protocol", files)).toEqual({ status: "non-relative" });
     expect(resolveImportSpecifier("src/a.ts", "node:fs", files)).toEqual({ status: "non-relative" });
     expect(resolveImportSpecifier("src/a.ts", "#application-host/store", files)).toEqual({ status: "non-relative" });
   });

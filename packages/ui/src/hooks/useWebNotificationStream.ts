@@ -1,9 +1,9 @@
 import React from 'react';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
-import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
-import type { NotificationPayload } from '@piarium/application-client';
+import type { NotificationPayload } from '@varin/application-client';
 
 const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';
 
@@ -18,7 +18,7 @@ const toNotificationPayload = (value: unknown): NotificationPayload | null => {
   const properties = record.properties && typeof record.properties === 'object'
     ? record.properties as Record<string, unknown>
     : null;
-  if (record.type !== 'piarium:notification' || !properties) return null;
+  if (record.type !== 'varin:notification' || !properties) return null;
   return {
     title: typeof properties.title === 'string' ? properties.title : undefined,
     body: typeof properties.body === 'string' ? properties.body : undefined,

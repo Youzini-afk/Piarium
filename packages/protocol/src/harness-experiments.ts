@@ -8,7 +8,7 @@
  *   experiment.job         — the backend process/scheduler binding for an attempt
  *   experiment.artifact    — a collected output object
  *   resource.machine       — an execution target (local, ssh, cluster)
- *   resource.commitment    — a confirmed Piarium reservation on a machine
+ *   resource.commitment    — a confirmed Varin reservation on a machine
  *   resource.sample        — the latest observed capacity/usage facts
  *
  * An Agent Run may manage many attempts; attempt lifecycles are independent of

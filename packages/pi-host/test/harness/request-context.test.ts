@@ -45,10 +45,10 @@ describe("per-request environment and team context", () => {
     const outgoing: Context[] = [];
     const bridge = { request: async (method: string, params: Record<string, unknown>) => {
       calls.push(method);
-      if (method === "zone2.status") return { status: "ready", content: '<piarium-status>t-1 · investigate · working · reading…</piarium-status>' };
+      if (method === "zone2.status") return { status: "ready", content: '<varin-status>t-1 · investigate · working · reading…</varin-status>' };
       if (method === "zone2.assemble") return params.afterEventId === 7
         ? { content: null, eventCursor: 7 }
-        : { content: '<piarium-context event-cursor="7">USER_EDIT</piarium-context>', eventCursor: 7,
+        : { content: '<varin-context event-cursor="7">USER_EDIT</varin-context>', eventCursor: 7,
           deliveryId: "delivery-7", observationRefs: ["edit-7"], materialRevisions: { "block:plan": "revision-2" } };
       if (method === "zone2.delivered") return { committed: true };
       throw new Error(method);
@@ -72,7 +72,7 @@ describe("per-request environment and team context", () => {
     assert.equal(outgoing[1]!.messages.filter((message) => JSON.stringify(message).includes("USER_EDIT")).length, 1);
     const branch = bound.sessionManager.getBranch();
     assert.equal(branch.filter((entry) => entry.type === "custom_message").length, 1);
-    assert.ok(!JSON.stringify(branch).includes("piarium-status"));
+    assert.ok(!JSON.stringify(branch).includes("varin-status"));
     // The prior real history and environment prefix remain in the same order;
     // the old transient table is replaced at the new tail, never in history.
     assert.deepEqual(outgoing[1]!.messages.slice(0, 2).map(({ role, content }) => ({ role, content })),

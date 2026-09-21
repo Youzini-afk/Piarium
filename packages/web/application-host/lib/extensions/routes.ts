@@ -3,23 +3,23 @@ import {
   ExtensionCatalogStorageError,
   ExtensionStorageRevisionConflictError,
   ExtensionStorageError,
-} from '@piarium/extension-host';
+} from '@varin/extension-host';
 import type {
   ApplicationExtensionCatalog,
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
-} from '@piarium/extension-host';
+} from '@varin/extension-host';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import {
-  PiariumExtensionContractError,
-  parsePiariumExtensionActualState,
-  parsePiariumExtensionCandidateCapabilityReviewRequest,
-  parsePiariumExtensionCapabilityReviewRequest,
-  parsePiariumExtensionHostStateWaitRequest,
-  parsePiariumExtensionLocalSourceReloadRequest,
-  parsePiariumExtensionPackageSource,
-  parsePiariumExtensionRemoveRequest,
-} from '@piarium/extension-contract';
+  VarinExtensionContractError,
+  parseVarinExtensionActualState,
+  parseVarinExtensionCandidateCapabilityReviewRequest,
+  parseVarinExtensionCapabilityReviewRequest,
+  parseVarinExtensionHostStateWaitRequest,
+  parseVarinExtensionLocalSourceReloadRequest,
+  parseVarinExtensionPackageSource,
+  parseVarinExtensionRemoveRequest,
+} from '@varin/extension-contract';
 import { renderExtensionRecoveryPage } from './recovery-page.js';
 
 interface ExtensionRouteDependencies {
@@ -43,7 +43,7 @@ const catalogError = (error: unknown) => ({
     code: error instanceof ExtensionCatalogStorageError ? error.code : 'catalog_read_failed',
     message: error instanceof ExtensionCatalogStorageError
       ? error.message
-      : 'Failed to read Piarium extension catalog',
+      : 'Failed to read Varin extension catalog',
     retryable: error instanceof ExtensionCatalogStorageError ? error.retryable : true,
   },
 });
@@ -96,14 +96,14 @@ const sendMutationError = (res: Response, error: unknown) => {
   if (error instanceof ExtensionStorageError) {
     return res.status(500).json({ error: { code: error.code, message: error.message, retryable: error.retryable } });
   }
-  if (error instanceof PiariumExtensionContractError) {
+  if (error instanceof VarinExtensionContractError) {
     return res.status(400).json({
       error: { code: 'invalid_request', details: error.issues, message: error.message, retryable: false },
     });
   }
   const message = error instanceof Error ? error.message : String(error);
   const notLocalSource = message.includes('not installed from a local source');
-  const localDependenciesMissing = message.includes('Local Piarium extension dependencies are not installed');
+  const localDependenciesMissing = message.includes('Local Varin extension dependencies are not installed');
   const notInstalled = !notLocalSource && message.includes('not installed');
   const managedByDistribution = message.includes('managed by the distribution');
   const mustDisable = message.includes('before removing it');
@@ -120,13 +120,13 @@ const sendMutationError = (res: Response, error: unknown) => {
   else if (capabilityReviewRequired) code = 'extension_capability_review_required';
   else if (notLocalSource) code = 'extension_not_local_source';
   else if (localDependenciesMissing) code = 'extension_local_dependencies_missing';
-  if (status === 500) console.error('[Piarium Extensions] Failed to mutate extension catalog:', error);
+  if (status === 500) console.error('[Varin Extensions] Failed to mutate extension catalog:', error);
   return res.status(status).json({
     error: {
       code,
       message: notInstalled || managedByDistribution || mustDisable || capabilityReviewRequired || notLocalSource || localDependenciesMissing
         ? message
-        : 'Failed to update Piarium extension catalog',
+        : 'Failed to update Varin extension catalog',
       retryable: false,
     },
   });
@@ -143,17 +143,17 @@ export const registerExtensionRoutes = (app: Express, {
     res.type('html').send(renderExtensionRecoveryPage());
   });
 
-  app.get('/api/piarium/extensions/v1/catalog', async (_req, res) => {
+  app.get('/api/varin/extensions/v1/catalog', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       res.json({ supported: true, status: 'ready', snapshot: await extensionCatalog.snapshot() });
     } catch (error) {
-      console.error('[Piarium Extensions] Failed to read extension catalog:', error);
+      console.error('[Varin Extensions] Failed to read extension catalog:', error);
       res.status(500).json(catalogError(error));
     }
   });
 
-  app.get('/api/piarium/extensions/v1/host-state', async (_req, res) => {
+  app.get('/api/varin/extensions/v1/host-state', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
     try {
@@ -164,7 +164,7 @@ export const registerExtensionRoutes = (app: Express, {
   });
 
   app.post(
-    '/api/piarium/extensions/v1/host-state/wait',
+    '/api/varin/extensions/v1/host-state/wait',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -172,7 +172,7 @@ export const registerExtensionRoutes = (app: Express, {
       const abort = () => { if (!res.writableEnded) controller.abort(new Error('Extension host-state client disconnected')); };
       res.once('close', abort);
       try {
-        return res.json(await extensionRuntime.waitForState(parsePiariumExtensionHostStateWaitRequest(req.body), controller.signal));
+        return res.json(await extensionRuntime.waitForState(parseVarinExtensionHostStateWaitRequest(req.body), controller.signal));
       } catch (error) {
         if (controller.signal.aborted) return undefined;
         return res.status(400).json({ error: { code: 'host_state_wait_failed', message: error instanceof Error ? error.message : String(error), retryable: true } });
@@ -183,7 +183,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/extensions/:extensionId/activate',
+    '/api/varin/extensions/v1/extensions/:extensionId/activate',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -197,7 +197,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/assets/read',
+    '/api/varin/extensions/v1/assets/read',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
@@ -211,7 +211,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/entrypoints/read',
+    '/api/varin/extensions/v1/entrypoints/read',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
@@ -225,7 +225,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/prepare',
+    '/api/varin/extensions/v1/candidates/prepare',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -241,7 +241,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/discard-prepared',
+    '/api/varin/extensions/v1/candidates/discard-prepared',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -258,7 +258,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/discard',
+    '/api/varin/extensions/v1/candidates/discard',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -271,11 +271,11 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/review-capabilities',
+    '/api/varin/extensions/v1/review-capabilities',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        const request = parsePiariumExtensionCapabilityReviewRequest(req.body);
+        const request = parseVarinExtensionCapabilityReviewRequest(req.body);
         return res.json({ snapshot: await (extensionRuntime
           ? extensionRuntime.reviewCapabilities(request)
           : extensionCatalog.reviewCapabilities(request)) });
@@ -286,11 +286,11 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/review-capabilities',
+    '/api/varin/extensions/v1/candidates/review-capabilities',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        const request = parsePiariumExtensionCandidateCapabilityReviewRequest(req.body);
+        const request = parseVarinExtensionCandidateCapabilityReviewRequest(req.body);
         return res.json({ snapshot: await (extensionRuntime
           ? extensionRuntime.reviewCandidateCapabilities(request)
           : extensionCatalog.reviewCandidateCapabilities(request)) });
@@ -301,7 +301,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/request-application',
+    '/api/varin/extensions/v1/candidates/request-application',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -314,7 +314,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/candidates/select',
+    '/api/varin/extensions/v1/candidates/select',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
@@ -328,12 +328,12 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/actual',
+    '/api/varin/extensions/v1/actual',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
         const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
-        const state = parsePiariumExtensionActualState(req.body?.state);
+        const state = parseVarinExtensionActualState(req.body?.state);
         await (extensionRuntime
           ? extensionRuntime.reportActualState(extensionId, state)
           : extensionPackages.reportActualState(extensionId, state));
@@ -351,7 +351,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/install',
+    '/api/varin/extensions/v1/install',
     uiAuthController.requireAuth,
     async (req, res) => {
       const revision = expectedRevision(req.body);
@@ -359,7 +359,7 @@ export const registerExtensionRoutes = (app: Express, {
         return res.status(400).json({ error: { code: 'invalid_request', message: 'expectedRevision is required', retryable: false } });
       }
       try {
-        const source = parsePiariumExtensionPackageSource(req.body?.source);
+        const source = parseVarinExtensionPackageSource(req.body?.source);
         const snapshot = await withRequestSignal(req, res, (signal) => extensionRuntime
           ? extensionRuntime.installOrStage({ expectedRevision: revision, source }, signal)
           : extensionPackages.installOrStage(source, revision, signal));
@@ -371,11 +371,11 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/extensions/:extensionId/reload-local-source',
+    '/api/varin/extensions/v1/extensions/:extensionId/reload-local-source',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        const request = parsePiariumExtensionLocalSourceReloadRequest({
+        const request = parseVarinExtensionLocalSourceReloadRequest({
           ...req.body,
           extensionId: routeParam(req.params.extensionId),
         });
@@ -390,7 +390,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/services/invoke',
+    '/api/varin/extensions/v1/services/invoke',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -414,7 +414,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/services/select',
+    '/api/varin/extensions/v1/services/select',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -438,13 +438,13 @@ export const registerExtensionRoutes = (app: Express, {
   };
 
   app.put(
-    '/api/piarium/extensions/v1/services/routing',
+    '/api/varin/extensions/v1/services/routing',
     uiAuthController.requireAuth,
     serviceRoutingMutation('upsertServiceRoutingRule'),
   );
 
   app.post(
-    '/api/piarium/extensions/v1/services/routing/remove',
+    '/api/varin/extensions/v1/services/routing/remove',
     uiAuthController.requireAuth,
     serviceRoutingMutation('removeServiceRoutingRule'),
   );
@@ -461,19 +461,19 @@ export const registerExtensionRoutes = (app: Express, {
   };
 
   app.patch(
-    '/api/piarium/extensions/v1/workbench/layout',
+    '/api/varin/extensions/v1/workbench/layout',
     uiAuthController.requireAuth,
     workbenchMutation('updateWorkbenchLayout'),
   );
 
   app.patch(
-    '/api/piarium/extensions/v1/workbench/profile/select',
+    '/api/varin/extensions/v1/workbench/profile/select',
     uiAuthController.requireAuth,
     workbenchMutation('selectWorkbenchProfile'),
   );
 
   app.post(
-    '/api/piarium/extensions/v1/workbench/profiles/apply',
+    '/api/varin/extensions/v1/workbench/profiles/apply',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
@@ -486,19 +486,19 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.put(
-    '/api/piarium/extensions/v1/workbench/profiles',
+    '/api/varin/extensions/v1/workbench/profiles',
     uiAuthController.requireAuth,
     workbenchMutation('upsertWorkbenchProfile'),
   );
 
   app.post(
-    '/api/piarium/extensions/v1/workbench/profiles/remove',
+    '/api/varin/extensions/v1/workbench/profiles/remove',
     uiAuthController.requireAuth,
     workbenchMutation('removeWorkbenchProfile'),
   );
 
   app.patch(
-    '/api/piarium/extensions/v1/extensions/:extensionId/enabled',
+    '/api/varin/extensions/v1/extensions/:extensionId/enabled',
     uiAuthController.requireAuth,
     async (req, res) => {
       const revision = expectedRevision(req.body);
@@ -517,12 +517,12 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.delete(
-    '/api/piarium/extensions/v1/extensions/:extensionId',
+    '/api/varin/extensions/v1/extensions/:extensionId',
     uiAuthController.requireAuth,
     async (req, res) => {
       if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
       try {
-        const request = parsePiariumExtensionRemoveRequest({
+        const request = parseVarinExtensionRemoveRequest({
           ...req.body,
           extensionId: routeParam(req.params.extensionId),
         });
@@ -534,7 +534,7 @@ export const registerExtensionRoutes = (app: Express, {
   );
 
   app.post(
-    '/api/piarium/extensions/v1/disable-all',
+    '/api/varin/extensions/v1/disable-all',
     uiAuthController.requireSessionAuth,
     async (req, res) => {
       const revision = expectedRevision(req.body);

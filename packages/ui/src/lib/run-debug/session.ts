@@ -1,24 +1,24 @@
 import type {
-  PiariumBreakpoint,
-  PiariumDebugBreakpointsResult,
-  PiariumDebugEvent,
-  PiariumDebugSessionStatus,
-  PiariumDebugStackFrame,
-  PiariumTaskEvent,
-  PiariumTestEvent,
-  PiariumTestItem,
-  PiariumTestRunStatus,
+  VarinBreakpoint,
+  VarinDebugBreakpointsResult,
+  VarinDebugEvent,
+  VarinDebugSessionStatus,
+  VarinDebugStackFrame,
+  VarinTaskEvent,
+  VarinTestEvent,
+  VarinTestItem,
+  VarinTestRunStatus,
   Subscription,
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@piarium/application-client';
-import { RunServicesError } from '@piarium/application-client';
+} from '@varin/application-client';
+import { RunServicesError } from '@varin/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import {
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { setWorkbenchContextKey } from '@/lib/workbench/editors/context-keys';
 
 type Bound = {
@@ -39,11 +39,11 @@ export type RunDebugTestOwner = {
 
 export type RunDebugEditorProjection = {
   workspaceId: string;
-  breakpoints: readonly PiariumBreakpoint[];
+  breakpoints: readonly VarinBreakpoint[];
   debugOwner?: RunDebugSessionOwner;
-  currentDebugFrame?: PiariumDebugStackFrame;
+  currentDebugFrame?: VarinDebugStackFrame;
   testOwner?: RunDebugTestOwner;
-  latestTestFailure?: PiariumTestItem;
+  latestTestFailure?: VarinTestItem;
 };
 
 type WorkspaceLoadState = {
@@ -63,7 +63,7 @@ const subscriptions = new Map<string, Subscription[]>();
 const projectionListeners = new Map<string, Set<() => void>>();
 const projections = new Map<string, RunDebugEditorProjection>();
 const loadStates = new Map<string, WorkspaceLoadState>();
-const selectedStackFrames = new Map<string, PiariumDebugStackFrame>();
+const selectedStackFrames = new Map<string, VarinDebugStackFrame>();
 const activeTaskRuns = new Map<string, Set<string>>();
 const debugStatuses = new Map<string, 'starting' | 'running' | 'paused'>();
 const listeners = new Set<() => void>();
@@ -106,7 +106,7 @@ const publishProjection = (
   emitWorkspace(workspaceId);
 };
 
-const debugOwnerFrom = (snapshot: PiariumDebugSessionStatus): RunDebugSessionOwner | undefined => (
+const debugOwnerFrom = (snapshot: VarinDebugSessionStatus): RunDebugSessionOwner | undefined => (
   snapshot.status !== 'absent'
   && typeof snapshot.sessionId === 'string'
   && snapshot.sessionId
@@ -115,7 +115,7 @@ const debugOwnerFrom = (snapshot: PiariumDebugSessionStatus): RunDebugSessionOwn
     : undefined
 );
 
-const testOwnerFrom = (snapshot: PiariumTestRunStatus): RunDebugTestOwner | undefined => (
+const testOwnerFrom = (snapshot: VarinTestRunStatus): RunDebugTestOwner | undefined => (
   typeof snapshot.runId === 'string'
   && snapshot.runId
   && typeof snapshot.generation === 'number'
@@ -209,7 +209,7 @@ const resolveTopFrame = async (
 
 const handleDebugStatus = (
   workspaceId: string,
-  snapshot: PiariumDebugSessionStatus,
+  snapshot: VarinDebugSessionStatus,
   state: WorkspaceLoadState,
 ): void => {
   if (snapshot.workspaceId !== workspaceId || !isCurrentLoadState(workspaceId, state)) return;
@@ -268,7 +268,7 @@ const handleDebugStatus = (
 
 const handleDebugEvent = (
   workspaceId: string,
-  event: PiariumDebugEvent,
+  event: VarinDebugEvent,
   state: WorkspaceLoadState,
 ): void => {
   if (event.kind === 'status') {
@@ -281,7 +281,7 @@ const handleDebugEvent = (
   }
 };
 
-const handleTaskEvent = (event: PiariumTaskEvent): void => {
+const handleTaskEvent = (event: VarinTaskEvent): void => {
   if (event.kind !== 'status') return;
   const workspaceId = event.snapshot.workspaceId;
   const active = activeTaskRuns.get(workspaceId) ?? new Set<string>();
@@ -296,7 +296,7 @@ const handleTaskEvent = (event: PiariumTaskEvent): void => {
 
 const handleTestStatus = (
   workspaceId: string,
-  snapshot: PiariumTestRunStatus,
+  snapshot: VarinTestRunStatus,
   state: WorkspaceLoadState,
 ): void => {
   if (snapshot.workspaceId !== workspaceId || !isCurrentLoadState(workspaceId, state)) return;
@@ -319,7 +319,7 @@ const handleTestStatus = (
 
 const handleTestEvent = (
   workspaceId: string,
-  event: PiariumTestEvent,
+  event: VarinTestEvent,
   state: WorkspaceLoadState,
 ): void => {
   if (event.kind === 'status') {
@@ -527,7 +527,7 @@ export const subscribeRunDebugEditorProjection = (
 export const toggleRunDebugBreakpoint = async (
   identity: DocumentIdentity,
   line: number,
-): Promise<PiariumDebugBreakpointsResult> => {
+): Promise<VarinDebugBreakpointsResult> => {
   const apis = bound;
   const state = loadStates.get(identity.workspaceId);
   if (!apis || !state || !isCurrentLoadState(identity.workspaceId, state)) {
@@ -582,18 +582,18 @@ export const toggleRunDebugBreakpoint = async (
   return result;
 };
 
-export const peekLastTestFailure = (workspaceId: string): PiariumTestItem | undefined => (
+export const peekLastTestFailure = (workspaceId: string): VarinTestItem | undefined => (
   projectionFor(workspaceId).latestTestFailure
 );
 
-export const rememberStackFrame = (workspaceId: string, frame: PiariumDebugStackFrame): void => {
+export const rememberStackFrame = (workspaceId: string, frame: VarinDebugStackFrame): void => {
   selectedStackFrames.set(workspaceId, frame);
   if (projectionFor(workspaceId).debugOwner) {
     publishProjection(workspaceId, { currentDebugFrame: frame });
   }
 };
 
-export const peekLastStackFrame = (workspaceId: string): PiariumDebugStackFrame | undefined => (
+export const peekLastStackFrame = (workspaceId: string): VarinDebugStackFrame | undefined => (
   selectedStackFrames.get(workspaceId) ?? projectionFor(workspaceId).currentDebugFrame
 );
 

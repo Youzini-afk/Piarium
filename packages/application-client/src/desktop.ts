@@ -45,7 +45,7 @@ export type DesktopSshInstance = {
     args: string[];
   };
   connectionTimeoutSec: number;
-  remotePiarium: {
+  remoteVarin: {
     mode: DesktopSshRemoteMode;
     keepRunning: boolean;
     preferredPort?: number;
@@ -58,7 +58,7 @@ export type DesktopSshInstance = {
   };
   auth: {
     sshPassword?: DesktopSshStoredSecret;
-    piariumPassword?: DesktopSshStoredSecret;
+    varinPassword?: DesktopSshStoredSecret;
   };
   portForwards: DesktopSshPortForward[];
 };
@@ -249,7 +249,7 @@ export type DesktopAppIconEntry = {
 };
 
 // ---------------------------------------------------------------------------
-// Dialog DTO (piarium:dialog:open)
+// Dialog DTO (varin:dialog:open)
 // ---------------------------------------------------------------------------
 
 export type DesktopDialogOptions = {
@@ -304,7 +304,7 @@ export interface PreloadBootstrapLocalPayload extends PreloadBootstrapShared {
 export type PreloadBootstrapPayload = PreloadBootstrapRemotePayload | PreloadBootstrapLocalPayload;
 
 // ---------------------------------------------------------------------------
-// Desktop event map (events delivered via piarium:emit / listen)
+// Desktop event map (events delivered via varin:emit / listen)
 // ---------------------------------------------------------------------------
 
 export type DesktopUpdateProgressEvent =
@@ -314,24 +314,24 @@ export type DesktopUpdateProgressEvent =
 
 export type DesktopTrayAction = { type: string } & Record<string, unknown>;
 
-export type PiariumDesktopEventMap = {
-  'piarium:update-progress': DesktopUpdateProgressEvent;
-  'piarium:open-session': { directory: string | null; sessionId: string };
-  'piarium:open-draft-session': { directory: string; projectId: string };
-  'piarium:window-resized': void;
-  'piarium:window-maximized-changed': { maximized: boolean };
-  'piarium:installed-apps-updated': DesktopInstalledApp[];
-  'piarium:system-resume': { timestamp: number };
-  'piarium:tray-action': DesktopTrayAction;
-  'piarium:vibrancy-ready': { ready: boolean };
-  'piarium:ssh-instance-status': DesktopSshInstanceStatus;
-  'piarium:menu-action': string;
-  'piarium:check-for-updates': void;
+export type VarinDesktopEventMap = {
+  'varin:update-progress': DesktopUpdateProgressEvent;
+  'varin:open-session': { directory: string | null; sessionId: string };
+  'varin:open-draft-session': { directory: string; projectId: string };
+  'varin:window-resized': void;
+  'varin:window-maximized-changed': { maximized: boolean };
+  'varin:installed-apps-updated': DesktopInstalledApp[];
+  'varin:system-resume': { timestamp: number };
+  'varin:tray-action': DesktopTrayAction;
+  'varin:vibrancy-ready': { ready: boolean };
+  'varin:ssh-instance-status': DesktopSshInstanceStatus;
+  'varin:menu-action': string;
+  'varin:check-for-updates': void;
 };
 
-export type PiariumDesktopEvent = keyof PiariumDesktopEventMap;
-export type PiariumDesktopEventArguments<E extends PiariumDesktopEvent> =
-  PiariumDesktopEventMap[E] extends void ? [] : [detail: PiariumDesktopEventMap[E]];
+export type VarinDesktopEvent = keyof VarinDesktopEventMap;
+export type VarinDesktopEventArguments<E extends VarinDesktopEvent> =
+  VarinDesktopEventMap[E] extends void ? [] : [detail: VarinDesktopEventMap[E]];
 
 // ---------------------------------------------------------------------------
 // Web render DTO (offscreen Chromium for harness webfetch)
@@ -347,7 +347,7 @@ export type DesktopWebRenderResult = {
 // Command map — desktop_* commands with typed args and results
 // ---------------------------------------------------------------------------
 
-export interface PiariumDesktopCommandMap {
+export interface VarinDesktopCommandMap {
   // --- window/chrome ---
   desktop_start_window_drag: { args: void; result: null };
   desktop_set_window_title: { args: { title: string }; result: null };
@@ -467,34 +467,34 @@ export interface PiariumDesktopCommandMap {
 // Derived command types
 // ---------------------------------------------------------------------------
 
-export type PiariumDesktopCommand = keyof PiariumDesktopCommandMap;
+export type VarinDesktopCommand = keyof VarinDesktopCommandMap;
 
-export type PiariumDesktopCommandArgs<K extends PiariumDesktopCommand> =
-  PiariumDesktopCommandMap[K]['args'];
+export type VarinDesktopCommandArgs<K extends VarinDesktopCommand> =
+  VarinDesktopCommandMap[K]['args'];
 
-export type PiariumDesktopCommandResult<K extends PiariumDesktopCommand> =
-  PiariumDesktopCommandMap[K]['result'];
+export type VarinDesktopCommandResult<K extends VarinDesktopCommand> =
+  VarinDesktopCommandMap[K]['result'];
 
-export type PiariumDesktopCommandInvocation<K extends PiariumDesktopCommand> =
-  PiariumDesktopCommandMap[K]['args'] extends void
+export type VarinDesktopCommandInvocation<K extends VarinDesktopCommand> =
+  VarinDesktopCommandMap[K]['args'] extends void
     ? []
-    : [args: PiariumDesktopCommandMap[K]['args']];
+    : [args: VarinDesktopCommandMap[K]['args']];
 
 // ---------------------------------------------------------------------------
 // Desktop bridge interface (typed invoke/openDialog/grantFileAccess/etc.)
 // ---------------------------------------------------------------------------
 
-export interface PiariumDesktopBridge {
-  invoke<K extends PiariumDesktopCommand>(
+export interface VarinDesktopBridge {
+  invoke<K extends VarinDesktopCommand>(
     cmd: K,
-    ...invocation: PiariumDesktopCommandInvocation<K>
-  ): Promise<PiariumDesktopCommandResult<K>>;
+    ...invocation: VarinDesktopCommandInvocation<K>
+  ): Promise<VarinDesktopCommandResult<K>>;
   openDialog(options?: DesktopDialogOptions): Promise<DesktopDialogResult>;
   grantFileAccess(filePath: string): Promise<DesktopDialogFileGrant>;
   openExternal(url: string): Promise<null>;
-  listen<E extends PiariumDesktopEvent>(
+  listen<E extends VarinDesktopEvent>(
     event: E,
-    handler: (evt: { payload: PiariumDesktopEventMap[E] }) => void,
+    handler: (evt: { payload: VarinDesktopEventMap[E] }) => void,
   ): Promise<() => void>;
 }
 
@@ -502,7 +502,7 @@ export interface PiariumDesktopBridge {
 // Command catalog — one exhaustive runtime value tied to the type map
 // ---------------------------------------------------------------------------
 
-export const PIARIUM_DESKTOP_COMMAND_CATALOG = {
+export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_start_window_drag: true,
   desktop_set_window_title: true,
   desktop_set_window_theme: true,
@@ -562,37 +562,37 @@ export const PIARIUM_DESKTOP_COMMAND_CATALOG = {
   desktop_ssh_logs: true,
   desktop_ssh_logs_clear: true,
   desktop_web_render: true,
-} as const satisfies Record<PiariumDesktopCommand, true>;
+} as const satisfies Record<VarinDesktopCommand, true>;
 
-export const PIARIUM_DESKTOP_COMMAND_LIST = Object.freeze(
-  Object.keys(PIARIUM_DESKTOP_COMMAND_CATALOG) as PiariumDesktopCommand[],
+export const VARIN_DESKTOP_COMMAND_LIST = Object.freeze(
+  Object.keys(VARIN_DESKTOP_COMMAND_CATALOG) as VarinDesktopCommand[],
 );
 
-export const isPiariumDesktopCommand = (value: unknown): value is PiariumDesktopCommand => (
-  typeof value === 'string' && Object.hasOwn(PIARIUM_DESKTOP_COMMAND_CATALOG, value)
+export const isVarinDesktopCommand = (value: unknown): value is VarinDesktopCommand => (
+  typeof value === 'string' && Object.hasOwn(VARIN_DESKTOP_COMMAND_CATALOG, value)
 );
 
-export const PIARIUM_DESKTOP_EVENT_CATALOG = {
-  'piarium:update-progress': true,
-  'piarium:open-session': true,
-  'piarium:open-draft-session': true,
-  'piarium:window-resized': true,
-  'piarium:window-maximized-changed': true,
-  'piarium:installed-apps-updated': true,
-  'piarium:system-resume': true,
-  'piarium:tray-action': true,
-  'piarium:vibrancy-ready': true,
-  'piarium:ssh-instance-status': true,
-  'piarium:menu-action': true,
-  'piarium:check-for-updates': true,
-} as const satisfies Record<PiariumDesktopEvent, true>;
+export const VARIN_DESKTOP_EVENT_CATALOG = {
+  'varin:update-progress': true,
+  'varin:open-session': true,
+  'varin:open-draft-session': true,
+  'varin:window-resized': true,
+  'varin:window-maximized-changed': true,
+  'varin:installed-apps-updated': true,
+  'varin:system-resume': true,
+  'varin:tray-action': true,
+  'varin:vibrancy-ready': true,
+  'varin:ssh-instance-status': true,
+  'varin:menu-action': true,
+  'varin:check-for-updates': true,
+} as const satisfies Record<VarinDesktopEvent, true>;
 
-export const PIARIUM_DESKTOP_EVENT_LIST = Object.freeze(
-  Object.keys(PIARIUM_DESKTOP_EVENT_CATALOG) as PiariumDesktopEvent[],
+export const VARIN_DESKTOP_EVENT_LIST = Object.freeze(
+  Object.keys(VARIN_DESKTOP_EVENT_CATALOG) as VarinDesktopEvent[],
 );
 
-export const isPiariumDesktopEvent = (value: unknown): value is PiariumDesktopEvent => (
-  typeof value === 'string' && Object.hasOwn(PIARIUM_DESKTOP_EVENT_CATALOG, value)
+export const isVarinDesktopEvent = (value: unknown): value is VarinDesktopEvent => (
+  typeof value === 'string' && Object.hasOwn(VARIN_DESKTOP_EVENT_CATALOG, value)
 );
 
 // ---------------------------------------------------------------------------
@@ -601,7 +601,7 @@ export const isPiariumDesktopEvent = (value: unknown): value is PiariumDesktopEv
 // this export lets architecture tests assert the subset relationship.
 // ---------------------------------------------------------------------------
 
-export const PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS = [
+export const VARIN_REMOTE_SAFE_DESKTOP_COMMANDS = [
   'desktop_new_window',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',
@@ -615,4 +615,4 @@ export const PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS = [
   'desktop_get_current_window_state',
   'desktop_get_app_version',
   'desktop_capture_page_rect',
-] as const satisfies readonly PiariumDesktopCommand[];
+] as const satisfies readonly VarinDesktopCommand[];

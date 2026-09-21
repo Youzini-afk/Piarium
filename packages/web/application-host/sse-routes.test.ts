@@ -3,7 +3,7 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import type { OutgoingHttpHeader } from 'node:http';
 
 import { NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS, registerNotificationStreamRoute } from './lib/notifications/routes.js';
-import { registerPiariumEventRoutes } from './lib/scheduled-tasks/routes.js';
+import { registerVarinEventRoutes } from './lib/scheduled-tasks/routes.js';
 
 const createRouteRegistry = () => {
   const routes = new Map<string, RequestHandler>();
@@ -148,7 +148,7 @@ describe('local SSE routes', () => {
       expect(res.getHeader('connection')).toBe('keep-alive');
       expect(res.getHeader('x-accel-buffering')).toBe('no');
       expect(res.flushed).toBe(true);
-      expect(res.body).toContain('piarium:notification-stream-ready');
+      expect(res.body).toContain('varin:notification-stream-ready');
       expect(clients.has(expressResponse)).toBe(true);
       expect(vi.getTimerCount()).toBe(1);
       expect(res.bodyFlushCount).toBe(1);
@@ -169,19 +169,19 @@ describe('local SSE routes', () => {
     }
   });
 
-  it('serves Piarium SSE with nginx-safe headers', () => {
+  it('serves Varin SSE with nginx-safe headers', () => {
     const { app, getRoute } = createRouteRegistry();
     const clients = new Set<Response>();
 
-    registerPiariumEventRoutes(app, {
-      getPiariumEventClients: () => clients,
+    registerVarinEventRoutes(app, {
+      getVarinEventClients: () => clients,
       requireAuth: (_req, _res, next) => next(),
       writeSseEvent(res, payload) {
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
       },
     });
 
-    const handler = getRoute('GET', '/api/piarium/events');
+    const handler = getRoute('GET', '/api/varin/events');
     const req = createMockRequest();
     const res = createMockResponse();
     const expressRequest = req as unknown as Request;
@@ -195,7 +195,7 @@ describe('local SSE routes', () => {
     expect(res.getHeader('connection')).toBe('keep-alive');
     expect(res.getHeader('x-accel-buffering')).toBe('no');
     expect(res.flushed).toBe(true);
-    expect(res.body).toContain('piarium:event-stream-ready');
+    expect(res.body).toContain('varin:event-stream-ready');
     expect(clients.has(expressResponse)).toBe(true);
 
     req.emit('close');

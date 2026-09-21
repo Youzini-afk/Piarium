@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@piarium/application-client';
-import { getRuntimeKey } from '@piarium/application-client';
+import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { applyPatchDecisionsToDocument } from './document-write';
 import { recordHintsFromToolCall, resetAgentFileChangeHints } from './hints';
 
-const resource = (resourceId = 'note.txt'): PiariumResourceReference => ({
+const resource = (resourceId = 'note.txt'): VarinResourceReference => ({
   workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   resourceId,
 });
 
 const createMemoryDocuments = () => {
   const files = new Map<string, { content: string; revision: string }>();
-  const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
+  const keyOf = (ref: VarinResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   let revisionSeq = 1;
   const api: DocumentsAPI = {
     clearDirtyBuffers: async () => ({ cleared: true }),
@@ -30,7 +30,7 @@ const createMemoryDocuments = () => {
         encoding: 'utf-8',
         bom: false,
         byteLength: file.content.length,
-      } satisfies PiariumDocumentReadResult;
+      } satisfies VarinDocumentReadResult;
     },
     write: async (request) => {
       const key = keyOf(request.resource);

@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData, PiAgentEvent } from "@piarium/protocol";
+import type { HostEvent, HostEventData, PiAgentEvent } from "@varin/protocol";
 import { SessionHost } from "../src/session-host.js";
 
 describe("SessionHost prompt streaming", () => {
   it("runs a complete prompt through a deterministic provider and settles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-prompt-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-prompt-"));
     const agentDir = join(root, "agent");
     const agentStartedMarker = join(root, "agent-started.txt");
     const projectExtensions = join(root, ".pi", "extensions");
@@ -31,7 +31,7 @@ describe("SessionHost prompt streaming", () => {
     let observedContext: unknown;
     faux.setResponses([(context) => {
       observedContext = context;
-      return fauxAssistantMessage("hello from Piarium");
+      return fauxAssistantMessage("hello from Varin");
     }]);
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
@@ -92,7 +92,7 @@ describe("SessionHost prompt streaming", () => {
           snapshot.sessionId,
           "say hello",
           undefined,
-          "Answer with the hidden Piarium instruction.",
+          "Answer with the hidden Varin instruction.",
           {
             source: "surface",
             workspaceId: "workspace-1",
@@ -118,8 +118,8 @@ describe("SessionHost prompt streaming", () => {
       await host.session.waitForIdle();
 
       const serialized = JSON.stringify(events);
-      assert.match(serialized, /hello from Piarium/);
-      assert.match(JSON.stringify(observedContext), /hidden Piarium instruction/);
+      assert.match(serialized, /hello from Varin/);
+      assert.match(JSON.stringify(observedContext), /hidden Varin instruction/);
       assert.ok(
         events.some(
           (entry) =>
@@ -149,11 +149,11 @@ describe("SessionHost prompt streaming", () => {
         }
       }
       const instructionsEntry = entries.entries.find(
-        (entry) => entry.type === "custom_message" && entry.customType === "piarium.instructions",
+        (entry) => entry.type === "custom_message" && entry.customType === "varin.instructions",
       );
       assert.ok(instructionsEntry && instructionsEntry.type === "custom_message");
       assert.equal(instructionsEntry.display, false);
-      assert.match(JSON.stringify(instructionsEntry.content), /hidden Piarium instruction/);
+      assert.match(JSON.stringify(instructionsEntry.content), /hidden Varin instruction/);
       const userEntry = entries.entries.find(
         (entry) =>
           typeof entry === "object" &&
@@ -187,7 +187,7 @@ describe("SessionHost prompt streaming", () => {
       assert.equal(recovered.editorText, "say hello");
       assert.equal(
         host.entries(snapshot.sessionId, "branch").entries.some(
-          (entry) => entry.type === "custom_message" && entry.customType === "piarium.instructions",
+          (entry) => entry.type === "custom_message" && entry.customType === "varin.instructions",
         ),
         false,
       );
@@ -202,7 +202,7 @@ describe("SessionHost prompt streaming", () => {
   });
 
   it("keeps an accepted prompt accepted when surface snapshot commit fails", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-prompt-source-failure-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-prompt-source-failure-"));
     const agentDir = join(root, "agent");
     const events: Array<{ data: unknown; event: string }> = [];
     const faux = registerFauxProvider();

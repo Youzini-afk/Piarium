@@ -7,7 +7,7 @@ import {
   type AgentInputContext,
   type DocumentSurfaceWriteResult,
   type DocumentWriteGuardResult,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   applyAgentSurfaceMutation,
   type AgentSurfaceWriteChange,
@@ -472,7 +472,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   };
 
   /**
-   * Record a write Piarium observed outside the Documents write path — today
+   * Record a write Varin observed outside the Documents write path — today
    * the Pi mutation journal for the native `write` / `edit` / `apply_patch`
    * tools. The absolute path is resolved against the workspace root; a path
    * outside it (an isolated thread's worktree) supersedes nothing here.
@@ -681,7 +681,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
 
   const atomicReplace = async (absolutePath: string, bytes: Uint8Array): Promise<void> => {
     await fsPromises.mkdir(pathModule.dirname(absolutePath), { recursive: true });
-    const tmp = `${absolutePath}.piarium-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tmp = `${absolutePath}.varin-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       await fsPromises.writeFile(tmp, bytes);
       await fsPromises.rename(tmp, absolutePath);
@@ -2057,7 +2057,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       return {
         status: 'unavailable',
         message: `${resourceId} has unsaved editor changes but its fixed draft is unavailable (${draft.message}) `
-          + 'so Piarium cannot tell whether writing would discard them. Nothing was written. This turn cannot '
+          + 'so Varin cannot tell whether writing would discard them. Nothing was written. This turn cannot '
           + 'recover the draft, so retrying it returns the same answer: report the path to the user and read it '
           + 'again in a later turn.',
       };
@@ -2070,7 +2070,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       return {
         status: 'unavailable',
         message: `${resourceId} has unsaved editor changes and its current disk text could not be read, `
-          + 'so Piarium cannot tell whether writing would discard them. Nothing was written. Retry or inspect '
+          + 'so Varin cannot tell whether writing would discard them. Nothing was written. Retry or inspect '
           + 'workspace availability.',
       };
     }

@@ -7,7 +7,7 @@ import { fetchSystemInfoFromPort } from './cli-http.js';
 import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
-import { discoverPiariumInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
+import { discoverVarinInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '#application-host/lib/security/bind-host.js';
 import {
@@ -79,34 +79,34 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
     const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
-      assertSafeBrowserPort(targetPort, { context: 'Piarium serve' });
+      assertSafeBrowserPort(targetPort, { context: 'Varin serve' });
     }
 
     if (targetPort !== 0) {
-      const existingInstance = await discoverPiariumInstanceOnPort(targetPort, { host: effectiveHost });
+      const existingInstance = await discoverVarinInstanceOnPort(targetPort, { host: effectiveHost });
       if (existingInstance?.runtime === 'desktop') {
         throw new Error(
-          `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
+          `Port ${targetPort} is used by Varin Desktop app. Choose another port or stop the desktop app.`
         );
       }
       if (existingInstance) {
         const pidSuffix = Number.isFinite(existingInstance.pid) ? ` (PID: ${existingInstance.pid})` : '';
         if (existingInstance.source === 'probe') {
-          throw new Error(`Piarium is already running on port ${targetPort}. Use \`piarium status\` or \`piarium stop --port ${targetPort}\`.`);
+          throw new Error(`Varin is already running on port ${targetPort}. Use \`varin status\` or \`varin stop --port ${targetPort}\`.`);
         }
-        throw new Error(`Piarium is already running on port ${targetPort}${pidSuffix}`);
+        throw new Error(`Varin is already running on port ${targetPort}${pidSuffix}`);
       }
 
       if (explicitPort && !(await isPortAvailable(targetPort, effectiveHost))) {
         const systemInfo = await fetchSystemInfoFromPort(targetPort, globalThis.fetch, effectiveHost);
         if (isDesktopRuntimeForPort(systemInfo, targetPort)) {
           throw new Error(
-            `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
+            `Port ${targetPort} is used by Varin Desktop app. Choose another port or stop the desktop app.`
           );
         }
         const systemInfoRuntimeMatchesPort = systemInfo?.runtime !== 'desktop' || isDesktopRuntimeForPort(systemInfo, targetPort);
         if (systemInfo?.runtime && systemInfoRuntimeMatchesPort) {
-          throw new Error(`Piarium is already running on port ${targetPort}. Use \`piarium status\` or \`piarium stop --port ${targetPort}\`.`);
+          throw new Error(`Varin is already running on port ${targetPort}. Use \`varin status\` or \`varin stop --port ${targetPort}\`.`);
         }
         throw new Error(`Port ${targetPort} is already in use by another process.`);
       }
@@ -131,11 +131,11 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
     if (!effectiveUiPassword && !options.suppressUiPasswordWarning) {
       const bindHost = effectiveHost;
       const networkExposed = isNetworkExposedBindHost(bindHost);
-      const warningLine = 'PIARIUM_UI_PASSWORD is not set';
+      const warningLine = 'VARIN_UI_PASSWORD is not set';
       const warningDetail = networkExposed
         ? `server is bound to ${bindHost} and reachable on your network with no UI auth. `
-          + 'Set --ui-password or PIARIUM_UI_PASSWORD before exposing it over LAN.'
-        : 'browser UI is unsecured. Use --ui-password or PIARIUM_UI_PASSWORD.';
+          + 'Set --ui-password or VARIN_UI_PASSWORD before exposing it over LAN.'
+        : 'browser UI is unsecured. Use --ui-password or VARIN_UI_PASSWORD.';
       if (showOutput) {
         logStatus('warning', warningLine, warningDetail);
       } else if (isJsonMode(options)) {
@@ -163,10 +163,10 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
 
       // Propagate resolved values into env before importing the server module.
       if (effectiveUiPassword) {
-        process.env.PIARIUM_UI_PASSWORD = effectiveUiPassword;
+        process.env.VARIN_UI_PASSWORD = effectiveUiPassword;
       }
-      process.env.PIARIUM_HOST = effectiveHost;
-      process.env.PIARIUM_RUNTIME = 'web';
+      process.env.VARIN_HOST = effectiveHost;
+      process.env.VARIN_RUNTIME = 'web';
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
       // server runtime output (console.log calls) does not pollute the
@@ -202,7 +202,7 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
       }
 
       if (!isQuietMode(options)) {
-        console.log(`Starting Piarium on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
+        console.log(`Starting Varin on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
       }
 
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
@@ -293,16 +293,16 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
       stdio: ['ignore', logFd, logFd, 'ipc'],
       env: {
         ...process.env,
-        PIARIUM_PORT: String(targetPort),
-        PIARIUM_RUNTIME: 'web',
-        PIARIUM_HOST: effectiveHost,
-        ...(effectiveUiPassword ? { PIARIUM_UI_PASSWORD: effectiveUiPassword } : {}),
-        ...(options.apiOnly === true ? { PIARIUM_API_ONLY: 'true' } : {}),
+        VARIN_PORT: String(targetPort),
+        VARIN_RUNTIME: 'web',
+        VARIN_HOST: effectiveHost,
+        ...(effectiveUiPassword ? { VARIN_UI_PASSWORD: effectiveUiPassword } : {}),
+        ...(options.apiOnly === true ? { VARIN_API_ONLY: 'true' } : {}),
       },
     });
 
     child.unref();
-    serveSpin?.start(`Starting Piarium on port ${targetPort === 0 ? 'auto' : targetPort}...`);
+    serveSpin?.start(`Starting Varin on port ${targetPort === 0 ? 'auto' : targetPort}...`);
 
     let resolvedPort: number;
     try {
@@ -311,13 +311,13 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
         const timeout = setTimeout(() => {
           if (settled) return;
           settled = true;
-          reject(new Error(`Piarium daemon did not report ready within ${DAEMON_READY_TIMEOUT_MS / 1000}s`));
+          reject(new Error(`Varin daemon did not report ready within ${DAEMON_READY_TIMEOUT_MS / 1000}s`));
         }, DAEMON_READY_TIMEOUT_MS);
 
         child.on('message', (msg) => {
           if (settled) return;
           const message = recordOf(msg);
-          if (message.type === 'piarium:ready' && typeof message.port === 'number') {
+          if (message.type === 'varin:ready' && typeof message.port === 'number') {
             settled = true;
             clearTimeout(timeout);
             resolve(message.port);
@@ -335,7 +335,7 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          reject(new Error(`Piarium daemon exited before reporting ready${signal ? ` (${signal})` : ` (code ${code ?? 'unknown'})`}`));
+          reject(new Error(`Varin daemon exited before reporting ready${signal ? ` (${signal})` : ` (code ${code ?? 'unknown'})`}`));
         });
       });
     } catch (error) {
@@ -368,7 +368,7 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
 
     const childPid = child.pid;
     if (typeof childPid !== 'number' || !isProcessRunning(childPid)) {
-      serveSpin?.error('Failed to start Piarium');
+      serveSpin?.error('Failed to start Varin');
       throw new Error('Failed to start server in daemon mode');
     }
 
@@ -387,7 +387,7 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
       port: resolvedPort,
       pid: childPid,
       url: buildLocalUrl(resolvedPort, '/'),
-      logs: `piarium logs -p ${resolvedPort}`,
+      logs: `varin logs -p ${resolvedPort}`,
       launchMode: 'daemon',
     };
 
@@ -413,7 +413,7 @@ async function serveCommand(options: CliOptions): Promise<number | void> {
     serveSpin?.clear();
 
     if (!options.suppressStartupSummary && showOutput) {
-      clackIntro('Piarium Started');
+      clackIntro('Varin Started');
       logStatus('success', `port ${serveResult.port} (PID: ${serveResult.pid})`);
       if (autoGeneratedUiPassword) {
         logStatus('success', 'UI password', effectiveUiPassword);

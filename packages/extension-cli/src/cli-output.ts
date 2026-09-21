@@ -55,7 +55,7 @@ export class CliOutput {
       return;
     }
     if (canRenderClack(this.#output, this.#mode)) {
-      intro("Piarium extension");
+      intro("Varin extension");
       for (const [index, line] of message.human.entries()) {
         if (index === 0) log.success(line);
         else log.info(line);

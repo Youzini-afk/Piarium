@@ -5,8 +5,8 @@ import {
   type PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
   type ProjectTrustDecision,
-} from '@piarium/runtime-broker';
-import { isRuntimeMethod } from '@piarium/protocol';
+} from '@varin/runtime-broker';
+import { isRuntimeMethod } from '@varin/protocol';
 import type { Express } from 'express';
 import express from 'express';
 import path from 'node:path';
@@ -50,7 +50,7 @@ export const registerPiRuntimeHttpRoute = (
   { piRuntimeBroker, getPiRuntimeBroker }: PiRuntimeHttpRouteOptions,
 ): void => {
   const resolveBroker = () => (typeof getPiRuntimeBroker === 'function' ? getPiRuntimeBroker() : piRuntimeBroker);
-  app.post('/api/piarium/runtime/request', express.json({ limit: '2mb' }), async (req, res) => {
+  app.post('/api/varin/runtime/request', express.json({ limit: '2mb' }), async (req, res) => {
     const method = typeof req.body?.method === 'string' ? req.body.method.trim() : '';
     if (!method) return res.status(400).json({ error: 'method is required' });
     if (!isRuntimeMethod(method)) {

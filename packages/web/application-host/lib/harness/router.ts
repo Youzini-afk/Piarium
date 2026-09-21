@@ -12,7 +12,7 @@ import {
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
   parseAgentInputContext,
   type AgentInputContext,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
 
 export { buildHarnessRespondParams };

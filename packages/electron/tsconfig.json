@@ -10,14 +10,14 @@
     "noEmit": true,
     "types": ["node", "electron"],
     "paths": {
-      "@piarium/application-client": ["./node_modules/@piarium/application-client/dist/index.d.ts"],
-      "@piarium/application-client/desktop": ["./node_modules/@piarium/application-client/dist/desktop.d.ts"],
-      "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
-      "@piarium/runtime-broker": ["./node_modules/@piarium/runtime-broker/dist/index.d.ts"],
-      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
-      "@piarium/web/server/index.js": ["./packages/web/.application-host-types/index.d.ts"],
-      "@piarium/web": ["./node_modules/@piarium/web/server/index.d.ts"],
-      "@piarium/web/*": ["./node_modules/@piarium/web/*"]
+      "@varin/application-client": ["./node_modules/@varin/application-client/dist/index.d.ts"],
+      "@varin/application-client/desktop": ["./node_modules/@varin/application-client/dist/desktop.d.ts"],
+      "@varin/protocol": ["./node_modules/@varin/protocol/dist/index.d.ts"],
+      "@varin/runtime-broker": ["./node_modules/@varin/runtime-broker/dist/index.d.ts"],
+      "@varin/settings-store": ["./node_modules/@varin/settings-store/dist/index.d.ts"],
+      "@varin/web/server/index.js": ["./packages/web/.application-host-types/index.d.ts"],
+      "@varin/web": ["./node_modules/@varin/web/server/index.d.ts"],
+      "@varin/web/*": ["./node_modules/@varin/web/*"]
     }
   },
   "include": ["*.ts"],

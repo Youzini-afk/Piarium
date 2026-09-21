@@ -1,12 +1,12 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
-  PIARIUM_WORKBENCH_SLOTS,
-  type PiariumWorkbenchActivityItemsSlotProps,
-  type PiariumWorkbenchPrimarySidebarViewsSlotProps,
-  type PiariumWorkbenchSecondarySidebarViewsSlotProps,
-  type PiariumWorkbenchStatusItemsSlotProps,
-} from '@piarium/extension-contract';
+  VARIN_WORKBENCH_SLOTS,
+  type VarinWorkbenchActivityItemsSlotProps,
+  type VarinWorkbenchPrimarySidebarViewsSlotProps,
+  type VarinWorkbenchSecondarySidebarViewsSlotProps,
+  type VarinWorkbenchStatusItemsSlotProps,
+} from '@varin/extension-contract';
 import { CommandPalette } from '@/components/ui/CommandPalette';
 import { HelpDialog } from '@/components/ui/HelpDialog';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -47,8 +47,8 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
 import {
-  refreshPiariumExtensionCatalog,
-  usePiariumExtensionCatalog,
+  refreshVarinExtensionCatalog,
+  useVarinExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import {
   useWorkbenchWorkspace,
@@ -71,7 +71,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGitRepositorySelectionStore } from '@/stores/useGitRepositorySelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { FileSearchResult, WorkspaceContentSearchHit } from '@piarium/application-client';
+import type { FileSearchResult, WorkspaceContentSearchHit } from '@varin/application-client';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
@@ -347,7 +347,7 @@ const IdeSearchPanel: React.FC<{
 
 const IdeExtensionsPanel: React.FC = () => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const extensions = catalog.snapshot?.catalog.extensions ?? [];
@@ -375,7 +375,7 @@ const IdeExtensionsPanel: React.FC = () => {
             type="button"
             variant="ghost"
             size="xs"
-            onClick={() => void refreshPiariumExtensionCatalog().catch(() => undefined)}
+            onClick={() => void refreshVarinExtensionCatalog().catch(() => undefined)}
           >
             {t('startup.initRecovery.retry')}
           </Button>
@@ -403,7 +403,7 @@ const IdeExtensionsPanel: React.FC = () => {
 };
 
 /** Ties the header's session button to the picker region it expands over the Agent column. */
-const SESSION_PICKER_REGION_ID = 'piarium-ide-session-picker';
+const SESSION_PICKER_REGION_ID = 'varin-ide-session-picker';
 
 export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const { t } = useI18n();
@@ -514,7 +514,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
   React.useEffect(() => subscribeIdeSearchRequests(({ mode }) => {
     const root = shellRootRef.current;
-    if (!root?.isConnected || root.closest('[data-piarium-workbench-shell-staging]')) return false;
+    if (!root?.isConnected || root.closest('[data-varin-workbench-shell-staging]')) return false;
     patchLayout({ activity: 'search', primaryVisible: true });
     updateSearchDraft({ mode });
     setSearchFocusRequestId((current) => current + 1);
@@ -758,8 +758,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   {workspaceId ? (
                     <WorkbenchContributionSlot
                       kind="view"
-                      slot={PIARIUM_WORKBENCH_SLOTS.activityItems}
-                      props={{ workspaceId } satisfies PiariumWorkbenchActivityItemsSlotProps}
+                      slot={VARIN_WORKBENCH_SLOTS.activityItems}
+                      props={{ workspaceId } satisfies VarinWorkbenchActivityItemsSlotProps}
                     />
                   ) : null}
                   <div className="mt-auto flex flex-col gap-1">
@@ -800,11 +800,11 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                       {workspaceId ? (
                         <WorkbenchContributionSlot
                           kind="view"
-                          slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews}
+                          slot={VARIN_WORKBENCH_SLOTS.primarySidebarViews}
                           props={{
                             workspaceId,
                             activeActivityId: layout.activity,
-                          } satisfies PiariumWorkbenchPrimarySidebarViewsSlotProps}
+                          } satisfies VarinWorkbenchPrimarySidebarViewsSlotProps}
                         />
                       ) : null}
                       {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
@@ -909,8 +909,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                         {workspaceId ? (
                           <WorkbenchContributionSlot
                             kind="view"
-                            slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews}
-                            props={{ workspaceId } satisfies PiariumWorkbenchSecondarySidebarViewsSlotProps}
+                            slot={VARIN_WORKBENCH_SLOTS.secondarySidebarViews}
+                            props={{ workspaceId } satisfies VarinWorkbenchSecondarySidebarViewsSlotProps}
                           />
                         ) : null}
                         <div className="h-full min-h-0">
@@ -986,8 +986,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 {workspaceId ? (
                   <WorkbenchContributionSlot
                     kind="view"
-                    slot={PIARIUM_WORKBENCH_SLOTS.statusItems}
-                    props={{ workspaceId } satisfies PiariumWorkbenchStatusItemsSlotProps}
+                    slot={VARIN_WORKBENCH_SLOTS.statusItems}
+                    props={{ workspaceId } satisfies VarinWorkbenchStatusItemsSlotProps}
                   />
                 ) : null}
               </>

@@ -24,7 +24,7 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
   // the Android origin 403'd every WebSocket upgrade from the Android app
   // (message stream, terminal, dictation) while SSE kept working.
   const packagedClientOrigins = new Set([
-    'piarium-ui://app',
+    'varin-ui://app',
     'capacitor://localhost',
     'https://localhost',
   ]);
@@ -39,7 +39,7 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
       const [rawName, ...rest] = segment.split('=');
       const name = rawName?.trim();
       if (!name) continue;
-      if (name !== 'piarium_ui_session') continue;
+      if (name !== 'varin_ui_session') continue;
       const value = rest.join('=').trim();
       try {
         return decodeURIComponent(value || '');

@@ -19,7 +19,7 @@ const requireDefinition = (definition: LoopDefinition | null): LoopDefinition =>
   return definition;
 };
 const tempRoot = async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'piarium-loops-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'varin-loops-'));
   roots.push(root);
   return root;
 };

@@ -70,7 +70,7 @@ describe('readTaskTagSessionIdFromOutput', () => {
     });
 });
 
-describe('Piarium tool output', () => {
+describe('Varin tool output', () => {
     test('keeps the result envelope in the generic JSON rendering pipeline', () => {
         const result = {
             schemaVersion: 1,

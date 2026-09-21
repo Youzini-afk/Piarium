@@ -3,24 +3,24 @@ import { presetThemes } from './presets';
 import { withPrColors } from './prColors';
 import flexokiLightRaw from './flexoki-light.json';
 import flexokiDarkRaw from './flexoki-dark.json';
-import piariumLightRaw from './piarium-light.json';
-import piariumDarkRaw from './piarium-dark.json';
+import varinLightRaw from './varin-light.json';
+import varinDarkRaw from './varin-dark.json';
 
 const flexokiLightTheme = withPrColors(flexokiLightRaw as Theme);
 const flexokiDarkTheme = withPrColors(flexokiDarkRaw as Theme);
-const piariumLightTheme = withPrColors(piariumLightRaw as Theme);
-const piariumDarkTheme = withPrColors(piariumDarkRaw as Theme);
+const varinLightTheme = withPrColors(varinLightRaw as Theme);
+const varinDarkTheme = withPrColors(varinDarkRaw as Theme);
 
-export const DEFAULT_LIGHT_THEME_ID = 'piarium-light' as const;
-export const DEFAULT_DARK_THEME_ID = 'piarium-dark' as const;
+export const DEFAULT_LIGHT_THEME_ID = 'varin-light' as const;
+export const DEFAULT_DARK_THEME_ID = 'varin-dark' as const;
 
 export const themes: Theme[] = [
-  piariumLightTheme,
-  piariumDarkTheme,
+  varinLightTheme,
+  varinDarkTheme,
   flexokiLightTheme,
   flexokiDarkTheme,
   ...presetThemes.filter(
-    (theme) => theme.metadata.id !== 'piarium-light' && theme.metadata.id !== 'piarium-dark',
+    (theme) => theme.metadata.id !== 'varin-light' && theme.metadata.id !== 'varin-dark',
   ),
 ];
 

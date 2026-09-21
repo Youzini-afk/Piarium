@@ -16,10 +16,10 @@ describe("web search credential routes", () => {
       .put("/api/harness/web-search/credentials/brave")
       .send({ apiKey: "brave-secret", credentialRef: "openai" })
       .expect(200);
-    expect(saveAuth).toHaveBeenCalledWith("piarium-web-search-brave", { type: "api_key", key: "brave-secret" });
+    expect(saveAuth).toHaveBeenCalledWith("varin-web-search-brave", { type: "api_key", key: "brave-secret" });
     expect(response.body).toEqual({
       provider: "brave",
-      credentialRef: "piarium-web-search-brave",
+      credentialRef: "varin-web-search-brave",
       configured: true,
     });
     expect(JSON.stringify(response.body)).not.toContain("brave-secret");
@@ -30,14 +30,14 @@ describe("web search credential routes", () => {
     app.use(express.json());
     const removeAuth = vi.fn(() => true);
     registerWebSearchCredentialRoutes(app, {
-      readAuth: () => ({ "piarium-web-search-exa": { key: "secret" } }),
+      readAuth: () => ({ "varin-web-search-exa": { key: "secret" } }),
       removeAuth,
     });
     await request(app)
       .get("/api/harness/web-search/credentials/exa")
-      .expect(200, { provider: "exa", credentialRef: "piarium-web-search-exa", configured: true });
+      .expect(200, { provider: "exa", credentialRef: "varin-web-search-exa", configured: true });
     await request(app).delete("/api/harness/web-search/credentials/exa").expect(200);
-    expect(removeAuth).toHaveBeenCalledWith("piarium-web-search-exa");
+    expect(removeAuth).toHaveBeenCalledWith("varin-web-search-exa");
 
     const protectedApp = express();
     const readAuth = vi.fn();

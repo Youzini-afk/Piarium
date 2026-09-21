@@ -12,7 +12,7 @@ type VimAdapterOptions = {
   statusNode: HTMLElement;
 };
 
-type PiariumMonacoVimAdapter = {
+type VarinMonacoVimAdapter = {
   dispose(): void;
   mode(): VimMode;
 };
@@ -21,9 +21,9 @@ const clamp = (value: number, minimum: number, maximum: number): number => (
   Math.min(Math.max(value, minimum), maximum)
 );
 
-export const createPiariumMonacoVimAdapter = (
+export const createVarinMonacoVimAdapter = (
   options: VimAdapterOptions,
-): PiariumMonacoVimAdapter => {
+): VarinMonacoVimAdapter => {
   const { commandAriaLabel, editor: editorInstance, monaco, onSave, statusNode } = options;
   const modeNode = document.createElement('span');
   const keyNode = document.createElement('span');
@@ -106,7 +106,7 @@ export const createPiariumMonacoVimAdapter = (
   };
   const executeEdit = (range: import('monaco-editor/editor').IRange, text: string): void => {
     editorInstance.pushUndoStop();
-    editorInstance.executeEdits('piarium.vim', [{ range, text, forceMoveMarkers: true }]);
+    editorInstance.executeEdits('varin.vim', [{ range, text, forceMoveMarkers: true }]);
     editorInstance.pushUndoStop();
   };
   const currentLineRange = (lineCount = 1): import('monaco-editor/editor').Range | null => {

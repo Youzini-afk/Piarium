@@ -58,7 +58,7 @@ const captureError = async (callback: () => Promise<void>): Promise<unknown> => 
 };
 
 describe('gitApiHttp index mutations', () => {
-  test('clones through the Piarium runtime and sends only the selected identity id', async () => {
+  test('clones through the Varin runtime and sends only the selected identity id', async () => {
     installWindowMock();
     const calls: FetchCall[] = [];
     globalThis.fetch = (async (input, init) => {

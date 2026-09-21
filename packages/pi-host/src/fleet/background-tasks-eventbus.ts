@@ -2,7 +2,7 @@ import type {
   PiFleetActionDescriptor,
   PiFleetEntry,
   PiFleetLogsData,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   assertClosed,
   isRecord,

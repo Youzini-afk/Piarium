@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiResourceKind, PiResourceScope } from '@piarium/protocol';
+import type { PiResourceKind, PiResourceScope } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -31,9 +31,9 @@ interface PiResourceSidebarProps {
 }
 
 const NAME_ERROR_KEYS = {
-  empty: 'settings.piarium.resources.nameError.empty',
-  reserved: 'settings.piarium.resources.nameError.reserved',
-  separator: 'settings.piarium.resources.nameError.separator',
+  empty: 'settings.varin.resources.nameError.empty',
+  reserved: 'settings.varin.resources.nameError.reserved',
+  separator: 'settings.varin.resources.nameError.separator',
 } satisfies Record<'empty' | 'reserved' | 'separator', I18nKey>;
 
 export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onItemSelect }) => {
@@ -61,7 +61,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
   const projectBlocked = scope === 'project' && pane.catalog?.projectTrusted === false;
 
   const confirmDiscard = React.useCallback(() => (
-    !dirty || window.confirm(t('settings.piarium.resources.discardConfirm'))
+    !dirty || window.confirm(t('settings.varin.resources.discardConfirm'))
   ), [dirty, t]);
 
   const refresh = React.useCallback(async () => {
@@ -88,7 +88,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
     if (!success) return;
     setName('');
     setCreating(false);
-    toast.success(t('settings.piarium.resources.toast.created'));
+    toast.success(t('settings.varin.resources.toast.created'));
     onItemSelect?.();
   }, [createResource, kind, name, nameError, onItemSelect, pane.mutating, projectBlocked, runtimeTarget, scope, t, targetKey]);
 
@@ -98,8 +98,8 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
         <div className="flex items-center justify-between gap-2">
           <h2 className={SETTINGS_PANEL_TITLE_CLASS}>
             {kind === 'prompt'
-              ? t('settings.piarium.prompts.sidebar.title')
-              : t('settings.piarium.skills.sidebar.title')}
+              ? t('settings.varin.prompts.sidebar.title')
+              : t('settings.varin.skills.sidebar.title')}
           </h2>
           <div className="flex items-center gap-1">
             <Button
@@ -109,7 +109,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
               className="h-7 w-7 px-0 text-muted-foreground"
               disabled={pane.loadingCatalog || pane.mutating}
               onClick={() => void refresh()}
-              aria-label={t('settings.piarium.recovery.actions.refresh')}
+              aria-label={t('settings.varin.recovery.actions.refresh')}
             >
               <Icon name="refresh" className={cn('size-3.5', pane.loadingCatalog && 'animate-spin')} />
             </Button>
@@ -120,7 +120,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
               className="h-7 w-7 px-0 text-muted-foreground"
               disabled={pane.mutating}
               onClick={() => setCreating((current) => !current)}
-              aria-label={t('settings.piarium.resources.actions.create')}
+              aria-label={t('settings.varin.resources.actions.create')}
             >
               <Icon name={creating ? 'close' : 'add'} className="size-4" />
             </Button>
@@ -132,7 +132,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('settings.piarium.resources.search.placeholder')}
+            placeholder={t('settings.varin.resources.search.placeholder')}
             className="h-8 pl-8"
           />
         </div>
@@ -165,7 +165,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">{t('settings.piarium.resources.scope.user')}</SelectItem>
+                  <SelectItem value="user">{t('settings.varin.resources.scope.user')}</SelectItem>
                   <SelectItem value="project" disabled={pane.catalog?.projectTrusted === false}>
                     {t('settings.common.scope.project')}
                   </SelectItem>
@@ -176,7 +176,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
                 size="sm"
                 disabled={Boolean(nameError) || projectBlocked || pane.mutating}
               >
-                {t('settings.piarium.resources.actions.create')}
+                {t('settings.varin.resources.actions.create')}
               </Button>
             </div>
             {name && nameError ? (
@@ -187,7 +187,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
           </form>
         ) : null}
         <p className="typography-micro text-muted-foreground">
-          {t('settings.piarium.resources.total', { count: pane.catalog?.resources.length ?? 0 })}
+          {t('settings.varin.resources.total', { count: pane.catalog?.resources.length ?? 0 })}
         </p>
       </div>
 
@@ -195,8 +195,8 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
         {!pane.loadingCatalog && resources.length === 0 ? (
           <div className="px-3 py-10 text-center text-muted-foreground">
             <Icon name={kind === 'prompt' ? 'file-text' : 'sparkling'} className="mx-auto size-9 opacity-50" />
-            <p className="mt-3 typography-ui-label">{t('settings.piarium.resources.empty.title')}</p>
-            <p className="mt-1 typography-meta opacity-75">{t('settings.piarium.resources.empty.description')}</p>
+            <p className="mt-3 typography-ui-label">{t('settings.varin.resources.empty.title')}</p>
+            <p className="mt-1 typography-meta opacity-75">{t('settings.varin.resources.empty.description')}</p>
           </div>
         ) : resources.map((resource) => {
           const selected = resource.id === pane.selectedId;
@@ -226,7 +226,7 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
                   </span>
                   {!resource.valid ? (
                     <span className="shrink-0 typography-micro text-[var(--status-warning)]">
-                      {t('settings.piarium.resources.status.invalid')}
+                      {t('settings.varin.resources.status.invalid')}
                     </span>
                   ) : null}
                 </span>

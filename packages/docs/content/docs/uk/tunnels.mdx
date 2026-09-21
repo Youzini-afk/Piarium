@@ -1,17 +1,17 @@
 ---
 title: Тунелі
-description: Безпечно відкрийте Piarium для віддаленого та мобільного доступу.
+description: Безпечно відкрийте Varin для віддаленого та мобільного доступу.
 ---
 
 # Тунелі
 
-Тунель — це публічне посилання на ваш Piarium, щоб дістатися до нього зі звичайного браузера в іншій мережі. Скористайтеся `piarium tunnel`, щоб створити його для запущеного інстансу.
+Тунель — це публічне посилання на ваш Varin, щоб дістатися до нього зі звичайного браузера в іншій мережі. Скористайтеся `varin tunnel`, щоб створити його для запущеного інстансу.
 
 > Для підключення **власних пристроїв** (мобільного застосунку, іншого десктопа) тунель зазвичай не потрібен — краще [зв'яжіть їх](/uk/connect-devices/) і дозвольте наскрізно зашифрованому [Private Relay](/uk/private-relay/) забезпечити доступ поза домом без жодних налаштувань.
 
 ## Передумови
 
-Piarium запускає CLI провайдера тунелю на вашій машині. Спочатку встановіть провайдера, який хочете використовувати:
+Varin запускає CLI провайдера тунелю на вашій машині. Спочатку встановіть провайдера, який хочете використовувати:
 
 ```bash
 brew install cloudflared
@@ -26,35 +26,35 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Швидкий старт
 
-1. Запустіть Piarium:
+1. Запустіть Varin:
 
 ```bash
-piarium
+varin
 ```
 
-Якщо пропустити цей крок, `piarium tunnel start` може автоматично запустити CLI server. Під час auto-start можна передати server options: `--port`, `--host`, `--lan`, `--ui-password` і `--api-only`.
+Якщо пропустити цей крок, `varin tunnel start` може автоматично запустити CLI server. Під час auto-start можна передати server options: `--port`, `--host`, `--lan`, `--ui-password` і `--api-only`.
 
 2. Запустіть тунель Cloudflare:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode quick
+varin tunnel start --provider cloudflare --mode quick
 ```
 
 Або запустіть тунель Ngrok:
 
 ```bash
-piarium tunnel start --provider ngrok --mode quick
+varin tunnel start --provider ngrok --mode quick
 ```
 
 3. Перевірте статус:
 
 ```bash
-piarium tunnel status
+varin tunnel status
 ```
 
-Коли тунель піднято, `status` показує публічний URL. Відкрийте його або відскануйте QR-код, щоб дістатися до Piarium звідусіль.
+Коли тунель піднято, `status` показує публічний URL. Відкрийте його або відскануйте QR-код, щоб дістатися до Varin звідусіль.
 
-Типово Piarium виводить QR-код в інтерактивних TTY-сесіях. Використовуйте `--qr`, щоб примусово вивести QR, або `--no-qr`, щоб вимкнути його.
+Типово Varin виводить QR-код в інтерактивних TTY-сесіях. Використовуйте `--qr`, щоб примусово вивести QR, або `--no-qr`, щоб вимкнути його.
 
 ## Провайдери
 
@@ -68,7 +68,7 @@ piarium tunnel status
 Використовуйте токен + хостнейм, керовані Cloudflare:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+varin tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
 ```
 
 ### Кероване локальне
@@ -76,7 +76,7 @@ piarium tunnel start --provider cloudflare --mode managed-remote --token-file ~/
 Використовуйте локальний конфіг `cloudflared`:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+varin tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 ```
 
 ## Профілі (managed-remote)
@@ -84,29 +84,29 @@ piarium tunnel start --provider cloudflare --mode managed-local --config ~/.clou
 Збережіть багаторазовий профіль:
 
 ```bash
-piarium tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+varin tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
 ```
 
 Запуск зі збереженим профілем:
 
 ```bash
-piarium tunnel start --profile prod-main
+varin tunnel start --profile prod-main
 ```
 
 ## Корисні команди
 
 ```bash
-piarium tunnel providers
-piarium tunnel ready --provider cloudflare
-piarium tunnel ready --provider ngrok
-piarium tunnel doctor --provider cloudflare
-piarium tunnel doctor --provider ngrok
-piarium tunnel stop --port 3000
+varin tunnel providers
+varin tunnel ready --provider cloudflare
+varin tunnel ready --provider ngrok
+varin tunnel doctor --provider cloudflare
+varin tunnel doctor --provider ngrok
+varin tunnel stop --port 3000
 ```
 
 ## Нотатки щодо поведінки
 
-- один активний тунель на інстанс Piarium (порт)
+- один активний тунель на інстанс Varin (порт)
 - запуск нового режиму/провайдера на тому самому інстансі замінює попередній тунель
 - генерація нового посилання для підключення відкликає попереднє невикористане
 - авто-старт тунелю зберігає серверні прапорці на кшталт `--ui-password` та `--api-only` у налаштуваннях інстансу, які використовуються під час рестарту/оновлення
@@ -116,5 +116,5 @@ piarium tunnel stop --port 3000
 - [Підключення пристрою](/uk/connect-devices/) — зв'яжіть власні пристрої без публічного URL
 - [Безпека](/uk/security/) — захистіть інтерфейс перед відкриттям доступу
 - [Десктопні тунелі](/uk/desktop-tunnels/) — налаштування тунелю в десктопному застосунку без CLI-старту
-- [PWA та мобільний доступ](/uk/mobile/) — відкривайте Piarium з телефона
+- [PWA та мобільний доступ](/uk/mobile/) — відкривайте Varin з телефона
 - [Усунення несправностей](/uk/troubleshooting/) — якщо посилання тунелю не працює

@@ -13,9 +13,9 @@ import {
 const makeTempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-gh-terminal-'));
 
 describe('terminal GitHub auth helpers', () => {
-  it('writes the active Piarium GitHub account to gh hosts.yml', () => {
+  it('writes the active Varin GitHub account to gh hosts.yml', () => {
     const homeDir = makeTempHome();
-    const authFilePath = path.join(homeDir, '.config', 'piarium', 'github-auth.json');
+    const authFilePath = path.join(homeDir, '.config', 'varin', 'github-auth.json');
 
     const result = installTerminalGitHubAuth({
       auth: {
@@ -47,7 +47,7 @@ describe('terminal GitHub auth helpers', () => {
 
   it('installs a Git credential helper without storing the token in git config', () => {
     const homeDir = makeTempHome();
-    const authFilePath = path.join(homeDir, '.config', 'piarium', 'github-auth.json');
+    const authFilePath = path.join(homeDir, '.config', 'varin', 'github-auth.json');
     const spawnSync = vi.fn(() => ({ status: 0, error: null, stderr: Buffer.from('') }));
 
     const result = installTerminalGitHubAuth({
@@ -70,7 +70,7 @@ describe('terminal GitHub auth helpers', () => {
         '--global',
         '--replace-all',
         'credential.https://github.com.helper',
-        expect.stringContaining('git-credential-piarium-github.cjs'),
+        expect.stringContaining('git-credential-varin-github.cjs'),
       ],
       expect.objectContaining({ encoding: 'utf8' }),
     );

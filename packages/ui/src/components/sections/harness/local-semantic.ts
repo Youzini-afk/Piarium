@@ -1,5 +1,5 @@
-import { runtimeFetch } from '@piarium/application-client';
-import type { LocalSemanticStatus } from '@piarium/protocol';
+import { runtimeFetch } from '@varin/application-client';
+import type { LocalSemanticStatus } from '@varin/protocol';
 
 const LOCAL_SEMANTIC_ENDPOINT = '/api/harness/local-semantic';
 

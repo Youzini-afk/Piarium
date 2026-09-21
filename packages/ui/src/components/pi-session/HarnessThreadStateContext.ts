@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ThreadParent } from '@piarium/protocol';
+import type { ThreadParent } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
 export interface HarnessThreadStateValue {

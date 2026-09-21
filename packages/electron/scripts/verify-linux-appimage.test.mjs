@@ -15,16 +15,16 @@ const writeElf = (filePath, architecture) => {
 };
 
 const createPayload = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-payload-test-'));
-  fs.writeFileSync(path.join(root, 'piarium.desktop'), [
-    '[Desktop Entry]', 'Name=Piarium', 'Exec=AppRun --no-sandbox %U', 'Icon=piarium', 'StartupWMClass=piarium', '',
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-payload-test-'));
+  fs.writeFileSync(path.join(root, 'varin.desktop'), [
+    '[Desktop Entry]', 'Name=Varin', 'Exec=AppRun --no-sandbox %U', 'Icon=varin', 'StartupWMClass=varin', '',
   ].join('\n'));
-  writeElf(path.join(root, 'piarium'), 'x64');
+  writeElf(path.join(root, 'varin'), 'x64');
   writeElf(
     path.join(root, 'resources/app.asar.unpacked/node_modules/triviumdb/triviumdb.linux-x64-gnu.node'),
     'x64',
   );
-  writeElf(path.join(root, 'resources/kernel/piarium-kernel'), 'x64');
+  writeElf(path.join(root, 'resources/kernel/varin-kernel'), 'x64');
   for (const name of ['sherpa-onnx.node']) {
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules', name), 'x64');
   }
@@ -32,7 +32,7 @@ const createPayload = () => {
 };
 
 test('reads supported ELF architectures', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-elf-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-elf-test-'));
   try {
     writeElf(path.join(root, 'x64'), 'x64');
     writeElf(path.join(root, 'arm64'), 'arm64');

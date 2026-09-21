@@ -1,25 +1,25 @@
 # Reverse proxy setup
 
-Use this guide when exposing a Piarium Web deployment through Nginx, Nginx Proxy Manager, Caddy, or
+Use this guide when exposing a Varin Web deployment through Nginx, Nginx Proxy Manager, Caddy, or
 another trusted TLS reverse proxy. Containers already expose one HTTP service on port `3000`; the
 proxy must forward the complete origin rather than selecting only ordinary REST requests.
 
 ## Before adding a proxy
 
-1. Start Piarium on loopback or a private interface and confirm `GET /health` succeeds.
-2. Set a long random `PIARIUM_UI_PASSWORD` before allowing traffic from outside the local machine.
-3. Keep `PIARIUM_DATA_DIR` and workspaces outside immutable release directories.
-4. Terminate TLS at the proxy. Do not publish an unauthenticated plain-HTTP Piarium server.
+1. Start Varin on loopback or a private interface and confirm `GET /health` succeeds.
+2. Set a long random `VARIN_UI_PASSWORD` before allowing traffic from outside the local machine.
+3. Keep `VARIN_DATA_DIR` and workspaces outside immutable release directories.
+4. Terminate TLS at the proxy. Do not publish an unauthenticated plain-HTTP Varin server.
 
 ## Current realtime routes
 
-Piarium no longer exposes the former OpenCode `/api/event`, `/api/global/event`, or matching
+Varin no longer exposes the former OpenCode `/api/event`, `/api/global/event`, or matching
 WebSocket routes. A proxy for the current Pi-native product must preserve:
 
 | Transport | Routes | Requirement |
 | --- | --- | --- |
-| WebSocket | `/api/piarium/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
-| SSE | `/api/piarium/events`, `/api/notifications/stream` | Disable proxy buffering, caching, and response transformation |
+| WebSocket | `/api/varin/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
+| SSE | `/api/varin/events`, `/api/notifications/stream` | Disable proxy buffering, caching, and response transformation |
 | HTTP | `/api/*`, `/auth/*`, `/health`, application assets | Preserve method, body, cookies, authorization, and normal forwarded headers |
 
 The application authenticates these routes and checks WebSocket origins. Do not strip cookies,
@@ -33,28 +33,28 @@ must not be compressed or buffered by an intermediary that delays chunks.
 ## Nginx
 
 ```nginx
-map $http_upgrade $piarium_connection_upgrade {
+map $http_upgrade $varin_connection_upgrade {
     default upgrade;
     ''      close;
 }
 
-upstream piarium {
+upstream varin {
     server 127.0.0.1:3000;
     keepalive 16;
 }
 
 server {
     listen 443 ssl http2;
-    server_name piarium.example.com;
+    server_name varin.example.com;
 
     # Configure ssl_certificate / ssl_certificate_key for your deployment.
     client_max_body_size 100m;
 
-    location ~ ^/api/(piarium/runtime|terminal|dictation)/ws$ {
-        proxy_pass http://piarium;
+    location ~ ^/api/(varin/runtime|terminal|dictation)/ws$ {
+        proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $piarium_connection_upgrade;
+        proxy_set_header Connection $varin_connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -64,8 +64,8 @@ server {
         proxy_send_timeout 1h;
     }
 
-    location ~ ^/api/(piarium/events|notifications/stream)$ {
-        proxy_pass http://piarium;
+    location ~ ^/api/(varin/events|notifications/stream)$ {
+        proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Connection '';
         proxy_set_header Host $host;
@@ -83,7 +83,7 @@ server {
     }
 
     location / {
-        proxy_pass http://piarium;
+        proxy_pass http://varin;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -106,7 +106,7 @@ Caddy forwards WebSocket upgrades automatically. `flush_interval -1` ensures SSE
 without proxy buffering:
 
 ```caddy
-piarium.example.com {
+varin.example.com {
     reverse_proxy 127.0.0.1:3000 {
         flush_interval -1
         header_up Host {host}

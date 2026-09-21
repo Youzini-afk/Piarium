@@ -1,34 +1,34 @@
 ---
 title: Outil de contrôle d’agent
-description: Laissez un agent gérer les sessions Piarium, les worktrees et les tâches planifiées depuis le chat.
+description: Laissez un agent gérer les sessions Varin, les worktrees et les tâches planifiées depuis le chat.
 ---
 
 # Outil de contrôle d’agent
 
-Utilisez l’outil de contrôle d’agent Piarium pour gérer le travail dans l’application directement depuis le chat. Il est disponible sur desktop et web quand Piarium exécute son runtime Pi local. Il n’y a pas d’outil séparé à installer ni de commande shell à exécuter.
+Utilisez l’outil de contrôle d’agent Varin pour gérer le travail dans l’application directement depuis le chat. Il est disponible sur desktop et web quand Varin exécute son runtime Pi local. Il n’y a pas d’outil séparé à installer ni de commande shell à exécuter.
 
 ## Ce que vous pouvez demander
 
 Demandez à l’agent en langage courant. Par exemple :
 
-- « Crée une nouvelle session Piarium dans ce projet, utilise le modèle `openai/gpt-5.6-sol`, et envoie-lui ce prompt : revoir le flux d’authentification. »
-- « Crée une nouvelle session Piarium pour cette tâche dans un worktree séparé, et demande-lui d’ajouter des tests pour le flux de connexion. »
-- « Utilise Piarium pour lister mes 10 sessions les plus récentes et inclure leur état actuel. »
-- « Crée une tâche planifiée Piarium nommée Weekday review qui envoie ce prompt à 09:00 chaque jour de semaine : revoir les changements depuis la dernière exécution. »
-- « Exécute maintenant la tâche planifiée Piarium nommée Weekday review. »
-- « Vérifie la session Piarium nommée Authentication review et montre-moi sa dernière réponse d’assistant. »
+- « Crée une nouvelle session Varin dans ce projet, utilise le modèle `openai/gpt-5.6-sol`, et envoie-lui ce prompt : revoir le flux d’authentification. »
+- « Crée une nouvelle session Varin pour cette tâche dans un worktree séparé, et demande-lui d’ajouter des tests pour le flux de connexion. »
+- « Utilise Varin pour lister mes 10 sessions les plus récentes et inclure leur état actuel. »
+- « Crée une tâche planifiée Varin nommée Weekday review qui envoie ce prompt à 09:00 chaque jour de semaine : revoir les changements depuis la dernière exécution. »
+- « Exécute maintenant la tâche planifiée Varin nommée Weekday review. »
+- « Vérifie la session Varin nommée Authentication review et montre-moi sa dernière réponse d’assistant. »
 
-L’outil peut lister les projets et les préférences de modèle, créer des sessions et les relancer, forker une session, créer des sessions worktree isolées, et gérer les tâches planifiées. Les sessions démarrées ainsi apparaissent dans Piarium comme n’importe quelle autre session, donc vous pouvez les ouvrir et continuer le travail vous-même.
+L’outil peut lister les projets et les préférences de modèle, créer des sessions et les relancer, forker une session, créer des sessions worktree isolées, et gérer les tâches planifiées. Les sessions démarrées ainsi apparaissent dans Varin comme n’importe quelle autre session, donc vous pouvez les ouvrir et continuer le travail vous-même.
 
 ## À garder en tête
 
-- Les prompts de nouvelle session reviennent immédiatement par défaut. Suivez la session dans Piarium, ou demandez à l’agent de la vérifier plus tard.
+- Les prompts de nouvelle session reviennent immédiatement par défaut. Suivez la session dans Varin, ou demandez à l’agent de la vérifier plus tard.
 - Un worktree séparé n’est créé que si vous le demandez. Les changements non commités de votre worktree actuel n’y sont pas copiés.
 - L’outil ne peut pas supprimer des sessions ou des worktrees, enregistrer des chemins de projet, exécuter des commandes shell arbitraires, ni appeler des URL arbitraires.
 
 ## Activer ou désactiver l’outil
 
-Ouvrez **Settings**, changez **Agent control tool**, puis enregistrez. Le réglage s’applique au runtime Piarium actuel.
+Ouvrez **Settings**, changez **Agent control tool**, puis enregistrez. Le réglage s’applique au runtime Varin actuel.
 
 
 ## Pages liées

@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiAssistantMessage } from '@piarium/protocol';
+import type { PiAssistantMessage } from '@varin/protocol';
 import { I18nProvider } from '@/lib/i18n';
 import type { PiTimelineTurn } from './piTimelineProjection';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';

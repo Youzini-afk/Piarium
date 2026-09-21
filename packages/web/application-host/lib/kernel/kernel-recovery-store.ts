@@ -8,7 +8,7 @@ import type {
   WorkspaceRecoveryTurnBinding,
   WorkspaceRecoveryTurnSettledInput,
   WorkspaceRecoveryTurnStartInput,
-} from "@piarium/extension-contract";
+} from "@varin/extension-contract";
 import type {
   CapturedState,
   CaptureStateOptions,
@@ -525,7 +525,7 @@ export class KernelRecoveryStore {
     const recordedKeys = new Set(recorded.map(comparison));
     const observed = [...new Set(input.observedResourceIds
       .map(normalizeResourceId)
-      .filter((value): value is string => Boolean(value) && !/\.piarium-(?:tmp|restore|recovery)-/u.test(value)))].sort();
+      .filter((value): value is string => Boolean(value) && !/\.varin-(?:tmp|restore|recovery)-/u.test(value)))].sort();
     const unrecorded = observed.filter((value) => !recordedKeys.has(comparison(value)));
     const retainedFailure = row.status === "incomplete" && row.failure && typeof row.failure === "object"
       ? row.failure as Record<string, unknown>

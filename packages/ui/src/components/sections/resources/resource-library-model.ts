@@ -2,7 +2,7 @@ import type {
   PiResourceDescriptor,
   PiResourceDiagnostic,
   PiResourceKind,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export const createPiResourceStarter = (kind: PiResourceKind, rawName: string): string => {
   const name = rawName.trim().replace(/\.md$/i, '');

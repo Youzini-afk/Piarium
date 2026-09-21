@@ -27,8 +27,8 @@ import { isDesktopShell } from '@/lib/desktop';
 import {
   getProjectActionsState,
   saveProjectActionsState,
-  type PiariumProjectAction,
-  type PiariumProjectRef as ProjectRef,
+  type VarinProjectAction,
+  type VarinProjectRef as ProjectRef,
 } from '@/lib/project-config';
 import {
   buildProjectActionDesktopForwardOptions,
@@ -45,7 +45,7 @@ import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint'
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-type EditableProjectAction = PiariumProjectAction;
+type EditableProjectAction = VarinProjectAction;
 
 const AUTO_SAVE_DELAY_MS = 450;
 

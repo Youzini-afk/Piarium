@@ -6,7 +6,7 @@ import type {
   HarnessRequestData,
   HarnessServiceMap,
   AgentInputContext,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 interface PendingRequest {
   cleanup?: () => void;
@@ -51,7 +51,7 @@ export class HostServicesBridge {
 
   /**
    * The input source accepted for the current turn. Surface-aware mutations
-   * still ask Host `document.surfaceWrite`; in Piarium production, disk-sourced
+   * still ask Host `document.surfaceWrite`; in Varin production, disk-sourced
    * targets are applied by Host Documents through the Rust file-resource backend.
    */
   inputContext(): AgentInputContext | undefined {

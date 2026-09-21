@@ -4,8 +4,8 @@ import type {
   SmartSearchConfigResponse,
   SmartSearchDoctorResponse,
   SmartSearchStatusResponse,
-} from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+} from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 const STATUS_ENDPOINT = '/api/smart-search/status';
 const CONFIG_ENDPOINT = '/api/smart-search/config';

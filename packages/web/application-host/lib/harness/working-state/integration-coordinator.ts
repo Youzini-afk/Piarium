@@ -3,7 +3,7 @@ import type {
   IntegrationApplyPhase,
   ThreadConflictResolution,
   ThreadIntegrationPreview,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type {
   DocumentSurfaceOperationRequest,
   DocumentSurfaceOperationResult,

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiCommandDescriptor, PiCommandSource } from '@piarium/protocol';
+import type { PiCommandDescriptor, PiCommandSource } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,7 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -18,17 +18,17 @@ const SOURCE_DETAILS: Readonly<Record<PiCommandSource, {
   labelKey: I18nKey;
 }>> = {
   extension: {
-    labelKey: 'settings.piarium.commands.source.extension.title',
-    descriptionKey: 'settings.piarium.commands.source.extension.description',
+    labelKey: 'settings.varin.commands.source.extension.title',
+    descriptionKey: 'settings.varin.commands.source.extension.description',
   },
   prompt: {
-    labelKey: 'settings.piarium.commands.source.prompt.title',
-    descriptionKey: 'settings.piarium.commands.source.prompt.description',
+    labelKey: 'settings.varin.commands.source.prompt.title',
+    descriptionKey: 'settings.varin.commands.source.prompt.description',
     destination: 'prompts',
   },
   skill: {
-    labelKey: 'settings.piarium.commands.source.skill.title',
-    descriptionKey: 'settings.piarium.commands.source.skill.description',
+    labelKey: 'settings.varin.commands.source.skill.title',
+    descriptionKey: 'settings.varin.commands.source.skill.description',
     destination: 'skills',
   },
 };
@@ -120,19 +120,19 @@ export const CommandsPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.commands.title')}
-      description={t('settings.piarium.commands.description')}
+      description={t('settings.varin.commands.description')}
       headerEnd={(
         <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
           <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
-          {t('settings.piarium.commands.actions.refresh')}
+          {t('settings.varin.commands.actions.refresh')}
         </Button>
       )}
       showSaveStatus={false}
     >
       <SettingsSection
         settingsItem="commands.catalog"
-        title={t('settings.piarium.commands.catalog.title')}
-        description={t('settings.piarium.commands.catalog.description')}
+        title={t('settings.varin.commands.catalog.title')}
+        description={t('settings.varin.commands.catalog.description')}
         divider={false}
       >
         <div className="max-w-xl">
@@ -170,8 +170,8 @@ export const CommandsPage: React.FC = () => {
                         onClick={() => setSettingsPage(details.destination!)}
                       >
                         {details.destination === 'prompts'
-                          ? t('settings.piarium.commands.actions.openPrompts')
-                          : t('settings.piarium.commands.actions.openSkills')}
+                          ? t('settings.varin.commands.actions.openPrompts')
+                          : t('settings.varin.commands.actions.openSkills')}
                       </Button>
                     ) : null}
                   </div>

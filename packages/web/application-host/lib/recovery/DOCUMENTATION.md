@@ -1,6 +1,6 @@
 # Affected-file recovery journal
 
-Piarium message recovery is an operation journal, not a workspace archive.
+Varin message recovery is an operation journal, not a workspace archive.
 
 ## Normal turn path
 
@@ -10,7 +10,7 @@ Piarium message recovery is an operation journal, not a workspace archive.
    Before the original tool executes, the worker sends `workspace.mutation.request` and waits.
 4. The recovery service resolves that one path, stores its old state and content-addressed bytes, then
    acknowledges the worker. The tool can now write.
-5. After the tool returns or throws, the worker waits while Piarium records the final state. Repeated
+5. After the tool returns or throws, the worker waits while Varin records the final state. Repeated
    writes to one path preserve the first before-image and the last after-image.
 6. Turn settlement compares watcher paths with the exact journal. An unchanged turn is a ready
    zero-path checkpoint. A path changed only by `bash`, a terminal, Git, or another uncontrolled process
@@ -21,7 +21,7 @@ with the files actually written by the journalled tools.
 
 ## Restore path
 
-Conversation navigation reports the entry IDs that will leave the active Pi branch. Piarium loads the
+Conversation navigation reports the entry IDs that will leave the active Pi branch. Varin loads the
 turn checkpoints bound to those entries and folds their path operations into:
 
 - the expected current state for each affected path;
@@ -29,11 +29,11 @@ turn checkpoints bound to those entries and folds their path operations into:
 
 Preparation hashes only those paths. Matching paths restore immediately. A later user edit or dirty
 buffer becomes a path conflict and is the only normal reason to show the recovery chooser. Before any
-write, Piarium stores the current version of the affected paths as the redo/compensation state. It does
+write, Varin stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
 The durable operation/file record is owned by the Rust kernel. If file application or Pi navigation
-fails, Piarium compensates only paths already changed by that operation. Startup resolves an interrupted
+fails, Varin compensates only paths already changed by that operation. Startup resolves an interrupted
 operation from those recorded paths; it never leaves the workspace locked while waiting for a conversation
 step. The former local SQLite recovery engine is test-fixture code only and is not a production fallback.
 
@@ -61,7 +61,7 @@ side effect; local SQLite operation rows remain only in isolated fixtures. The p
 revision for file CAS and terminal completion, so a lost response is reconciled by operation identity rather
 than replaying a mutation.
 
-`write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation
+`write` and `edit` have exact before/after coverage because Varin pauses them at the mutation
 boundary. A generic native process can modify unknown paths without a portable pre-write hook. Watcher
 events identify those paths only after the change, so such a turn is explicitly incomplete for combined
 rollback. Conversation-only rollback remains available.
@@ -72,8 +72,8 @@ shell rollback without a real copy-on-write or operating-system interception pro
 
 ## Persistence
 
-The built-in `piarium.builtin.recovery` provider shares the Rust kernel storage authority with WorkingState.
-Its product location is the Application Host kernel root below `PIARIUM_DATA_DIR/kernel/<hostId>` and it
+The built-in `varin.builtin.recovery` provider shares the Rust kernel storage authority with WorkingState.
+Its product location is the Application Host kernel root below `VARIN_DATA_DIR/kernel/<hostId>` and it
 reports `{ mode: "application-data" }` with `storageManagement: false`. It cannot be moved independently:
 doing so would split recovery references from the WorkingState/object transaction domain that R1 deliberately
 made authoritative. The Recovery settings UI therefore exposes location and migration controls only when the

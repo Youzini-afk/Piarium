@@ -1,7 +1,7 @@
 {
-  "name": "Piarium - Pi Coding Workspace",
-  "short_name": "Piarium",
-  "description": "Piarium is a Pi-native coding workspace for desktop and web",
+  "name": "Varin - Agent Workspace",
+  "short_name": "Varin",
+  "description": "Varin is an independent agent workspace and harness for coding and research",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#151313",

@@ -1,12 +1,12 @@
 import type { PiSessionFeatureState } from "./session-features.js";
 import type { SessionWorkFocusSnapshot } from "./work-focus.js";
 
-// Piarium is pre-release and all product surfaces ship in lockstep. Breaking
+// Varin is pre-release and all product surfaces ship in lockstep. Breaking
 // development changes replace this single contract instead of accumulating
 // compatibility versions that no released client needs.
-export const PIARIUM_PROTOCOL_VERSION = 1 as const;
+export const VARIN_PROTOCOL_VERSION = 1 as const;
 
-export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
+export type ProtocolVersion = typeof VARIN_PROTOCOL_VERSION;
 
 export type JsonPrimitive = boolean | number | string | null;
 
@@ -198,7 +198,7 @@ export interface SessionSummary {
   updatedAt: string;
   workspace?: SessionWorkspaceBinding;
   workspacePersistence?: "pending";
-  /** Present for Piarium-managed sessions after broker metadata projection. */
+  /** Present for Varin-managed sessions after broker metadata projection. */
   workFocus?: SessionWorkFocusSnapshot;
 }
 

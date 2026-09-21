@@ -12,7 +12,7 @@ import { listProductSkillIds, seedProductSkills } from "./product-skills.js";
 
 const tmpDirs: string[] = [];
 const makeAgentDir = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "piarium-skills-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "varin-skills-"));
   tmpDirs.push(dir);
   return dir;
 };
@@ -29,8 +29,8 @@ describe("product skill seeding", () => {
     for (const id of listProductSkillIds()) {
       const file = path.join(agentDir, "skills", id, "SKILL.md");
       assert.ok(fs.existsSync(file), `${id} should exist`);
-      assert.match(fs.readFileSync(file, "utf8"), /^---\nname: piarium-/);
-      assert.ok(fs.existsSync(path.join(agentDir, "skills", id, ".piarium-managed")));
+      assert.match(fs.readFileSync(file, "utf8"), /^---\nname: varin-/);
+      assert.ok(fs.existsSync(path.join(agentDir, "skills", id, ".varin-managed")));
     }
   });
 

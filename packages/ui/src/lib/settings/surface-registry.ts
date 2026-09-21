@@ -2,18 +2,18 @@ import React from 'react';
 import {
   type SurfaceContribution,
   type SurfaceRegistrySnapshot,
-} from '@piarium/extension-surface';
-import type { JsonValue } from '@piarium/extension-contract';
+} from '@varin/extension-surface';
+import type { JsonValue } from '@varin/extension-contract';
 import {
   createBuiltinSurfaceController,
-  piariumSurfaceRuntime,
+  varinSurfaceRuntime,
   type BuiltinSurfaceController,
 } from '@/lib/extensions/surface-runtime';
-import { startBuiltinPiariumExtensions } from '@/lib/extensions/builtin-surface-manager';
-import type { SurfaceActivation } from '@piarium/extension-surface';
+import { startBuiltinVarinExtensions } from '@/lib/extensions/builtin-surface-manager';
+import type { SurfaceActivation } from '@varin/extension-surface';
 import type { SettingsPageImplementation, SettingsPageMeta, SettingsPageRegistration } from './page-types';
 
-export { piariumSurfaceRuntime };
+export { varinSurfaceRuntime };
 
 let builtinSettingsController: BuiltinSurfaceController | null = null;
 
@@ -35,11 +35,11 @@ const requireBuiltinSettingsController = (): BuiltinSurfaceController => {
 
 export const ensureBuiltinSettingsContributions = (): Promise<void> => {
   return requireBuiltinSettingsController().ensure().then(() => {
-    void startBuiltinPiariumExtensions().catch((error) => {
-      console.error('[Piarium Extensions] Failed to load built-in integration state:', error);
+    void startBuiltinVarinExtensions().catch((error) => {
+      console.error('[Varin Extensions] Failed to load built-in integration state:', error);
     });
   }).catch((error) => {
-    console.error('[Piarium Extensions] Failed to activate built-in settings contributions:', error);
+    console.error('[Varin Extensions] Failed to activate built-in settings contributions:', error);
     throw error;
   });
 };
@@ -97,12 +97,12 @@ export const settingsPageRegistrationsFromSnapshot = (
 
 export const getSettingsPageRegistrations = (): SettingsPageRegistration[] => {
   void ensureBuiltinSettingsContributions().catch(() => undefined);
-  return settingsPageRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot());
+  return settingsPageRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot());
 };
 
 export const subscribeSettingsPageRegistrations = (listener: () => void): (() => void) => {
   void ensureBuiltinSettingsContributions().catch(() => undefined);
-  return piariumSurfaceRuntime.subscribe(listener);
+  return varinSurfaceRuntime.subscribe(listener);
 };
 
 export const useSettingsPageRegistrations = (): SettingsPageRegistration[] => {
@@ -110,9 +110,9 @@ export const useSettingsPageRegistrations = (): SettingsPageRegistration[] => {
     void ensureBuiltinSettingsContributions().catch(() => undefined);
   }, []);
   const snapshot = React.useSyncExternalStore(
-    piariumSurfaceRuntime.subscribe,
-    piariumSurfaceRuntime.getSnapshot,
-    piariumSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.subscribe,
+    varinSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.getSnapshot,
   );
   return React.useMemo(() => settingsPageRegistrationsFromSnapshot(snapshot), [snapshot]);
 };

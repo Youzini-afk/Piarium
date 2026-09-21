@@ -150,7 +150,7 @@ function buildTunnelStartReplayCommand({
   tokenViaStdin,
   tokenFileProvided,
 }: TunnelReplayInput): string {
-  const parts = ['piarium', 'tunnel', 'start'];
+  const parts = ['varin', 'tunnel', 'start'];
   if (typeof port === 'number' && Number.isFinite(port) && port > 0) {
     parts.push('--port', String(port));
   }
@@ -198,7 +198,7 @@ function buildTunnelProfileAddCommand({ provider, hostname }: {
   provider?: string;
 }): string {
   const parts = [
-    'piarium',
+    'varin',
     'tunnel',
     'profile',
     'add',

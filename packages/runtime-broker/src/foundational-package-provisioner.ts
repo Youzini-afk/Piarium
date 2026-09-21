@@ -5,7 +5,7 @@ import {
   type FoundationalPiPackageStatusEntry,
   type PackageBootstrapResult,
   type PackageDescriptor,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   type PackageProvisioningReceiptDocument,
   type PackageProvisioningReceiptEntry,

@@ -1,6 +1,6 @@
 import type { ThemeMode } from '@/types/theme';
 
-export const PIARIUM_THEME_STORAGE_KEY = 'piarium.theme.v1';
+export const VARIN_THEME_STORAGE_KEY = 'varin.theme.v1';
 
 export type StoredThemeColors = {
   background: string;
@@ -65,7 +65,7 @@ export const parseStoredThemeState = (raw: string | null): StoredThemeState | nu
 export const readStoredThemeState = (): StoredThemeState | null => {
   if (typeof window === 'undefined') return null;
   try {
-    return parseStoredThemeState(window.localStorage.getItem(PIARIUM_THEME_STORAGE_KEY));
+    return parseStoredThemeState(window.localStorage.getItem(VARIN_THEME_STORAGE_KEY));
   } catch {
     return null;
   }
@@ -74,7 +74,7 @@ export const readStoredThemeState = (): StoredThemeState | null => {
 export const writeStoredThemeState = (state: StoredThemeState): void => {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(PIARIUM_THEME_STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(VARIN_THEME_STORAGE_KEY, JSON.stringify(state));
   } catch {
     // Theme persistence is only a first-paint optimization. React retains the
     // active theme when browser storage is unavailable.

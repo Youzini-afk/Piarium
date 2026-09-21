@@ -292,10 +292,10 @@ const supportsMethod = (record: LanguageSessionRecord, method: string, request: 
 
 const ownerScopeKey = (owner?: LanguageOwner | null): string => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
-  : 'piarium.host';
+  : 'varin.host';
 const exactOwnerKey = (owner?: LanguageOwner | null): string => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
-  : 'piarium.host\0host';
+  : 'varin.host\0host';
 
 const toFileUri = (absolutePath: string): string => pathToFileURL(absolutePath).href;
 
@@ -522,8 +522,8 @@ export const createLanguageSupervisor = ({
           workspaceId,
           languageId,
           view,
-          providerId: 'piarium.workspace-match',
-          providerOwnerKey: 'piarium.host\0activation',
+          providerId: 'varin.workspace-match',
+          providerOwnerKey: 'varin.host\0activation',
           generation: nextGeneration(key, existing),
           status: 'failed',
           message: error instanceof Error ? error.message : 'Language extension activation failed',

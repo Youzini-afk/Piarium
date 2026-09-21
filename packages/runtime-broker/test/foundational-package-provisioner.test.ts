@@ -4,7 +4,7 @@ import {
   FOUNDATIONAL_PI_PACKAGE_MANIFEST,
   type PackageBootstrapResult,
   type PackageDescriptor,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   reconcileFoundationalPackages,
   type PackageProvisioningReceiptDocument,

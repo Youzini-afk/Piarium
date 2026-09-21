@@ -3,7 +3,7 @@ import {
   RUNTIME_WORKER_ROLES,
   type RuntimeSourceKind,
   type RuntimeWorkerRole,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export interface HostArguments {
   agentDir?: string;
@@ -60,10 +60,10 @@ export function resolveHostRuntimeOptions(args: HostArguments): {
   packageRoot?: string;
   runtimeSource?: RuntimeSourceKind;
 } {
-  const packageRoot = args.packageRoot ?? process.env.PIARIUM_PI_PACKAGE_ROOT;
+  const packageRoot = args.packageRoot ?? process.env.VARIN_PI_PACKAGE_ROOT;
   const runtimeSource = args.runtimeSource
-    ?? (process.env.PIARIUM_RUNTIME_SOURCE
-      ? parseRuntimeSource(process.env.PIARIUM_RUNTIME_SOURCE)
+    ?? (process.env.VARIN_RUNTIME_SOURCE
+      ? parseRuntimeSource(process.env.VARIN_RUNTIME_SOURCE)
       : undefined);
   return {
     ...(packageRoot === undefined || packageRoot.trim() === "" ? {} : { packageRoot }),

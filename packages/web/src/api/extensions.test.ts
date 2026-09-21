@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const refreshLocalRuntimeUrlAuthToken = vi.fn();
 const fetchWithoutRuntimeRouting = vi.fn();
 
-vi.mock('@piarium/application-client', () => ({
+vi.mock('@varin/application-client', () => ({
   fetchWithoutRuntimeRouting,
   refreshLocalRuntimeUrlAuthToken,
 }));
@@ -23,9 +23,9 @@ describe('createWebExtensionsAPI', () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
-        __PIARIUM_API_BASE_URL__: 'https://remote-pi.example',
-        __PIARIUM_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
-        location: { href: 'piarium-ui://app/', origin: 'piarium-ui://app' },
+        __VARIN_API_BASE_URL__: 'https://remote-pi.example',
+        __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+        location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
     refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
@@ -51,16 +51,16 @@ describe('createWebExtensionsAPI', () => {
     expect(refreshLocalRuntimeUrlAuthToken).toHaveBeenCalledWith('http://127.0.0.1:57123');
     const target = new URL(String(fetchWithoutRuntimeRouting.mock.calls[0]?.[0]));
     expect(target.origin).toBe('http://127.0.0.1:57123');
-    expect(target.pathname).toBe('/api/piarium/extensions/v1/catalog');
-    expect(target.searchParams.get('piarium_url_token')).toBe('local-url-token');
+    expect(target.pathname).toBe('/api/varin/extensions/v1/catalog');
+    expect(target.searchParams.get('varin_url_token')).toBe('local-url-token');
   });
 
   it('reloads a local source by stored extension identity without sending a source specifier', async () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
-        __PIARIUM_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
-        location: { href: 'piarium-ui://app/', origin: 'piarium-ui://app' },
+        __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+        location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
     refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
@@ -86,7 +86,7 @@ describe('createWebExtensionsAPI', () => {
 
     expect(result.outcome).toBe('unchanged');
     const [target, init] = fetchWithoutRuntimeRouting.mock.calls[0] as [URL, RequestInit];
-    expect(target.pathname).toBe('/api/piarium/extensions/v1/extensions/dev.example.local/reload-local-source');
+    expect(target.pathname).toBe('/api/varin/extensions/v1/extensions/dev.example.local/reload-local-source');
     expect(JSON.parse(String(init.body))).toEqual({
       expectedRevision: 7,
       extensionId: 'dev.example.local',
@@ -98,8 +98,8 @@ describe('createWebExtensionsAPI', () => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
-        __PIARIUM_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
-        location: { href: 'piarium-ui://app/', origin: 'piarium-ui://app' },
+        __VARIN_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+        location: { href: 'varin-ui://app/', origin: 'varin-ui://app' },
       },
     });
     refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
@@ -124,7 +124,7 @@ describe('createWebExtensionsAPI', () => {
     });
 
     const [target, init] = fetchWithoutRuntimeRouting.mock.calls[0] as [URL, RequestInit];
-    expect(target.pathname).toBe('/api/piarium/extensions/v1/extensions/dev.example.local');
+    expect(target.pathname).toBe('/api/varin/extensions/v1/extensions/dev.example.local');
     expect(init.method).toBe('DELETE');
     expect(JSON.parse(String(init.body))).toEqual({
       deleteData: true,

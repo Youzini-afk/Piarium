@@ -8,12 +8,12 @@ import {
   type FoundationalPiPackageId,
   type FoundationalPiPackageIntent,
   type FoundationalPiPackageProvenance,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   createSettingsFileStore,
-  type PiariumSettingsDocument,
+  type VarinSettingsDocument,
   type SettingsFileStore,
-} from "@piarium/settings-store";
+} from "@varin/settings-store";
 
 export const PACKAGE_PROVISIONING_RECEIPT_FILE = "package-provisioning.json";
 export const PACKAGE_PROVISIONING_RECEIPT_VERSION = 1 as const;
@@ -101,7 +101,7 @@ function assertKnownEntry(
 }
 
 function parseReceiptDocument(
-  value: PiariumSettingsDocument,
+  value: VarinSettingsDocument,
   path: string,
 ): PackageProvisioningReceiptDocument {
   if (
@@ -132,7 +132,7 @@ function mergeEntry(
 }
 
 export function packageProvisioningReceiptPath(canonicalAgentDir: string): string {
-  return join(canonicalAgentDir, "piarium", PACKAGE_PROVISIONING_RECEIPT_FILE);
+  return join(canonicalAgentDir, "varin", PACKAGE_PROVISIONING_RECEIPT_FILE);
 }
 
 export class PackageProvisioningReceiptStore {
@@ -181,7 +181,7 @@ export class PackageProvisioningReceiptStore {
         throw new Error("Package provisioning receipt transaction must return a result object");
       }
       const document = parseReceiptDocument(
-        (transaction.document ?? current) as PiariumSettingsDocument,
+        (transaction.document ?? current) as VarinSettingsDocument,
         this.filePath,
       );
       return {

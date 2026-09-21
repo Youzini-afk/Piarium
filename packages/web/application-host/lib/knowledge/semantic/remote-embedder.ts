@@ -8,7 +8,7 @@ import {
   REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS,
   type HarnessEmbedResult,
   type HarnessResolvedEmbeddingBinding,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { SemanticEmbedder, SemanticEmbedRequest, SemanticEmbedResult } from "./embedder.js";
 import { remoteEmbeddingSpaceId, type VectorSpaceIdentity } from "./identity.js";
 

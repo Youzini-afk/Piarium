@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
-import type { HarnessRequestData } from "@piarium/protocol";
+import type { HarnessRequestData } from "@varin/protocol";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createSurfaceAwareReadTool } from "../../src/harness/read-tool.js";
 
@@ -11,7 +11,7 @@ const context = undefined as never;
 
 describe("surface-aware native read", () => {
   it("reads the fixed surface bytes and preserves native offset/limit handling", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-tool-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-tool-"));
     const file = join(root, "draft.ts");
     await writeFile(file, "current disk\n", "utf8");
     const emitted: HarnessRequestData[] = [];
@@ -49,7 +49,7 @@ describe("surface-aware native read", () => {
   });
 
   it("reads a dirty-only file whose disk path does not exist", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-dirty-only-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-dirty-only-"));
     const bridge = {
       request: async () => ({
         base64: Buffer.from("unsaved new file\n", "utf8").toString("base64"),
@@ -85,7 +85,7 @@ describe("surface-aware native read", () => {
   });
 
   it("reads working-branch bytes and reports provenance without touching disk", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-branch-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-branch-"));
     await writeFile(join(root, "kept.txt"), "parent live\n", "utf8");
     const bridge = {
       request: async () => ({
@@ -110,7 +110,7 @@ describe("surface-aware native read", () => {
   });
 
   it("delegates disk reads to the native definition", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-disk-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-disk-"));
     const file = join(root, "disk.txt");
     await writeFile(file, "one\ntwo\nthree\n", "utf8");
     const bridge = {
@@ -135,7 +135,7 @@ describe("surface-aware native read", () => {
   });
 
   it("does not fall back to disk when the fixed surface source is unavailable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-unavailable-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-unavailable-"));
     await writeFile(join(root, "draft.ts"), "must not leak\n", "utf8");
     const bridge = {
       request: async () => { throw new Error("fixed snapshot expired"); },
@@ -152,7 +152,7 @@ describe("surface-aware native read", () => {
   });
 
   it("preserves native image attachments for disk reads", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-read-image-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-read-image-"));
     const file = join(root, "pixel.png");
     await writeFile(file, Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nS0AAAAASUVORK5CYII=",

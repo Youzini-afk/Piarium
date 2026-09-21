@@ -4,7 +4,7 @@ import type {
   ExploreRelationStatus,
   HarnessActorContext,
   HarnessServiceMap,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";

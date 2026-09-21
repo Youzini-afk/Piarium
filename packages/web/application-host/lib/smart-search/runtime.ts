@@ -326,7 +326,7 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
     } catch (error) {
       if (errorCode(error) === 'ENOENT') return {};
       if (error instanceof SyntaxError) {
-        throw makeEndpointError('Smart Search config file contains invalid JSON. Fix it before saving from Piarium.', 409);
+        throw makeEndpointError('Smart Search config file contains invalid JSON. Fix it before saving from Varin.', 409);
       }
       throw error;
     }
@@ -334,7 +334,7 @@ export const createSmartSearchRuntime = (dependencies: SmartSearchRuntimeDepende
 
   const writeRawConfig = async (configFile: string, data: Record<string, unknown>): Promise<void> => {
     await fsPromises.mkdir(path.dirname(configFile), { recursive: true });
-    const tempFile = `${configFile}.piarium-${process.pid}-${Date.now()}.tmp`;
+    const tempFile = `${configFile}.varin-${process.pid}-${Date.now()}.tmp`;
     let mode = 0o600;
     try {
       const stat = fsPromises.stat ? await fsPromises.stat(configFile) : null;

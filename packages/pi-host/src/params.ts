@@ -1,4 +1,4 @@
-import type { JsonValue } from "@piarium/protocol";
+import type { JsonValue } from "@varin/protocol";
 import { HostError } from "./errors.js";
 
 export function expectRecord(value: unknown, label: string = "params"): Record<string, unknown> {

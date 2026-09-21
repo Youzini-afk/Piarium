@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 const temp = async () => {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-materialize-switch-"));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-materialize-switch-"));
   roots.push(root);
   const live = path.join(root, "scratch");
   await fs.promises.mkdir(live);

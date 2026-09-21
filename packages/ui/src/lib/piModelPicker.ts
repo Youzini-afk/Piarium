@@ -1,4 +1,4 @@
-import type { ModelDescriptor } from '@piarium/protocol';
+import type { ModelDescriptor } from '@varin/protocol';
 import type { ModelPickerEntry, ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import type { PiProviderView } from '@/stores/usePiProviderStore';
 

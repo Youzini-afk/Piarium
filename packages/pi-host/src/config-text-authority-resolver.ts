@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, posix, resolve, win32 } from "node:path";
-import type { PiConfigTextAuthorityId, PiConfigTextFormat } from "@piarium/protocol";
+import type { PiConfigTextAuthorityId, PiConfigTextFormat } from "@varin/protocol";
 import { HostError } from "./errors.js";
 
 const PI_LENS_PROJECT_CONFIG_NAMES = [".pi-lens.json", "pi-lens.json"] as const;

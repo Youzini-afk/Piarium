@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://varin.dev/schemas/varin.extension.v1.json",
+  "title": "Varin Extension Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "id", "version", "engines"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "displayName": { "$ref": "#/$defs/text" },
+    "version": { "$ref": "#/$defs/semver" },
+    "engines": {
+      "type": "object",
+      "required": ["varin"],
+      "properties": { "varin": { "$ref": "#/$defs/semverRange" } }
+    },
+    "entrypoints": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "object",
+          "required": ["file", "mode"],
+          "properties": {
+            "file": { "$ref": "#/$defs/entryPath" },
+            "mode": { "enum": ["brokered", "native"] },
+            "activation": { "$ref": "#/$defs/activationList" }
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "mode", "supports"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "file": { "$ref": "#/$defs/entryPath" },
+              "mode": { "enum": ["declarative", "isolated", "managed", "native"] },
+              "isolation": { "enum": ["iframe", "worker"] },
+              "supports": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/surface" }
+              },
+              "activation": { "$ref": "#/$defs/activationList" }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "mode": { "const": "isolated" } }, "required": ["mode"] },
+                "else": { "not": { "required": ["isolation"] } }
+              },
+              {
+                "if": {
+                  "properties": { "mode": { "enum": ["managed", "isolated", "native"] } },
+                  "required": ["mode"]
+                },
+                "then": { "required": ["file"] }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/service" },
+              {
+                "type": "object",
+                "properties": {
+                  "optional": { "type": "boolean" },
+                  "binding": { "enum": ["all", "selected", "single"] }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "provides": {
+      "type": "object",
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/service" },
+              { "type": "object", "properties": { "multiple": { "type": "boolean" } } }
+            ]
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "host": { "$ref": "#/$defs/idList" },
+        "surface": { "$ref": "#/$defs/idList" }
+      }
+    },
+    "integrates": {
+      "type": "object",
+      "properties": {
+        "piPackages": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/text" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "description": { "$ref": "#/$defs/text" },
+        "homepage": { "$ref": "#/$defs/text" },
+        "repository": { "$ref": "#/$defs/text" },
+        "icon": { "$ref": "#/$defs/entryPath" },
+        "keywords": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/text" }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": { "schemaVersion": { "type": "integer", "minimum": 1 } }
+    },
+    "contributions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["contractVersion", "data", "id", "kind", "supports"],
+        "properties": {
+          "contractVersion": { "type": "integer", "minimum": 1 },
+          "data": { "type": "object" },
+          "entrypoint": { "$ref": "#/$defs/id" },
+          "id": { "$ref": "#/$defs/id" },
+          "kind": {
+            "enum": [
+              "command", "composer-action", "editor", "keybinding", "menu-item", "message-renderer",
+              "page", "panel", "session-decoration", "settings-page", "shell", "sidebar",
+              "status-item", "tool-renderer", "transition-scene", "view"
+            ]
+          },
+          "supports": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/surface" }
+          },
+          "title": { "$ref": "#/$defs/text" },
+          "when": { "$ref": "#/$defs/contextExpression" },
+          "requiresCapabilities": { "$ref": "#/$defs/idList" },
+          "placement": {
+            "type": "object",
+            "properties": {
+              "slot": { "$ref": "#/$defs/id" },
+              "order": { "type": "number" },
+              "before": { "$ref": "#/$defs/idList" },
+              "after": { "$ref": "#/$defs/idList" }
+            }
+          },
+          "replacement": {
+            "type": "object",
+            "required": ["target"],
+            "properties": {
+              "target": { "$ref": "#/$defs/id" },
+              "priority": { "type": "number" }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "editor" }, "contractVersion": { "const": 1 } }, "required": ["kind", "contractVersion"] },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "languageIds": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "$ref": "#/$defs/text" }
+                    },
+                    "filenames": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": { "$ref": "#/$defs/text" }
+                    },
+                    "priority": { "type": "number" }
+                  },
+                  "anyOf": [{ "required": ["languageIds"] }, { "required": ["filenames"] }]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "kind": { "const": "transition-scene" }, "contractVersion": { "const": 1 } },
+              "required": ["kind", "contractVersion"]
+            },
+            "then": {
+              "required": ["replacement"],
+              "properties": {
+                "data": { "$ref": "#/$defs/transitionSceneData" },
+                "replacement": {
+                  "type": "object",
+                  "required": ["target"],
+                  "properties": { "target": { "const": "workbench.transition" } }
+                }
+              },
+              "not": { "required": ["when"] }
+            }
+          },
+          {
+            "if": {
+              "properties": { "kind": { "const": "shell" }, "contractVersion": { "const": 1 } },
+              "required": ["kind", "contractVersion"]
+            },
+            "then": {
+              "required": ["replacement"],
+              "properties": {
+                "data": { "$ref": "#/$defs/shellData" },
+                "replacement": {
+                  "type": "object",
+                  "required": ["target"],
+                  "properties": { "target": { "const": "workbench.shell" } }
+                }
+              },
+              "not": { "required": ["when"] },
+              "allOf": [
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "desktop" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["desktop"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["desktop"] } } } } } }
+                },
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "mobile" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["mobile"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["mobile"] } } } } } }
+                },
+                {
+                  "if": { "properties": { "supports": { "contains": { "const": "web" } } } },
+                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["web"] } } } } },
+                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["web"] } } } } } }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "activationList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "application-startup", "background", "command", "contribution-visible",
+          "service-request", "workspace-match"
+        ]
+      }
+    },
+    "entryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "transitionDurationSet": {
+      "type": "object",
+      "required": ["quick", "reduced", "standard"],
+      "properties": {
+        "quick": { "type": "integer", "minimum": 0 },
+        "reduced": { "type": "integer", "minimum": 0 },
+        "standard": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "transitionSceneData": {
+      "type": "object",
+      "required": ["contract", "durations", "scenes"],
+      "properties": {
+        "contract": { "const": "varin-transition-scene/v1" },
+        "fallback": { "type": "boolean" },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["workbench-profile"] }
+        },
+        "durations": {
+          "type": "object",
+          "required": ["workbench-profile"],
+          "properties": {
+            "workbench-profile": {
+              "type": "object",
+              "required": ["covering", "revealing"],
+              "properties": {
+                "covering": { "$ref": "#/$defs/transitionDurationSet" },
+                "revealing": { "$ref": "#/$defs/transitionDurationSet" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    },
+    "shellData": {
+      "type": "object",
+      "required": ["contract", "seams"],
+      "additionalProperties": false,
+      "properties": {
+        "contract": { "const": "varin-workbench-shell/v1" },
+        "seams": {
+          "type": "object",
+          "properties": {
+            "desktop": { "$ref": "#/$defs/shellSurfaceSeams" },
+            "mobile": { "$ref": "#/$defs/shellSurfaceSeams" },
+            "web": { "$ref": "#/$defs/shellSurfaceSeams" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "shellSurfaceSeams": {
+      "type": "object",
+      "required": ["replacementTargets", "slots"],
+      "additionalProperties": false,
+      "properties": {
+        "replacementTargets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/id" },
+              { "not": { "enum": ["workbench.shell", "workbench.transition"] } }
+            ]
+          }
+        },
+        "slots": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        }
+      }
+    },
+    "idList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "semverRange": {
+      "type": "string",
+      "minLength": 1,
+      "format": "semver-range"
+    },
+    "service": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "surface": { "enum": ["desktop", "mobile", "web"] },
+    "text": { "type": "string", "minLength": 1 },
+    "contextExpression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "key"],
+          "properties": {
+            "op": { "const": "defined" },
+            "key": { "$ref": "#/$defs/text" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "key", "value"],
+          "properties": {
+            "op": { "const": "equals" },
+            "key": { "$ref": "#/$defs/text" },
+            "value": { "type": ["string", "number", "boolean"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "expression"],
+          "properties": {
+            "op": { "const": "not" },
+            "expression": { "$ref": "#/$defs/contextExpression" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "expressions"],
+          "properties": {
+            "op": { "enum": ["all", "any"] },
+            "expressions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/contextExpression" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

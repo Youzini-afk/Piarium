@@ -40,7 +40,7 @@ const versionProcess = (exitCode: number, output: string, error = ""): ManagedPr
 };
 
 async function fixture() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "piarium-managed-lsp-"));
+  const directory = await mkdtemp(path.join(os.tmpdir(), "varin-managed-lsp-"));
   return { directory, cleanup: () => rm(directory, { recursive: true, force: true }) };
 }
 

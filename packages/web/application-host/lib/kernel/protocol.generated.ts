@@ -5,7 +5,7 @@
 
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
-export const KERNEL_PROTOCOL_SCHEMA = "piarium.kernel.v1" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v1" as const;
 
 export type KernelMethod =
   | "process.spawn"

@@ -1,4 +1,4 @@
-import type { WorkingBranchReadProvenance } from "@piarium/protocol";
+import type { WorkingBranchReadProvenance } from "@varin/protocol";
 import type { SurfaceSnapshotOverlayEntry } from "../../documents/surface-snapshot-store.js";
 import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";

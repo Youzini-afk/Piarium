@@ -9,9 +9,9 @@ type TransformerTestState = {
 };
 
 const transformerState = (): TransformerTestState => {
-  const target = globalThis as typeof globalThis & { __piariumMinilmTestState?: TransformerTestState };
-  target.__piariumMinilmTestState ??= { batches: [], options: [], sessionOptions: [] };
-  return target.__piariumMinilmTestState;
+  const target = globalThis as typeof globalThis & { __varinMinilmTestState?: TransformerTestState };
+  target.__varinMinilmTestState ??= { batches: [], options: [], sessionOptions: [] };
+  return target.__varinMinilmTestState;
 };
 
 vi.mock("@huggingface/transformers", () => ({

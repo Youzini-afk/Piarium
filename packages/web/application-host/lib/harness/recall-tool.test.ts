@@ -6,7 +6,7 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.
 import { executeRecall, openUserKnowledgeStore, RECALL_PROMPT_SNIPPET } from "./recall-tool.js";
 
 // Keep scratch stores separate from the source tree.
-const TEST_DIR = join(tmpdir(), "piarium-test-recall");
+const TEST_DIR = join(tmpdir(), "varin-test-recall");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

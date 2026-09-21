@@ -7,8 +7,8 @@ import type {
   PiThinkingLevelChangeEntry,
   PiToolResultMessage,
   PiUserMessage,
-} from '@piarium/protocol';
-import { PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE } from '@piarium/protocol';
+} from '@varin/protocol';
+import { VARIN_RECOVERY_NAVIGATION_MARKER_TYPE } from '@varin/protocol';
 
 type PiTimelineControlEntry = Extract<
   PiSessionEntry,
@@ -98,8 +98,8 @@ const isVisibleTimelineEntry = (
   knownToolCallIds: ReadonlySet<string>,
 ): entry is PiTimelineEntry => {
   if (isTimelineControlEntry(entry)) return false;
-  if (entry.type === 'custom' && entry.customType === 'piarium.session-features/v1') return false;
-  if (entry.type === 'custom' && entry.customType === PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE) return false;
+  if (entry.type === 'custom' && entry.customType === 'varin.session-features/v1') return false;
+  if (entry.type === 'custom' && entry.customType === VARIN_RECOVERY_NAVIGATION_MARKER_TYPE) return false;
   if (entry.type === 'custom_message' && !entry.display) return false;
   if (entry.type === 'message' && entry.message.role === 'custom' && !entry.message.display) return false;
   if (

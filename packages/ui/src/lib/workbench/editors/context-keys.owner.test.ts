@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SurfaceExtensionRuntime } from '@piarium/extension-surface';
-import type { SurfaceContextWriter } from '@piarium/extension-surface';
+import { SurfaceExtensionRuntime } from '@varin/extension-surface';
+import type { SurfaceContextWriter } from '@varin/extension-surface';
 import { startWorkbenchMountSession } from '@/lib/extensions/workbench-mount';
 import type { WorkbenchMountImplementation } from '@/lib/extensions/workbench-mount';
 import {

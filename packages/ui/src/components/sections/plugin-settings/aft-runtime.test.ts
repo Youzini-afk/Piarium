@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiCommandDescriptor } from '@piarium/protocol';
+import type { PiCommandDescriptor } from '@varin/protocol';
 import { aftRuntimeState, observedAftStatusCommand } from './aft-runtime';
 
 const command = (name: string): PiCommandDescriptor => ({

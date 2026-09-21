@@ -1,5 +1,5 @@
-import type { DocumentsAPI } from '@piarium/application-client';
-import { registerRuntimeEndpointSwitchBlocker } from '@piarium/application-client';
+import type { DocumentsAPI } from '@varin/application-client';
+import { registerRuntimeEndpointSwitchBlocker } from '@varin/application-client';
 import { DocumentRegistry } from './registry';
 
 let active: DocumentRegistry | null = null;

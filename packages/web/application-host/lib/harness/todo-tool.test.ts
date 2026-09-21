@@ -10,7 +10,7 @@ import {
   type TodoItem,
 } from "./todo-tool.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-test-todo");
+const TEST_DIR = join(tmpdir(), "varin-test-todo");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

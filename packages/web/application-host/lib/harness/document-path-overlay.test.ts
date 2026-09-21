@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
 import { createDocumentPathOverlayService } from "./harness-services.js";
 

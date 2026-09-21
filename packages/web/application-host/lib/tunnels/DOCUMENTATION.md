@@ -1,7 +1,7 @@
 # Tunnels Module Documentation
 
 ## Purpose
-This module contains tunnel provider orchestration for Piarium, including provider registry/service wiring, managed remote token config lifecycle, and tunnel HTTP route registration.
+This module contains tunnel provider orchestration for Varin, including provider registry/service wiring, managed remote token config lifecycle, and tunnel HTTP route registration.
 
 ## Entrypoints and structure
 - `packages/web/application-host/lib/tunnels/index.js`: tunnel service orchestration.

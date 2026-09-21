@@ -19,14 +19,14 @@ const createFakeProcess = (): FakeProcess => {
     writes: [],
     write(data: string) {
       this.writes.push(data);
-      const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+      const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
       if (ready) {
         queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
         return;
       }
-      const token = data.match(/__PIARIUM_SENTINEL_([0-9a-f]+):B/)?.[1];
+      const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
       if (!token) return;
-      queueMicrotask(() => { for (const handler of dataHandlers) handler(`__PIARIUM_SENTINEL_${token}:B\nprompt>`); });
+      queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\nprompt>`); });
     },
     resize() {},
     kill() {

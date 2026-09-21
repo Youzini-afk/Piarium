@@ -2,14 +2,14 @@ import type {
   ModelDescriptor,
   ProviderConfigDetails,
   ProviderDescriptor,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { create } from 'zustand';
 import {
   getPiProviderConfig,
   listPiModels,
   listPiProviders,
 } from '@/lib/pi-runtime/providers';
-import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
 export interface PiProviderView extends ProviderDescriptor {
   connected: boolean;

@@ -4,7 +4,7 @@ import {
   FilesystemError,
   isFilesystemError,
   parseFilesystemErrorReason,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 describe('FilesystemError', () => {
   test('retains a stable reason and HTTP status', () => {

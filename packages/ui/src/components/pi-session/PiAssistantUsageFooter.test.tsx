@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PiUsage } from '@piarium/protocol';
+import type { PiUsage } from '@varin/protocol';
 import { I18nProvider } from '@/lib/i18n';
 import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
 

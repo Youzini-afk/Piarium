@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionSnapshot, SessionStats } from '@piarium/protocol';
+import type { SessionSnapshot, SessionStats } from '@varin/protocol';
 import { piSessionContextUsage } from './sessionStats';
 
 const snapshot: SessionSnapshot = {

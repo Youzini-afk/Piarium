@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { PackageDescriptor, RuntimeContextTarget } from '@varin/protocol';
 import { listPiPackages, piPackageNameFromSource } from '@/lib/pi-runtime/packages';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 export interface PluginSettingsCatalogState {
   error: string | null;

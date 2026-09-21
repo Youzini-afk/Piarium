@@ -24,13 +24,13 @@ describe('DAP transport', () => {
     const client = createDapClient({ input: adapterOutput, output: clientOutput });
     try {
       const initialized = client.waitForEvent('initialized');
-      const initialize = client.request('initialize', { clientID: 'piarium' });
+      const initialize = client.request('initialize', { clientID: 'varin' });
       await waitUntil(() => frames.length === 1);
       expect(frames[0]).toEqual({
         seq: 1,
         type: 'request',
         command: 'initialize',
-        arguments: { clientID: 'piarium' },
+        arguments: { clientID: 'varin' },
       });
       expect(frames[0]?.jsonrpc).toBeUndefined();
 

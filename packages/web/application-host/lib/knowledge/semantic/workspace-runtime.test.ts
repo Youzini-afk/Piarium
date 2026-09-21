@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
-import type { HarnessInferenceBindingSnapshot, HarnessRerankSettings, PiSettingsSnapshot } from '@piarium/protocol';
+import type { PiRuntimeBrokerEvent } from '@varin/runtime-broker';
+import type { HarnessInferenceBindingSnapshot, HarnessRerankSettings, PiSettingsSnapshot } from '@varin/protocol';
 import { createDocumentAuthorityHarness } from '../../documents/contract-fixtures.js';
 import { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createStructureSource } from '../../structure/source.js';

@@ -2,20 +2,20 @@ import React from 'react';
 import type {
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
-} from '@piarium/extension-contract';
-import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
-import { runtimeFetch } from '@piarium/application-client';
+} from '@varin/extension-contract';
+import { PiRuntimeAmbiguousRequestError } from '@varin/runtime-client';
+import { runtimeFetch } from '@varin/application-client';
 import type {
   ModelDescriptor,
   PiSessionMessageEntry,
   PiUserMessage,
   ThinkingLevel,
   WorkFocusId,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import { useI18n } from '@/lib/i18n';
 import {
   getWorkspaceRecoveryAPI,
@@ -97,7 +97,7 @@ interface PiChatViewProps {
   threadPanelTitle?: string;
 }
 
-const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
+const DRAFT_PROJECT_MARKER = '__VARIN_DRAFT_PROJECT__';
 const EMPTY_PI_MESSAGE_HISTORY: readonly string[] = [];
 
 const pendingUserMessage = (draft: PiDraftState): PiUserMessage => ({
@@ -537,7 +537,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         });
       }
       if (result.outcome === 'applied') {
-        toast.success(t('settings.piarium.recovery.preference.conversation.label'));
+        toast.success(t('settings.varin.recovery.preference.conversation.label'));
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -857,7 +857,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           fallback={entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
               <div className="max-w-md">
-                <PiariumLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
+                <VarinLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
                 <p className="mt-4 typography-ui-label text-muted-foreground">
                   {t('chat.emptyState.startNewChat')}
                 </p>

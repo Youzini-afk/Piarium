@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@varin/protocol";
 import type { CreateTerminalSessionInput, TerminalHandle, TerminalSessionApi } from "../terminal/session-api.js";
 import type { OutputStore } from "./output-store.js";
 
@@ -117,7 +117,7 @@ export function stripControlSequences(text: string): string {
   return stripOutputChunk(text, "text").text;
 }
 
-const SENTINEL = "__PIARIUM_SENTINEL_";
+const SENTINEL = "__VARIN_SENTINEL_";
 
 const quotePowerShell = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
@@ -129,11 +129,11 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
     return [
       `Write-Output ${begin}`,
       command,
-      "$__piarium_success = $?",
-      "$__piarium_exit = $LASTEXITCODE",
-      "$__piarium_code = if ($__piarium_success) { 0 } elseif ($__piarium_exit -is [int] -and $__piarium_exit -ne 0) { [int]$__piarium_exit } else { 1 }",
+      "$__varin_success = $?",
+      "$__varin_exit = $LASTEXITCODE",
+      "$__varin_code = if ($__varin_success) { 0 } elseif ($__varin_exit -is [int] -and $__varin_exit -ne 0) { [int]$__varin_exit } else { 1 }",
       `Write-Output (${cwd} + (Get-Location).Path)`,
-      `Write-Output (${end} + $__piarium_code)`,
+      `Write-Output (${end} + $__varin_code)`,
     ].join("; ");
   }
   return `echo '${SENTINEL}${token}:B'; { ${command}; }; __ec=$?; echo '${SENTINEL}${token}:C:'"$PWD"; echo '${SENTINEL}${token}:E:'"$__ec"`;
@@ -708,7 +708,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     if (sessionHandle?.status === "running") return shellReadyPromise ?? Promise.resolve();
 
     const initToken = randomBytes(8).toString("hex");
-    const initMarker = `__PIARIUM_READY_${initToken}__`;
+    const initMarker = `__VARIN_READY_${initToken}__`;
 
     let resolveReady: () => void = () => undefined;
     let rejectReady: (error: unknown) => void = () => undefined;

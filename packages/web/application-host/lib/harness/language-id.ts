@@ -1,1 +1,1 @@
-export { languageIdForPath } from "@piarium/protocol";
+export { languageIdForPath } from "@varin/protocol";

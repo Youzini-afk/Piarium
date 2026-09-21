@@ -2,7 +2,7 @@ import type {
   PiResourceKind,
   PiResourceScope,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const listPiResources = async (

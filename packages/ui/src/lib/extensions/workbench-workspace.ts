@@ -1,7 +1,7 @@
 import React from 'react';
-import type { DocumentsAPI } from '@piarium/application-client';
+import type { DocumentsAPI } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type WorkbenchWorkspaceResolution =
@@ -125,8 +125,8 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
       if (currentResolution.key !== key || currentResolution.status !== 'error') return;
       ensureResolution(documents, currentDirectory, currentGeneration, true);
     };
-    window.addEventListener('piarium:settings-synced', retryAfterSettingsSync);
-    return () => window.removeEventListener('piarium:settings-synced', retryAfterSettingsSync);
+    window.addEventListener('varin:settings-synced', retryAfterSettingsSync);
+    return () => window.removeEventListener('varin:settings-synced', retryAfterSettingsSync);
   }, [currentDirectory, documents]);
 
   const effective = resolved.key === expectedKey

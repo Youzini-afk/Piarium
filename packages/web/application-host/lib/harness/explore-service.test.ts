@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@varin/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createWorkspaceContentSearch } from "../search/content.js";
 import { createNativeComputeTestHarness } from "../kernel/compute.test-helper.js";
@@ -21,7 +21,7 @@ async function fixture(
   structureSource?: StructureSource,
   fileRelations?: NonNullable<import("./service-host.js").HarnessServiceHost["fileRelations"]>,
 ) {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-explore-service-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-explore-service-"));
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace);
   const documents = createDocumentAuthority({ hostId: "test-host", dataDir: path.join(root, "data"), isAllowedRoot: async () => true, isTrusted: async () => true });

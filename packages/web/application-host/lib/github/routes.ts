@@ -334,7 +334,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
       const clientId = getGitHubClientId();
       if (!clientId) {
         return res.status(400).json({
-          error: 'GitHub OAuth client not configured. Set PIARIUM_GITHUB_CLIENT_ID.',
+          error: 'GitHub OAuth client not configured. Set VARIN_GITHUB_CLIENT_ID.',
         });
       }
 
@@ -366,7 +366,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
       const clientId = getGitHubClientId();
       if (!clientId) {
         return res.status(400).json({
-          error: 'GitHub OAuth client not configured. Set PIARIUM_GITHUB_CLIENT_ID.',
+          error: 'GitHub OAuth client not configured. Set VARIN_GITHUB_CLIENT_ID.',
         });
       }
 

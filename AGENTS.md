@@ -1,8 +1,8 @@
-# Piarium contributor guide
+# Varin contributor guide
 
 ## Start from current authority
 
-Piarium keeps project knowledge in ordinary repository documentation, next to the code it describes.
+Varin keeps project knowledge in ordinary repository documentation, next to the code it describes.
 Start with [docs/development.md](docs/development.md), [docs/architecture.md](docs/architecture.md), and
 the nearest `README.md` or `DOCUMENTATION.md` in the owning package or module.
 
@@ -18,8 +18,8 @@ reliable as code, a script, or normal documentation.
 
 ## Product boundary
 
-- Piarium is an independent Agent workspace and harness with a bundled Pi runtime, originating from
-  the maintainer's OpenChamber fork. All Piarium edits, commits, and pushes happen in this repository;
+- Varin is an independent Agent workspace and harness with a bundled Pi runtime, originating from
+  the maintainer's OpenChamber fork. All Varin edits, commits, and pushes happen in this repository;
   external OpenChamber checkouts remain read-only.
 - The OpenCode cutover is complete. Do not restore OpenCode contracts, compatibility facades, parallel
   implementations, or dead migration paths.
@@ -29,7 +29,7 @@ reliable as code, a script, or normal documentation.
 - Do not add speculative restrictions. A limit needs a concrete protocol, platform, safety, data, or
   measured resource failure behind it; defaults, warnings, and configurable budgets are distinct from
   hard rejection.
-- There are no users requiring backward compatibility for Piarium's internal formats. Replace obsolete
+- There are no users requiring backward compatibility for Varin's internal formats. Replace obsolete
   contracts and storage directly; remove old readers, writers, compatibility branches, and fallback
   backends. Do not build internal-format upgrade/import machinery. Workspace files, Git history, native
   Pi data, and external configuration remain assets; handing off unfinished work does not require keeping
@@ -45,7 +45,7 @@ reliable as code, a script, or normal documentation.
   language, task, debug, test, and Pi runtime services.
 - `packages/electron` is the native shell. It hosts the Web application host in-process and must not
   grow a parallel backend.
-- `packages/mobile` is a Capacitor client connected to a Piarium server.
+- `packages/mobile` is a Capacitor client connected to a Varin server.
 - Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
   [docs/architecture.md](docs/architecture.md).
 - Stage R in [docs/agent-harness-plan.md](docs/agent-harness-plan.md) completed the Rust system-kernel
@@ -62,7 +62,7 @@ bearer/pairing data, or file contents.
 
 ## Workbench and data invariants
 
-- Agent Workspace (`default`), IDE Workbench (`piarium.ide`), and Research Workbench (`piarium.research`)
+- Agent Workspace (`default`), IDE Workbench (`varin.ide`), and Research Workbench (`varin.research`)
   are extension-provided shells selected through Workbench Profiles. Work focus is independent session
   execution configuration; project or session navigation never changes the selected shell.
 - Shells own presentation. Documents, editor groups, terminals, Git, profiles, and runtime identity

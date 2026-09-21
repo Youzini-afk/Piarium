@@ -1,30 +1,30 @@
-import type { PiariumExtensionContributionKind } from "./types.js";
+import type { VarinExtensionContributionKind } from "./types.js";
 
 /**
  * Result of checking whether a contribution's contract version is compatible
- * with the current Piarium runtime.
+ * with the current Varin runtime.
  */
-export type PiariumContributionCompatibility =
+export type VarinContributionCompatibility =
   | {
       status: "supported";
-      kind: PiariumExtensionContributionKind;
+      kind: VarinExtensionContributionKind;
       contractVersion: number;
     }
   | {
       status: "unsupported-contract-version";
-      kind: PiariumExtensionContributionKind;
+      kind: VarinExtensionContributionKind;
       contractVersion: number;
       supportedVersions: number[];
     };
 
 /**
  * The single source of truth for which contribution contract versions the
- * current Piarium runtime understands. Every kind currently supports only
+ * current Varin runtime understands. Every kind currently supports only
  * version 1. When a future version is introduced, add it here — do not
  * scatter `version === N` checks across consumers.
  */
-export const PIARIUM_CONTRIBUTION_SUPPORTED_VERSIONS: Readonly<
-  Record<PiariumExtensionContributionKind, readonly number[]>
+export const VARIN_CONTRIBUTION_SUPPORTED_VERSIONS: Readonly<
+  Record<VarinExtensionContributionKind, readonly number[]>
 > = {
   command: [1],
   "composer-action": [1],
@@ -46,16 +46,16 @@ export const PIARIUM_CONTRIBUTION_SUPPORTED_VERSIONS: Readonly<
 
 /**
  * Check whether a contribution's contract version is compatible with the
- * current Piarium runtime. This is a pure function — it does not throw.
+ * current Varin runtime. This is a pure function — it does not throw.
  *
  * The `kind` must already be validated as a known contribution kind.
  * The `contractVersion` must already be validated as a positive integer.
  */
-export const checkPiariumContributionCompatibility = (
-  kind: PiariumExtensionContributionKind,
+export const checkVarinContributionCompatibility = (
+  kind: VarinExtensionContributionKind,
   contractVersion: number,
-): PiariumContributionCompatibility => {
-  const supportedVersions = PIARIUM_CONTRIBUTION_SUPPORTED_VERSIONS[kind];
+): VarinContributionCompatibility => {
+  const supportedVersions = VARIN_CONTRIBUTION_SUPPORTED_VERSIONS[kind];
   if (supportedVersions.includes(contractVersion)) {
     return { status: "supported", kind, contractVersion };
   }
@@ -71,7 +71,7 @@ export const checkPiariumContributionCompatibility = (
  * Convenience predicate. Returns `true` when the contribution's contract
  * version is supported by the current runtime.
  */
-export const isPiariumContributionCompatible = (
-  kind: PiariumExtensionContributionKind,
+export const isVarinContributionCompatible = (
+  kind: VarinExtensionContributionKind,
   contractVersion: number,
-): boolean => checkPiariumContributionCompatibility(kind, contractVersion).status === "supported";
+): boolean => checkVarinContributionCompatibility(kind, contractVersion).status === "supported";

@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { ThreadFactsSetResult } from "@piarium/protocol";
+import type { ThreadFactsSetResult } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 

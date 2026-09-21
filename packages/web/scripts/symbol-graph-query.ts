@@ -49,7 +49,7 @@ const catalogFiles = (): string[] => {
 };
 
 const main = async (): Promise<void> => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-symbol-graph-query-"));
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "varin-symbol-graph-query-"));
   const store = await openWorkspaceKnowledge({
     dataDir,
     hostId: "symbol-graph-query-host",

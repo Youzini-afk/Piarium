@@ -794,7 +794,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
    *   call still marshals every id (24K symbol ids ≈ 90 ms), and `explore`
    *   asks for the count once per query;
    * - one lazily rebuilt shape cache (file paths, languages, resolved reverse
-   *   imports), because import resolution is Piarium's rule, not the
+   *   imports), because import resolution is Varin's rule, not the
    *   database's, and it depends on the whole path set (D-139).
    *
    * Both are dropped on any graph write and rebuilt on the next read (D-141).

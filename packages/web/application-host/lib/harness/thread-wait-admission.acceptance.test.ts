@@ -9,7 +9,7 @@ import type { HarnessServiceContext } from "./router.js";
 const workspaceId = "audit-workspace";
 const root = { kind: "session" as const, id: "root-session" };
 const fixture = async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "piarium-wait-admission-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "varin-wait-admission-"));
   const registry = createThreadRegistry({ dataDir, hostId: "audit-host" });
   const base = { workspaceId, brief: "audit work", kind: "implementation" as const,
     createdBy: "agent" as const, concurrency: 1, autoRun: true, worktree: "isolated" as const,

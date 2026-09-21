@@ -1,5 +1,5 @@
-import type { WorkspaceCombinedRecoveryPlan } from '@piarium/extension-contract';
-import type { RecoveryPreference } from '@piarium/protocol';
+import type { WorkspaceCombinedRecoveryPlan } from '@varin/extension-contract';
+import type { RecoveryPreference } from '@varin/protocol';
 
 export const shouldOpenRecoveryDialog = (
   preference: RecoveryPreference,

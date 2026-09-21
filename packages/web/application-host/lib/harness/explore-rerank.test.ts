@@ -5,7 +5,7 @@ import {
   scoresFromRerankResult,
   shrinkViewForRerank,
 } from "./explore-rerank.js";
-import type { ExploreQueryView } from "@piarium/protocol";
+import type { ExploreQueryView } from "@varin/protocol";
 
 const view = (viewId: string, text: string): ExploreQueryView => ({
   viewId,

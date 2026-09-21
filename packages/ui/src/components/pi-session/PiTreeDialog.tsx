@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiSessionMessageEntry, SessionTreeResult } from '@piarium/protocol';
+import type { PiSessionMessageEntry, SessionTreeResult } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {

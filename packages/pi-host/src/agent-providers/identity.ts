@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PiAgentKind } from "@piarium/protocol";
+import type { PiAgentKind } from "@varin/protocol";
 
 export function agentProviderEntityId(
   providerId: string,

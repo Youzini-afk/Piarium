@@ -3,10 +3,10 @@ import type {
   WorkspaceContentSearchResult,
   WorkspaceContentSearchHit,
   WorkspaceSearchAPI,
-} from '@piarium/application-client';
-import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeEndpointGeneration } from '@piarium/application-client';
+} from '@varin/application-client';
+import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {
@@ -72,7 +72,7 @@ export const createWebWorkspaceSearchAPI = (): WorkspaceSearchAPI => ({
         headers: {
           Accept: 'application/x-ndjson, application/json',
           'Content-Type': 'application/json',
-          'x-piarium-generation': String(generation),
+          'x-varin-generation': String(generation),
         },
         body: JSON.stringify(request),
         signal: options?.signal,

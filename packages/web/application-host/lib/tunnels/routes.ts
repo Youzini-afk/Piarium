@@ -272,7 +272,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
   };
 
   const registerRoutes = (app: Express): void => {
-    app.get('/api/piarium/tunnel/check', async (req, res) => {
+    app.get('/api/varin/tunnel/check', async (req, res) => {
       try {
         const requestedProvider = typeof req?.query?.provider === 'string' && req.query.provider.trim().length > 0
           ? normalizeTunnelProvider(req.query.provider)
@@ -380,15 +380,15 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
         return res.status(500).json({ ok: false, error: 'Failed to run tunnel doctor' });
       }
     };
-    app.post('/api/piarium/tunnel/doctor', handleTunnelDoctor);
-    app.get('/api/piarium/tunnel/doctor', handleTunnelDoctor);
+    app.post('/api/varin/tunnel/doctor', handleTunnelDoctor);
+    app.get('/api/varin/tunnel/doctor', handleTunnelDoctor);
 
-    app.get('/api/piarium/tunnel/providers', (_req, res) => {
+    app.get('/api/varin/tunnel/providers', (_req, res) => {
       const providers = tunnelProviderRegistry.listCapabilities();
       return res.json({ providers });
     });
 
-    app.get('/api/piarium/tunnel/status', async (_req, res) => {
+    app.get('/api/varin/tunnel/status', async (_req, res) => {
       try {
         const settings = await readSettingsFromDisk();
         const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
@@ -481,7 +481,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
       }
     });
 
-    app.put('/api/piarium/tunnel/managed-remote-token', async (req, res) => {
+    app.put('/api/varin/tunnel/managed-remote-token', async (req, res) => {
       try {
         const presetId = typeof req?.body?.presetId === 'string' ? req.body.presetId.trim() : '';
         const presetName = typeof req?.body?.presetName === 'string' ? req.body.presetName.trim() : '';
@@ -506,7 +506,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
       }
     });
 
-    app.post('/api/piarium/tunnel/start', async (_req, res) => {
+    app.post('/api/varin/tunnel/start', async (_req, res) => {
       try {
         const settings = await readSettingsFromDisk();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
@@ -644,7 +644,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
       }
     });
 
-    app.post('/api/piarium/tunnel/stop', (_req, res) => {
+    app.post('/api/varin/tunnel/stop', (_req, res) => {
       let revokedBootstrapCount = 0;
       let invalidatedSessionCount = 0;
       const activeTunnelId = tunnelAuthController.getActiveTunnelId();

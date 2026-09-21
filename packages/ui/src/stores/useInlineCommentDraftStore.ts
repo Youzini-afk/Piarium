@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
@@ -282,11 +282,11 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
       }),
       {
-        name: 'piarium.inlineCommentDrafts.v1',
+        name: 'varin.inlineCommentDrafts.v1',
         storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ drafts: state.drafts, touchedAt: state.touchedAt }),
       },
     ),
-    { name: 'piarium-inline-comment-drafts' },
+    { name: 'varin-inline-comment-drafts' },
   ),
 );

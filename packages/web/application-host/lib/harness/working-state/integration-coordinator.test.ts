@@ -39,7 +39,7 @@ const createHarness = async (
   baseFileStore = createRecoveryFileStore(),
   durableRecoveryStore: DurableTestStore = createInMemoryRecoveryDurablePort(),
 ) => {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-integration-"));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-integration-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   const dataDir = path.join(root, "data");
@@ -748,7 +748,7 @@ describe("IntegrationCoordinator", () => {
   });
 
   it("queues a Documents save behind the final integration check and returns its original-revision conflict", async () => {
-    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-integration-documents-gate-"));
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-integration-documents-gate-"));
     roots.push(root);
     const workspace = path.join(root, "workspace");
     const dataDir = path.join(root, "data");
@@ -1479,7 +1479,7 @@ describe("IntegrationCoordinator", () => {
       expect(merged).toMatchObject({ status: "applied", appliedPaths: ["a.txt"] });
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("grandchild\n");
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("parent\n");
-      expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
+      expect(await fs.promises.stat(path.join(parentDir, ".varin")).then(() => true, () => false)).toBe(false);
       const parentListing = await fs.promises.readdir(parentDir, { recursive: true });
       expect(parentListing.some((entry) => String(entry).includes("staging") || String(entry).includes("objects"))).toBe(false);
     } finally {
@@ -1547,7 +1547,7 @@ describe("IntegrationCoordinator", () => {
         [expect.objectContaining({ resourceId: "a.txt" })],
         expect.any(Function),
       );
-      expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
+      expect(await fs.promises.stat(path.join(parentDir, ".varin")).then(() => true, () => false)).toBe(false);
       expect(await h.durableRecoveryStore.getOperation("ws", "crashed-directory")).toMatchObject({ state: "compensated" });
       await restarted.dispose();
     } finally {

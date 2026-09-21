@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorContext, HarnessServiceMap, SessionSnapshot, SessionStats } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessServiceMap, SessionSnapshot, SessionStats } from "@varin/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
@@ -35,7 +35,7 @@ describe("owning vs execution workspace identity", () => {
   });
 
   it("dispatches a grandchild through the public router into the owning catalog when Documents assigns a different execution workspace", async () => {
-    const root = mkdtempSync(join(tmpdir(), "piarium-workspace-identity-"));
+    const root = mkdtempSync(join(tmpdir(), "varin-workspace-identity-"));
     roots.push(root);
     const repo = join(root, "repo");
     mkdirSync(repo);

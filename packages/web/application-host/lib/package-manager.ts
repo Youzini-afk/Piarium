@@ -6,12 +6,12 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PACKAGE_NAME = '@piarium/web';
+const PACKAGE_NAME = '@varin/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Piarium/main/CHANGELOG.md';
-const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Youzini-afk/Piarium/releases';
+const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Varin/main/CHANGELOG.md';
+const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Varin/releases';
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Youzini-afk/Varin/releases';
 type PackageManager = 'bun' | 'electron' | 'npm' | 'pnpm' | 'yarn';
 type UpdateAppType = 'desktop-electron' | 'mobile-capacitor' | 'web';
 type UpdatePlatform = 'android' | 'ios' | 'linux' | 'macos' | 'web' | 'windows';
@@ -70,7 +70,7 @@ export function setPackageManagerSpawnSyncForTest(fn: SpawnSyncOverride | null):
 function getSpawnSyncBaseOptions(): { windowsHide?: boolean } {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
-const getUpdateCheckUrl = () => process.env.PIARIUM_UPDATE_API_URL?.trim() || null;
+const getUpdateCheckUrl = () => process.env.VARIN_UPDATE_API_URL?.trim() || null;
 
 const isCliPackageManager = (value: unknown): value is Exclude<PackageManager, 'electron'> => (
   value === 'npm' || value === 'pnpm' || value === 'yarn' || value === 'bun'
@@ -117,7 +117,7 @@ async function resolveAndroidApkUrl(version: string, candidateUrl?: string): Pro
     const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'piarium-update-check',
+        'User-Agent': 'varin-update-check',
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -135,7 +135,7 @@ async function resolveAndroidApkUrl(version: string, candidateUrl?: string): Pro
         && typeof asset.browser_download_url === 'string'
       ))
       : [];
-    const canonicalAsset = apkAssets.find((asset) => /^Piarium-.+-android\.apk$/i.test(asset.name));
+    const canonicalAsset = apkAssets.find((asset) => /^Varin-.+-android\.apk$/i.test(asset.name));
     return (canonicalAsset || apkAssets[0])?.browser_download_url;
   } catch {
     // The lexical path remains useful when its real path cannot be resolved.
@@ -367,7 +367,7 @@ function getGlobalNodeModulesRoots(pm: PackageManager): string[] {
 function getOwnedPackagePathsFromGlobalBins(pm: PackageManager): string[] {
   const packagePaths: string[] = [];
   for (const binDir of getGlobalBinDirs(pm)) {
-    const binaryName = process.platform === 'win32' ? 'piarium.cmd' : 'piarium';
+    const binaryName = process.platform === 'win32' ? 'varin.cmd' : 'varin';
     const binaryPath = path.join(binDir, binaryName);
     if (!fs.existsSync(binaryPath)) continue;
 
@@ -410,7 +410,7 @@ export function detectPackageManagerDetails(): PackageManagerDetails {
   // dozen spawnSync(pm, ['bin', '-g']) calls with 10s timeouts each; under
   // the in-process server every one blocks the Electron main event loop and
   // manifests as a multi-second UI freeze. Short-circuit here.
-  if (process.env.PIARIUM_RUNTIME === 'desktop') {
+  if (process.env.VARIN_RUNTIME === 'desktop') {
     return {
       packageManager: 'electron',
       reason: 'desktop-runtime',
@@ -430,7 +430,7 @@ export function detectPackageManagerDetails(): PackageManagerDetails {
       };
   }
 
-  const forcedPm = process.env.PIARIUM_PACKAGE_MANAGER?.trim();
+  const forcedPm = process.env.VARIN_PACKAGE_MANAGER?.trim();
   if (isCliPackageManager(forcedPm)) {
     const forcedPmCommand = resolvePackageManagerCommand(forcedPm);
     if (isCommandAvailable(forcedPmCommand)) {
@@ -669,7 +669,7 @@ function isPackageInstalledWith(pm: PackageManager): boolean {
     });
 
     if (result.status !== 0) return false;
-    return result.stdout.includes(PACKAGE_NAME) || result.stdout.includes('piarium');
+    return result.stdout.includes(PACKAGE_NAME) || result.stdout.includes('varin');
   } catch {
     return false;
   }
@@ -810,7 +810,7 @@ export async function checkForUpdates(options: UpdateCheckOptions = {}) {
       return {
         ...remote,
         packageManager: pm,
-        updateCommand: 'piarium update',
+        updateCommand: 'varin update',
       };
     }
   }
@@ -844,7 +844,7 @@ export async function checkForUpdates(options: UpdateCheckOptions = {}) {
     downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
-    updateCommand: 'piarium update',
+    updateCommand: 'varin update',
   };
 }
 

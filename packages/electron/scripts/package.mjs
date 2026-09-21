@@ -8,7 +8,7 @@ import { resolveTargetArchitecture } from './target-architecture.mjs';
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
-const unsignedMacIndex = builderArgs.indexOf('--piarium-unsigned-mac');
+const unsignedMacIndex = builderArgs.indexOf('--varin-unsigned-mac');
 const unsignedMac = unsignedMacIndex >= 0;
 if (unsignedMac) builderArgs.splice(unsignedMacIndex, 1);
 const requestedPlatforms = new Set();
@@ -22,9 +22,9 @@ const targetPlatform = [...requestedPlatforms][0] || process.platform;
 const targetArchitecture = resolveTargetArchitecture({ platform: targetPlatform, environment: env, builderArgs });
 const require = createRequire(import.meta.url);
 const electronVersion = require('electron/package.json').version;
-env.PIARIUM_TARGET_ARCH = targetArchitecture.node;
-env.PIARIUM_TARGET_PLATFORM = targetPlatform;
-env.PIARIUM_PACKAGING_NODE = process.execPath;
+env.VARIN_TARGET_ARCH = targetArchitecture.node;
+env.VARIN_TARGET_PLATFORM = targetPlatform;
+env.VARIN_PACKAGING_NODE = process.execPath;
 
 if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
   builderArgs.push(`--config.electronVersion=${electronVersion}`);

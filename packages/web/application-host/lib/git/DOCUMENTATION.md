@@ -93,7 +93,7 @@ The following functions are internal helpers used by exported functions:
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.
-- `resolveWorktreeProjectContext(directory)`: Resolve the Piarium project ID, primary worktree, and managed worktree root.
+- `resolveWorktreeProjectContext(directory)`: Resolve the Varin project ID, primary worktree, and managed worktree root.
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
@@ -128,7 +128,7 @@ The following functions are internal helpers used by exported functions:
 - Fast-create background failures remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
-- Worktree population enables `core.longpaths` for the repository and for each reset command so managed Windows paths can be checked out. After population Piarium invokes the repository's executable `post-checkout` hook with Git's new-worktree arguments; hook failures are logged without discarding the usable worktree.
+- Worktree population enables `core.longpaths` for the repository and for each reset command so managed Windows paths can be checked out. After population Varin invokes the repository's executable `post-checkout` hook with Git's new-worktree arguments; hook failures are logged without discarding the usable worktree.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
@@ -153,9 +153,9 @@ The following functions are internal helpers used by exported functions:
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.
-- Managed worktrees live under `PIARIUM_DATA_DIR/worktrees/<Piarium project ID>`; Git remains the authoritative worktree registry, so Piarium does not duplicate sandbox state in another database.
-- Random names use adjectives/nouns from `PIARIUM_WORKTREE_ADJECTIVES` and `PIARIUM_WORKTREE_NOUNS`.
-- Branches created without an explicit branch name use the `piarium/<worktree-name>` pattern.
+- Managed worktrees live under `VARIN_DATA_DIR/worktrees/<Varin project ID>`; Git remains the authoritative worktree registry, so Varin does not duplicate sandbox state in another database.
+- Random names use adjectives/nouns from `VARIN_WORKTREE_ADJECTIVES` and `VARIN_WORKTREE_NOUNS`.
+- Branches created without an explicit branch name use the `varin/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.

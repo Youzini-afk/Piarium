@@ -5,7 +5,7 @@ import {
   type ProviderConfigInput,
   type ProviderModelConfigInput,
   type ProviderModelDiscoveryResult,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "./errors.js";
 import type { ProviderConfigurationManager } from "./provider-configuration.js";
 
@@ -21,9 +21,9 @@ function configurableResourceLimit(name: string): number | undefined {
 
 // Discovery follows the configured provider without product-imposed ceilings. Deployments that
 // need resource budgets can opt into them; exact redirect loops remain rejected independently.
-const MAX_RESPONSE_BYTES = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES");
-const REQUEST_TIMEOUT_MS = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS");
-const MAX_REDIRECTS = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS");
+const MAX_RESPONSE_BYTES = configurableResourceLimit("VARIN_PROVIDER_DISCOVERY_MAX_BYTES");
+const REQUEST_TIMEOUT_MS = configurableResourceLimit("VARIN_PROVIDER_DISCOVERY_TIMEOUT_MS");
+const MAX_REDIRECTS = configurableResourceLimit("VARIN_PROVIDER_DISCOVERY_MAX_REDIRECTS");
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

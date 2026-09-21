@@ -4,7 +4,7 @@ import path from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-jobs-'));
-process.env.PIARIUM_DATA_DIR = TEMP_DATA_DIR;
+process.env.VARIN_DATA_DIR = TEMP_DATA_DIR;
 
 // Mocking git rather than this module's own source loading: fewer of our own
 // seams faked means the test exercises the real digest and prompt path.
@@ -164,7 +164,7 @@ describe('generation jobs', () => {
   // was subtracted from the input allowance overruns the context mid-answer.
   it('requests exactly the budget the model resolution reserved', async () => {
     describeSmallModel.mockResolvedValue({
-      providerID: 'piarium-test',
+      providerID: 'varin-test',
       modelID: 'deepseek-v4-flash',
       source: 'config',
       hasLogin: true,
@@ -293,7 +293,7 @@ describe('schema refusal memory', () => {
   beforeEach(() => {
     fs.rmSync(path.join(TEMP_DATA_DIR, 'walkthroughs'), { recursive: true, force: true });
     describeSmallModel.mockResolvedValue({
-      providerID: 'piarium-test',
+      providerID: 'varin-test',
       modelID: 'deepseek-v4-flash',
       source: 'config',
       hasLogin: true,

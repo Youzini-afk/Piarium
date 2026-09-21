@@ -1,8 +1,8 @@
-English | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
+English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
-# Contributing to Piarium
+# Contributing to Varin
 
-Thank you for helping improve Piarium. Contributions are welcome across the Pi runtime boundary,
+Thank you for helping improve Varin. Contributions are welcome across the Pi runtime boundary,
 desktop and remote surfaces, extension integrations, documentation, testing, accessibility, and
 platform support.
 
@@ -24,7 +24,7 @@ need to return to the repository index to change language.
 ## Before you begin
 
 - Read the [Code of Conduct](CODE_OF_CONDUCT.md).
-- Use [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) for reproducible bugs, feature
+- Use [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) for reproducible bugs, feature
   proposals, and focused technical discussions.
 - Send vulnerabilities through the private process in [SECURITY.md](SECURITY.md). Do not publish
   exploit details in an issue, discussion, pull request, log, or screenshot.
@@ -35,17 +35,17 @@ need to return to the repository index to change language.
 
 ## Project principles that affect contributions
 
-Piarium is not a generic wrapper around several coding-agent CLIs. It has one Pi-native domain and
+Varin is not a generic wrapper around several coding-agent CLIs. It has one Pi-native domain and
 one current pre-release runtime contract.
 
 1. **Keep Pi authoritative.** Pi owns sessions, models, authentication, settings, packages, and the
-   extension runtime. Project a JSON-safe Piarium contract; do not clone Pi state into a parallel
+   extension runtime. Project a JSON-safe Varin contract; do not clone Pi state into a parallel
    application schema.
 2. **Preserve plugin ownership.** Integrate extensions through public commands, events, settings,
    and capability bridges. Do not parse private databases or duplicate plugin migrations merely to
    build a GUI.
 3. **Avoid compatibility sediment.** During pre-1.0 development, all product surfaces move together.
-   Remove obsolete OpenCode and superseded Piarium paths once the replacement is accepted; do not
+   Remove obsolete OpenCode and superseded Varin paths once the replacement is accepted; do not
    accumulate protocol v13/v14-style shims without a real persisted-data or external-client need.
 4. **Enforce privilege at the trusted boundary.** Renderers and remote clients cannot authorize
    themselves. Validate filesystem, process, network, project-trust, and credential operations in
@@ -71,14 +71,14 @@ Read [Architecture](../docs/architecture.md), [Plugin GUI design](../docs/plugin
 ### Clone and install
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run check:pi
 ```
 
 `bun.lock` is authoritative. Do not switch package managers or regenerate the lockfile unless the
-dependency change requires it. Review lifecycle-script changes carefully; Piarium intentionally
+dependency change requires it. Review lifecycle-script changes carefully; Varin intentionally
 allowlists only required install scripts.
 
 ## Common development surfaces
@@ -234,6 +234,6 @@ You can also help by:
 
 ## License
 
-By submitting a contribution, you agree that it may be distributed under Piarium's
+By submitting a contribution, you agree that it may be distributed under Varin's
 [GNU Affero General Public License v3.0](../LICENSE) (`AGPL-3.0-only`) and that imported third-party
 material retains the notices required by [Third-party notices](../THIRD_PARTY_NOTICES.md).

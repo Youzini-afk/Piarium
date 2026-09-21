@@ -1,6 +1,6 @@
-# @piarium/extension-surface
+# @varin/extension-surface
 
-Framework-neutral Surface lifecycle foundation for Piarium extensions.
+Framework-neutral Surface lifecycle foundation for Varin extensions.
 
 Activations stage contributions, services, and cleanup ownership before one atomic commit. Failed or
 superseded generations roll back without becoming visible. Deactivation withdraws visible records
@@ -16,9 +16,9 @@ generation's values. `single`, `selected`, and `all` service requirements use th
 set: selected requires one explicit matching provider, single requires exactly one candidate, and all
 exposes every compatible candidate.
 
-Most extension authors use `@piarium/extension-sdk`; this lower-level package is public for alternate
+Most extension authors use `@varin/extension-sdk`; this lower-level package is public for alternate
 Surface hosts and advanced lifecycle tests. See the
-[authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).
+[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
 
 An injected `SurfaceExternalService` may carry a disposer. The runtime attaches it to the consumer
 owner scope, so candidate rollback, generation replacement, and disable clean up the exact service

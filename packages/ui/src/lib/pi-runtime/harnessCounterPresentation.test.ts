@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionStats } from '@piarium/protocol';
+import type { SessionStats } from '@varin/protocol';
 import { formatHarnessOutputBytes, projectHarnessCounters } from './harnessCounterPresentation';
 
 const stats = (overrides: Partial<SessionStats> = {}): SessionStats => ({

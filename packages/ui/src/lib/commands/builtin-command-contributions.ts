@@ -1,4 +1,4 @@
-import type { SurfaceActivationContext } from '@piarium/extension-surface';
+import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { toast } from '@/components/ui';
 import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
@@ -21,7 +21,7 @@ import {
   type FileEditorCommandId,
 } from '@/lib/monaco/editor-command-service';
 
-export const BUILTIN_COMMANDS_EXTENSION_ID = 'piarium.builtin.commands';
+export const BUILTIN_COMMANDS_EXTENSION_ID = 'varin.builtin.commands';
 
 interface BuiltinCommandDefinition {
   implementation: WorkbenchCommandImplementation;

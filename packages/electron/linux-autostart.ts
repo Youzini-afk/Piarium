@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const AUTOSTART_FILE_NAME = 'piarium.desktop';
+const AUTOSTART_FILE_NAME = 'varin.desktop';
 
 interface LinuxAutostartPathsOptions {
   env?: NodeJS.ProcessEnv;
@@ -57,7 +57,7 @@ const quoteDesktopExecArg = (value: unknown): string => {
 };
 
 export const buildLinuxAutostartDesktopEntry = ({
-  appName = 'Piarium',
+  appName = 'Varin',
   executable,
   backgroundArg,
   env = process.env,
@@ -75,7 +75,7 @@ export const buildLinuxAutostartDesktopEntry = ({
     `Exec=${args.join(' ')}`,
     'Terminal=false',
     'X-GNOME-Autostart-enabled=true',
-    'StartupWMClass=piarium',
+    'StartupWMClass=varin',
     '',
   ].join('\n');
 };
@@ -92,7 +92,7 @@ export const readLinuxAutostartEnabled = async (options: LinuxAutostartPathsOpti
 
 export const setLinuxAutostartEnabled = async ({
   enabled,
-  appName = 'Piarium',
+  appName = 'Varin',
   backgroundArg,
   env = process.env,
   execPath = process.execPath,

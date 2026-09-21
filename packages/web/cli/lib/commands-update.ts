@@ -51,7 +51,7 @@ function createUpdateCommand<Manager>({ importFromFilePath, packageManagerPath, 
     const currentVersion = getCurrentVersion();
 
     if (showOutput) {
-      clackIntro('Piarium Update');
+      clackIntro('Varin Update');
     }
 
     if (showOutput && !updateSpin) {

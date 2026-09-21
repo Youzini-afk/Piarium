@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import {
-  PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+  VARIN_RECOVERY_NAVIGATION_MARKER_TYPE,
   type SessionSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "../src/errors.js";
 import { SessionHost } from "../src/session-host.js";
 
@@ -24,7 +24,7 @@ interface NavigationFixture {
 }
 
 async function createNavigationFixture(): Promise<NavigationFixture> {
-  const root = await mkdtemp(join(tmpdir(), "piarium-recovery-navigation-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-recovery-navigation-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   await mkdir(cwd, { recursive: true });
@@ -42,7 +42,7 @@ async function createNavigationFixture(): Promise<NavigationFixture> {
   });
   const assistantEntryId = manager.appendMessage(fauxAssistantMessage("first answer"));
   manager.appendCustomMessageEntry(
-    "piarium.instructions",
+    "varin.instructions",
     "hidden application instructions",
     false,
   );
@@ -118,7 +118,7 @@ describe("SessionHost atomic recovery navigation", () => {
 
       const marker = fixture.host.session.sessionManager.getEntry(committed.markerId);
       assert.deepEqual(marker, {
-        customType: PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+        customType: VARIN_RECOVERY_NAVIGATION_MARKER_TYPE,
         data: {
           expectedLeafId: fixture.currentAssistantEntryId,
           operationId: "navigation-1",
@@ -199,7 +199,7 @@ describe("SessionHost atomic recovery navigation", () => {
       assert.equal(
         fixture.host.session.sessionManager.getEntries().filter((entry) => (
           entry.type === "custom"
-          && entry.customType === PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE
+          && entry.customType === VARIN_RECOVERY_NAVIGATION_MARKER_TYPE
         )).length,
         1,
       );
@@ -300,7 +300,7 @@ describe("SessionHost atomic recovery navigation", () => {
       const sessionFile = committed.snapshot.sessionFile;
       assert.ok(sessionFile);
       const persisted = await readFile(sessionFile, "utf8");
-      assert.match(persisted, new RegExp(PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE.replace("/", "\\/")));
+      assert.match(persisted, new RegExp(VARIN_RECOVERY_NAVIGATION_MARKER_TYPE.replace("/", "\\/")));
       assert.match(persisted, /"operationId":"navigation-reopen"/);
 
       await fixture.host.dispose();

@@ -11,7 +11,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
 async function setup() {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-state-retention-"));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-state-retention-"));
   const database = await openRecoveryJournalCatalog(root, { create: true });
   if (!database) throw new Error("catalog missing");
   cleanups.push(async () => { database.close(); await fs.promises.rm(root, { recursive: true, force: true }); });

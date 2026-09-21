@@ -15,10 +15,10 @@ import {
   type HarnessRequestData,
   type HostEvent,
   type HostEventData,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type ResponseEnvelope,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostController } from "../src/host-controller.js";
 import { SessionHost } from "../src/session-host.js";
 import { MemoryHostTransport } from "../src/transport.js";
@@ -113,7 +113,7 @@ function serveHarnessRequest(
 
 describe("workspace mutation journal", () => {
   it("routes enabled write and edit through the Host document mutation backend", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-tools-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-tools-"));
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
     const events = new MutationEventCollector();
@@ -149,7 +149,7 @@ describe("workspace mutation journal", () => {
     }
   });
   it("does not override Pi's built-ins when the capability is disabled", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-disabled-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-disabled-"));
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
     const events = new MutationEventCollector();
@@ -182,7 +182,7 @@ describe("workspace mutation journal", () => {
   });
 
   it("routes both fixed drafts and ordinary disk paths through document.surfaceWrite", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-write-guard-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-write-guard-"));
     const events = new MutationEventCollector();
     const journal = new WorkspaceMutationJournalBridge({
       emit: (event, data) => events.emit(event, data),
@@ -266,7 +266,7 @@ describe("workspace mutation journal", () => {
   });
 
   it("isolates concurrent request ids and preserves the original tool result", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-concurrent-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-concurrent-"));
     const events = new MutationEventCollector();
     const bridge = new WorkspaceMutationJournalBridge({
       emit: (event, data) => events.emit(event, data),
@@ -310,7 +310,7 @@ describe("workspace mutation journal", () => {
   });
 
   it("continues without journaling when event emission throws", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-emit-error-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-emit-error-"));
     const bridge = new WorkspaceMutationJournalBridge({
       emit: () => {
         throw new Error("transport unavailable");
@@ -332,7 +332,7 @@ describe("workspace mutation journal", () => {
   });
 
   it("releases pending standalone journal waits on disposal", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-mutation-dispose-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-mutation-dispose-"));
     const events = new MutationEventCollector();
     const bridge = new WorkspaceMutationJournalBridge({
       emit: (event, data) => events.emit(event, data),
@@ -354,7 +354,7 @@ describe("workspace mutation journal", () => {
   });
 
   it("commits a virtual write through document.branchWrite without touching disk", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-virtual-write-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-virtual-write-"));
     const journal = new WorkspaceMutationJournalBridge({
       emit: () => {
         throw new Error("virtual writes must not journal disk mutations");
@@ -405,7 +405,7 @@ describe("workspace mutation journal", () => {
         clientName: "web-host",
         clientVersion: "0.1.0",
         mode: "web",
-        protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+        protocolVersions: [VARIN_PROTOCOL_VERSION],
       }));
       const handshake = await transport.waitFor((envelope) => isResponse(envelope, "handshake"));
       assert.equal(handshake.kind, "response");
@@ -422,7 +422,7 @@ describe("workspace mutation journal", () => {
         kind: "response",
         ok: true,
         result: { accepted: false },
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       });
       assert.equal(transport.sent.some(isMutationEvent), false);
     } finally {

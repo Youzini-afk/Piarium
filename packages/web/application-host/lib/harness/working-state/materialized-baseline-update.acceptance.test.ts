@@ -14,7 +14,7 @@ import type { HarnessServiceContext } from "../router.js";
 import type { RecoveryState, WorkspaceWorkingStateRootAccess } from "./types.js";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "piarium-native-baseline-update-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-native-baseline-update-"));
   const workspace = join(root, "workspace");
   const managedRoot = join(root, "managed");
   const directory = join(managedRoot, "child");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import {
   createExtensionStateBridgeExtension,
   MCP_ADAPTER_STATUS_CHANNEL,

@@ -18,7 +18,7 @@ afterEach(async () => {
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 async function makeArchive(options: { extra?: string } = {}): Promise<string> {
-  const source = await mkdtemp(join(tmpdir(), "piarium-local-semantic-source-"));
+  const source = await mkdtemp(join(tmpdir(), "varin-local-semantic-source-"));
   roots.push(source);
   const files: Record<string, Uint8Array> = {
     "model/recipe.json": new TextEncoder().encode(JSON.stringify({
@@ -65,7 +65,7 @@ async function makeArchive(options: { extra?: string } = {}): Promise<string> {
 
 describe("local semantic component manager", () => {
   it("keeps the component unavailable without importing a runtime", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-local-semantic-data-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-local-semantic-data-"));
     roots.push(dataDir);
     const manager = createLocalSemanticComponentManager({ dataDir, version: "test" });
     expect(manager.status()).toEqual({ status: "not-installed" });
@@ -75,7 +75,7 @@ describe("local semantic component manager", () => {
   });
 
   it("reports a damaged active pointer as failed rather than not-installed", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-local-semantic-data-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-local-semantic-data-"));
     roots.push(dataDir);
     const pointer = join(dataDir, "optional-components/local-semantic/active.json");
     await mkdir(join(pointer, ".."), { recursive: true });
@@ -86,7 +86,7 @@ describe("local semantic component manager", () => {
   });
 
   it("rejects files outside the manifest without publishing an active pointer", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-local-semantic-data-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-local-semantic-data-"));
     roots.push(dataDir);
     const archive = await makeArchive({ extra: "unexpected.txt" });
     const manager = createLocalSemanticComponentManager({ dataDir, version: "test", validatePack: async () => undefined });
@@ -98,7 +98,7 @@ describe("local semantic component manager", () => {
   });
 
   it("verifies and enables a complete package atomically", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-local-semantic-data-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-local-semantic-data-"));
     roots.push(dataDir);
     const archive = await makeArchive();
     const manager = createLocalSemanticComponentManager({ dataDir, version: "test", validatePack: async () => undefined });
@@ -109,7 +109,7 @@ describe("local semantic component manager", () => {
   });
 
   it("leaves the previously enabled package usable after a failed replacement", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-local-semantic-data-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-local-semantic-data-"));
     roots.push(dataDir);
     const valid = await makeArchive();
     const invalid = await makeArchive({ extra: "unexpected.txt" });

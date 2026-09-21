@@ -1,10 +1,10 @@
 import {
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
 } from "./services.js";
-import type { JsonObject, JsonValue, PiariumExtensionServiceInvocationRequest } from "./types.js";
+import type { JsonObject, JsonValue, VarinExtensionServiceInvocationRequest } from "./types.js";
 
-export const PIARIUM_WORKSPACE_RECOVERY_CONTRACT_VERSION = 5 as const;
+export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 5 as const;
 
 export type WorkspaceRecoveryFailureCode =
   | "invalid-request" | "workspace-not-found" | "workspace-untrusted"
@@ -695,9 +695,9 @@ export interface WorkspaceRecoveryAPI {
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatusResult>;
 }
 
-export type WorkspaceRecoveryServiceInvoker = (request: PiariumExtensionServiceInvocationRequest) => Promise<JsonValue>;
+export type WorkspaceRecoveryServiceInvoker = (request: VarinExtensionServiceInvocationRequest) => Promise<JsonValue>;
 export const createWorkspaceRecoveryAPI = (invokeService: WorkspaceRecoveryServiceInvoker): WorkspaceRecoveryAPI => {
-  const call = (method: string, args: JsonValue[]) => invokeService({ args, method, serviceId: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID, version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION });
+  const call = (method: string, args: JsonValue[]) => invokeService({ args, method, serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID, version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION });
   return {
     applyCombinedRecovery: async (input) => parseWorkspaceCombinedRecoveryOperationResult(await call("applyCombinedRecovery", [parseWorkspaceCombinedRecoveryApplyInput(input) as unknown as JsonValue])),
     cancelCombinedOperation: async (id) => parseWorkspaceCombinedRecoveryOperationResult(await call("cancelCombinedOperation", [text(id, "operationId")])),

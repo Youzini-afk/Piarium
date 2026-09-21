@@ -12,14 +12,14 @@ import {
   removePidFile,
   readInstanceOptions,
   removeInstanceFile,
-  getPiariumProcessState,
-  hasPiariumRuntimeInfo,
+  getVarinProcessState,
+  hasVarinRuntimeInfo,
 } from './cli-process.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './cli-tunnel-capabilities.js';
 import type { TunnelProviderCapabilities } from '#application-host/lib/tunnels/types.js';
 import type { FetchLike, SystemInfo } from './cli-http.js';
 import type { CliOptions } from './cli-types.js';
-import type { PiariumProcessState } from './cli-process.js';
+import type { VarinProcessState } from './cli-process.js';
 
 export interface CliInstance {
   autoStarted?: boolean | undefined;
@@ -43,7 +43,7 @@ export interface DesktopInstance {
 
 interface LifecycleDiscoveryOptions extends CliOptions {
   fetchImpl?: FetchLike | undefined;
-  getPiariumProcessState?: ((pid: number) => PiariumProcessState) | undefined;
+  getVarinProcessState?: ((pid: number) => VarinProcessState) | undefined;
 }
 
 interface ProbeHost {
@@ -52,12 +52,12 @@ interface ProbeHost {
 }
 
 function createLivePortInstance(port: number, info: unknown, host?: unknown): CliInstance | null {
-  if (!hasPiariumRuntimeInfo(info)) return null;
+  if (!hasVarinRuntimeInfo(info)) return null;
   return {
     port,
     pid: typeof info.pid === 'number' && Number.isFinite(info.pid) ? info.pid : null,
-    pidFilePath: path.join(getRunDir(), `piarium-${port}.pid`),
-    instanceFilePath: path.join(getRunDir(), `piarium-${port}.json`),
+    pidFilePath: path.join(getRunDir(), `varin-${port}.pid`),
+    instanceFilePath: path.join(getRunDir(), `varin-${port}.json`),
     mtime: 0,
     startedAt: 0,
     launchMode: 'daemon',
@@ -116,7 +116,7 @@ async function fetchSystemInfoFromPortCandidates(
 ): Promise<{ host: string | null; info: SystemInfo | null }> {
   for (const { host, requiresPidMatch } of hosts) {
     const info = await fetchSystemInfoFromPort(port, fetchImpl, host);
-    if (hasPiariumRuntimeInfo(info)) {
+    if (hasVarinRuntimeInfo(info)) {
       if (requiresPidMatch && info.pid !== expectedPid) {
         continue;
       }
@@ -166,7 +166,7 @@ async function resolveDoctorPortStatuses(options: CliOptions = {}): Promise<{
         available: false,
         status: 'warning',
         line: `port ${requestedPort} not available (desktop runtime)`,
-        detail: 'Use a CLI instance port from `piarium serve` for tunneling.',
+        detail: 'Use a CLI instance port from `varin serve` for tunneling.',
       });
       return { statuses, availableEntries: [] };
     }
@@ -176,7 +176,7 @@ async function resolveDoctorPortStatuses(options: CliOptions = {}): Promise<{
       available: false,
       status: 'error',
       line: `port ${requestedPort} not available (no running instance)`,
-      detail: `Start one with \`piarium serve --port ${requestedPort}\`.`,
+      detail: `Start one with \`varin serve --port ${requestedPort}\`.`,
     });
     return { statuses, availableEntries: [] };
   }
@@ -197,7 +197,7 @@ async function resolveDoctorPortStatuses(options: CliOptions = {}): Promise<{
       available: false,
       status: 'warning',
       line: `port ${desktopEntry.port} not available (desktop runtime)`,
-      detail: 'Use a CLI instance port from `piarium serve` for tunneling.',
+      detail: 'Use a CLI instance port from `varin serve` for tunneling.',
     });
   }
 
@@ -207,7 +207,7 @@ async function resolveDoctorPortStatuses(options: CliOptions = {}): Promise<{
       available: false,
       status: 'warning',
       line: 'no CLI ports available for tunneling',
-      detail: 'Start one with `piarium serve`.',
+      detail: 'Start one with `varin serve`.',
     });
   }
 
@@ -218,24 +218,24 @@ async function discoverRunningInstances(options: LifecycleDiscoveryOptions = {})
   const instances: CliInstance[] = [];
   const runDir = getRunDir();
   const fetchImpl = typeof options.fetchImpl === 'function' ? options.fetchImpl : globalThis.fetch;
-  const getProcessState = typeof options.getPiariumProcessState === 'function'
-    ? options.getPiariumProcessState
-    : (pid: number) => getPiariumProcessState(pid);
+  const getProcessState = typeof options.getVarinProcessState === 'function'
+    ? options.getVarinProcessState
+    : (pid: number) => getVarinProcessState(pid);
   try {
     const files = fs.readdirSync(runDir);
-    const pidFiles = files.filter((file) => file.startsWith('piarium-') && file.endsWith('.pid'));
+    const pidFiles = files.filter((file) => file.startsWith('varin-') && file.endsWith('.pid'));
     for (const file of pidFiles) {
-      const port = parseInt(file.replace('piarium-', '').replace('.pid', ''), 10);
+      const port = parseInt(file.replace('varin-', '').replace('.pid', ''), 10);
       if (!Number.isFinite(port) || port <= 0) continue;
       const pidFilePath = path.join(runDir, file);
       const pid = readPidFile(pidFilePath);
       if (!pid) {
         removePidFile(pidFilePath);
-        removeInstanceFile(path.join(runDir, `piarium-${port}.json`));
+        removeInstanceFile(path.join(runDir, `varin-${port}.json`));
         continue;
       }
 
-      const instanceFilePath = path.join(runDir, `piarium-${port}.json`);
+      const instanceFilePath = path.join(runDir, `varin-${port}.json`);
       const storedOptions = readInstanceOptions(instanceFilePath);
       const processState = getProcessState(pid);
       if (processState === 'dead') {
@@ -245,8 +245,8 @@ async function discoverRunningInstances(options: LifecycleDiscoveryOptions = {})
       }
 
       // A live PID-file is only the right instance if the recorded port also
-      // confirms Piarium. Cmdline identity alone can match a recycled PID
-      // from another Piarium process on a different port. Try all plausible
+      // confirms Varin. Cmdline identity alone can match a recycled PID
+      // from another Varin process on a different port. Try all plausible
       // hosts first; if matched/unknown identity still can't be confirmed, keep
       // the registry files but don't claim the instance is running.
       const { info: liveInfo, host: confirmedHost } = await fetchSystemInfoFromPortCandidates(
@@ -256,7 +256,7 @@ async function discoverRunningInstances(options: LifecycleDiscoveryOptions = {})
         pid,
       );
       const livePid = typeof liveInfo?.pid === 'number' && Number.isFinite(liveInfo.pid) ? liveInfo.pid : null;
-      if (!hasPiariumRuntimeInfo(liveInfo)) {
+      if (!hasVarinRuntimeInfo(liveInfo)) {
         if (processState === 'mismatched') {
           removePidFile(pidFilePath);
           removeInstanceFile(instanceFilePath);
@@ -303,7 +303,7 @@ async function discoverRunningInstances(options: LifecycleDiscoveryOptions = {})
   return instances;
 }
 
-async function discoverPiariumInstanceOnPort(
+async function discoverVarinInstanceOnPort(
   port: number,
   options: LifecycleDiscoveryOptions & { runningInstances?: CliInstance[] } = {},
 ): Promise<CliInstance | null> {
@@ -336,7 +336,7 @@ async function discoverLifecycleInstances(
   const requestedPort = typeof options.port === 'number' ? options.port : DEFAULT_PORT;
   const found = runningInstances.find((entry) => entry.port === requestedPort);
   if (found) return [found];
-  const liveInstance = await discoverPiariumInstanceOnPort(requestedPort, {
+  const liveInstance = await discoverVarinInstanceOnPort(requestedPort, {
     ...deps,
     host: options.host,
     runningInstances,
@@ -356,7 +356,7 @@ async function discoverUnconfirmedRegistryInstanceOnPort(
 
   const instanceFilePath = await getInstanceFilePath(port);
   const storedOptions = readInstanceOptions(instanceFilePath);
-  const processState = getPiariumProcessState(pid);
+  const processState = getVarinProcessState(pid);
   if (processState === 'dead') {
     removePidFile(pidFilePath);
     removeInstanceFile(instanceFilePath);
@@ -488,7 +488,7 @@ async function resolveTunnelProviders(options: CliOptions = {}, deps: {
 export {
   resolveDoctorPortStatuses,
   discoverRunningInstances,
-  discoverPiariumInstanceOnPort,
+  discoverVarinInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   getLatestInstance,

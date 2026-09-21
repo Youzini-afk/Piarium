@@ -107,7 +107,7 @@ interface Harness {
   calls: RecordedCall[];
   failures: [string, string][];
   successes: string[];
-  compactions: import("@piarium/protocol").ContextRetentionParams[];
+  compactions: import("@varin/protocol").ContextRetentionParams[];
   config: { enabled: boolean; waterline: number };
   entries: SessionEntry[];
   extension: ReturnType<typeof createContextPreparationExtension>;
@@ -383,7 +383,7 @@ describe("context preparation extension", () => {
 describe("D-284 acceptance regressions", () => {
   it("rebinds observation retention on branch navigation without preparing a summary", async () => {
     const note: SessionEntry = { id: "kept-note", parentId: null, timestamp: new Date().toISOString(),
-      type: "custom_message", customType: "piarium-context", content: "observed facts", display: false,
+      type: "custom_message", customType: "varin-context", content: "observed facts", display: false,
       details: { observationRefs: ["kept-receipt"], gitObserved: true } };
     const harness = createHarness([note], 10);
     await harness.handlers.get("session_tree")!({ type: "session_tree" } as never, harness.ctx as never);

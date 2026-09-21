@@ -1,34 +1,34 @@
 import {
-  parsePiariumExtensionCatalogAvailability,
-  parsePiariumExtensionAssetPayload,
-  parsePiariumExtensionCatalogSnapshot,
-  parsePiariumExtensionCandidatePreparationResult,
-  parsePiariumExtensionHostStateSnapshot,
-  parsePiariumExtensionLocalSourceReloadResult,
-  parsePiariumExtensionManagedEntrypointPayload,
-  parsePiariumExtensionServiceRoutingSnapshot,
-  parsePiariumWorkbenchProfileSnapshot,
-  type PiariumExtensionActualState,
-  type PiariumExtensionAssetRequest,
-  type PiariumExtensionCandidateCapabilityReviewRequest,
-  type PiariumExtensionCapabilityReviewRequest,
-  type PiariumExtensionCandidateSelectionRequest,
-  type PiariumExtensionCatalogAvailability,
-  type PiariumExtensionManagedEntrypointRequest,
-  type PiariumExtensionPackageInstallRequest,
-  type PiariumExtensionHostStateWaitRequest,
-  type PiariumExtensionLocalSourceReloadRequest,
-} from '@piarium/extension-contract';
-import type { ExtensionsAPI } from '@piarium/application-client';
-import { refreshLocalRuntimeUrlAuthToken } from '@piarium/application-client';
-import { fetchWithoutRuntimeRouting } from '@piarium/application-client';
+  parseVarinExtensionCatalogAvailability,
+  parseVarinExtensionAssetPayload,
+  parseVarinExtensionCatalogSnapshot,
+  parseVarinExtensionCandidatePreparationResult,
+  parseVarinExtensionHostStateSnapshot,
+  parseVarinExtensionLocalSourceReloadResult,
+  parseVarinExtensionManagedEntrypointPayload,
+  parseVarinExtensionServiceRoutingSnapshot,
+  parseVarinWorkbenchProfileSnapshot,
+  type VarinExtensionActualState,
+  type VarinExtensionAssetRequest,
+  type VarinExtensionCandidateCapabilityReviewRequest,
+  type VarinExtensionCapabilityReviewRequest,
+  type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCatalogAvailability,
+  type VarinExtensionManagedEntrypointRequest,
+  type VarinExtensionPackageInstallRequest,
+  type VarinExtensionHostStateWaitRequest,
+  type VarinExtensionLocalSourceReloadRequest,
+} from '@varin/extension-contract';
+import type { ExtensionsAPI } from '@varin/application-client';
+import { refreshLocalRuntimeUrlAuthToken } from '@varin/application-client';
+import { fetchWithoutRuntimeRouting } from '@varin/application-client';
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '');
 
 const applicationHostOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string'
-    ? normalizeOrigin(window.__PIARIUM_LOCAL_ORIGIN__)
+  const injected = typeof window.__VARIN_LOCAL_ORIGIN__ === 'string'
+    ? normalizeOrigin(window.__VARIN_LOCAL_ORIGIN__)
     : '';
   return injected || normalizeOrigin(window.location.origin);
 };
@@ -38,7 +38,7 @@ const currentOrigin = (): string => {
   return normalizeOrigin(window.location.origin);
 };
 
-const errorResult = (message: string, retryable: boolean): PiariumExtensionCatalogAvailability => ({
+const errorResult = (message: string, retryable: boolean): VarinExtensionCatalogAvailability => ({
   supported: true,
   status: 'error',
   error: { code: 'application_host_unavailable', message, retryable },
@@ -54,7 +54,7 @@ const applicationHostRequest = async (
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
   const headers = new Headers({ Accept: 'application/json', 'Content-Type': 'application/json' });
   if (origin && origin !== currentOrigin()) {
-    headers.set('X-Piarium-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
+    headers.set('X-Varin-Application-Token', await refreshLocalRuntimeUrlAuthToken(origin));
   }
   return fetchWithoutRuntimeRouting(target, {
     body: JSON.stringify(body),
@@ -69,7 +69,7 @@ const applicationHostRead = async (path: string): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
   if (origin && origin !== currentOrigin()) {
-    target.searchParams.set('piarium_url_token', await refreshLocalRuntimeUrlAuthToken(origin));
+    target.searchParams.set('varin_url_token', await refreshLocalRuntimeUrlAuthToken(origin));
   }
   return fetchWithoutRuntimeRouting(target, {
     credentials: 'include',
@@ -83,29 +83,29 @@ const readJsonOrThrow = async (response: Response): Promise<unknown> => {
   const message = payload && typeof payload === 'object' && 'error' in payload
     && typeof (payload as { error?: { message?: unknown } }).error?.message === 'string'
     ? String((payload as { error: { message: string } }).error.message)
-    : `Piarium extension host request failed (${response.status})`;
+    : `Varin extension host request failed (${response.status})`;
   throw new Error(message);
 };
 
 export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   activateExtension: async (extensionId) => {
-    const response = await applicationHostRequest(`/api/piarium/extensions/v1/extensions/${encodeURIComponent(extensionId)}/activate`, {});
+    const response = await applicationHostRequest(`/api/varin/extensions/v1/extensions/${encodeURIComponent(extensionId)}/activate`, {});
     if (!response.ok) await readJsonOrThrow(response);
   },
   applyWorkbenchProfile: async (request) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profiles/apply', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium workbench profile apply response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/profiles/apply', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin workbench profile apply response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
   catalog: async () => {
     try {
       const origin = applicationHostOrigin();
       const target = origin
-        ? new URL('/api/piarium/extensions/v1/catalog', `${origin}/`)
-        : new URL('/api/piarium/extensions/v1/catalog', window.location.href);
+        ? new URL('/api/varin/extensions/v1/catalog', `${origin}/`)
+        : new URL('/api/varin/extensions/v1/catalog', window.location.href);
       if (origin && origin !== currentOrigin()) {
         const token = await refreshLocalRuntimeUrlAuthToken(origin);
-        target.searchParams.set('piarium_url_token', token);
+        target.searchParams.set('varin_url_token', token);
       }
       const response = await fetchWithoutRuntimeRouting(target, {
         credentials: 'include',
@@ -114,132 +114,132 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
       const payload = await response.json().catch(() => null) as unknown;
       if (!response.ok) {
         try {
-          const parsed = parsePiariumExtensionCatalogAvailability(payload);
+          const parsed = parseVarinExtensionCatalogAvailability(payload);
           if (parsed.supported === true && parsed.status === 'error') return parsed;
         } catch {
           // The HTTP status below remains the authoritative failure when the error body is malformed.
         }
         return errorResult(`Extension catalog request failed (${response.status})`, response.status >= 500);
       }
-      return parsePiariumExtensionCatalogAvailability(payload);
+      return parseVarinExtensionCatalogAvailability(payload);
     } catch (error) {
       return errorResult(error instanceof Error ? error.message : String(error), true);
     }
   },
   discardPreparedCandidate: async (extensionId, candidateIntegrity) => {
-    const response = await applicationHostRequest('/api/piarium/extensions/v1/candidates/discard-prepared', { candidateIntegrity, extensionId });
+    const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/discard-prepared', { candidateIntegrity, extensionId });
     if (!response.ok) await readJsonOrThrow(response);
   },
   discardCandidate: async (request) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/discard', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension discard response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/discard', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension discard response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  hostState: async () => parsePiariumExtensionHostStateSnapshot(
-    await readJsonOrThrow(await applicationHostRead('/api/piarium/extensions/v1/host-state')),
+  hostState: async () => parseVarinExtensionHostStateSnapshot(
+    await readJsonOrThrow(await applicationHostRead('/api/varin/extensions/v1/host-state')),
   ),
-  install: async (request: PiariumExtensionPackageInstallRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/install', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension install response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  install: async (request: VarinExtensionPackageInstallRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/install', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension install response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
   invokeService: async (request) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/invoke', request));
-    if (!payload || typeof payload !== 'object' || !('result' in payload)) throw new Error('Piarium Host service response is malformed');
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/invoke', request));
+    if (!payload || typeof payload !== 'object' || !('result' in payload)) throw new Error('Varin Host service response is malformed');
     return JSON.parse(JSON.stringify((payload as { result: unknown }).result));
   },
   prepareCandidate: async (extensionId, candidateIntegrity) => {
-    const response = await applicationHostRequest('/api/piarium/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId });
-    return parsePiariumExtensionCandidatePreparationResult(await readJsonOrThrow(response));
+    const response = await applicationHostRequest('/api/varin/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId });
+    return parseVarinExtensionCandidatePreparationResult(await readJsonOrThrow(response));
   },
-  requestCandidateApplication: async (request: PiariumExtensionCandidateSelectionRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/request-application', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension candidate application response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  requestCandidateApplication: async (request: VarinExtensionCandidateSelectionRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/request-application', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension candidate application response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  readAsset: async (request: PiariumExtensionAssetRequest) => (
-    parsePiariumExtensionAssetPayload(await readJsonOrThrow(
-      await applicationHostRequest('/api/piarium/extensions/v1/assets/read', request),
+  readAsset: async (request: VarinExtensionAssetRequest) => (
+    parseVarinExtensionAssetPayload(await readJsonOrThrow(
+      await applicationHostRequest('/api/varin/extensions/v1/assets/read', request),
     ))
   ),
-  readManagedEntrypoint: async (request: PiariumExtensionManagedEntrypointRequest) => (
-    parsePiariumExtensionManagedEntrypointPayload(await readJsonOrThrow(
-      await applicationHostRequest('/api/piarium/extensions/v1/entrypoints/read', request),
+  readManagedEntrypoint: async (request: VarinExtensionManagedEntrypointRequest) => (
+    parseVarinExtensionManagedEntrypointPayload(await readJsonOrThrow(
+      await applicationHostRequest('/api/varin/extensions/v1/entrypoints/read', request),
     ))
   ),
-  reloadLocalSource: async (request: PiariumExtensionLocalSourceReloadRequest) => (
-    parsePiariumExtensionLocalSourceReloadResult(await readJsonOrThrow(await applicationHostRequest(
-      `/api/piarium/extensions/v1/extensions/${encodeURIComponent(request.extensionId)}/reload-local-source`,
+  reloadLocalSource: async (request: VarinExtensionLocalSourceReloadRequest) => (
+    parseVarinExtensionLocalSourceReloadResult(await readJsonOrThrow(await applicationHostRequest(
+      `/api/varin/extensions/v1/extensions/${encodeURIComponent(request.extensionId)}/reload-local-source`,
       request,
     )))
   ),
-  reportActualState: async (extensionId: string, state: PiariumExtensionActualState) => {
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/actual', { extensionId, state }))
+  reportActualState: async (extensionId: string, state: VarinExtensionActualState) => {
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/actual', { extensionId, state }))
       .catch((error) => {
         // A successful actual-state report intentionally has no response body.
         if (error instanceof SyntaxError) return undefined;
         throw error;
       });
   },
-  reviewCapabilities: async (request: PiariumExtensionCapabilityReviewRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/review-capabilities', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension capability review response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  reviewCapabilities: async (request: VarinExtensionCapabilityReviewRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/review-capabilities', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension capability review response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  reviewCandidateCapabilities: async (request: PiariumExtensionCandidateCapabilityReviewRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/review-capabilities', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension capability review response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  reviewCandidateCapabilities: async (request: VarinExtensionCandidateCapabilityReviewRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/review-capabilities', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension capability review response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  selectCandidate: async (request: PiariumExtensionCandidateSelectionRequest) => {
-    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/select', request));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension candidate response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  selectCandidate: async (request: VarinExtensionCandidateSelectionRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/candidates/select', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension candidate response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
   setEnabled: async (extensionId, enabled, expectedRevision) => {
     const payload = await readJsonOrThrow(await applicationHostRequest(
-      `/api/piarium/extensions/v1/extensions/${encodeURIComponent(extensionId)}/enabled`,
+      `/api/varin/extensions/v1/extensions/${encodeURIComponent(extensionId)}/enabled`,
       { enabled, expectedRevision },
       undefined,
       'PATCH',
     ));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension enabled response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension enabled response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/select', request)),
+  setServiceSelection: async (request) => parseVarinExtensionHostStateSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/select', request)),
   ),
-  upsertServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/routing', request, undefined, 'PUT')),
+  upsertServiceRoutingRule: async (request) => parseVarinExtensionServiceRoutingSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/routing', request, undefined, 'PUT')),
   ),
-  removeServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/routing/remove', request)),
+  removeServiceRoutingRule: async (request) => parseVarinExtensionServiceRoutingSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/services/routing/remove', request)),
   ),
   removeExtension: async (request) => {
     const payload = await readJsonOrThrow(await applicationHostRequest(
-      `/api/piarium/extensions/v1/extensions/${encodeURIComponent(request.extensionId)}`,
+      `/api/varin/extensions/v1/extensions/${encodeURIComponent(request.extensionId)}`,
       request,
       undefined,
       'DELETE',
     ));
-    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension remove response is malformed');
-    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension remove response is malformed');
+    return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/layout', request, undefined, 'PATCH')),
+  updateWorkbenchLayout: async (request) => parseVarinWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/layout', request, undefined, 'PATCH')),
   ),
-  selectWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profile/select', request, undefined, 'PATCH')),
+  selectWorkbenchProfile: async (request) => parseVarinWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/profile/select', request, undefined, 'PATCH')),
   ),
-  upsertWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profiles', request, undefined, 'PUT')),
+  upsertWorkbenchProfile: async (request) => parseVarinWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/profiles', request, undefined, 'PUT')),
   ),
-  removeWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
-    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profiles/remove', request)),
+  removeWorkbenchProfile: async (request) => parseVarinWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/profiles/remove', request)),
   ),
-  waitForHostState: async (request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal) => (
-    parsePiariumExtensionHostStateSnapshot(await readJsonOrThrow(
-      await applicationHostRequest('/api/piarium/extensions/v1/host-state/wait', request, signal),
+  waitForHostState: async (request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal) => (
+    parseVarinExtensionHostStateSnapshot(await readJsonOrThrow(
+      await applicationHostRequest('/api/varin/extensions/v1/host-state/wait', request, signal),
     ))
   ),
 });

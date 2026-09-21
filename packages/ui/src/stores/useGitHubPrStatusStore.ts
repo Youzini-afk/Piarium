@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { GitHubPullRequestStatus, RuntimeAPIs } from '@piarium/application-client';
+import type { GitHubPullRequestStatus, RuntimeAPIs } from '@varin/application-client';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
 const PR_REVALIDATE_INTERVAL_MS = 15_000;
@@ -14,7 +14,7 @@ const PR_OPEN_DEFAULT_INTERVAL_MS = 2 * 60_000;
 const PR_OPEN_STABLE_INTERVAL_MS = 5 * 60_000;
 const PR_STATUS_REFRESH_CONCURRENCY = 4;
 const PR_PERSIST_TTL_MS = 12 * 60 * 60_000;
-const PR_STATUS_STORAGE_KEY = 'piarium.githubPrStatus.v1';
+const PR_STATUS_STORAGE_KEY = 'varin.githubPrStatus.v1';
 const PR_MAX_ENTRIES = 200;
 
 const isTerminalPrState = (state: string | null | undefined): boolean => state === 'closed' || state === 'merged';

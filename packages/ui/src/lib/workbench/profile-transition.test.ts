@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-  PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  type PiariumTransitionSceneContributionDataV1,
-} from '@piarium/extension-contract';
+  VARIN_TRANSITION_SCENE_DATA_CONTRACT,
+  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  type VarinTransitionSceneContributionDataV1,
+} from '@varin/extension-contract';
 import {
   QUICK_TRANSITION_COMMIT_GRACE_MS,
   armWorkbenchProfileTransitionPhase,
@@ -32,10 +32,10 @@ const sceneData = (input: {
   revealQuick?: number;
   revealReduced?: number;
   revealStandard?: number;
-} = {}): PiariumTransitionSceneContributionDataV1 => ({
-  contract: PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
+} = {}): VarinTransitionSceneContributionDataV1 => ({
+  contract: VARIN_TRANSITION_SCENE_DATA_CONTRACT,
   durations: {
-    [PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE]: {
+    [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE]: {
       covering: {
         quick: input.coverQuick ?? 800,
         reduced: input.coverReduced ?? 0,
@@ -48,7 +48,7 @@ const sceneData = (input: {
       },
     },
   },
-  scenes: [PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE],
+  scenes: [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE],
 });
 
 const scene = (data = sceneData()): WorkbenchTransitionSceneCapture => ({
@@ -96,7 +96,7 @@ describe('workbench profile transition state machine', () => {
     const id = beginWorkbenchProfileTransition({
       fromProfileId: 'default',
       scene: selectedScene,
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
 
     expect(phases).toEqual(['idle', 'covering']);
@@ -107,12 +107,12 @@ describe('workbench profile transition state machine', () => {
       phase: 'covering',
       scene: selectedScene,
       tempo: 'quick',
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
   });
 
   test('does not cross the commit boundary until reverse playback is fully covered', async () => {
-    const id = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     let resolved: boolean | undefined;
     const covered = waitForWorkbenchProfileTransitionCovered(id).then((value) => {
       resolved = value;
@@ -128,7 +128,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a candidate prepared during covering keeps the quick reveal', async () => {
-    const id = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     markWorkbenchProfileTransitionOperationPrepared(id);
     armWorkbenchProfileTransitionPhase(id, 'covering');
     markWorkbenchProfileTransitionCovered(id);
@@ -144,7 +144,7 @@ describe('workbench profile transition state machine', () => {
   test('keeps the cover closed until the authoritative target Shell has painted', async () => {
     const id = beginWorkbenchProfileTransition({
       fromProfileId: 'default',
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     markWorkbenchProfileTransitionCovered(id);
@@ -160,12 +160,12 @@ describe('workbench profile transition state machine', () => {
     await Promise.resolve();
     expect(settled).toBeUndefined();
 
-    markWorkbenchProfileTransitionTargetPainted(id, 'piarium.ide');
+    markWorkbenchProfileTransitionTargetPainted(id, 'varin.ide');
     await expect(painted).resolves.toBe(true);
   });
 
   test('a candidate that reaches the boundary after covering uses the standard reveal', async () => {
-    const id = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     markWorkbenchProfileTransitionCovered(id);
     markWorkbenchProfileTransitionOperationPrepared(id);
@@ -178,7 +178,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a prepared candidate that remains covered past the quick grace uses the standard reveal', async () => {
-    const id = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     markWorkbenchProfileTransitionOperationPrepared(id);
     armWorkbenchProfileTransitionPhase(id, 'covering');
     markWorkbenchProfileTransitionCovered(id);
@@ -192,7 +192,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('declared scene durations advance phases without a renderer completion signal', async () => {
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     const covered = waitForWorkbenchProfileTransitionCovered(id);
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(800);
@@ -207,7 +207,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a declared duration does not run before the scene mount reports ready', () => {
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     vi.advanceTimersByTime(8_000);
     expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('covering');
     armWorkbenchProfileTransitionPhase(id, 'covering');
@@ -221,7 +221,7 @@ describe('workbench profile transition state machine', () => {
     const id = beginWorkbenchProfileTransition({
       reducedMotion: true,
       scene: scene(sceneData({ coverReduced: 25, revealReduced: 40 })),
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
     expect(getWorkbenchProfileTransitionSnapshot().durationMs).toBe(25);
     armWorkbenchProfileTransitionPhase(id, 'covering');
@@ -235,7 +235,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('Core fallback is explicit and advances asynchronously without inventing a duration', async () => {
-    const id = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ durationMs: 0, scene: null });
     expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('covering');
     armWorkbenchProfileTransitionPhase(id, 'covering');
@@ -252,14 +252,14 @@ describe('workbench profile transition state machine', () => {
     const firstId = beginWorkbenchProfileTransition({
       fromProfileId: 'default',
       scene: scene(),
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
     const controller = createWorkbenchTransitionSceneController(firstId);
     expect(controller.getSnapshot()).toMatchObject({
       contractVersion: 1,
       fromProfileId: 'default',
       phase: 'covering',
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
       transitionId: firstId,
     });
     controller.complete(firstId + 1, 'covering');
@@ -276,7 +276,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a newer selection releases a superseded cover waiter', async () => {
-    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     const first = waitForWorkbenchProfileTransitionCovered(firstId);
     beginWorkbenchProfileTransition({ toProfileId: 'default' });
 
@@ -285,7 +285,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a newer selection releases a superseded target-paint waiter', async () => {
-    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(firstId, 'covering');
     markWorkbenchProfileTransitionCovered(firstId);
     const first = waitForWorkbenchProfileTransitionTargetPainted(firstId);
@@ -295,7 +295,7 @@ describe('workbench profile transition state machine', () => {
   });
 
   test('a late animation event cannot advance a newer transition', () => {
-    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'varin.ide' });
     const secondId = beginWorkbenchProfileTransition({ toProfileId: 'default' });
 
     markWorkbenchProfileTransitionCovered(firstId);
@@ -309,19 +309,19 @@ describe('workbench profile transition state machine', () => {
 });
 
 describe('sweep direction', () => {
-  const profiles = ['default', 'piarium.ide'];
+  const profiles = ['default', 'varin.ide'];
 
   test('moving later in the profile order sweeps forward', () => {
-    expect(resolveTransitionDirection(profiles, 'default', 'piarium.ide')).toBe('forward');
+    expect(resolveTransitionDirection(profiles, 'default', 'varin.ide')).toBe('forward');
   });
 
   test('moving earlier reverses the sweep', () => {
-    expect(resolveTransitionDirection(profiles, 'piarium.ide', 'default')).toBe('backward');
+    expect(resolveTransitionDirection(profiles, 'varin.ide', 'default')).toBe('backward');
   });
 
   test('an unknown origin or target does not guess', () => {
-    expect(resolveTransitionDirection(profiles, null, 'piarium.ide')).toBe('forward');
-    expect(resolveTransitionDirection(profiles, 'gone', 'piarium.ide')).toBe('forward');
+    expect(resolveTransitionDirection(profiles, null, 'varin.ide')).toBe('forward');
+    expect(resolveTransitionDirection(profiles, 'gone', 'varin.ide')).toBe('forward');
     expect(resolveTransitionDirection(profiles, 'default', 'unknown')).toBe('forward');
   });
 });
@@ -349,7 +349,7 @@ describe('scene retirement', () => {
   const REVEAL_MS = 1_400;
 
   const reachRevealEnd = (): number => {
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(COVER_MS);
     void revealWorkbenchProfileTransition(id);
@@ -382,7 +382,7 @@ describe('scene retirement', () => {
 
   test('callers awaiting the reveal resolve at detachment, not at the last animation frame', async () => {
     const release = registerWorkbenchProfileTransitionSceneHost();
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(COVER_MS);
 
@@ -405,7 +405,7 @@ describe('scene retirement', () => {
     // The one moment nothing about the scene may be re-evaluated is the moment it is being retired against
     // its terminal frame. Retirement is Core/host bookkeeping and changes no frame field.
     const release = registerWorkbenchProfileTransitionSceneHost();
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     const controller = createWorkbenchTransitionSceneController(id);
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(COVER_MS);
@@ -467,7 +467,7 @@ describe('scene retirement', () => {
   test('with no host mounted a finished reveal is simply the end', async () => {
     // Headless callers, tests, and any surface that never mounted the overlay have no scene DOM to retire,
     // so waiting for a detachment report would be waiting for something that cannot happen.
-    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'varin.ide' });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(COVER_MS);
     const reveal = revealWorkbenchProfileTransition(id);
@@ -483,7 +483,7 @@ describe('scene retirement', () => {
     const id = beginWorkbenchProfileTransition({
       reducedMotion: true,
       scene: scene(),
-      toProfileId: 'piarium.ide',
+      toProfileId: 'varin.ide',
     });
     armWorkbenchProfileTransitionPhase(id, 'covering');
     vi.advanceTimersByTime(0);

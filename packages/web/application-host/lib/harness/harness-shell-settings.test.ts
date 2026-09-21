@@ -3,7 +3,7 @@ import {
   HarnessShellSettingsError,
   resolveHarnessShellSetting,
 } from "./harness-shell-settings.js";
-import type { JsonValue, PiSettingsSnapshot } from "@piarium/protocol";
+import type { JsonValue, PiSettingsSnapshot } from "@varin/protocol";
 
 const snapshot = (
   global: { [key: string]: JsonValue },

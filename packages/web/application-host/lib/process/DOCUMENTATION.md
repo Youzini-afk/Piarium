@@ -44,7 +44,7 @@ replacement of every child_process import. Debuggee children spawned inside a na
 belong to that native process tree, not another Host backend. Node/Bun PTY providers are not selected
 in production, and D-282 removed their distribution packages and Electron rebuild probe.
 
-The OS implementation is in `kernel/crates/piarium-kernel/src/process/` and
+The OS implementation is in `kernel/crates/varin-kernel/src/process/` and
 `storage/process_resources.rs`. A guardian is the same packaged executable and owns no SQLite
 connection. The sole Storage retains durable records. Windows uses named Jobs; Linux uses sessions
 plus a subreaper for reparented descendants; other Unix platforms use managed-session observation.

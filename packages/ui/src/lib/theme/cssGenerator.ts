@@ -196,16 +196,16 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     document.documentElement.setAttribute('data-theme', theme.metadata.variant);
 
     const hasMacVibrancy = typeof window !== 'undefined'
-      && window.__PIARIUM_ELECTRON__?.runtime === 'electron'
-      && window.__PIARIUM_ELECTRON__?.macVibrancy === true;
-    document.documentElement.toggleAttribute('data-piarium-vibrancy', hasMacVibrancy);
+      && window.__VARIN_ELECTRON__?.runtime === 'electron'
+      && window.__VARIN_ELECTRON__?.macVibrancy === true;
+    document.documentElement.toggleAttribute('data-varin-vibrancy', hasMacVibrancy);
     // Default the "ready" flag here (DOM is guaranteed to exist) rather than
     // relying on the preload, which sets it at document-start when
     // documentElement may not exist yet — that race left the sidebar stuck
     // un-frosted on cold launch until a minimize/restore re-sent ready=true.
     // The minimize/restore IPC continues to toggle this afterwards.
     if (hasMacVibrancy) {
-      document.documentElement.toggleAttribute('data-piarium-vibrancy-ready', true);
+      document.documentElement.toggleAttribute('data-varin-vibrancy-ready', true);
     }
   }
 

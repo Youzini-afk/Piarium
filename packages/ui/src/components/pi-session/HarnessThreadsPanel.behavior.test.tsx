@@ -2,19 +2,19 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { toast } from '@/components/ui';
 import { HarnessThreadsPanel } from './HarnessThreadsPanel';
 import { HarnessThreadStateContext, type HarnessThreadStateValue } from './HarnessThreadStateContext';
-import type { SessionEntriesResult } from '@piarium/protocol';
+import type { SessionEntriesResult } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
 const mocks = vi.hoisted(() => ({ openSession: vi.fn(), prefetchSession: vi.fn(), timeline: vi.fn(), translate: (key: string) => key }));
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/lib/piariumEvents', () => ({ subscribePiariumEvents: () => () => {} }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/stores/usePiSessionStore', () => ({
   usePiSessionStore: (select: (state: typeof mocks) => unknown) => select(mocks),
 }));

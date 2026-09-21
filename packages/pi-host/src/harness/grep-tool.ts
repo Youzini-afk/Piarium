@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { SearchContentResult } from "@piarium/protocol";
+import type { SearchContentResult } from "@varin/protocol";
 
 const GrepParams = Type.Object({
   pattern: Type.String(),

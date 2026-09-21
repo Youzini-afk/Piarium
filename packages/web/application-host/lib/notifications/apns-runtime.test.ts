@@ -12,7 +12,7 @@ type FetchCall = [unknown, { body: string; headers: Record<string, string> }];
 // A real P-256 key so the ES256 signing path (direct mode) runs for real.
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const P8 = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-const APNS_CONFIG: ApnsConfig = { keyId: 'KEY123', teamId: 'TEAM123', p8: P8, bundleId: 'dev.piarium.mobile', environment: 'sandbox' };
+const APNS_CONFIG: ApnsConfig = { keyId: 'KEY123', teamId: 'TEAM123', p8: P8, bundleId: 'dev.varin.mobile', environment: 'sandbox' };
 const APNS_CONFIG_WITHOUT_ENVIRONMENT = {
   keyId: APNS_CONFIG.keyId,
   teamId: APNS_CONFIG.teamId,
@@ -132,9 +132,9 @@ const createSuccessfulHttp2 = ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.PIARIUM_PUSH_RELAY_URL;
-  delete process.env.PIARIUM_PUSH_RELAY_DISABLED;
-  delete process.env.PIARIUM_APNS_ENVIRONMENT;
+  delete process.env.VARIN_PUSH_RELAY_URL;
+  delete process.env.VARIN_PUSH_RELAY_DISABLED;
+  delete process.env.VARIN_APNS_ENVIRONMENT;
 });
 
 describe('apns runtime relay mode (explicit)', () => {
@@ -161,7 +161,7 @@ describe('apns runtime relay mode (explicit)', () => {
           }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    process.env.PIARIUM_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
 
     const runtime = createApnsRuntime(makeDeps());
     await runtime.addOrUpdateApnsToken('s1', 'tokenA');
@@ -207,7 +207,7 @@ describe('apns runtime relay mode (explicit)', () => {
   it('reuses one persisted keypair (same serverId) across register + send', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
     vi.stubGlobal('fetch', fetchMock);
-    process.env.PIARIUM_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
 
     const deps = makeDeps();
     const runtime = createApnsRuntime(deps);
@@ -226,8 +226,8 @@ describe('apns runtime relay mode (explicit)', () => {
   it('honors an explicit sandbox environment override for every token', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
     vi.stubGlobal('fetch', fetchMock);
-    process.env.PIARIUM_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
-    process.env.PIARIUM_APNS_ENVIRONMENT = 'sandbox';
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    process.env.VARIN_APNS_ENVIRONMENT = 'sandbox';
 
     const runtime = createApnsRuntime(makeDeps());
     await runtime.addOrUpdateApnsToken('s1', 'tokenA', undefined, 'ios', 'production');
@@ -240,7 +240,7 @@ describe('apns runtime relay mode (explicit)', () => {
   it('routes each token to its registered environment (dev build sandbox, release production)', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
     vi.stubGlobal('fetch', fetchMock);
-    process.env.PIARIUM_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    process.env.VARIN_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
 
     const runtime = createApnsRuntime(makeDeps());
     await runtime.addOrUpdateApnsToken('s1', 'tokenXcode', undefined, 'ios', 'sandbox');
@@ -265,7 +265,7 @@ describe('apns runtime relay mode (explicit)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not send Piarium device tokens to an undeclared central relay', async () => {
+  it('does not send Varin device tokens to an undeclared central relay', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const runtime = createApnsRuntime(makeDeps());
@@ -285,7 +285,7 @@ describe('apns runtime direct fallback (relay disabled)', () => {
   });
 
   it('sends each token to the APNs host of its registered environment', async () => {
-    process.env.PIARIUM_PUSH_RELAY_DISABLED = 'true';
+    process.env.VARIN_PUSH_RELAY_DISABLED = 'true';
     const configWithoutEnvironment = APNS_CONFIG_WITHOUT_ENVIRONMENT;
     const hosts: Array<{ host: string; targeted: string[] }> = [];
     let currentTargets: string[] = [];
@@ -309,7 +309,7 @@ describe('apns runtime direct fallback (relay disabled)', () => {
   });
 
   it('signs an ES256 JWT and sends over http2 when relay is disabled', async () => {
-    process.env.PIARIUM_PUSH_RELAY_DISABLED = 'true';
+    process.env.VARIN_PUSH_RELAY_DISABLED = 'true';
     const targeted: string[] = [];
     const http2 = createSuccessfulHttp2({ onToken: (token) => targeted.push(token) });
     const runtime = createApnsRuntime(

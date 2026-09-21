@@ -30,9 +30,9 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `zhipuai-coding-plan` | Zhipu AI Coding Plan | `providers/zhipuai-coding-plan.js` | `zhipuai-coding-plan`, `zhipuai`, `zhipu` |
 | `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` / `providers/minimax-shared.js` | `minimax-coding-plan` |
 | `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` / `providers/minimax-shared.js` | `minimax-cn-coding-plan` |
-| `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Manual cookie stored under the Piarium data directory (`~/.config/piarium/quota/` on Linux) |
+| `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Manual cookie stored under the Varin data directory (`~/.config/varin/quota/` on Linux) |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
-| `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Manual workspace ID and auth cookie stored under the Piarium data directory (`~/.config/piarium/quota/` on Linux) |
+| `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Manual workspace ID and auth cookie stored under the Varin data directory (`~/.config/varin/quota/` on Linux) |
 | `neuralwatt` | NeuralWatt | `providers/neuralwatt.js` | `neuralwatt` (API key under `key` or `token`) |
 
 ## Internal-only provider module
@@ -51,10 +51,10 @@ OpenCode Go, Ollama Cloud, and Cursor credentials are explicitly managed through
 
 Google quota reads can use an existing unexpired access token without additional configuration.
 Refreshing Gemini or Antigravity tokens requires the corresponding installed-app OAuth credentials
-at runtime. Piarium never commits those credentials or sends them to the renderer:
+at runtime. Varin never commits those credentials or sends them to the renderer:
 
-- `PIARIUM_GOOGLE_GEMINI_CLIENT_ID` and `PIARIUM_GOOGLE_GEMINI_CLIENT_SECRET`
-- `PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_ID` and `PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_SECRET`
+- `VARIN_GOOGLE_GEMINI_CLIENT_ID` and `VARIN_GOOGLE_GEMINI_CLIENT_SECRET`
+- `VARIN_GOOGLE_ANTIGRAVITY_CLIENT_ID` and `VARIN_GOOGLE_ANTIGRAVITY_CLIENT_SECRET`
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:

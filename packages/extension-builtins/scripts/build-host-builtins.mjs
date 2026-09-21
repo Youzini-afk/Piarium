@@ -136,11 +136,11 @@ const bundleNodeServer = async (entryPoint, outfile) => {
 };
 
 const {
-  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
-  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
+  VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
 } = await import('../dist/index.js');
-const { PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
+const { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } = await import('../dist/host.js');
 
 const typescriptLanguageServerRoot = packageRoot('typescript-language-server');
 const typescriptRoot = packageRoot('typescript');
@@ -167,19 +167,19 @@ await cp(join(typescriptLanguageServerRoot, 'LICENSE'), join(typescriptOutputRoo
 await cp(join(typescriptRoot, 'LICENSE.txt'), join(typescriptOutputRoot, 'LICENSE.typescript'));
 await cp(join(typescriptRoot, 'ThirdPartyNoticeText.txt'), join(typescriptOutputRoot, 'THIRD_PARTY_NOTICES.typescript'));
 await writePackageJson(typescriptOutputRoot, {
-  name: 'piarium-builtin-typescript-language',
+  name: 'varin-builtin-typescript-language',
   private: true,
   type: 'module',
   version: typescriptLanguageServerPackage.version,
 });
 
-const expectedVersion = `${typescriptLanguageServerPackage.version}+typescript.${typescriptPackage.version}.piarium.1`;
-if (PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest.version !== expectedVersion) {
+const expectedVersion = `${typescriptLanguageServerPackage.version}+typescript.${typescriptPackage.version}.varin.1`;
+if (VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest.version !== expectedVersion) {
   throw new Error(`TypeScript language extension version must be ${expectedVersion}`);
 }
 await writeFile(
-  join(typescriptOutputRoot, 'piarium.extension.json'),
-  `${JSON.stringify(PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest, null, 2)}\n`,
+  join(typescriptOutputRoot, 'varin.extension.json'),
+  `${JSON.stringify(VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest, null, 2)}\n`,
   'utf8',
 );
 
@@ -188,7 +188,7 @@ const serverSource = await readFile(join(typescriptOutputRoot, 'runtime', 'types
 if (!serverSource.startsWith('#!/usr/bin/env node') || !serverSource.includes("from 'node:")) {
   throw new Error('typescript-language-server runtime asset is no longer the expected self-contained Node entrypoint');
 }
-await writePackageFingerprint(typescriptOutputRoot, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+await writePackageFingerprint(typescriptOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
 
 await rm(languageServersOutputRoot, { force: true, recursive: true });
 await mkdir(join(languageServersOutputRoot, 'runtime'), { recursive: true });
@@ -260,15 +260,15 @@ const runtimePackages = await collectRuntimePackages([
 await copyRuntimeLicenses(languageServersOutputRoot, runtimePackages);
 
 await writePackageJson(languageServersOutputRoot, {
-  name: 'piarium-builtin-language-servers',
+  name: 'varin-builtin-language-servers',
   private: true,
   type: 'module',
-  version: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION.manifest.version,
+  version: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION.manifest.version,
 });
 await writeFile(
   join(languageServersOutputRoot, 'THIRD_PARTY_NOTICES.language-servers.txt'),
   [
-    'Piarium bundled language servers',
+    'Varin bundled language servers',
     '',
     ...runtimePackages.map(({ name, manifest }) => `${name}@${manifest.version} (${manifest.license ?? 'SEE PACKAGE METADATA'})`),
     '',
@@ -279,11 +279,11 @@ await writeFile(
   'utf8',
 );
 await writeFile(
-  join(languageServersOutputRoot, 'piarium.extension.json'),
-  `${JSON.stringify(PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION.manifest, null, 2)}\n`,
+  join(languageServersOutputRoot, 'varin.extension.json'),
+  `${JSON.stringify(VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION.manifest, null, 2)}\n`,
   'utf8',
 );
-await writePackageFingerprint(languageServersOutputRoot, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+await writePackageFingerprint(languageServersOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
 
 await rm(recoveryOutputRoot, { force: true, recursive: true });
 await mkdir(recoveryOutputRoot, { recursive: true });
@@ -292,14 +292,14 @@ await bundleNodeServer(
   join(recoveryOutputRoot, 'host.cjs'),
 );
 await writePackageJson(recoveryOutputRoot, {
-  name: 'piarium-builtin-recovery',
+  name: 'varin-builtin-recovery',
   private: true,
   type: 'module',
-  version: PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest.version,
+  version: VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest.version,
 });
 await writeFile(
-  join(recoveryOutputRoot, 'piarium.extension.json'),
-  `${JSON.stringify(PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest, null, 2)}\n`,
+  join(recoveryOutputRoot, 'varin.extension.json'),
+  `${JSON.stringify(VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION.manifest, null, 2)}\n`,
   'utf8',
 );
-await writePackageFingerprint(recoveryOutputRoot, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE);
+await writePackageFingerprint(recoveryOutputRoot, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE);

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessActorContext, HarnessServiceMap, PiMessage } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessServiceMap, PiMessage } from "@varin/protocol";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
@@ -46,7 +46,7 @@ const assistantMessage = (text: string): PiMessage => ({
 });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-execution-baseline-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-execution-baseline-"));
   const workspace = path.join(root, "workspace");
   const recoveryRoot = path.join(root, "recovery");
   const worktrees = path.join(root, "worktrees");

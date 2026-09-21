@@ -10,7 +10,7 @@ import {
 } from "../src/runtime-selection-store.js";
 
 test("treats a missing selection file as empty success", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-selection-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-runtime-selection-"));
   try {
     assert.deepEqual(await loadRuntimeSelection(dataDir), { status: "missing" });
   } finally {
@@ -19,7 +19,7 @@ test("treats a missing selection file as empty success", async () => {
 });
 
 test("preserves malformed selection files instead of converting them to empty", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-selection-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-runtime-selection-"));
   const path = runtimeSelectionPath(dataDir);
   try {
     await writeFile(path, "{not-json", "utf8");
@@ -33,7 +33,7 @@ test("preserves malformed selection files instead of converting them to empty", 
 });
 
 test("round-trips a selected custom package root", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-selection-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-runtime-selection-"));
   try {
     await saveRuntimeSelection(dataDir, {
       selectedId: "custom:selected",

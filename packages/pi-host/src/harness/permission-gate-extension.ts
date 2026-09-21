@@ -11,7 +11,7 @@ import {
   type PermissionInspectResult,
   type PermissionMode,
   type PermissionPolicy,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import {
   buildPermissionInspection,
@@ -21,7 +21,7 @@ import {
 } from "./permission-target.js";
 
 /**
- * Piarium's sole interactive permission authority. Every concrete Pi tool call
+ * Varin's sole interactive permission authority. Every concrete Pi tool call
  * reaches this hook, including Pi built-ins, Harness SDK overrides, MCP tools,
  * package tools, and nested-thread tools.
  */
@@ -110,27 +110,27 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
   const sessionAllow = new Map<string, string>();
 
   return (pi) => {
-    pi.registerCommand("piarium-permissions", {
-      description: "Review or revoke Piarium session-scoped tool approvals",
+    pi.registerCommand("varin-permissions", {
+      description: "Review or revoke Varin session-scoped tool approvals",
       handler: async (_args, ctx) => {
         if (sessionAllow.size === 0) {
-          ctx.ui.notify("No Piarium session-scoped approvals are active.", "info");
+          ctx.ui.notify("No Varin session-scoped approvals are active.", "info");
           return;
         }
         const revokeAll = "Revoke all session approvals";
         const entries = [...sessionAllow.entries()];
         const labels = entries.map(([, label], index) => `Revoke ${index + 1}: ${label}`);
-        const choice = await ctx.ui.select("Piarium session approvals", [revokeAll, ...labels, "Cancel"]);
+        const choice = await ctx.ui.select("Varin session approvals", [revokeAll, ...labels, "Cancel"]);
         if (choice === revokeAll) {
           sessionAllow.clear();
-          ctx.ui.notify("Revoked all Piarium session approvals.", "info");
+          ctx.ui.notify("Revoked all Varin session approvals.", "info");
           return;
         }
         const index = labels.indexOf(choice ?? "");
         if (index >= 0) {
           const key = entries[index]?.[0];
           if (key) sessionAllow.delete(key);
-          ctx.ui.notify("Revoked the selected Piarium session approval.", "info");
+          ctx.ui.notify("Revoked the selected Varin session approval.", "info");
         }
       },
     });

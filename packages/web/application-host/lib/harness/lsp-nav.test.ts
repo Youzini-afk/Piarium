@@ -6,7 +6,7 @@ import type { HarnessServiceContext } from "./router.js";
 import { createLspNavigationServices } from "./lsp-nav.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { AGENT_LANGUAGE_VIEW, SURFACE_LANGUAGE_VIEW, createLanguageSupervisor } from "../lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 
 const context: HarnessServiceContext = {
   actor: {
@@ -190,7 +190,7 @@ describe("LSP navigation services", () => {
       language.registerProvider({
         providerId: "fixture",
         command: process.execPath,
-        args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+        args: VARIN_LSP_FIXTURE_SERVER_ARGS,
         languageIds: ["typescript"],
         source: "host",
       });

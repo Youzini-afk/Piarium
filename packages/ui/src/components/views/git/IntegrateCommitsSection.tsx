@@ -71,7 +71,7 @@ export const IntegrateCommitsSection: React.FC<{
 
   const [targetBranch, setTargetBranch] = React.useState<string>(defaultTargetBranch);
   const targetBranchStorageKey = React.useMemo(
-    () => `piarium.integrate.target:${JSON.stringify([repoRoot, sourceBranch])}`,
+    () => `varin.integrate.target:${JSON.stringify([repoRoot, sourceBranch])}`,
     [repoRoot, sourceBranch],
   );
   React.useEffect(() => {
@@ -101,7 +101,7 @@ export const IntegrateCommitsSection: React.FC<{
 
   const conflictStorageKey = React.useMemo(() => {
     if (!currentSessionId) return null;
-    return `piarium.integrate.conflict:${currentSessionId}`;
+    return `varin.integrate.conflict:${currentSessionId}`;
   }, [currentSessionId]);
 
   React.useEffect(() => {

@@ -81,9 +81,9 @@ async function stopChildTree(child) {
   }
 }
 
-const uiPort = process.env.PIARIUM_HMR_UI_PORT || '5180';
-const backendPort = process.env.PIARIUM_HMR_API_PORT || '3902';
-const hmrHost = process.env.PIARIUM_HMR_HOST || '127.0.0.1';
+const uiPort = process.env.VARIN_HMR_UI_PORT || '5180';
+const backendPort = process.env.VARIN_HMR_API_PORT || '3902';
+const hmrHost = process.env.VARIN_HMR_HOST || '127.0.0.1';
 
 function getLanAddresses() {
   const addresses = [];
@@ -113,15 +113,15 @@ function clearViteCache() {
 clearViteCache();
 
 const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
-  PIARIUM_PORT: backendPort,
+  VARIN_PORT: backendPort,
 });
 const vite = run(
   'vite',
   'bun',
   ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
   {
-    PIARIUM_PORT: backendPort,
-    PIARIUM_DISABLE_PWA_DEV: '1',
+    VARIN_PORT: backendPort,
+    VARIN_DISABLE_PWA_DEV: '1',
   },
   { cwd: webRoot },
 );

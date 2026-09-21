@@ -20,9 +20,9 @@ import type {
   GitHubGitAuthorResult,
   GitHubUserSummary,
   GitHubTerminalAuthResult,
-} from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
-import type { RuntimeUrlResolver } from '@piarium/application-client';
+} from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import type { RuntimeUrlResolver } from '@varin/application-client';
 
 interface WebGitHubAPIOptions {
   urls: RuntimeUrlResolver;

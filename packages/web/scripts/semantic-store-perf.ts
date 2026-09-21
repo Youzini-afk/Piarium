@@ -20,7 +20,7 @@ if (!(total > 0 && interval > 0 && batchSize > 0)) {
   throw new Error("Usage: semantic-store-perf.ts [documents>0] [report-interval>0] [batch-size>0]");
 }
 
-const dataDir = mkdtempSync(join(tmpdir(), "piarium-semantic-store-perf-"));
+const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-store-perf-"));
 const store = createSemanticGenerationStore({
   dataDir,
   hostId: "perf",

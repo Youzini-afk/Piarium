@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@varin/protocol';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
 
 describe('recommended Pi packages', () => {

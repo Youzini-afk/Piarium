@@ -1,6 +1,6 @@
 # Third-party notices
 
-`@piarium/web` is licensed as part of Piarium under `AGPL-3.0-only`. Incorporated OpenChamber-derived
+`@varin/web` is licensed as part of Varin under `AGPL-3.0-only`. Incorporated OpenChamber-derived
 portions retain the following notice:
 
 MIT License

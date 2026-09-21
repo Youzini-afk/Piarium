@@ -1,7 +1,7 @@
 import React from 'react';
-import type { ProjectEntry } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl } from '@varin/application-client';
 import type { IconName } from "@/components/icon/icons";
 
 type ThemeVariant = 'light' | 'dark';

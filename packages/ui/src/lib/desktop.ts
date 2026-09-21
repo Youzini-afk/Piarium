@@ -1,19 +1,19 @@
-import type { ProjectEntry, TerminalShell } from '@piarium/application-client';
+import type { ProjectEntry, TerminalShell } from '@varin/application-client';
 import type {
-  PiariumDesktopBridge,
-  PiariumDesktopCommand,
-  PiariumDesktopCommandInvocation,
-  PiariumDesktopCommandResult,
+  VarinDesktopBridge,
+  VarinDesktopCommand,
+  VarinDesktopCommandInvocation,
+  VarinDesktopCommandResult,
   DesktopKeepAwakeStatus,
   DesktopLaunchAtLoginStatus,
   DesktopMinimizeToTrayStatus,
-} from '@piarium/application-client';
-import type { RecoveryPreference } from '@piarium/protocol';
+} from '@varin/application-client';
+import type { RecoveryPreference } from '@varin/protocol';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { FileEditorSettingsPatch } from '@/lib/file-editor-settings';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 
 type ManagedRemoteTunnelPreset = {
@@ -203,12 +203,12 @@ export type DesktopSettings = {
   // Message limit — controls fetch, trim, and Load More chunk size (default: 200)
   messageLimit?: number;
 
-  // User-added skills catalogs (persisted to Piarium's settings.json)
+  // User-added skills catalogs (persisted to Varin's settings.json)
   skillCatalogs?: SkillCatalogConfig[];
   // Automatic update checks and update notification UI (default: true; user-configurable)
   autoUpdateChecksEnabled?: boolean;
 
-  // Piarium-owned global behavior prompt.
+  // Varin-owned global behavior prompt.
   globalBehaviorPrompt?: string;
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
@@ -228,11 +228,11 @@ export type DesktopSettings = {
   draftStartersVisible?: boolean;
 };
 
-// The desktop bridge type is owned by @piarium/application-client so that
+// The desktop bridge type is owned by @varin/application-client so that
 // preload, main, and UI share a single typed contract for all 58 commands.
-// The exposed bridge is structurally compatible with PiariumDesktopBridge;
+// The exposed bridge is structurally compatible with VarinDesktopBridge;
 // we keep a local alias for ergonomics and backward-compatible imports.
-type DesktopBridgeGlobal = Partial<PiariumDesktopBridge>;
+type DesktopBridgeGlobal = Partial<VarinDesktopBridge>;
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
@@ -244,19 +244,19 @@ type ElectronRuntimeGlobal = {
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { __PIARIUM_ELECTRON__?: ElectronRuntimeGlobal }).__PIARIUM_ELECTRON__ ?? null;
+  return (window as unknown as { __VARIN_ELECTRON__?: ElectronRuntimeGlobal }).__VARIN_ELECTRON__ ?? null;
 };
 
 const getDesktopBridge = (): DesktopBridgeGlobal | null => {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__ ?? null;
+  return (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__ ?? null;
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
 export const getElectronPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;
-  const platform = (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__;
+  const platform = (window as unknown as { __VARIN_PLATFORM__?: string }).__VARIN_PLATFORM__;
   return typeof platform === 'string' ? platform : null;
 };
 
@@ -304,10 +304,10 @@ export const hasDesktopInvoke = (): boolean => {
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
 
-export const invokeDesktop = async <K extends PiariumDesktopCommand>(
+export const invokeDesktop = async <K extends VarinDesktopCommand>(
   command: K,
-  ...invocation: PiariumDesktopCommandInvocation<K>
-): Promise<PiariumDesktopCommandResult<K> | null> => {
+  ...invocation: VarinDesktopCommandInvocation<K>
+): Promise<VarinDesktopCommandResult<K> | null> => {
   const bridge = getDesktopBridge();
   if (typeof bridge?.invoke !== 'function') return null;
   return bridge.invoke(command, ...invocation);
@@ -458,7 +458,7 @@ export const isDesktopLocalOriginActive = (): boolean => {
     return true;
   }
 
-  const local = typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string' ? window.__PIARIUM_LOCAL_ORIGIN__ : '';
+  const local = typeof window.__VARIN_LOCAL_ORIGIN__ === 'string' ? window.__VARIN_LOCAL_ORIGIN__ : '';
   const localUrl = parseUrl(local);
   const runtimeApiUrl = parseUrl(getRuntimeApiBaseUrl());
 
@@ -552,7 +552,7 @@ export const isBrowserClientRuntime = (
 
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {
-    const embedded = window.__PIARIUM_HOME__;
+    const embedded = window.__VARIN_HOME__;
     if (embedded && embedded.length > 0) {
       return embedded;
     }
@@ -708,7 +708,7 @@ export const downloadDesktopUpdate = async (
 
   try {
     if (typeof onProgress === 'function' && bridge?.listen) {
-      unlisten = await bridge.listen('piarium:update-progress', (evt) => {
+      unlisten = await bridge.listen('varin:update-progress', (evt) => {
         const payload = evt?.payload;
         if (!payload || typeof payload !== 'object') return;
         const data = payload as { event?: unknown; data?: unknown };

@@ -1,9 +1,9 @@
 import React from 'react';
-import type { JsonValue } from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+import type { JsonValue } from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import {
   createBuiltinSurfaceController,
-  piariumSurfaceRuntime,
+  varinSurfaceRuntime,
 } from '@/lib/extensions/surface-runtime';
 import {
   BUILTIN_COMMANDS_EXTENSION_ID,
@@ -43,7 +43,7 @@ interface SurfaceCommandExecutionDependencies {
 }
 
 const surfaceCommandExecutionDependencies: SurfaceCommandExecutionDependencies = {
-  getSnapshot: piariumSurfaceRuntime.getSnapshot,
+  getSnapshot: varinSurfaceRuntime.getSnapshot,
   trigger: async (contribution) => {
     const { surfaceExtensionLoader } = await import('@/lib/extensions/managed-runtime');
     await surfaceExtensionLoader.triggerActivation('command', {
@@ -120,13 +120,13 @@ export const workbenchCommandRegistrationsFromSnapshot = (
 export const useWorkbenchCommandRegistrations = (): WorkbenchCommandRegistration[] => {
   React.useEffect(() => {
     void ensureBuiltinWorkbenchCommands().catch((error) => {
-      console.error('[Piarium Extensions] Failed to activate built-in workbench commands:', error);
+      console.error('[Varin Extensions] Failed to activate built-in workbench commands:', error);
     });
   }, []);
   const snapshot = React.useSyncExternalStore(
-    piariumSurfaceRuntime.subscribe,
-    piariumSurfaceRuntime.getSnapshot,
-    piariumSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.subscribe,
+    varinSurfaceRuntime.getSnapshot,
+    varinSurfaceRuntime.getSnapshot,
   );
   return React.useMemo(() => workbenchCommandRegistrationsFromSnapshot(snapshot), [snapshot]);
 };

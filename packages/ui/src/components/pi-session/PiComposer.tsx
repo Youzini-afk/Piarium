@@ -4,7 +4,7 @@ import type {
   SessionSnapshot,
   SessionWorkspaceBinding,
   ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -44,7 +44,7 @@ import {
 import type { ComposerLanguageContext } from '@/components/chat/composer/language/tokenize';
 import { MAGIC_PROMPT_COMMANDS } from '@/components/chat/composer/submit/slashCommands';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -59,7 +59,7 @@ import { PiComposerAgentControl } from './PiComposerAgentControl';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { projectPiComposerActions } from './piComposerActions';
-import type { WorkFocusId } from '@piarium/protocol';
+import type { WorkFocusId } from '@varin/protocol';
 import { PiWorkFocusControl } from './PiWorkFocusControl';
 
 interface PiComposerProps {
@@ -116,11 +116,11 @@ const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((
   reader.readAsDataURL(file);
 });
 
-const MAGIC_PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
+const MAGIC_VARIN_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
   description: getMagicPromptDefinition(command.visiblePrompt).description,
-  id: `piarium:${command.name}`,
+  id: `varin:${command.name}`,
   name: command.name,
-  source: 'piarium',
+  source: 'varin',
 }));
 
 type PiComposerAutocomplete = {
@@ -173,13 +173,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [aborting, setAborting] = React.useState(false);
   const [clearingQueue, setClearingQueue] = React.useState(false);
   const messageHistory = useMessageHistory(sentMessageHistory);
-  const piariumCommands = React.useMemo<readonly CommandInfo[]>(() => [
-    ...MAGIC_PIARIUM_COMMANDS,
+  const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [
+    ...MAGIC_VARIN_COMMANDS,
     {
       description: t('chat.timeline.description'),
-      id: 'piarium:tree',
+      id: 'varin:tree',
       name: 'tree',
-      source: 'piarium',
+      source: 'varin',
     },
   ], [t]);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -207,9 +207,9 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     confirmedMentions,
     inputMode: 'normal',
     knownAgentNames,
-    knownSlashNames: new Set(piariumCommands.map((command) => command.name.toLowerCase())),
+    knownSlashNames: new Set(varinCommands.map((command) => command.name.toLowerCase())),
     knownSnippetTriggers: new Set(snippets.flatMap((snippet) => [snippet.name, ...snippet.aliases]).map((value) => value.toLowerCase())),
-  }), [confirmedMentions, knownAgentNames, piariumCommands, snippets]);
+  }), [confirmedMentions, knownAgentNames, varinCommands, snippets]);
   const modelControls = (
     <div className="flex min-w-0 items-center justify-end gap-2.5">
       <PiComposerModelControls
@@ -496,7 +496,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               {steeringQueue.map((message, index) => (
                 <div key={`steer:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
                   <span className="mt-0.5 shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro font-medium text-primary">
-                    {t('settings.piarium.visual.option.followUpBehavior.steer.label')}
+                    {t('settings.varin.visual.option.followUpBehavior.steer.label')}
                   </span>
                   <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
                     {message || t('chat.queuedMessage.empty')}
@@ -506,7 +506,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               {followUpQueue.map((message, index) => (
                 <div key={`follow-up:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
                   <span className="mt-0.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 typography-micro font-medium text-muted-foreground">
-                    {t('settings.piarium.visual.option.followUpBehavior.queue.label')}
+                    {t('settings.varin.visual.option.followUpBehavior.queue.label')}
                   </span>
                   <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
                     {message || t('chat.queuedMessage.empty')}
@@ -603,7 +603,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           {autocomplete?.kind === 'command' ? (
             <CommandAutocomplete
               ref={commandRef}
-              additionalCommands={piariumCommands}
+              additionalCommands={varinCommands}
               cwd={cwd}
               sessionId={sessionId}
               searchQuery={autocomplete.query}

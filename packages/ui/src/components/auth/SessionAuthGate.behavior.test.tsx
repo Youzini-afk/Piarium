@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
 
@@ -71,10 +71,10 @@ const resetHarness = () => {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: testWindow });
   const documentElement = {
     setAttribute: (name: string, value: string) => {
-      if (name === 'data-piarium-splash-handoff' && value === 'true') initialSplashHandoffSet = true;
+      if (name === 'data-varin-splash-handoff' && value === 'true') initialSplashHandoffSet = true;
     },
     removeAttribute: (name: string) => {
-      if (name === 'data-piarium-splash-handoff') initialSplashHandoffReleased = true;
+      if (name === 'data-varin-splash-handoff') initialSplashHandoffReleased = true;
     },
   };
   const testDocument = {
@@ -277,8 +277,8 @@ mock.module('@/components/ui', () => ({
   },
 }));
 
-mock.module('@/components/ui/PiariumLogo', () => ({
-  PiariumLogo: () => 'logo',
+mock.module('@/components/ui/VarinLogo', () => ({
+  VarinLogo: () => 'logo',
 }));
 
 mock.module('@/components/icon/Icon', () => ({
@@ -307,7 +307,7 @@ mock.module('@/lib/directoryPersistence', () => ({
   applyPersistedDirectoryPreferences: mock(() => restoreDirectoryPreferences()),
 }));
 
-mock.module('@piarium/application-client', () => ({
+mock.module('@varin/application-client', () => ({
   getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
   getRuntimeExtraHeadersSync: mock(() => ({})),
   getRuntimeKey: () => runtimeKey,

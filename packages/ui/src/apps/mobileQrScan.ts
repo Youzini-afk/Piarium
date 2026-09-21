@@ -62,7 +62,7 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  if (/^piarium:\/\//i.test(trimmed)) {
+  if (/^varin:\/\//i.test(trimmed)) {
     const pairing = parsePairingConnectionPayload(trimmed)
       ?? parsePairingConnectionPayloadString(trimmed);
     return pairing ? { pairing } : null;

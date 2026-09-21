@@ -1,4 +1,4 @@
-import type { ModelDescriptor, PiUserMessage, SessionSnapshot } from '@piarium/protocol';
+import type { ModelDescriptor, PiUserMessage, SessionSnapshot } from '@varin/protocol';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import type {
   PiSessionSubmissionMode,

@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from '@piarium/extension-contract';
+import type { JsonObject, JsonValue } from '@varin/extension-contract';
 import type { editor } from 'monaco-editor/editor';
 
 import type { EditorViewState } from '@/lib/workbench/editors/types';

@@ -5,7 +5,7 @@ import type {
   ProviderConfigDeleteScope,
   ProviderConfigInput,
   ProviderConfigScope,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const listPiProviders = async (cwd: string) => {

@@ -1,4 +1,4 @@
-import type { AgentInputContext } from '@piarium/protocol';
+import type { AgentInputContext } from '@varin/protocol';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from './supervisor.js';
 

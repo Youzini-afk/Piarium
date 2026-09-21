@@ -54,12 +54,12 @@ export const isLoopbackBindHost = (host: unknown): boolean => {
 export const isNetworkExposedBindHost = (host: unknown): boolean => !isLoopbackBindHost(host);
 
 export const getInvalidBindHostErrorMessage = (host: unknown): string =>
-  `Invalid Piarium bind host: ${JSON.stringify(host)}. Use a hostname or IP address without a URL scheme, port, or path.`;
+  `Invalid Varin bind host: ${JSON.stringify(host)}. Use a hostname or IP address without a URL scheme, port, or path.`;
 
 export const isUnsafeUnauthenticatedLanAllowed = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  env?.PIARIUM_ALLOW_UNAUTHENTICATED_LAN === 'true';
+  env?.VARIN_ALLOW_UNAUTHENTICATED_LAN === 'true';
 
 export const getUnauthenticatedLanErrorMessage = (host: unknown): string =>
-  `Piarium refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `
-  + 'Set --ui-password or PIARIUM_UI_PASSWORD before exposing it over LAN, '
-  + 'or set PIARIUM_ALLOW_UNAUTHENTICATED_LAN=true to accept the risk.';
+  `Varin refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `
+  + 'Set --ui-password or VARIN_UI_PASSWORD before exposing it over LAN, '
+  + 'or set VARIN_ALLOW_UNAUTHENTICATED_LAN=true to accept the risk.';

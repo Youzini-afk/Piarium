@@ -10,12 +10,12 @@ import {
   type HostMethod,
   type HostMethodParams,
   type HostMethodResult,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type ResponseEnvelope,
   type RuntimeSourceKind,
   type RuntimeWorkerRole,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { assertExternalPiHostEntry } from "./errors.js";
 
 interface PendingRequest {
@@ -202,10 +202,10 @@ export class PiHostClient {
           : { PI_CODING_AGENT_DIR: this.#options.agentDir }),
         ...(this.#options.packageRoot === undefined
           ? {}
-          : { PIARIUM_PI_PACKAGE_ROOT: this.#options.packageRoot }),
+          : { VARIN_PI_PACKAGE_ROOT: this.#options.packageRoot }),
         ...(this.#options.runtimeSource === undefined
           ? {}
-          : { PIARIUM_RUNTIME_SOURCE: this.#options.runtimeSource }),
+          : { VARIN_RUNTIME_SOURCE: this.#options.runtimeSource }),
       },
       serialization: "json",
       stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -246,7 +246,7 @@ export class PiHostClient {
         "host.handshake",
         {
           ...this.#options.handshake,
-          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+          protocolVersions: [VARIN_PROTOCOL_VERSION],
         },
         this.#options.startupTimeoutMs ?? 15_000,
       );

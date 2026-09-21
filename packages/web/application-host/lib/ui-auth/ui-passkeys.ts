@@ -13,17 +13,17 @@ import type {
   CredentialDeviceType,
   RegistrationResponseJSON,
 } from '@simplewebauthn/server';
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { SettingsFileStore } from '@piarium/settings-store';
-import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { SettingsFileStore } from '@varin/settings-store';
+import { resolveVarinDataDir } from '../platform/data-paths.js';
 import type { IncomingHttpHeaders } from 'node:http';
 
 const DEFAULT_STORE_VERSION = 1;
 const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_RP_NAME = 'Piarium';
+const DEFAULT_RP_NAME = 'Varin';
 
-const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
-const PASSKEY_STORE_FILE = path.join(PIARIUM_DATA_DIR, 'ui-passkeys.json');
+const VARIN_DATA_DIR = resolveVarinDataDir(process);
+const PASSKEY_STORE_FILE = path.join(VARIN_DATA_DIR, 'ui-passkeys.json');
 
 interface StoredPasskey {
   backedUp: boolean;
@@ -390,8 +390,8 @@ export const createUiPasskeys = ({
       rpName,
       rpID,
       userID: registrationUserID,
-      userName: 'piarium-ui',
-      userDisplayName: 'Piarium UI',
+      userName: 'varin-ui',
+      userDisplayName: 'Varin UI',
       attestationType: 'none',
       excludeCredentials: getPasskeysForRpId(store, rpID).map((passkey) => ({
         id: passkey.id,
@@ -529,7 +529,7 @@ export const createUiPasskeys = ({
     return mutateStore(async (store) => {
       const passkey = store.passkeys.find((item) => item.id === response?.id);
       if (!passkey) {
-        throw httpError('That passkey is not registered for this Piarium instance', 404);
+        throw httpError('That passkey is not registered for this Varin instance', 404);
       }
 
       const verification = await verifyAuthenticationResponse({

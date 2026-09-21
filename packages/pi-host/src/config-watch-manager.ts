@@ -7,7 +7,7 @@ import type {
   PiConfigWatchChangeReason,
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "./errors.js";
 
 const COALESCE_DELAY_MS = 20;

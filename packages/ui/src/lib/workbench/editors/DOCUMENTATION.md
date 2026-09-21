@@ -16,7 +16,7 @@ this kernel; they do not own document buffers, disk revisions, or layout schema.
   by resolution and is reachable only through an explicit request.
 - `commands.ts` / `context-keys.ts` / `menus.ts` — owner-scoped commands, per-key context subscribe,
   `when` menu projection. The Monaco command service adapts the focused editor into these contracts;
-  the user-facing command catalog remains the Piarium surface-command registry.
+  the user-facing command catalog remains the Varin surface-command registry.
 - `panels.ts` — terminal/problems/output container; empty is distinct from failure
 - `view-state-core.ts` — framework-neutral provider ID/schema/JSON state and selection summary
 - `view-state.ts` — mobile/embedded CodeMirror capture and restore; desktop/Web Monaco owns its payload
@@ -31,7 +31,7 @@ as text and as a Git diff at the same time; pinned opens only reuse the same pin
 ordinary opens never focus a pinned tab. A pinned provider still yields to being disabled, which is
 an authoritative unavailable state rather than a silent substitution.
 
-`piarium.builtin.git-diff` renders the working-tree or staged diff for a tracked file and is the
+`varin.builtin.git-diff` renders the working-tree or staged diff for a tracked file and is the
 IDE's target for Git diff requests. It declares no languages and no fallback, so resolution never
 selects it. Its `viewState.diffScope` carries `working` or `staged`; `diffRepositoryResourceId` keeps
 the selected nested Git root relative to the outer workspace, and both persist with the tab. The
@@ -56,7 +56,7 @@ IDE enables the full minimap/sticky-scroll presentation, while validated user se
 Profile changes update live options and never create a second buffer, dirty flag, save path, or undo stack.
 
 The official IDE layout is a versioned split/stack/editor-area document stored by the
-`piarium.workbench.layout` v1 Host service in profile/workspace-scoped extension storage. Missing
+`varin.workbench.layout` v1 Host service in profile/workspace-scoped extension storage. Missing
 and empty documents use the distribution default without writing it; malformed/read failures keep
 the last valid in-memory document and surface a diagnostic instead of replacing Host state.
 

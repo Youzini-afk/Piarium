@@ -16,7 +16,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `read` | Pi-native paging/truncation/images with fixed editor-draft or working-branch source selection | `document.readSource` |
 | `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only or exclusive working-branch paths | `document.pathOverlay` |
 | `grep` | Bounded rg plus fixed editor-draft overlay, or exclusive working-branch corpus | `search.content` |
-| `apply_patch` | Codex-format multi-file patch (OpenAI only); Piarium mutations go through Host branch/surface write authority | `document.branchWrite` + `document.surfaceWrite` |
+| `apply_patch` | Codex-format multi-file patch (OpenAI only); Varin mutations go through Host branch/surface write authority | `document.branchWrite` + `document.surfaceWrite` |
 | `get_output` | Retrieve stored/shell output by handle; optionally wait for new bytes or exit | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
@@ -72,13 +72,13 @@ const customTools = selectHarnessTools(settings, {
 - `createHarnessCounterTracker` — tracks `toolErrors`, `toolRetries`,
   `outputBytes`, `observationCalls`, and `cacheHitRatio`. Auxiliary per-model usage
   aggregation was removed in D-080; ordinary Pi session cost and token statistics remain unchanged.
-- `createPermissionGateExtension` — Piarium's sole interactive `tool_call`
+- `createPermissionGateExtension` — Varin's sole interactive `tool_call`
   permission authority. It covers the actual Pi registry (Harness overrides,
   built-ins, MCP and package tools), asks Host `permission.inspect` to bind
   canonical workspace resources, keeps session grants scoped to the normalized
   source/action/resources, and emits credential-free decisions through
   `permission.audit`. Unknown or incomplete third-party actions ask; Smart mode
-  can auto-allow only ordinary complete asks. `/piarium-permissions` revokes
+  can auto-allow only ordinary complete asks. `/varin-permissions` revokes
   remembered session grants.
   An allowed call also returns the Host-canonical path/thread effects discovered
   by `permission.inspect`; Pi merges them with the owned tool's effect declaration
@@ -169,7 +169,7 @@ permission hook's Host-authoritative plan. There is no second Agent loop.
 
 The Host still exposes `fs.lock` for callers that need an explicit critical section. Its production
 implementation delegates the already-authorized Documents resource to the Rust kernel `file.lease.*`
-authority; the Host does not keep a second in-memory production lock table. Piarium `write`, `edit`, and
+authority; the Host does not keep a second in-memory production lock table. Varin `write`, `edit`, and
 `apply_patch` do not wrap `document.surfaceWrite` in `fs.lock`, because Documents acquires the same kernel
 resource gate internally and nesting the two would self-deadlock. The `withPathLock` wrapper remains only
 for callers that perform work outside the Host Documents mutation path.
@@ -196,13 +196,13 @@ unavailable or disabled.
 ## Mutation Journal Integration
 
 `createWorkspaceMutationJournalTools` accepts an optional `HostServicesBridge`. Isolated Runs try
-`document.branchWrite` first. In Piarium mode, real workspace/surface mutations then call
+`document.branchWrite` first. In Varin mode, real workspace/surface mutations then call
 `document.surfaceWrite`: snapshot-owned paths edit the Document Registry buffer and disk-target paths are
 applied by Host Documents through the Rust file-resource backend. If the Host mutation backend cannot take
 the request, the worker fails explicitly; it does not fall through to Pi's local file writer or the legacy
 `workspace.mutation.request` loop. Host-confirmed disk writes still request post-write LSP diagnostics after
 the mutation gate has been released. The journal loop remains a standalone/no-Host helper path used by its own
-tests and is not Piarium's production disk authority.
+tests and is not Varin's production disk authority.
 
 `apply_patch` uses the same shared plan. Mixed surface/disk batches return per-path
 applied/conflict/compensated/needs-attention instead of a generic failure after a partial write, and the worker

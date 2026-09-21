@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 
 export interface PiEditorSelection {
   endColumn?: number;

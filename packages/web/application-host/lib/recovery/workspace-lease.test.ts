@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
 
 const makeRoot = async () => {
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-recovery-lease-'));
+  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-recovery-lease-'));
   const root = path.join(parent, 'recovery', 'v1');
   await fs.promises.mkdir(root, { recursive: true });
   return { parent, root };

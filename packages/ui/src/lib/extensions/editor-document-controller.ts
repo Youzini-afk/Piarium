@@ -1,10 +1,10 @@
 import type {
-  PiariumEditorDocumentApplyEditsResult,
-  PiariumEditorDocumentController,
-  PiariumEditorDocumentEdit,
-  PiariumEditorDocumentSnapshot,
-  PiariumEditorDocumentUpdateResult,
-} from '@piarium/extension-contract';
+  VarinEditorDocumentApplyEditsResult,
+  VarinEditorDocumentController,
+  VarinEditorDocumentEdit,
+  VarinEditorDocumentSnapshot,
+  VarinEditorDocumentUpdateResult,
+} from '@varin/extension-contract';
 
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
@@ -12,7 +12,7 @@ import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
 type EditorDocumentRegistry = Pick<ReturnType<typeof getDocumentRegistry>,
   'applyEdits' | 'get' | 'open' | 'save' | 'subscribe'>;
 
-const snapshotFromRecord = (record: DocumentRecord | undefined): PiariumEditorDocumentSnapshot => {
+const snapshotFromRecord = (record: DocumentRecord | undefined): VarinEditorDocumentSnapshot => {
   const status = record && [
     'binary',
     'conflict',
@@ -22,7 +22,7 @@ const snapshotFromRecord = (record: DocumentRecord | undefined): PiariumEditorDo
     'ready',
     'unsupported-encoding',
   ].includes(record.status)
-    ? record.status as PiariumEditorDocumentSnapshot['status']
+    ? record.status as VarinEditorDocumentSnapshot['status']
     : 'error';
   return {
     baseRevision: record?.baseRevision ?? null,
@@ -48,16 +48,16 @@ export const createEditorDocumentController = (options: {
   identity: DocumentIdentity;
   origin: string;
   registry?: EditorDocumentRegistry;
-}): PiariumEditorDocumentController => {
+}): VarinEditorDocumentController => {
   const registry = options.registry ?? getDocumentRegistry();
   const currentRecord = async (): Promise<DocumentRecord> => (
     registry.get(options.identity) ?? registry.open(options.identity)
   );
 
   const applyEdits = async (
-    edits: readonly PiariumEditorDocumentEdit[],
+    edits: readonly VarinEditorDocumentEdit[],
     expectedDocumentVersion: number,
-  ): Promise<PiariumEditorDocumentApplyEditsResult> => {
+  ): Promise<VarinEditorDocumentApplyEditsResult> => {
     const current = await currentRecord();
     if (current.localEditRevision !== expectedDocumentVersion) {
       return { status: 'stale', snapshot: snapshotFromRecord(current) };
@@ -82,7 +82,7 @@ export const createEditorDocumentController = (options: {
   const replaceContent = async (
     content: string,
     expectedDocumentVersion: number,
-  ): Promise<PiariumEditorDocumentUpdateResult> => {
+  ): Promise<VarinEditorDocumentUpdateResult> => {
     const current = await currentRecord();
     if (current.localEditRevision !== expectedDocumentVersion) {
       return { status: 'stale', snapshot: snapshotFromRecord(current) };
@@ -108,7 +108,7 @@ export const createEditorDocumentController = (options: {
     applyEdits,
     getSnapshot: () => snapshotFromRecord(registry.get(options.identity)),
     replaceContent,
-    save: async (expectedDocumentVersion): Promise<PiariumEditorDocumentUpdateResult> => {
+    save: async (expectedDocumentVersion): Promise<VarinEditorDocumentUpdateResult> => {
       const current = await currentRecord();
       if (current.localEditRevision !== expectedDocumentVersion) {
         return { status: 'stale', snapshot: snapshotFromRecord(current) };

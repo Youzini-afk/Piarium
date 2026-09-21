@@ -1,12 +1,12 @@
 import type {
   LanguageServicesAPI,
-  PiariumLanguageServiceEvent,
+  VarinLanguageServiceEvent,
   Subscription,
-} from '@piarium/application-client';
-import { LanguageServicesError } from '@piarium/application-client';
+} from '@varin/application-client';
+import { LanguageServicesError } from '@varin/application-client';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentIdentity } from '@/lib/documents/types';
-import { subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import {
   clearLanguageDiagnosticsForWorkspace,
   replaceLanguageDiagnostics,
@@ -52,7 +52,7 @@ const acceptedVersion = (workspaceId: string, resourceId: string, documentVersio
   }
 };
 
-const handleProviderStatus = (snapshot: Extract<PiariumLanguageServiceEvent, { kind: 'status' }>['snapshot']): void => {
+const handleProviderStatus = (snapshot: Extract<VarinLanguageServiceEvent, { kind: 'status' }>['snapshot']): void => {
   replaceLanguageProviderStatus(snapshot);
   if (snapshot.status === 'absent') {
     if (snapshot.generation === undefined) return;
@@ -80,7 +80,7 @@ const handleProviderStatus = (snapshot: Extract<PiariumLanguageServiceEvent, { k
   }
 };
 
-const handleEvent = (event: PiariumLanguageServiceEvent): void => {
+const handleEvent = (event: VarinLanguageServiceEvent): void => {
   if (event.kind === 'status') {
     handleProviderStatus(event.snapshot);
     return;

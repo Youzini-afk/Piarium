@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ui-auth-test-'));
-process.env.PIARIUM_DATA_DIR = dataDir;
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ui-auth-test-'));
+process.env.VARIN_DATA_DIR = dataDir;
 
 afterAll(() => {
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -123,7 +123,7 @@ describe('ui auth client credential seam', () => {
     const loginRes = createResponse();
     await auth.handleSessionCreate(loginReq, loginRes);
     const sessionCookie = String(loginRes.getHeader('set-cookie') || '').split(';', 1)[0] ?? '';
-    expect(sessionCookie.startsWith('piarium_ui_session=')).toBe(true);
+    expect(sessionCookie.startsWith('varin_ui_session=')).toBe(true);
 
     const sessionReq = { method: 'GET', path: '/api/client-auth/clients', headers: { cookie: sessionCookie } };
     const sessionRes = createResponse();
@@ -160,7 +160,7 @@ describe('ui auth client credential seam', () => {
     expect(await auth.resolveWebSocketAuthContext(deniedReq)).toBe(null);
     expect(await auth.resolveWebSocketAuthContext({
       method: 'GET',
-      headers: { cookie: 'piarium_ui_session=attacker-controlled' },
+      headers: { cookie: 'varin_ui_session=attacker-controlled' },
     })).toBe(null);
     expect(await auth.resolveWebSocketAuthContext(allowedReq)).toMatchObject({
       type: 'client',
@@ -217,12 +217,12 @@ describe('ui auth client credential seam', () => {
     await auth.handleUrlAuthToken(mintReq, mintRes);
     const mintedToken = typeof mintRes.body.token === 'string' ? mintRes.body.token : '';
     expect(typeof mintRes.body.token).toBe('string');
-    expect(mintedToken.startsWith('piarium_url_')).toBe(true);
+    expect(mintedToken.startsWith('varin_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintedToken;
-    const urlReq = { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const urlReq = { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&varin_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const urlRes = createResponse();
     let urlCalled = false;
     await auth.requireAuth(urlReq, urlRes, () => {
@@ -234,9 +234,9 @@ describe('ui auth client credential seam', () => {
 
     const extensionAssetReq = {
       method: 'POST',
-      path: '/api/piarium/extensions/v1/assets/read',
-      url: '/api/piarium/extensions/v1/assets/read',
-      headers: { 'x-piarium-application-token': urlToken },
+      path: '/api/varin/extensions/v1/assets/read',
+      url: '/api/varin/extensions/v1/assets/read',
+      headers: { 'x-varin-application-token': urlToken },
     };
     const extensionAssetRes = createResponse();
     let extensionAssetCalled = false;
@@ -247,9 +247,9 @@ describe('ui auth client credential seam', () => {
 
     const extensionEnabledReq = {
       method: 'PATCH',
-      path: '/api/piarium/extensions/v1/extensions/piarium.builtin.pi-agents/enabled',
-      url: '/api/piarium/extensions/v1/extensions/piarium.builtin.pi-agents/enabled',
-      headers: { 'x-piarium-application-token': urlToken },
+      path: '/api/varin/extensions/v1/extensions/varin.builtin.pi-agents/enabled',
+      url: '/api/varin/extensions/v1/extensions/varin.builtin.pi-agents/enabled',
+      headers: { 'x-varin-application-token': urlToken },
     };
     const extensionEnabledRes = createResponse();
     let extensionEnabledCalled = false;
@@ -262,7 +262,7 @@ describe('ui auth client credential seam', () => {
       method: 'POST',
       path: '/api/fs/raw',
       url: '/api/fs/raw',
-      headers: { 'x-piarium-application-token': urlToken },
+      headers: { 'x-varin-application-token': urlToken },
     };
     const unrelatedHeaderRes = createResponse();
     let unrelatedHeaderCalled = false;
@@ -272,7 +272,7 @@ describe('ui auth client credential seam', () => {
     expect(unrelatedHeaderCalled).toBe(false);
     expect(unrelatedHeaderRes.statusCode).toBe(401);
 
-    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?varin_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const serveRes = createResponse();
     let serveCalled = false;
     await auth.requireAuth(serveReq, serveRes, () => {
@@ -280,7 +280,7 @@ describe('ui auth client credential seam', () => {
     });
     expect(serveCalled).toBe(true);
 
-    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?varin_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const absoluteServeRes = createResponse();
     let absoluteServeCalled = false;
     await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
@@ -292,8 +292,8 @@ describe('ui auth client credential seam', () => {
       method: 'GET',
       baseUrl: '/api',
       path: '/fs/serve/Users/test/project/preview-test.html',
-      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`,
-      url: `/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?varin_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/serve/Users/test/project/preview-test.html?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: {},
     };
     const mountedServeRes = createResponse();
@@ -306,15 +306,15 @@ describe('ui auth client credential seam', () => {
     const dictationWsReq = {
       method: 'GET',
       path: '/api/dictation/ws',
-      url: `/api/dictation/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/api/dictation/ws?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
 
     const piRuntimeWsReq = {
       method: 'GET',
-      path: '/api/piarium/runtime/ws',
-      url: `/api/piarium/runtime/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      path: '/api/varin/runtime/ws',
+      url: `/api/varin/runtime/ws?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.resolveWebSocketAuthContext(piRuntimeWsReq)).toMatchObject({
@@ -325,7 +325,7 @@ describe('ui auth client credential seam', () => {
     const dictationHttpReq = {
       method: 'GET',
       path: '/api/dictation/ws',
-      url: `/api/dictation/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/api/dictation/ws?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'application/json' },
     };
     const dictationHttpRes = createResponse();
@@ -338,8 +338,8 @@ describe('ui auth client credential seam', () => {
 
     const runtimeManagerSseReq = {
       method: 'GET',
-      path: '/api/piarium/runtime-manager/events',
-      url: `/api/piarium/runtime-manager/events?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      path: '/api/varin/runtime-manager/events',
+      url: `/api/varin/runtime-manager/events?varin_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'text/event-stream' },
     };
     const runtimeManagerSseRes = createResponse();
@@ -349,7 +349,7 @@ describe('ui auth client credential seam', () => {
     });
     expect(runtimeManagerSseCalled).toBe(true);
 
-    const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+    const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?varin_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
     let arbitraryGetCalled = false;
     await auth.requireAuth(arbitraryGetReq, arbitraryGetRes, () => {
@@ -359,7 +359,7 @@ describe('ui auth client credential seam', () => {
     expect(arbitraryGetRes.statusCode).toBe(401);
 
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&piarium_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&varin_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
       const writeRes = createResponse();
       let writeCalled = false;
       await auth.requireAuth(writeReq, writeRes, () => {
@@ -401,7 +401,7 @@ describe('ui auth client credential seam', () => {
       body: {
         password: 'secret',
         issueClientToken: true,
-        clientLabel: 'Piarium Desktop',
+        clientLabel: 'Varin Desktop',
       },
     };
     const res = createResponse();
@@ -411,7 +411,7 @@ describe('ui auth client credential seam', () => {
     expect(res.body.clientToken).toBe('client-token');
     const capturedInput = createClientInput as Record<string, unknown> | null;
     if (!capturedInput) throw new Error('Expected createClient input');
-    expect(capturedInput.label).toBe('Piarium Desktop');
+    expect(capturedInput.label).toBe('Varin Desktop');
     const expiresAt = Date.parse(String(capturedInput.expiresAt));
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);

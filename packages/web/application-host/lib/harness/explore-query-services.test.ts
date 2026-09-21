@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import {
   createExploreQueryCancelService,
   createExploreQueryFinishService,

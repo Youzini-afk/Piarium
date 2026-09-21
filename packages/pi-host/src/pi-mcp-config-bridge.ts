@@ -6,7 +6,7 @@ import type {
 import {
   parsePiMcpConfigCatalog,
   type PiMcpConfigSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export const PI_MCP_RPC_VERSION = 1 as const;
 export const PI_MCP_RPC_READY_EVENT = "pi-mcp-adapter:rpc:v1:ready";
@@ -190,7 +190,7 @@ export class PiMcpConfigBridge {
       throw new Error("Pi MCP config bridge is unavailable");
     }
     const generation = this.#generation;
-    const requestId = `piarium-mcp-config-${generation}-${++this.#nextRequestId}`;
+    const requestId = `varin-mcp-config-${generation}-${++this.#nextRequestId}`;
     const replyEvent = `${PI_MCP_RPC_REPLY_PREFIX}${requestId}`;
     return new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -216,7 +216,7 @@ export class PiMcpConfigBridge {
           params: {},
           requestId,
           session: { cwd: this.#cwd, sessionId },
-          source: { extension: "piarium" },
+          source: { extension: "varin" },
           version: PI_MCP_RPC_VERSION,
         });
       } catch (error) {

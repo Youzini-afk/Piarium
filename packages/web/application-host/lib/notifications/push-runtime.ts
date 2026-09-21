@@ -1,5 +1,5 @@
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { SettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { SettingsFileStore } from '@varin/settings-store';
 
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
@@ -365,16 +365,16 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
   };
 
   const resolveVapidSubject = async (): Promise<string> => {
-    const configured = process.env.PIARIUM_VAPID_SUBJECT;
+    const configured = process.env.VARIN_VAPID_SUBJECT;
     if (typeof configured === 'string' && configured.trim().length > 0) {
       return configured.trim();
     }
 
-    const originEnv = process.env.PIARIUM_PUBLIC_ORIGIN;
+    const originEnv = process.env.VARIN_PUBLIC_ORIGIN;
     if (typeof originEnv === 'string' && originEnv.trim().length > 0) {
       const trimmed = originEnv.trim();
       if (isLoopbackHttpOrigin(trimmed)) {
-        return 'mailto:piarium@localhost';
+        return 'mailto:varin@localhost';
       }
       return trimmed;
     }
@@ -385,7 +385,7 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
       if (typeof stored === 'string' && stored.trim().length > 0) {
         const trimmed = stored.trim();
         if (isLoopbackHttpOrigin(trimmed)) {
-          return 'mailto:piarium@localhost';
+          return 'mailto:varin@localhost';
         }
         return trimmed;
       }
@@ -393,7 +393,7 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
       // Settings are optional; fall back to the local mailto subject.
     }
 
-    return 'mailto:piarium@localhost';
+    return 'mailto:varin@localhost';
   };
 
   const ensurePushInitialized = async (): Promise<void> => {
@@ -401,8 +401,8 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
     const keys = await getOrCreateVapidKeys();
     const subject = await resolveVapidSubject();
 
-    if (subject === 'mailto:piarium@localhost') {
-      console.warn('[Push] No public origin configured for VAPID; set PIARIUM_VAPID_SUBJECT or enable push once from a real origin.');
+    if (subject === 'mailto:varin@localhost') {
+      console.warn('[Push] No public origin configured for VAPID; set VARIN_VAPID_SUBJECT or enable push once from a real origin.');
     }
 
     webPush.setVapidDetails(subject, keys.publicKey, keys.privateKey);

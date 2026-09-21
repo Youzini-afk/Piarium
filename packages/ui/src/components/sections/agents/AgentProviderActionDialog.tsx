@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiAgentActionDescriptor, PiAgentDescriptor } from '@piarium/protocol';
+import type { PiAgentActionDescriptor, PiAgentDescriptor } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -56,15 +56,15 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
   const effectiveScope = chooseScope ? scope : inferredScope;
   const projectBlocked = effectiveScope === 'project' && !projectTrusted;
   const descriptionKey = action.destructive
-    ? 'settings.piarium.agents.actionDialog.destructiveDescription'
-    : 'settings.piarium.agents.actionDialog.scopeDescription';
+    ? 'settings.varin.agents.actionDialog.destructiveDescription'
+    : 'settings.varin.agents.actionDialog.scopeDescription';
 
   return (
     <Dialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t('settings.piarium.agents.actionDialog.title', {
+            {t('settings.varin.agents.actionDialog.title', {
               action: action.label,
               agent: agent.name,
             })}
@@ -77,20 +77,20 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
         {chooseScope ? (
           <div className="space-y-1.5">
             <label className="typography-settings-field-label text-foreground" htmlFor="agent-action-scope">
-              {t('settings.piarium.agents.definition.field.saveLocation')}
+              {t('settings.varin.agents.definition.field.saveLocation')}
             </label>
             <Select value={scope} onValueChange={setScope} disabled={submitting}>
               <SelectTrigger id="agent-action-scope" size="settings" className="w-full">
                 <SelectValue>
                   {scope === 'project'
-                    ? t('settings.piarium.agents.scope.project')
-                    : t('settings.piarium.agents.scope.user')}
+                    ? t('settings.varin.agents.scope.project')
+                    : t('settings.varin.agents.scope.user')}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="user">{t('settings.piarium.agents.scope.user')}</SelectItem>
+                <SelectItem value="user">{t('settings.varin.agents.scope.user')}</SelectItem>
                 <SelectItem value="project" disabled={!projectTrusted}>
-                  {t('settings.piarium.agents.scope.project')}
+                  {t('settings.varin.agents.scope.project')}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -99,7 +99,7 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
 
         {projectBlocked ? (
           <p className="typography-meta text-[var(--status-warning)]">
-            {t('settings.piarium.recovery.pluginSettings.projectUntrusted')}
+            {t('settings.varin.recovery.pluginSettings.projectUntrusted')}
           </p>
         ) : null}
 

@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'piarium.document-recovery.session';
+const STORAGE_KEY = 'varin.document-recovery.session';
 
 export const getDocumentRecoverySessionId = (): string => {
   const created = crypto.randomUUID();

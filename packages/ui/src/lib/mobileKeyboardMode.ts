@@ -1,6 +1,6 @@
 export type MobileKeyboardMode = 'native' | 'resize-content';
 
-const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'piarium.mobileKeyboardMode';
+const MOBILE_KEYBOARD_MODE_STORAGE_KEY = 'varin.mobileKeyboardMode';
 const VIEWPORT_META_SELECTOR = 'meta[name="viewport"]';
 const VIEWPORT_CONTENT_BASE = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
 
@@ -65,7 +65,7 @@ export const applyMobileKeyboardMode = (value: unknown): MobileKeyboardMode => {
     return mode;
   }
 
-  document.documentElement.setAttribute('data-piarium-mobile-keyboard-mode', mode);
+  document.documentElement.setAttribute('data-varin-mobile-keyboard-mode', mode);
 
   const viewportMeta = document.querySelector(VIEWPORT_META_SELECTOR);
   if (viewportMeta instanceof HTMLMetaElement) {

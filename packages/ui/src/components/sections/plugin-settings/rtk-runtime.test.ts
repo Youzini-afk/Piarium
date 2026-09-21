@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiCommandDescriptor } from '@piarium/protocol';
+import type { PiCommandDescriptor } from '@varin/protocol';
 import { buildRtkCommand, rtkCommandObserved, rtkRuntimeState } from './rtk-runtime';
 
 const command = (name: string): PiCommandDescriptor => ({

@@ -3,7 +3,7 @@ import type {
   WorkspaceCombinedRecoveryOperation,
   WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryStatus,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -89,7 +89,7 @@ export const PiRecoveryPanel: React.FC = () => {
         workspaceId,
       }));
       setCheckpointName('');
-      toast.success(t('contextPanel.recovery.toast.applied', { provider: 'piarium.builtin.recovery' }));
+      toast.success(t('contextPanel.recovery.toast.applied', { provider: 'varin.builtin.recovery' }));
       await refresh();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
@@ -150,8 +150,8 @@ export const PiRecoveryPanel: React.FC = () => {
           size="icon"
           onClick={() => void refresh()}
           disabled={busy !== null}
-          aria-label={t('settings.piarium.recovery.actions.refresh')}
-          title={t('settings.piarium.recovery.actions.refresh')}
+          aria-label={t('settings.varin.recovery.actions.refresh')}
+          title={t('settings.varin.recovery.actions.refresh')}
         >
           <Icon name="refresh" className={cn('size-4', busy === 'refresh' && 'animate-spin')} />
         </Button>
@@ -162,7 +162,7 @@ export const PiRecoveryPanel: React.FC = () => {
           <section className="rounded-xl border border-border/60 bg-muted/15 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="typography-ui-label font-medium text-foreground">piarium.builtin.recovery</p>
+                <p className="typography-ui-label font-medium text-foreground">varin.builtin.recovery</p>
                 <p className="mt-1 typography-micro text-muted-foreground">
                   {status.storage.location.mode} · {status.storage.state}
                 </p>
@@ -176,20 +176,20 @@ export const PiRecoveryPanel: React.FC = () => {
                   setSettingsDialogOpen(true);
                 }}
               >
-                {t('settings.piarium.recovery.actions.configure')}
+                {t('settings.varin.recovery.actions.configure')}
               </Button>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.checkpoints')}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.checkpoints')}</p>
                 <p className="mt-1 typography-ui-label tabular-nums">{status.storage.checkpointCount}</p>
               </div>
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.objects')}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.objects')}</p>
                 <p className="mt-1 typography-ui-label tabular-nums">{status.storage.objectCount}</p>
               </div>
               <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.piarium.recovery.storage.size')}</p>
+                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.size')}</p>
                 <p className="mt-1 typography-ui-label tabular-nums">
                   {formatWorkspaceArchiveBytes(status.storage.byteLength)}
                 </p>

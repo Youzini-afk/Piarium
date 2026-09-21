@@ -6,7 +6,7 @@ import { createMonacoEditorOptions, fileEditorPresentationForProfile } from './e
 describe('Monaco editor option projection', () => {
   test('uses compact and full official presentation presets without changing document state', () => {
     expect(fileEditorPresentationForProfile('default')).toBe('agent-compact');
-    expect(fileEditorPresentationForProfile('piarium.ide')).toBe('ide-full');
+    expect(fileEditorPresentationForProfile('varin.ide')).toBe('ide-full');
     const agent = createMonacoEditorOptions({
       ariaLabel: 'Editor',
       fontSize: 13,
@@ -16,7 +16,7 @@ describe('Monaco editor option projection', () => {
     const ide = createMonacoEditorOptions({
       ariaLabel: 'Editor',
       fontSize: 13,
-      profileId: 'piarium.ide',
+      profileId: 'varin.ide',
       settings: { ...DEFAULT_FILE_EDITOR_SETTINGS },
     });
     expect(agent.wordWrap).toBe('on');
@@ -31,7 +31,7 @@ describe('Monaco editor option projection', () => {
     const options = createMonacoEditorOptions({
       ariaLabel: 'Editor',
       fontSize: 15,
-      profileId: 'piarium.ide',
+      profileId: 'varin.ide',
       settings: {
         ...DEFAULT_FILE_EDITOR_SETTINGS,
         minimap: 'off',

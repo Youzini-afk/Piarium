@@ -7,14 +7,14 @@ import { createKernelClient } from "../kernel/kernel-client.js";
 import { createSourceService } from "./sources.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
-  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH
+  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const available = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Research source test requires the release kernel");
+if (!available && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Research source test requires the release kernel");
 
 it.skipIf(!available)("retains source content after its original branch is released and keeps other research roots out", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-source-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-source-"));
   const client = createKernelClient({ hostId: "source-test", storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false });
   try {
     await client.start();

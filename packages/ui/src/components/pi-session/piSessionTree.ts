@@ -4,7 +4,7 @@ import type {
   PiUserMessage,
   SessionTreeNode,
   SessionTreeResult,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface PiSessionTreeItem {
   active: boolean;

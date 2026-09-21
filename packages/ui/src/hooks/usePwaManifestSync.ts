@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { isWebRuntime } from '@/lib/desktop';
 import { PWA_RECENT_SESSIONS_STORAGE_KEY } from '@/lib/pwa';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -10,7 +10,7 @@ type RecentSessionShortcut = {
 };
 
 type ManifestSyncWindow = Window & {
-  __PIARIUM_UPDATE_PWA_MANIFEST__?: () => void;
+  __VARIN_UPDATE_PWA_MANIFEST__?: () => void;
 };
 
 const MAX_RECENT_SHORTCUTS = 3;
@@ -91,6 +91,6 @@ export const usePwaManifestSync = () => {
     }
 
     const win = window as ManifestSyncWindow;
-    win.__PIARIUM_UPDATE_PWA_MANIFEST__?.();
+    win.__VARIN_UPDATE_PWA_MANIFEST__?.();
   }, [hasRecentShortcuts, signature]);
 };

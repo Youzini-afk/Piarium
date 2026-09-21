@@ -88,7 +88,7 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(childPath, "tracked.txt"), "child result\n");
       writeFileSync(join(childPath, "child-note.txt"), "new child file\n");
       const snapshotted = await runtime.snapshot(prepared.worktree!);
-      expect(snapshotted.branch).toBe("piarium/thread-one");
+      expect(snapshotted.branch).toBe("varin/thread-one");
       expect(snapshotted.resultCommit).toMatch(/^[0-9a-f]{40}$/);
       expect(git(childPath, ["status", "--porcelain"])).toBe("");
       const inspected = await runtime.inspect(snapshotted);
@@ -762,7 +762,7 @@ describe("thread worktree runtime", () => {
   it("inits an independent Git repo when the live path sits inside the parent worktree", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
-    const live = join(fixture.repo, ".piarium", "worktrees", "isolated-child");
+    const live = join(fixture.repo, ".varin", "worktrees", "isolated-child");
     const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
     const parentBranches = git(fixture.repo, ["branch"]);
     try {
@@ -770,19 +770,19 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
       const attached = await runtime.attachIsolatedGitContext(fixture.repo, {
         path: live,
-        managedRoot: join(fixture.repo, ".piarium", "worktrees"),
+        managedRoot: join(fixture.repo, ".varin", "worktrees"),
         base: parentHead,
       });
       expect(attached.kind).toBe("init");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       expect(attached.executionBaseline).not.toBe(parentHead);
       const retried = await runtime.attachIsolatedGitContext(fixture.repo, {
-        path: live, managedRoot: join(fixture.repo, ".piarium", "worktrees"), base: parentHead,
+        path: live, managedRoot: join(fixture.repo, ".varin", "worktrees"), base: parentHead,
       });
       expect(retried).toEqual(attached);
       const inspected = await runtime.inspect({
         path: live,
-        managedRoot: join(fixture.repo, ".piarium", "worktrees"),
+        managedRoot: join(fixture.repo, ".varin", "worktrees"),
         base: parentHead,
         executionBaseline: attached.executionBaseline!,
         viewMode: "materialized",
@@ -886,16 +886,16 @@ describe("thread worktree runtime", () => {
     const runtime = runtimeFor(fixture.worktrees);
     const live = join(fixture.worktrees, "required-filter-live");
     try {
-      writeFileSync(join(fixture.repo, ".gitattributes"), "filtered.txt filter=piarium-required\n");
+      writeFileSync(join(fixture.repo, ".gitattributes"), "filtered.txt filter=varin-required\n");
       writeFileSync(join(fixture.repo, "filtered.txt"), "base bytes\n");
       git(fixture.repo, ["add", ".gitattributes", "filtered.txt"]);
       git(fixture.repo, ["commit", "-m", "filter fixture"]);
-      git(fixture.repo, ["config", "filter.piarium-required.clean", "false"]);
-      git(fixture.repo, ["config", "filter.piarium-required.smudge", "cat"]);
-      git(fixture.repo, ["config", "filter.piarium-required.required", "true"]);
+      git(fixture.repo, ["config", "filter.varin-required.clean", "false"]);
+      git(fixture.repo, ["config", "filter.varin-required.smudge", "cat"]);
+      git(fixture.repo, ["config", "filter.varin-required.required", "true"]);
       const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
       mkdirSync(live, { recursive: true });
-      writeFileSync(join(live, ".gitattributes"), "filtered.txt filter=piarium-required\n");
+      writeFileSync(join(live, ".gitattributes"), "filtered.txt filter=varin-required\n");
       writeFileSync(join(live, "filtered.txt"), "materialized bytes\n");
       await expect(runtime.attachIsolatedGitContext(fixture.repo, {
         path: live,

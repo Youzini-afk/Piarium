@@ -5,34 +5,34 @@ import pathDefault from 'node:path';
 
 // ── Public types ─────────────────────────────────────────────────────────
 
-export type PiariumSettingsDocument = Record<string, unknown>;
+export type VarinSettingsDocument = Record<string, unknown>;
 
 export interface SettingsFileTransaction<Result> {
-  document?: PiariumSettingsDocument;
+  document?: VarinSettingsDocument;
   result: Result;
   write?: boolean;
 }
 
 export interface SettingsFileStore {
   readonly filePath: string;
-  read(): Promise<PiariumSettingsDocument>;
-  readSync(): PiariumSettingsDocument;
-  replace(settings: PiariumSettingsDocument): Promise<PiariumSettingsDocument>;
+  read(): Promise<VarinSettingsDocument>;
+  readSync(): VarinSettingsDocument;
+  replace(settings: VarinSettingsDocument): Promise<VarinSettingsDocument>;
   transact<Result>(
     mutator: (
-      current: PiariumSettingsDocument,
+      current: VarinSettingsDocument,
     ) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
   ): Promise<Result>;
   update(
     mutator: (
-      current: PiariumSettingsDocument,
-    ) => PiariumSettingsDocument | void | Promise<PiariumSettingsDocument | void>,
-  ): Promise<PiariumSettingsDocument>;
+      current: VarinSettingsDocument,
+    ) => VarinSettingsDocument | void | Promise<VarinSettingsDocument | void>,
+  ): Promise<VarinSettingsDocument>;
 }
 
 export interface SettingsFileStoreOptions {
   filePath: string;
-  defaultValue?: PiariumSettingsDocument;
+  defaultValue?: VarinSettingsDocument;
   fsModule?: Pick<typeof fs, 'readFileSync'>;
   fsPromises?: Pick<
     typeof fsPromisesDefault,
@@ -60,14 +60,14 @@ const errorCode = (error: unknown): string | undefined => (
     : undefined
 );
 
-const assertObject = (value: unknown): PiariumSettingsDocument => {
+const assertObject = (value: unknown): VarinSettingsDocument => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Settings file is malformed (non-object payload)');
   }
-  return value as PiariumSettingsDocument;
+  return value as VarinSettingsDocument;
 };
 
-const parseSettings = (raw: string): PiariumSettingsDocument => assertObject(JSON.parse(raw));
+const parseSettings = (raw: string): VarinSettingsDocument => assertObject(JSON.parse(raw));
 
 const processIsAlive = (
   processLike: Pick<NodeJS.Process, 'kill' | 'pid' | 'platform'>,
@@ -102,13 +102,13 @@ export const createSettingsFileStore = ({
   pathModule = pathDefault,
   processLike = process,
 }: SettingsFileStoreOptions): SettingsFileStore => {
-  const readDefault = (): PiariumSettingsDocument => structuredClone(assertObject(defaultValue));
+  const readDefault = (): VarinSettingsDocument => structuredClone(assertObject(defaultValue));
   const resolvedPath = pathModule.resolve(filePath);
   const lockPath = `${resolvedPath}.lock`;
   const previousPath = `${resolvedPath}.previous`;
   const directory = pathModule.dirname(resolvedPath);
 
-  const read = async (): Promise<PiariumSettingsDocument> => {
+  const read = async (): Promise<VarinSettingsDocument> => {
     try {
       return parseSettings(await fsPromises.readFile(resolvedPath, 'utf8'));
     } catch (error) {
@@ -124,7 +124,7 @@ export const createSettingsFileStore = ({
     }
   };
 
-  const readSync = (): PiariumSettingsDocument => {
+  const readSync = (): VarinSettingsDocument => {
     try {
       return parseSettings(fsModule.readFileSync(resolvedPath, 'utf8'));
     } catch (error) {
@@ -229,7 +229,7 @@ export const createSettingsFileStore = ({
     if (movedCurrent) await fsPromises.rm(previousPath, { force: true });
   };
 
-  const writeUnlocked = async (settings: PiariumSettingsDocument): Promise<void> => {
+  const writeUnlocked = async (settings: VarinSettingsDocument): Promise<void> => {
     assertObject(settings);
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (processLike.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
@@ -253,13 +253,13 @@ export const createSettingsFileStore = ({
     }
   });
 
-  const replace = (settings: PiariumSettingsDocument): Promise<PiariumSettingsDocument> => withMutationLock(async () => {
+  const replace = (settings: VarinSettingsDocument): Promise<VarinSettingsDocument> => withMutationLock(async () => {
     await writeUnlocked(settings);
     return settings;
   });
 
   const transact = <Result>(
-    mutator: (current: PiariumSettingsDocument) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+    mutator: (current: VarinSettingsDocument) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
   ): Promise<Result> => withMutationLock(async () => {
     const current = await read();
     const transaction = await mutator(structuredClone(current));
@@ -272,8 +272,8 @@ export const createSettingsFileStore = ({
   });
 
   const update = (
-    mutator: (current: PiariumSettingsDocument) => PiariumSettingsDocument | void | Promise<PiariumSettingsDocument | void>,
-  ): Promise<PiariumSettingsDocument> => transact(async (current) => {
+    mutator: (current: VarinSettingsDocument) => VarinSettingsDocument | void | Promise<VarinSettingsDocument | void>,
+  ): Promise<VarinSettingsDocument> => transact(async (current) => {
     const next = assertObject((await mutator(current)) ?? current);
     return { document: next, result: next };
   });

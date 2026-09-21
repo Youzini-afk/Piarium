@@ -3,7 +3,7 @@
  * registers for every session, exercised inside an actual agent loop with a
  * faux provider:
  *
- *   - zone2-extension            (before_agent_start → <piarium-context>)
+ *   - zone2-extension            (before_agent_start → <varin-context>)
  *   - context-preparation        (context budget → session_before_compact)
  *   - permission-gate            (tool_call → ui.select → allow/deny)
  *
@@ -23,7 +23,7 @@ import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 
 import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
@@ -38,7 +38,7 @@ import {
   type LiveSurfaceBuffer,
 } from "../../../web/application-host/lib/documents/contract-fixtures.js";
 import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
 import { createWebSearchService, resolveConfiguredSearchProvider } from "../../../web/application-host/lib/harness/web-search.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
@@ -54,7 +54,7 @@ import { createSemanticIndexRuntime } from "../../../web/application-host/lib/kn
 import { workspaceScope } from "../../../web/application-host/lib/knowledge/semantic/identity.js";
 import { createStructureSource } from "../../../web/application-host/lib/structure/source.js";
 import { createTreeSitterStructureProvider } from "../../../web/application-host/lib/structure/tree-sitter-provider.js";
-import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@piarium/protocol";
+import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@varin/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
 import { serializedToolResult } from "./provider-context.js";
@@ -276,7 +276,7 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
 
 describe("session e2e — work focus", () => {
   it("applies research only at run boundaries without retaining its prompt after code resumes", async () => {
-    await withTempRoot("piarium-work-focus-", async (root) => {
+    await withTempRoot("varin-work-focus-", async (root) => {
       await writeFile(join(root, "observation.txt"), "measured result\n", "utf8");
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
@@ -303,7 +303,7 @@ describe("session e2e — work focus", () => {
         );
         await session.host.prompt(snapshot.sessionId, "implement a small change");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /piarium-work-focus id="research"/);
+        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
         await session.host.prompt(snapshot.sessionId, "investigate the observation");
@@ -315,12 +315,12 @@ describe("session e2e — work focus", () => {
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "code", source: "explicit" }, 3), true);
         await session.host.prompt(snapshot.sessionId, "implement the selected analysis");
         await session.host.session.waitForIdle();
-        assert.doesNotMatch(contexts[3]?.systemPrompt ?? "", /piarium-work-focus id="research"/);
+        assert.doesNotMatch(contexts[3]?.systemPrompt ?? "", /varin-work-focus id="research"/);
 
         assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
         await session.host.prompt(snapshot.sessionId, "test a competing explanation");
         await session.host.session.waitForIdle();
-        assert.equal((contexts[4]?.systemPrompt?.match(/<piarium-work-focus id="research">/g) ?? []).length, 1);
+        assert.equal((contexts[4]?.systemPrompt?.match(/<varin-work-focus id="research">/g) ?? []).length, 1);
       } finally {
         await session.dispose();
         faux.unregister();
@@ -329,7 +329,7 @@ describe("session e2e — work focus", () => {
   });
 
   it("keeps the applied code focus when research preparation is rejected during a live run", async () => {
-    await withTempRoot("piarium-work-focus-failure-", async (root) => {
+    await withTempRoot("varin-work-focus-failure-", async (root) => {
       const faux = registerFauxProvider();
       let release!: () => void;
       let entered!: () => void;
@@ -360,7 +360,7 @@ describe("session e2e — work focus", () => {
   });
 
   it("uses the bounded research identity for a spawned branch session", async () => {
-    await withTempRoot("piarium-work-focus-branch-", async (root) => {
+    await withTempRoot("varin-work-focus-branch-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -393,7 +393,7 @@ describe("session e2e — work focus", () => {
 
 describe("session e2e — passive thread input", () => {
   it("shows a passive note in the next actual tool continuation without adding a turn", async () => {
-    await withTempRoot("piarium-passive-tool-boundary-", async (root) => {
+    await withTempRoot("varin-passive-tool-boundary-", async (root) => {
       await writeFile(join(root, "note-source.txt"), "tool result", "utf8");
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
@@ -421,7 +421,7 @@ describe("session e2e — passive thread input", () => {
   });
 
   it("deduplicates concurrent execution requests and replays a native receipt after reopening", async () => {
-    await withTempRoot("piarium-thread-request-receipt-", async (root) => {
+    await withTempRoot("varin-thread-request-receipt-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -453,7 +453,7 @@ describe("session e2e — passive thread input", () => {
     });
   });
   it("persists a notification without waking an idle model and deduplicates the Pi receipt", async () => {
-    await withTempRoot("piarium-passive-idle-", async (root) => {
+    await withTempRoot("varin-passive-idle-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -486,7 +486,7 @@ describe("session e2e — passive thread input", () => {
   });
 
   it("does not schedule a follow-up when inform arrives during an actual model request", async () => {
-    await withTempRoot("piarium-passive-active-", async (root) => {
+    await withTempRoot("varin-passive-active-", async (root) => {
       const faux = registerFauxProvider();
       let entered!: () => void;
       let release!: () => void;
@@ -520,7 +520,7 @@ describe("session e2e — passive thread input", () => {
 
 describe("session e2e — zone2 extension", () => {
   it("sends only new material and rebuilds only material actually removed by a native Pi cut", async () => {
-    await withTempRoot("piarium-zone2-retained-", async (root) => {
+    await withTempRoot("varin-zone2-retained-", async (root) => {
       const faux = registerFauxProvider();
       const requests: Context[] = [];
       faux.setResponses(Array.from({ length: 4 }, () => (context: Context) => {
@@ -570,7 +570,7 @@ describe("session e2e — zone2 extension", () => {
     });
   });
   it("carries a committed editor mutation through the Host store into the next real Pi turn", async () => {
-    await withTempRoot("piarium-s-zone2-documents-", async (root) => {
+    await withTempRoot("varin-s-zone2-documents-", async (root) => {
       const dataDir = join(root, "data");
       let observeMutation = (_event: DocumentMutationObservation): void => {};
       const documents = createDocumentAuthority({
@@ -643,7 +643,7 @@ describe("session e2e — zone2 extension", () => {
   });
 
   it("carries a user terminal command through the Host store into the next real Pi turn", async () => {
-    await withTempRoot("piarium-s-zone2-terminal-", async (root) => {
+    await withTempRoot("varin-s-zone2-terminal-", async (root) => {
       const dataDir = join(root, "data");
       const documents = createDocumentAuthority({
         hostId: "zone2-term-host",
@@ -681,7 +681,7 @@ describe("session e2e — zone2 extension", () => {
         knowledge.observeTerminalCommand({
           workspaceId: identity.workspaceId,
           sessionId: "term-user",
-          command: "echo piarium-user-terminal",
+          command: "echo varin-user-terminal",
           commandId: "term-user:1:1",
           cwd: root,
           exitCode: 0,
@@ -692,7 +692,7 @@ describe("session e2e — zone2 extension", () => {
         knowledge.observeTerminalCommand({
           workspaceId: identity.workspaceId,
           sessionId: "term-user",
-          command: "echo piarium-user-terminal",
+          command: "echo varin-user-terminal",
           commandId: "term-user:1:1",
           exitCode: 0,
           source: "user",
@@ -712,12 +712,12 @@ describe("session e2e — zone2 extension", () => {
         await session.host.session.waitForIdle();
         const second = JSON.stringify(contexts[1]!.messages);
         assert.match(second, /<user-terminal>/);
-        assert.match(second, /echo piarium-user-terminal/);
+        assert.match(second, /echo varin-user-terminal/);
         assert.doesNotMatch(second, /agent-build/);
         await session.host.prompt(snapshot.sessionId, "third turn");
         await session.host.session.waitForIdle();
         assert.equal(
-          JSON.stringify(contexts[2]!.messages).match(/echo piarium-user-terminal/g)?.length,
+          JSON.stringify(contexts[2]!.messages).match(/echo varin-user-terminal/g)?.length,
           1,
           "the delivered command must remain in history without being appended a second time",
         );
@@ -731,8 +731,8 @@ describe("session e2e — zone2 extension", () => {
     });
   });
 
-  it("injects assembled <piarium-context> into the first request and leaves Zone 0 alone", async () => {
-    await withTempRoot("piarium-s-zone2-", async (root) => {
+  it("injects assembled <varin-context> into the first request and leaves Zone 0 alone", async () => {
+    await withTempRoot("varin-s-zone2-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -779,13 +779,13 @@ describe("session e2e — zone2 extension", () => {
         assert.equal(zone2Requests[1]?.afterEventId, 4, "the next turn must continue after the delivered event cursor");
 
         const firstMessages = JSON.stringify(contexts[0]!.messages);
-        assert.match(firstMessages, /<piarium-context/, "Zone 2 block must reach the provider");
+        assert.match(firstMessages, /<varin-context/, "Zone 2 block must reach the provider");
         assert.match(firstMessages, /packages\/web\/lib\/foo\.ts/, "user edit must be listed");
         assert.match(firstMessages, /not instructions/, "Zone 2 must be marked as data");
 
         // Zone 2 is a message, never the system prompt (§4.2 / invariant 2).
         const system = contexts[0]!.systemPrompt ?? "";
-        assert.doesNotMatch(system, /<piarium-context/, "Zone 2 must not touch the system prompt");
+        assert.doesNotMatch(system, /<varin-context/, "Zone 2 must not touch the system prompt");
         assert.equal(contexts[1]!.systemPrompt ?? "", system, "system prompt must stay byte-identical");
       } finally {
         await session.dispose();
@@ -795,7 +795,7 @@ describe("session e2e — zone2 extension", () => {
   });
 
   it("sends no context message when the host has no Zone 2 material", async () => {
-    await withTempRoot("piarium-s-zone2-empty-", async (root) => {
+    await withTempRoot("varin-s-zone2-empty-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -829,7 +829,7 @@ describe("session e2e — zone2 extension", () => {
         assert.equal(contexts.length, 1);
         assert.doesNotMatch(
           JSON.stringify(contexts[0]!.messages),
-          /<piarium-context/,
+          /<varin-context/,
           "an empty Zone 2 must not produce an empty block",
         );
       } finally {
@@ -842,7 +842,7 @@ describe("session e2e — zone2 extension", () => {
 
 describe("session e2e — context preparation settings", () => {
   it("projects background preparation state and honors the retired memory off switch", async () => {
-    await withTempRoot("piarium-s-context-settings-", async (root) => {
+    await withTempRoot("varin-s-context-settings-", async (root) => {
       const faux = registerFauxProvider();
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       try {
@@ -884,7 +884,7 @@ describe("session e2e — context preparation settings", () => {
 
 describe("session e2e — context preparation chain", () => {
   for (const outcome of ["commit", "cancel", "invalid-summary"] as const) it(`fixed candidate ${outcome}: foreground progress, capacity admission, and native history`, async () => {
-    await withTempRoot("piarium-fixed-context-chain-", async (root) => {
+    await withTempRoot("varin-fixed-context-chain-", async (root) => {
       await mkdir(join(root, "agent"), { recursive: true });
       await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
         compaction: { enabled: true, reserveTokens: 8_000, keepRecentTokens: 4_000 },
@@ -1015,7 +1015,7 @@ describe("session e2e — context preparation chain", () => {
 
 describe("session e2e — native file pagination", () => {
   it("keeps the native file page intact and follows its read continuation", async () => {
-    await withTempRoot("piarium-s-large-read-", async (root) => {
+    await withTempRoot("varin-s-large-read-", async (root) => {
       await writeFile(
         join(root, "large.txt"),
         Array.from({ length: 8_000 }, (_, index) => `line ${index + 1} — 大文件`).join("\n"),
@@ -1057,7 +1057,7 @@ describe("session e2e — native file pagination", () => {
 
 describe("session e2e — fixed surface read", () => {
   it("uses the Host-advertised read override inside a real Pi turn", async () => {
-    await withTempRoot("piarium-s-surface-read-", async (root) => {
+    await withTempRoot("varin-s-surface-read-", async (root) => {
       await writeFile(join(root, "draft.ts"), "stale disk value\n", "utf8");
       const faux = registerFauxProvider();
       let toolResult = "";
@@ -1246,7 +1246,7 @@ describe("session e2e — fixed surface edit", () => {
 
 describe("session e2e — fixed surface find and ls", () => {
   it("enters the Host-advertised same-name overrides for virtual paths and keeps disk paths native", async () => {
-    await withTempRoot("piarium-s-surface-find-ls-", async (root) => {
+    await withTempRoot("varin-s-surface-find-ls-", async (root) => {
       await mkdir(join(root, "disk"), { recursive: true });
       await writeFile(join(root, "disk", "old.ts"), "disk old\n", "utf8");
       const faux = registerFauxProvider();
@@ -1317,7 +1317,7 @@ describe("session e2e — fixed surface find and ls", () => {
 
 describe("session e2e — session-local web reader", () => {
   it("fetches once in the Host and answers with the configured reader model in pi-host", async () => {
-    await withTempRoot("piarium-s-web-reader-", async (root) => {
+    await withTempRoot("varin-s-web-reader-", async (root) => {
       const faux = registerFauxProvider();
       const model = faux.getModel();
       const agentDir = join(root, "agent");
@@ -1384,7 +1384,7 @@ describe("session e2e — session-local web reader", () => {
 
 describe("session e2e — default web search", () => {
   it("searches without search credentials and follows the result URL to a page passage in a real Pi turn", async () => {
-    await withTempRoot("piarium-s-web-search-", async (root) => {
+    await withTempRoot("varin-s-web-search-", async (root) => {
       const agentDir = join(root, "agent");
       await mkdir(agentDir, { recursive: true });
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({
@@ -1396,12 +1396,12 @@ describe("session e2e — default web search", () => {
       let searchRequests = 0;
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("websearch", {
-          query: "Piarium architecture",
+          query: "Varin architecture",
           allowed_domains: ["docs.example"],
         })]),
         (context) => {
           finalToolResult = serializedToolResult(context, "websearch");
-          return fauxAssistantMessage([fauxToolCall("webfetch", { url: "https://docs.example/piarium", find: "authority" })]);
+          return fauxAssistantMessage([fauxToolCall("webfetch", { url: "https://docs.example/varin", find: "authority" })]);
         },
         (context) => {
           pageToolResult = serializedToolResult(context, "webfetch");
@@ -1418,7 +1418,7 @@ describe("session e2e — default web search", () => {
           const request = JSON.parse(String(init?.body));
           assert.equal(request.params.name, "web_search_advanced_exa");
           assert.deepEqual(request.params.arguments.includeDomains, ["docs.example"]);
-          return Response.json({ jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text: "Title: Piarium architecture\nURL: https://docs.example/piarium\nText: Host and pi-host have separate authority boundaries." }] } });
+          return Response.json({ jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text: "Title: Varin architecture\nURL: https://docs.example/varin\nText: Host and pi-host have separate authority boundaries." }] } });
         },
       }));
       const session = await setupSession({
@@ -1437,7 +1437,7 @@ describe("session e2e — default web search", () => {
         await session.host.session.waitForIdle();
         assert.equal(searchRequests, 1);
         assert.match(finalToolResult, /default-exa/);
-        assert.match(finalToolResult, /https:\/\/docs\.example\/piarium/);
+        assert.match(finalToolResult, /https:\/\/docs\.example\/varin/);
         assert.match(finalToolResult, /authority boundaries/);
         assert.match(pageToolResult, /2: The Host owns file authority/);
       } finally {
@@ -1478,7 +1478,7 @@ async function createExploreFixture(root: string) {
 
 describe("session e2e — explore", () => {
   it("delivers a contiguous, versioned Documents excerpt and a usable output handle to the model", async () => {
-    await withTempRoot("piarium-s-explore-snapshot-", async (root) => {
+    await withTempRoot("varin-s-explore-snapshot-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "target.ts"), [
         "export const before = 1;",
@@ -1535,7 +1535,7 @@ describe("session e2e — explore", () => {
   });
 
   it("returns a structure slice in one explore.search result, not an extra symbols call", async () => {
-    await withTempRoot("piarium-s-explore-structure-", async (root) => {
+    await withTempRoot("varin-s-explore-structure-", async (root) => {
       const fixture = await createExploreFixture(root);
       const body = Array.from({ length: 48 }, (_, index) => (
         index === 23 ? "  const needle = 1;" : `  const pad${index} = ${index};`
@@ -1605,7 +1605,7 @@ describe("session e2e — explore", () => {
   });
 
   it("reports a stale changed hit as partial through the real Pi tool result", async () => {
-    await withTempRoot("piarium-s-explore-stale-", async (root) => {
+    await withTempRoot("varin-s-explore-stale-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
       await writeFile(join(fixture.workspaceRoot, "changed.ts"), "export const needle = \"before search\";", "utf8");
@@ -1659,7 +1659,7 @@ describe("session e2e — explore", () => {
   });
 
   it("reports a missing hit as an unavailable source gap through the real Pi tool result", async () => {
-    await withTempRoot("piarium-s-explore-missing-", async (root) => {
+    await withTempRoot("varin-s-explore-missing-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "current.ts"), "export const needle = \"current\";", "utf8");
       await writeFile(join(fixture.workspaceRoot, "missing.ts"), "export const needle = \"to be removed\";", "utf8");
@@ -1712,7 +1712,7 @@ describe("session e2e — explore", () => {
   });
 
   it("T9: forwards anchors through the real explore tool and prefers the literal hit", async () => {
-    await withTempRoot("piarium-s-explore-anchors-", async (root) => {
+    await withTempRoot("varin-s-explore-anchors-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "generic.ts"), "export const token = 1;\n", "utf8");
       await writeFile(join(fixture.workspaceRoot, "exact.ts"), "export const uniqueAnchor = 2;\n", "utf8");
@@ -1754,7 +1754,7 @@ describe("session e2e — explore", () => {
   });
 
   it("runs plan expressions through ModelRuntime and keeps a zero-overlap excerpt in the final source", async () => {
-    await withTempRoot("piarium-s-explore-model-", async (root) => {
+    await withTempRoot("varin-s-explore-model-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "reclaim.ts"), [
         "export function reclaimLease(handle: string) {",
@@ -1826,7 +1826,7 @@ describe("session e2e — explore", () => {
   });
 
   it("uses the remote embedding binding and HTTP rerank on the public explore path", async () => {
-    await withTempRoot("piarium-s-explore-remote-", async (root) => {
+    await withTempRoot("varin-s-explore-remote-", async (root) => {
       const fixture = await createExploreFixture(root);
       await writeFile(join(fixture.workspaceRoot, "remote.ts"), [
         "export function remotePineapple() {",
@@ -1994,7 +1994,7 @@ describe("session e2e — explore", () => {
 
 describe("session e2e — related", () => {
   it("registers related and returns file-level topology from an already-open store", async () => {
-    await withTempRoot("piarium-s-related-", async (root) => {
+    await withTempRoot("varin-s-related-", async (root) => {
       const fixture = await createExploreFixture(root);
       const store = await openWorkspaceKnowledge({
         dataDir: join(root, "knowledge"),
@@ -2074,7 +2074,7 @@ describe("session e2e — real LSP diagnostics", () => {
       language.registerProvider({
         providerId: "fixture",
         command: process.execPath,
-        args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+        args: VARIN_LSP_FIXTURE_SERVER_ARGS,
         languageIds: ["typescript"],
         source: "host",
       });
@@ -2129,7 +2129,7 @@ describe("session e2e — real LSP diagnostics", () => {
 
 describe("session e2e — Harness counters", () => {
   it("publishes real tool failures, retries, output bytes, observations, and cache ratio through session stats", async () => {
-    await withTempRoot("piarium-s-counters-", async (root) => {
+    await withTempRoot("varin-s-counters-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing-counter-file.txt" })]),
@@ -2160,7 +2160,7 @@ describe("session e2e — Harness counters", () => {
 
 describe("session e2e — permission gate extension", () => {
   it("asks before a write and performs it when the user allows once", async () => {
-    await withTempRoot("piarium-s-perm-allow-", async (root) => {
+    await withTempRoot("varin-s-perm-allow-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "allowed.txt", content: "hi" })]),
@@ -2193,7 +2193,7 @@ describe("session e2e — permission gate extension", () => {
   });
 
   it("blocks the tool and leaves the file alone when the user denies", async () => {
-    await withTempRoot("piarium-s-perm-deny-", async (root) => {
+    await withTempRoot("varin-s-perm-deny-", async (root) => {
       const faux = registerFauxProvider();
       const contexts: Context[] = [];
       faux.setResponses([
@@ -2225,7 +2225,7 @@ describe("session e2e — permission gate extension", () => {
   });
 
   it("binds a session approval to one resource and always asks for a high-risk path", async () => {
-    await withTempRoot("piarium-s-perm-session-", async (root) => {
+    await withTempRoot("varin-s-perm-session-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "one.txt", content: "1" })]),
@@ -2268,7 +2268,7 @@ describe("session e2e — permission gate extension", () => {
   });
 
   it("does not ask for a read-only tool", async () => {
-    await withTempRoot("piarium-s-perm-read-", async (root) => {
+    await withTempRoot("varin-s-perm-read-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "missing.txt" })]),
@@ -2299,7 +2299,7 @@ describe("session e2e — permission gate extension", () => {
   });
 
   it("uses the configured Smart judge for an ordinary edit without prompting", async () => {
-    await withTempRoot("piarium-s-perm-smart-", async (root) => {
+    await withTempRoot("varin-s-perm-smart-", async (root) => {
       const faux = registerFauxProvider();
       const model = faux.getModel();
       const judgeContexts: Context[] = [];
@@ -2338,7 +2338,7 @@ describe("session e2e — permission gate extension", () => {
 
 describe("D-284 request admission", () => {
   it("commits before a tool-loop continuation needs space, not after the final reply", async () => {
-    await withTempRoot("piarium-request-admission-", async (root) => {
+    await withTempRoot("varin-request-admission-", async (root) => {
       await mkdir(join(root, "agent"), { recursive: true });
       await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
         compaction: { enabled: true, reserveTokens: 4_000, keepRecentTokens: 1_200 },

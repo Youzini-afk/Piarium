@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SessionSnapshot } from "@piarium/protocol";
+import type { SessionSnapshot } from "@varin/protocol";
 import { dispatchRuntimeRequest, RuntimeDispatchError } from "../src/runtime-dispatcher.js";
 import type { PiRuntimeBroker } from "../src/runtime-broker.js";
 

@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { KnowledgeSettings } from './KnowledgeSettings';
 import { SettingsSearchTargetContext } from '@/lib/settings/search-target';
 
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_HELPER_CLASS: '',
@@ -31,7 +31,7 @@ vi.mock('@/components/ui/button', () => ({
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/extensions/workbench-workspace', () => ({ useWorkbenchWorkspace: () => mocks.workspace }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/lib/piariumEvents', () => ({ subscribePiariumEvents: mocks.subscribe }));
+vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: mocks.subscribe }));
 
 type PendingRequest = {
   url: string;

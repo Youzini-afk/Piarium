@@ -6,7 +6,7 @@ import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { getDeviceInfo } from '@/lib/device';
 import { markAppBootReady } from './appBootReady';

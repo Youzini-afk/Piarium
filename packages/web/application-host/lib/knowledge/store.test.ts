@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "piarium-test-tdb");
+const TEST_DIR = join(tmpdir(), "varin-test-tdb");
 
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
@@ -760,7 +760,7 @@ describe("KnowledgeStore", () => {
         { name: "createExploreSearchService", kind: "function", range },
       ], "disk-r1", [
         { kind: "import", value: "./explore.js", line: 1 },
-        { kind: "import", value: "@piarium/protocol", line: 2 },
+        { kind: "import", value: "@varin/protocol", line: 2 },
       ]);
       await store.replaceFileSymbols("lib/other.ts", "typescript", [
         { name: "other", kind: "function", range },

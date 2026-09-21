@@ -39,16 +39,16 @@ describe('core-routes', () => {
       gracefulShutdown: vi.fn(async () => {}),
       getHealthSnapshot: () => ({}),
       getServerPort: () => 4123,
-      getTunnelUrl: () => 'https://piarium.example/',
-      piariumVersion: '1.0.0',
+      getTunnelUrl: () => 'https://varin.example/',
+      varinVersion: '1.0.0',
       runtimeName: 'test',
     });
 
     const response = await request(app).get('/api/system/info').expect(200);
     expect(response.body).toMatchObject({
-      piariumVersion: '1.0.0',
+      varinVersion: '1.0.0',
       port: 4123,
-      tunnelUrl: 'https://piarium.example/',
+      tunnelUrl: 'https://varin.example/',
     });
   });
 
@@ -60,7 +60,7 @@ describe('core-routes', () => {
         shutdownOpts = opts;
       }),
       getHealthSnapshot: () => ({ status: 'ok' }),
-      piariumVersion: '1.0.0',
+      varinVersion: '1.0.0',
       runtimeName: 'test',
       express,
     };
@@ -78,7 +78,7 @@ describe('core-routes', () => {
     const dependencies = {
       gracefulShutdown: vi.fn(async () => {}),
       getHealthSnapshot: () => ({ status: 'ok' }),
-      piariumVersion: '1.0.0',
+      varinVersion: '1.0.0',
       runtimeName: 'test',
       express,
       tunnelAuthController: {
@@ -105,7 +105,7 @@ describe('core-routes', () => {
     const dependencies = {
       gracefulShutdown: vi.fn(async () => {}),
       getHealthSnapshot: () => ({ status: 'ok' }),
-      piariumVersion: '1.0.0',
+      varinVersion: '1.0.0',
       runtimeName: 'test',
       express,
       tunnelAuthController: {
@@ -132,7 +132,7 @@ describe('core-routes', () => {
     const dependencies = {
       gracefulShutdown: vi.fn(async () => {}),
       getHealthSnapshot: () => ({ status: 'ok' }),
-      piariumVersion: '1.0.0',
+      varinVersion: '1.0.0',
       runtimeName: 'test',
       express,
       tunnelAuthController: {
@@ -297,7 +297,7 @@ describe('core-routes', () => {
         redeemPairingSession: vi.fn(async () => ({
           pairing: { fingerprint: 'ABCD-1234' },
           client: { id: 'client-1', label: 'Phone', authMethod: 'pairing' },
-          token: 'piarium_client_token',
+          token: 'varin_client_token',
         })),
       },
       readSettingsFromDisk: vi.fn(async () => ({})),
@@ -333,14 +333,14 @@ describe('core-routes', () => {
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
-      .set('Host', 'piarium.example.com')
+      .set('Host', 'varin.example.com')
       .set('X-Forwarded-Proto', 'https')
       .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
       .expect(201);
 
     expect(response.body.server.candidates).toEqual([
       { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
-      { type: 'tunnel', url: 'https://piarium.example.com', priority: 20 },
+      { type: 'tunnel', url: 'https://varin.example.com', priority: 20 },
     ]);
   });
 
@@ -429,9 +429,9 @@ describe('core-routes', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.body).toMatchObject({
       ok: true,
-      server: { label: 'Piarium', url: 'http://runtime.example', fingerprint: 'ABCD-1234' },
+      server: { label: 'Varin', url: 'http://runtime.example', fingerprint: 'ABCD-1234' },
       client: { id: 'client-1', authMethod: 'pairing' },
-      clientToken: 'piarium_client_token',
+      clientToken: 'varin_client_token',
     });
     expect(dependencies.clientPairingRuntime.redeemPairingSession).toHaveBeenCalledWith(expect.objectContaining({
       pairingId: 'pair_1',
@@ -515,12 +515,12 @@ describe('core-routes', () => {
     app.use('/api/preview/proxy', (_req, res) => res.json({ reached: true }));
 
     await request(app)
-      .get('/api/preview/proxy/abc123/?piarium_preview_token=preview-secret')
+      .get('/api/preview/proxy/abc123/?varin_preview_token=preview-secret')
       .expect(200, { reached: true });
 
     await request(app)
       .get('/api/preview/proxy/abc123/')
-      .set('Cookie', 'piarium_preview_token=preview-secret')
+      .set('Cookie', 'varin_preview_token=preview-secret')
       .expect(200, { reached: true });
 
     await request(app)
@@ -571,7 +571,7 @@ describe('core-routes', () => {
     });
 
     app.get('/api/downstream', (req, res) => {
-      res.json({ auth: req.piariumAuth });
+      res.json({ auth: req.varinAuth });
     });
 
     const response = await request(app).get('/api/downstream').expect(200);
@@ -636,7 +636,7 @@ describe('client auth routes', () => {
             clientKind: clientKind || null,
           };
           clients.push(client);
-          return { client, token: 'piarium_client_secret' };
+          return { client, token: 'varin_client_secret' };
         },
         revokeClient: async (id: string) => {
           const client = clients.find((entry) => entry.id === id);
@@ -667,7 +667,7 @@ describe('client auth routes', () => {
       .post('/api/client-auth/clients')
       .send({ label: 'Laptop' });
     expect(created.status).toBe(201);
-    expect(created.body.token).toBe('piarium_client_secret');
+    expect(created.body.token).toBe('varin_client_secret');
     expect(created.headers['cache-control']).toBe('no-store');
 
     const listed = await request(app).get('/api/client-auth/clients');
@@ -747,7 +747,7 @@ describe('client auth routes', () => {
 
     const current = await request(app)
       .post('/api/client-auth/clients')
-      .send({ label: 'Piarium Desktop', clientKind: 'desktop-local' });
+      .send({ label: 'Varin Desktop', clientKind: 'desktop-local' });
     const other = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Other device' });
@@ -782,7 +782,7 @@ describe('client auth routes', () => {
 
     const desktop = await request(app)
       .post('/api/client-auth/clients')
-      .send({ label: 'Piarium Desktop', clientKind: 'desktop-local' });
+      .send({ label: 'Varin Desktop', clientKind: 'desktop-local' });
     const other = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Other device' });
@@ -815,7 +815,7 @@ describe('client auth routes', () => {
 
     const desktop = await request(app)
       .post('/api/client-auth/clients')
-      .send({ label: 'Piarium Desktop', clientKind: 'desktop-local' });
+      .send({ label: 'Varin Desktop', clientKind: 'desktop-local' });
     const remote = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Phone' });

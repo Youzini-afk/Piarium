@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CODE_OF_CONDUCT.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # 贡献者公约行为准则
 
@@ -39,7 +39,7 @@
 ## 执行
 
 请通过 GitHub 向维护者报告事件：从仓库发起私密维护者联系，或在报告涉及漏洞时提交
-[私密安全公告](https://github.com/Youzini-afk/Piarium/security/advisories/new)。
+[私密安全公告](https://github.com/Youzini-afk/Varin/security/advisories/new)。
 不要把骚扰报告发成公开 Issue。
 
 所有投诉都将得到及时、公正的审查和调查。

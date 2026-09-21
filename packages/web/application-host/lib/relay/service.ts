@@ -1,9 +1,9 @@
 // Private relay service: config persistence, lifecycle of the relay host
-// client, and the /api/piarium/relay/* management routes.
+// client, and the /api/varin/relay/* management routes.
 //
 // Config lives in the server settings file as `settings.privateRelay =
 // { enabled, relayUrl }` (same storage precedent as tunnels/notifications).
-// Routes are registered with the other Piarium feature routes and are covered
+// Routes are registered with the other Varin feature routes and are covered
 // by the same global UI auth gate.
 //
 // Cross-runtime parity note: relay host mode intentionally targets the web
@@ -73,7 +73,7 @@ const normalizeRelayUrl = (value: unknown): string => {
 // stored setting entirely, so the host connection, the pairing offer, and the
 // status all point at it — clients then inherit it from the offer automatically.
 const envRelayUrlOverride = (): string | null => {
-  const raw = process.env.PIARIUM_RELAY_URL;
+  const raw = process.env.VARIN_RELAY_URL;
   if (typeof raw !== 'string' || !raw.trim() || !isValidRelayUrl(raw)) return null;
   return raw.trim();
 };
@@ -128,7 +128,7 @@ export const createRelayService = ({
     return {
       enabled: stored?.enabled === true,
       relayUrl: override ?? normalizeRelayUrl(stored?.relayUrl),
-      // True when the endpoint is pinned by PIARIUM_RELAY_URL (a self-hosted
+      // True when the endpoint is pinned by VARIN_RELAY_URL (a self-hosted
       // relay); the stored setting is ignored while it is set.
       relayUrlLocked: override !== null,
     };
@@ -149,7 +149,7 @@ export const createRelayService = ({
 
   const standbyStatus = (holderPid: number | null): RelayServiceStatus => ({
     state: 'standby',
-    lastError: `relay host is owned by another local Piarium process (pid ${holderPid})`,
+    lastError: `relay host is owned by another local Varin process (pid ${holderPid})`,
     connectedClients: 0,
   });
 
@@ -325,7 +325,7 @@ export const createRelayService = ({
   };
 
   const registerRoutes = (app: Express): void => {
-    app.get('/api/piarium/relay/status', async (_req, res) => {
+    app.get('/api/varin/relay/status', async (_req, res) => {
       try {
         res.json(await getStatus());
       } catch (error) {
@@ -333,7 +333,7 @@ export const createRelayService = ({
       }
     });
 
-    app.post('/api/piarium/relay/enable', express.json({ limit: '16kb' }), async (req, res) => {
+    app.post('/api/varin/relay/enable', express.json({ limit: '16kb' }), async (req, res) => {
       try {
         const current = await readConfig();
         const relayUrl = typeof req.body?.relayUrl === 'string' ? normalizeRelayUrl(req.body.relayUrl) : current.relayUrl;
@@ -347,7 +347,7 @@ export const createRelayService = ({
       }
     });
 
-    app.post('/api/piarium/relay/disable', async (_req, res) => {
+    app.post('/api/varin/relay/disable', async (_req, res) => {
       try {
         const current = await readConfig();
         await writeConfig({ enabled: false, relayUrl: current.relayUrl });

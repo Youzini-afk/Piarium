@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { runtimeFetch } from '@piarium/application-client';
-import type { ExperimentAttemptView, FollowUpDefinitionView, FollowUpSource } from '@piarium/protocol';
+import { runtimeFetch } from '@varin/application-client';
+import type { ExperimentAttemptView, FollowUpDefinitionView, FollowUpSource } from '@varin/protocol';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

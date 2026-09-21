@@ -3,9 +3,9 @@ import type { editor } from 'monaco-editor/editor';
 
 import type {
   DocumentsAPI,
-  PiariumDocumentReadResult,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinDocumentReadResult,
+  VarinResourceReference,
+} from '@varin/application-client';
 import {
   consumeEditorContextAttachments,
   resetEditorContextAttachments,
@@ -16,7 +16,7 @@ import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/ses
 import { documentKey } from '@/lib/documents/types';
 import { FileEditorModelRegistry } from '@/lib/monaco/model-registry';
 import type { MonacoRuntime } from '@/lib/monaco/runtime';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import {
   armWorkbenchProfileTransitionPhase,
   beginWorkbenchProfileTransition,
@@ -30,7 +30,7 @@ import {
 } from '@/lib/workbench/profile-transition';
 
 const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const identity: PiariumResourceReference = { workspaceId, resourceId: 'src/main.ts' };
+const identity: VarinResourceReference = { workspaceId, resourceId: 'src/main.ts' };
 
 class JourneyModel {
   disposed = false;
@@ -109,7 +109,7 @@ const createMemoryDocuments = () => {
     documentKey(identity),
     { content: 'const value = 1;\n', revision: 'd1_1' },
   ]]);
-  const read = async (resource: PiariumResourceReference): Promise<PiariumDocumentReadResult> => {
+  const read = async (resource: VarinResourceReference): Promise<VarinDocumentReadResult> => {
     const current = files.get(documentKey(resource));
     return current
       ? {
@@ -227,7 +227,7 @@ describe('unified editor cross-surface journey', () => {
     const model = agentSnapshot.model as unknown as JourneyModel;
 
     // Profile staging changes Shell ownership, not the shared Workbench tab owner.
-    await switchProfile('default', 'piarium.ide');
+    await switchProfile('default', 'varin.ide');
     const ideSnapshot = modelRegistry.getSnapshot(identity);
     expect(ideSnapshot.status).toBe('ready');
     if (ideSnapshot.status !== 'ready') throw new Error(ideSnapshot.status);
@@ -281,7 +281,7 @@ describe('unified editor cross-surface journey', () => {
     expect(conflicted.buffer).toBe('const result = 3;\n');
     expect(conflicted.conflict?.diskContent).toBe('const result = 4;\n');
 
-    await switchProfile('piarium.ide', 'default');
+    await switchProfile('varin.ide', 'default');
     const returned = modelRegistry.getSnapshot(identity);
     expect(returned.status).toBe('ready');
     if (returned.status === 'ready') expect(returned.model).toBe(agentSnapshot.model);

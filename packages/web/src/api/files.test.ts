@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@piarium/application-client';
+import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@varin/application-client';
 
 const runtimeFetchMock = vi.fn();
 
-vi.mock('@piarium/application-client', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@piarium/application-client')>(),
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
   runtimeFetch: runtimeFetchMock,
 }));
 
@@ -38,7 +38,7 @@ describe('createWebFilesAPI', () => {
     });
   });
 
-  it('lists directories through the Piarium files endpoint', async () => {
+  it('lists directories through the Varin files endpoint', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
 
@@ -59,7 +59,7 @@ describe('createWebFilesAPI', () => {
     });
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/list', {
       query: new URLSearchParams({ path: '/current-workspace', respectGitignore: 'true' }),
-      headers: { 'x-piarium-directory': '/current-workspace' },
+      headers: { 'x-varin-directory': '/current-workspace' },
     });
   });
 
@@ -93,7 +93,7 @@ describe('createWebFilesAPI', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-piarium-directory': '/current-workspace',
+        'x-varin-directory': '/current-workspace',
       },
       body: JSON.stringify({ path: '/projects/new-app', allowOutsideWorkspace: true }),
     });
@@ -108,7 +108,7 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
-      headers: { 'x-piarium-directory': '/worktree-a' },
+      headers: { 'x-varin-directory': '/worktree-a' },
     });
   });
 
@@ -121,7 +121,7 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/raw', {
       query: { path: '/current-workspace/file.txt', download: true },
-      headers: { 'x-piarium-directory': '/current-workspace' },
+      headers: { 'x-varin-directory': '/current-workspace' },
     });
   });
 });

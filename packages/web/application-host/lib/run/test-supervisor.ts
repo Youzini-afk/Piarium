@@ -9,10 +9,10 @@ import type { DocumentAuthority, MutationOwner } from '../documents/authority.js
 import type {
   ExtensionRunOwner,
   InspectedRunWorkspace,
-  PiariumTestDiscoverResult,
-  PiariumTestEvent,
-  PiariumTestItem,
-  PiariumTestRunStatus,
+  VarinTestDiscoverResult,
+  VarinTestEvent,
+  VarinTestItem,
+  VarinTestRunStatus,
   ProcessWriter,
   ProviderProcess,
   RegisteredTestProvider,
@@ -23,9 +23,9 @@ import type {
 
 type MessageRecord = Record<string, unknown>;
 type TestRunEventPayload =
-  | { kind: 'test'; test: PiariumTestItem }
+  | { kind: 'test'; test: VarinTestItem }
   | { channel: string; kind: 'output'; text: string }
-  | { kind: 'finished'; results?: PiariumTestItem[] };
+  | { kind: 'finished'; results?: VarinTestItem[] };
 
 const asRecord = (value: unknown): MessageRecord => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -35,10 +35,10 @@ const asRecord = (value: unknown): MessageRecord => (
 
 const ownerScopeKey = (owner?: ExtensionRunOwner) => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
-  : 'piarium.host';
+  : 'varin.host';
 const exactOwnerKey = (owner?: ExtensionRunOwner) => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
-  : 'piarium.host\0host';
+  : 'varin.host\0host';
 
 
 const registerProcessWriter = async (
@@ -56,8 +56,8 @@ const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true
   await writer.close();
 };
 
-const parseTap = (text: string, resourceId: string): PiariumTestItem[] => {
-  const results: PiariumTestItem[] = [];
+const parseTap = (text: string, resourceId: string): VarinTestItem[] => {
+  const results: VarinTestItem[] = [];
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
     const ok = /^ok\s+\d+\s+-?\s*(.*)$/.exec(line);
@@ -99,8 +99,8 @@ export const createTestSupervisor = ({
 }: TestSupervisorOptions) => {
   const providers: RegisteredTestProvider[] = [];
   const sessions = new Map<string, TestRunRecord>();
-  const trees = new Map<string, PiariumTestItem[]>();
-  const workspaceListeners = new Map<string, Set<(event: PiariumTestEvent) => void>>();
+  const trees = new Map<string, VarinTestItem[]>();
+  const workspaceListeners = new Map<string, Set<(event: VarinTestEvent) => void>>();
   const pendingExits = new Set<Promise<void>>();
   const generations = new Map<string, number>();
   const discoveryGenerations = new Map<string, number>();
@@ -128,14 +128,14 @@ export const createTestSupervisor = ({
     return next;
   };
 
-  const emit = (workspaceId: string, event: PiariumTestEvent): void => {
+  const emit = (workspaceId: string, event: VarinTestEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record: TestRunRecord): PiariumTestRunStatus => {
-    const snapshot: PiariumTestRunStatus = {
+  const snapshotFor = (record: TestRunRecord): VarinTestRunStatus => {
+    const snapshot: VarinTestRunStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       runId: record.runId,
@@ -186,7 +186,7 @@ export const createTestSupervisor = ({
     return exited;
   };
 
-  const discoverBuiltin = async (workspace: InspectedRunWorkspace): Promise<PiariumTestItem[]> => {
+  const discoverBuiltin = async (workspace: InspectedRunWorkspace): Promise<VarinTestItem[]> => {
     const files = await walkWorkspaceTestFiles({
       root: workspace.root,
       fsPromises,
@@ -273,7 +273,7 @@ export const createTestSupervisor = ({
 
   const discover = async (
     request: { providerId?: unknown; workspaceId?: unknown } | string,
-  ): Promise<PiariumTestDiscoverResult> => {
+  ): Promise<VarinTestDiscoverResult> => {
     const workspaceId = typeof request === 'string'
       ? request
       : (typeof request.workspaceId === 'string' ? request.workspaceId : '');
@@ -339,9 +339,9 @@ export const createTestSupervisor = ({
         };
       }
       const raw = asRecord(await processPair.rpc.request('discover', {}));
-      const tests: PiariumTestItem[] = Array.isArray(raw.tests) ? raw.tests.map((item) => {
+      const tests: VarinTestItem[] = Array.isArray(raw.tests) ? raw.tests.map((item) => {
         const value = asRecord(item);
-        const mapped: PiariumTestItem = {
+        const mapped: VarinTestItem = {
           id: typeof value.id === 'string' ? value.id : '',
           label: typeof value.label === 'string' ? value.label : '',
         };
@@ -383,13 +383,13 @@ export const createTestSupervisor = ({
     record: TestRunRecord,
     workspace: InspectedRunWorkspace,
     testIds: string[],
-  ): Promise<PiariumTestRunStatus> => {
+  ): Promise<VarinTestRunStatus> => {
     const discovered = trees.get(record.workspaceId) ?? await discoverBuiltin(workspace);
     trees.set(record.workspaceId, discovered);
     const selected = testIds.length > 0
       ? discovered.filter((item) => testIds.includes(item.id) || (item.resourceId ? testIds.includes(item.resourceId) : false))
       : discovered;
-    const results: PiariumTestItem[] = [];
+    const results: VarinTestItem[] = [];
     for (const item of selected) {
       if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
       if (!item.resourceId) continue;
@@ -434,7 +434,7 @@ export const createTestSupervisor = ({
         if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
         const parsed = parseTap(chunks.join(''), resourceId);
         if (parsed.length === 0) {
-          const fallback: PiariumTestItem = {
+          const fallback: VarinTestItem = {
             ...item,
             status: code === 0 ? 'passed' : 'failed',
             ...(code === 0 ? {} : { message: `Test process exited with code ${code}` }),
@@ -466,7 +466,7 @@ export const createTestSupervisor = ({
     provider: RegisteredTestProvider,
     workspace: InspectedRunWorkspace,
     testIds: string[],
-  ): Promise<PiariumTestRunStatus> => {
+  ): Promise<VarinTestRunStatus> => {
     const processPair = await startProviderProcess(provider, workspace, {
       owner: {
         kind: 'test',
@@ -515,7 +515,7 @@ export const createTestSupervisor = ({
         emitRunEvent(record, { kind: 'test', test: { id: notification.id, label: typeof notification.label === 'string' ? notification.label : notification.id, status: 'passed' } });
       }
       if (method === 'test/failed' && typeof notification.id === 'string') {
-        const test: PiariumTestItem = {
+        const test: VarinTestItem = {
           id: notification.id,
           label: typeof notification.label === 'string' ? notification.label : notification.id,
           status: 'failed',
@@ -538,7 +538,7 @@ export const createTestSupervisor = ({
 
   const run = async (
     request: { providerId?: unknown; testIds?: unknown; workspaceId?: unknown },
-  ): Promise<PiariumTestRunStatus> => {
+  ): Promise<VarinTestRunStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const provider = findProvider(workspaceId, request?.providerId);
     if (!provider) return { status: 'absent', workspaceId };
@@ -654,7 +654,7 @@ export const createTestSupervisor = ({
     },
     discover,
     run,
-    cancel(request: unknown): PiariumTestRunStatus {
+    cancel(request: unknown): VarinTestRunStatus {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (!record) return { status: 'absent', workspaceId };
@@ -663,7 +663,7 @@ export const createTestSupervisor = ({
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       return snapshotFor(record);
     },
-    getStatus(request: unknown): PiariumTestRunStatus {
+    getStatus(request: unknown): VarinTestRunStatus {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (record) return snapshotFor(record);
@@ -671,7 +671,7 @@ export const createTestSupervisor = ({
       if (tests) return { status: tests.length > 0 ? 'idle' : 'empty', workspaceId };
       return { status: 'absent', workspaceId };
     },
-    subscribe(workspaceId: string, listener: (event: PiariumTestEvent) => void) {
+    subscribe(workspaceId: string, listener: (event: VarinTestEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);

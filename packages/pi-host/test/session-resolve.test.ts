@@ -7,7 +7,7 @@ import {
   createRequest,
   type ResponseEnvelope,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostController } from "../src/host-controller.js";
 import { MemoryHostTransport } from "../src/transport.js";
 
@@ -16,7 +16,7 @@ function isResponse(envelope: WireEnvelope, id: string): envelope is ResponseEnv
 }
 
 test("session.resolve reads the selected Pi SDK header without opening or rewriting a session", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-session-resolve-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-session-resolve-"));
   const cwd = join(root, "workspace");
   const validFile = join(root, "valid.jsonl");
   const invalidFile = join(root, "invalid.jsonl");
@@ -116,7 +116,7 @@ test("session.resolve reads the selected Pi SDK header without opening or rewrit
 });
 
 test("session.resolve loads the session reader from the selected external Pi package root", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-session-resolve-sdk-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-session-resolve-sdk-"));
   const packageRoot = join(root, "selected-sdk");
   const coreDir = join(packageRoot, "dist", "core");
   const sessionFile = join(root, "selected.jsonl");

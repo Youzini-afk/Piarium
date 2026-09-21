@@ -1,6 +1,6 @@
 # Document Registry
 
-Per-document editing state for Piarium workspace text files. High-frequency buffers live in this
+Per-document editing state for Varin workspace text files. High-frequency buffers live in this
 external registry, not in Zustand or Local Storage.
 
 - `registry.ts` — load/save/watch, dirty/conflict, in-flight save, recovery journals, Agent/disk source hints;

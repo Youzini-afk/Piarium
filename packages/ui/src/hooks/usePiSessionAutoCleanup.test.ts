@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { buildPiCleanupCandidates } from './usePiSessionAutoCleanup';
 
 const summary = (id: string, updatedAt: string, patch: Partial<SessionSummary> = {}): SessionSummary => ({

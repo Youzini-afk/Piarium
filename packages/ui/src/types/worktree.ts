@@ -1,1 +1,1 @@
-export type { WorktreeMetadata } from '@piarium/application-client';
+export type { WorktreeMetadata } from '@varin/application-client';

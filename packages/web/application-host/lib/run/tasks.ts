@@ -6,16 +6,16 @@ import type { ManagedProcessHandle } from "../process/types.js";
 import { launchOwnedProcess, terminateOwnedProcess, managedExitConfirmed } from "../process/types.js";
 import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
 import type {
-  PiariumTaskConfiguration,
-  PiariumTaskEvent,
-  PiariumTaskListResult,
-  PiariumTaskRunStatus,
+  VarinTaskConfiguration,
+  VarinTaskEvent,
+  VarinTaskListResult,
+  VarinTaskRunStatus,
   ProcessWriter,
   TaskRunRecord,
   TaskRunnerOptions,
 } from './types.js';
 
-const TASKS_FILE = 'piarium.tasks.json';
+const TASKS_FILE = 'varin.tasks.json';
 
 const workspaceIdOf = (value: unknown): string => {
   if (typeof value === 'string') return value;
@@ -43,24 +43,24 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 );
 
-const parseTaskDocument = (content: string): PiariumTaskConfiguration[] => {
+const parseTaskDocument = (content: string): VarinTaskConfiguration[] => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    throw new Error('piarium.tasks.json is malformed');
+    throw new Error('varin.tasks.json is malformed');
   }
   const root = asRecord(parsed);
-  if (!root) throw new Error('piarium.tasks.json must be an object');
-  if (root.version !== 1) throw new Error('piarium.tasks.json version is unsupported');
-  if (!Array.isArray(root.tasks)) throw new Error('piarium.tasks.json tasks must be an array');
-  const tasks: PiariumTaskConfiguration[] = [];
+  if (!root) throw new Error('varin.tasks.json must be an object');
+  if (root.version !== 1) throw new Error('varin.tasks.json version is unsupported');
+  if (!Array.isArray(root.tasks)) throw new Error('varin.tasks.json tasks must be an array');
+  const tasks: VarinTaskConfiguration[] = [];
   for (const item of root.tasks) {
     const record = asRecord(item);
     if (!record || typeof record.id !== 'string' || !record.id.trim()) continue;
     if (typeof record.label !== 'string' || !record.label.trim()) continue;
     const type = record.type === 'process' || record.type === 'npm' ? record.type : 'node';
-    const next: PiariumTaskConfiguration = {
+    const next: VarinTaskConfiguration = {
       id: record.id.trim(),
       label: record.label.trim(),
       type,
@@ -84,7 +84,7 @@ export const createWorkspaceTaskRunner = ({
   execPath = process.execPath,
 }: TaskRunnerOptions) => {
   const runs = new Map<string, TaskRunRecord>();
-  const workspaceListeners = new Map<string, Set<(event: PiariumTaskEvent) => void>>();
+  const workspaceListeners = new Map<string, Set<(event: VarinTaskEvent) => void>>();
   const pendingExits = new Set<Promise<void>>();
 
   const acquireWriter = (scopeId: string, owner: MutationOwner): Promise<ProcessWriter | null> => {
@@ -103,14 +103,14 @@ export const createWorkspaceTaskRunner = ({
     return release;
   };
 
-  const emit = (workspaceId: string, event: PiariumTaskEvent): void => {
+  const emit = (workspaceId: string, event: VarinTaskEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record: TaskRunRecord): PiariumTaskRunStatus => {
-    const snapshot: PiariumTaskRunStatus = {
+  const snapshotFor = (record: TaskRunRecord): VarinTaskRunStatus => {
+    const snapshot: VarinTaskRunStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       runId: record.runId,
@@ -146,7 +146,7 @@ export const createWorkspaceTaskRunner = ({
     return exited;
   };
 
-  const list = async (request: unknown): Promise<PiariumTaskListResult> => {
+  const list = async (request: unknown): Promise<VarinTaskListResult> => {
     const workspaceId = workspaceIdOf(request);
     try {
       await documents.inspectWorkspace(workspaceId);
@@ -177,7 +177,7 @@ export const createWorkspaceTaskRunner = ({
       return {
         status: 'failure',
         workspaceId,
-        message: read.status === 'binary' ? 'piarium.tasks.json is not text' : 'Failed to read tasks',
+        message: read.status === 'binary' ? 'varin.tasks.json is not text' : 'Failed to read tasks',
         configurations: [],
       };
     }
@@ -191,13 +191,13 @@ export const createWorkspaceTaskRunner = ({
       return {
         status: 'failure',
         workspaceId,
-        message: error instanceof Error ? error.message : 'piarium.tasks.json is malformed',
+        message: error instanceof Error ? error.message : 'varin.tasks.json is malformed',
         configurations: [],
       };
     }
   };
 
-  const run = async (request: { taskId?: unknown; workspaceId?: unknown }): Promise<PiariumTaskRunStatus> => {
+  const run = async (request: { taskId?: unknown; workspaceId?: unknown }): Promise<VarinTaskRunStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const taskId = typeof request?.taskId === 'string' ? request.taskId : '';
     const listed = await list(workspaceId);
@@ -339,7 +339,7 @@ export const createWorkspaceTaskRunner = ({
   return {
     list,
     run,
-    cancel(request: { runId?: unknown; workspaceId?: unknown }): PiariumTaskRunStatus {
+    cancel(request: { runId?: unknown; workspaceId?: unknown }): VarinTaskRunStatus {
       const runId = typeof request?.runId === 'string' ? request.runId : '';
       const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
       const record = runs.get(runId);
@@ -349,7 +349,7 @@ export const createWorkspaceTaskRunner = ({
       disposeRun(record, 'Task cancelled');
       return snapshotFor(record);
     },
-    subscribe(workspaceId: string, listener: (event: PiariumTaskEvent) => void) {
+    subscribe(workspaceId: string, listener: (event: VarinTaskEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);

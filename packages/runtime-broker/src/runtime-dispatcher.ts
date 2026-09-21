@@ -1,5 +1,5 @@
 import {
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   FOUNDATIONAL_PI_PACKAGE_IDS,
   type FoundationalPiPackageId,
   type ExtensionUiResponse,
@@ -26,7 +26,7 @@ import {
   type AgentInputContext,
   isWorkFocusId,
   type WorkFocusId,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { PiRuntimeBroker, type PiCatalogMethod } from "./runtime-broker.js";
 
 export class RuntimeDispatchError extends Error {
@@ -375,11 +375,11 @@ async function dispatchRuntimeRequestUnchecked(
       if (
         !Array.isArray(versions) ||
         !versions.every((value) => Number.isSafeInteger(value)) ||
-        !versions.includes(PIARIUM_PROTOCOL_VERSION)
+        !versions.includes(VARIN_PROTOCOL_VERSION)
       ) {
         throw new RuntimeDispatchError(
           "unsupported_version",
-          `Client must support Piarium protocol ${PIARIUM_PROTOCOL_VERSION}`,
+          `Client must support Varin protocol ${VARIN_PROTOCOL_VERSION}`,
         );
       }
       requireString(input, "clientName");

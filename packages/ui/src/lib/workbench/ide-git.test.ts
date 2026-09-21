@@ -7,8 +7,8 @@ import {
 describe('IDE Git repository scope', () => {
   test('maps repository-relative paths through a nested repository root', () => {
     expect(resolveIdeGitResourceId(
-      '/home/piarium/workspaces',
-      '/home/piarium/workspaces/product/packages/app',
+      '/home/varin/workspaces',
+      '/home/varin/workspaces/product/packages/app',
       'src/main.ts',
     )).toBe('product/packages/app/src/main.ts');
   });

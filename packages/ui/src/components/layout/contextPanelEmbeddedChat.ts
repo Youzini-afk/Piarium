@@ -1,6 +1,6 @@
 import type { Theme } from '@/types/theme';
 import type { RelayRuntimeDescriptor } from '@/lib/relay/runtime-tunnel';
-import { PIARIUM_EMBEDDED_SESSION_CHAT_PANEL } from '@/lib/embeddedSessionChat';
+import { VARIN_EMBEDDED_SESSION_CHAT_PANEL } from '@/lib/embeddedSessionChat';
 
 export type EmbeddedSessionChatThemeBootstrap = {
   mode: 'light' | 'dark' | 'system';
@@ -23,8 +23,8 @@ export type EmbeddedSessionRuntimeBootstrap = {
   relay?: Omit<RelayRuntimeDescriptor, 'grant'>;
 };
 
-export const EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST = 'piarium:embedded-runtime-bootstrap-request';
-export const EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE = 'piarium:embedded-runtime-bootstrap-response';
+export const EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST = 'varin:embedded-runtime-bootstrap-request';
+export const EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE = 'varin:embedded-runtime-bootstrap-response';
 const EMBEDDED_RUNTIME_BOOTSTRAP_TIMEOUT_MS = 5_000;
 const EMBEDDED_RUNTIME_BOOTSTRAP_RETRY_MS = 100;
 
@@ -118,7 +118,7 @@ export const buildEmbeddedSessionChatURL = (
   }
 
   const url = new URL(window.location.pathname, window.location.origin);
-  url.searchParams.set('piPanel', PIARIUM_EMBEDDED_SESSION_CHAT_PANEL);
+  url.searchParams.set('piPanel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
   url.searchParams.set('surface', 'desktop');
   url.searchParams.set('piSessionId', sessionID);
   if (readOnly) {
@@ -190,7 +190,7 @@ export const isEmbeddedSessionChat = (): boolean => {
   }
   try {
     embeddedSessionChatCached =
-      new URLSearchParams(window.location.search).get('piPanel') === PIARIUM_EMBEDDED_SESSION_CHAT_PANEL;
+      new URLSearchParams(window.location.search).get('piPanel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL;
     return embeddedSessionChatCached;
   } catch {
     embeddedSessionChatCached = false;

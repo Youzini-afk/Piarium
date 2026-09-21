@@ -79,7 +79,7 @@ const resolveExtension = (module) => {
     return { activate: candidate.activate.bind(candidate), migrate: candidate.migrate?.bind(candidate) ?? module?.migrate };
   }
   if (typeof module?.activate === 'function') return { activate: module.activate, migrate: module.migrate };
-  throw new Error('Brokered Piarium Host module must export activate or a default extension definition');
+  throw new Error('Brokered Varin Host module must export activate or a default extension definition');
 };
 
 const deactivate = async () => {

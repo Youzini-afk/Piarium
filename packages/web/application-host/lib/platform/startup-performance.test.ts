@@ -11,16 +11,16 @@ const loggedEvent = (info: ReturnType<typeof vi.spyOn>, index = 0): Record<strin
 };
 
 describe('startup performance diagnostics', () => {
-  const previousValue = process.env.PIARIUM_STARTUP_PERF;
+  const previousValue = process.env.VARIN_STARTUP_PERF;
 
   afterEach(() => {
-    if (previousValue === undefined) delete process.env.PIARIUM_STARTUP_PERF;
-    else process.env.PIARIUM_STARTUP_PERF = previousValue;
+    if (previousValue === undefined) delete process.env.VARIN_STARTUP_PERF;
+    else process.env.VARIN_STARTUP_PERF = previousValue;
     vi.restoreAllMocks();
   });
 
   it('is disabled by default', () => {
-    delete process.env.PIARIUM_STARTUP_PERF;
+    delete process.env.VARIN_STARTUP_PERF;
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     recordStartupPerformance('pi-runtime.warmup.ready', { durationMs: 5 });
@@ -29,7 +29,7 @@ describe('startup performance diagnostics', () => {
   });
 
   it('records only approved labels and numeric metadata', () => {
-    process.env.PIARIUM_STARTUP_PERF = '1';
+    process.env.VARIN_STARTUP_PERF = '1';
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     recordStartupPerformance('pi-runtime.warmup.ready', {
@@ -58,7 +58,7 @@ describe('startup performance diagnostics', () => {
   });
 
   it('rejects unknown phases and invalid field values', () => {
-    process.env.PIARIUM_STARTUP_PERF = 'true';
+    process.env.VARIN_STARTUP_PERF = 'true';
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     recordStartupPerformance('secret.phase', { durationMs: 1 });

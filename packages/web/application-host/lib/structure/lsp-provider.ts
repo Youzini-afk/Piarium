@@ -1,4 +1,4 @@
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import type { DocumentAuthority } from "../documents/authority.js";
 import { AGENT_LANGUAGE_VIEW, type createLanguageSupervisor } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";

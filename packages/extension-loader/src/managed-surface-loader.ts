@@ -1,43 +1,43 @@
 import {
-  parsePiariumExtensionAssetPayload,
-  parsePiariumExtensionCatalogAvailability,
-  parsePiariumExtensionCatalogSnapshot,
-  parsePiariumExtensionCandidatePreparationResult,
-  parsePiariumExtensionHostStateSnapshot,
-  parsePiariumExtensionManagedEntrypointPayload,
-  checkPiariumContributionCompatibility,
-  isPiariumContributionCompatible,
-  type PiariumApplicationSurface,
-  type PiariumExtensionActualState,
-  type PiariumExtensionAssetPayload,
-  type PiariumExtensionAssetRequest,
-  type PiariumExtensionCandidateSelectionRequest,
-  type PiariumExtensionCapabilityGrant,
-  type PiariumExtensionCandidatePreparationResult,
-  type PiariumExtensionCatalogAvailability,
-  type PiariumExtensionCatalogEntry,
-  type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionDiagnostic,
-  type PiariumExtensionManagedEntrypointPayload,
-  type PiariumExtensionManagedEntrypointRequest,
-  type PiariumExtensionManifest,
-  type PiariumExtensionActivationEvent,
-  type PiariumExtensionHostStateSnapshot,
-  type PiariumExtensionHostStateWaitRequest,
-  type PiariumExtensionStaticContribution,
-  type PiariumExtensionSurfaceEntrypoint,
-  type PiariumExtensionServiceInvocationRequest,
-  type PiariumExtensionServiceProvision,
-  type PiariumExtensionServiceProviderSnapshot,
-  type PiariumExtensionServiceRequirement,
+  parseVarinExtensionAssetPayload,
+  parseVarinExtensionCatalogAvailability,
+  parseVarinExtensionCatalogSnapshot,
+  parseVarinExtensionCandidatePreparationResult,
+  parseVarinExtensionHostStateSnapshot,
+  parseVarinExtensionManagedEntrypointPayload,
+  checkVarinContributionCompatibility,
+  isVarinContributionCompatible,
+  type VarinApplicationSurface,
+  type VarinExtensionActualState,
+  type VarinExtensionAssetPayload,
+  type VarinExtensionAssetRequest,
+  type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCapabilityGrant,
+  type VarinExtensionCandidatePreparationResult,
+  type VarinExtensionCatalogAvailability,
+  type VarinExtensionCatalogEntry,
+  type VarinExtensionCatalogSnapshot,
+  type VarinExtensionDiagnostic,
+  type VarinExtensionManagedEntrypointPayload,
+  type VarinExtensionManagedEntrypointRequest,
+  type VarinExtensionManifest,
+  type VarinExtensionActivationEvent,
+  type VarinExtensionHostStateSnapshot,
+  type VarinExtensionHostStateWaitRequest,
+  type VarinExtensionStaticContribution,
+  type VarinExtensionSurfaceEntrypoint,
+  type VarinExtensionServiceInvocationRequest,
+  type VarinExtensionServiceProvision,
+  type VarinExtensionServiceProviderSnapshot,
+  type VarinExtensionServiceRequirement,
   type JsonValue,
-} from "@piarium/extension-contract";
+} from "@varin/extension-contract";
 import {
   resolveSurfaceExtensionModule,
-  type PiariumManagedSurfaceContext,
-  type PiariumManagedSurfaceModule,
-  type PiariumSurfaceAsset,
-} from "@piarium/extension-sdk";
+  type VarinManagedSurfaceContext,
+  type VarinManagedSurfaceModule,
+  type VarinSurfaceAsset,
+} from "@varin/extension-sdk";
 import {
   SurfaceCapabilityRegistry,
   SurfaceExtensionRuntime,
@@ -48,7 +48,7 @@ import {
   type SurfaceDisposer,
   type SurfaceExternalService,
   type SurfaceOwnerIdentity,
-} from "@piarium/extension-surface";
+} from "@varin/extension-surface";
 import {
   browserIsolatedSurfaceRealmFactory,
   type IsolatedSurfaceRealm,
@@ -57,21 +57,21 @@ import {
 
 export interface SurfaceExtensionHost {
   activateExtension(extensionId: string): Promise<void>;
-  catalog(): Promise<PiariumExtensionCatalogAvailability>;
+  catalog(): Promise<VarinExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
-  hostState(): Promise<PiariumExtensionHostStateSnapshot>;
-  invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
-  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
-  requestCandidateApplication(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
-  readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
-  reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
-  selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
+  hostState(): Promise<VarinExtensionHostStateSnapshot>;
+  invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<VarinExtensionCandidatePreparationResult>;
+  requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
+  readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
+  reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void>;
+  selectCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  waitForHostState(request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<VarinExtensionHostStateSnapshot>;
 }
 
 export interface ManagedSurfaceModuleEvaluator {
-  (source: string, identity: { entrypointId: string; extensionId: string; integrity: string }): PiariumManagedSurfaceModule | Promise<PiariumManagedSurfaceModule>;
+  (source: string, identity: { entrypointId: string; extensionId: string; integrity: string }): VarinManagedSurfaceModule | Promise<VarinManagedSurfaceModule>;
 }
 
 export interface ManagedStyleHandle {
@@ -83,7 +83,7 @@ export interface ManagedStyleHost {
   stage(cssText: string, ownerLabel: string): ManagedStyleHandle;
 }
 
-export interface SurfaceExtensionLoaderDiagnostic extends PiariumExtensionDiagnostic {
+export interface SurfaceExtensionLoaderDiagnostic extends VarinExtensionDiagnostic {
   entrypointId?: string;
   integrity?: string;
   moduleGeneration?: number;
@@ -117,7 +117,7 @@ export interface SurfaceExtensionLoaderOptions {
   isolatedRealmFactory?: IsolatedSurfaceRealmFactory;
   realmId?: string;
   styleHost?: ManagedStyleHost;
-  surface: PiariumApplicationSurface;
+  surface: VarinApplicationSurface;
   surfaceRuntime: SurfaceExtensionRuntime;
   /** Overrides the transport-retry wait for deterministic conformance tests. */
   watchRetry?: (attempt: number, signal: AbortSignal) => Promise<void>;
@@ -131,7 +131,7 @@ export interface SurfaceLocalExternalServiceFactory {
   create(
     owner: Readonly<SurfaceOwnerIdentity>,
   ): SurfaceExternalService | Promise<SurfaceExternalService>;
-  descriptor: PiariumExtensionServiceProvision;
+  descriptor: VarinExtensionServiceProvision;
   providerId: string;
 }
 
@@ -141,41 +141,41 @@ export interface SurfaceLocalExternalServiceFactory {
  * value is deliberately not a renderer function or a product-private component handle.
  */
 export interface DeclarativeSurfaceContributionImplementation {
-  readonly descriptor: PiariumExtensionStaticContribution;
+  readonly descriptor: VarinExtensionStaticContribution;
   readonly kind: "declarative";
 }
 
 interface ActiveEntrypoint {
   artifactIntegrity: string;
   capabilityBindings: string;
-  mode: PiariumExtensionSurfaceEntrypoint["mode"];
+  mode: VarinExtensionSurfaceEntrypoint["mode"];
   moduleGeneration: number;
   owner: SurfaceOwnerIdentity;
   serviceBindings: string;
 }
 
 interface ArtifactSelection {
-  capabilityGrants: PiariumExtensionCapabilityGrant[];
+  capabilityGrants: VarinExtensionCapabilityGrant[];
   integrity: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   slot: "candidate" | "selected";
   version: string;
 }
 
-type ExecutableSurfaceEntrypoint = PiariumExtensionSurfaceEntrypoint & {
-  mode: Exclude<PiariumExtensionSurfaceEntrypoint["mode"], "declarative">;
+type ExecutableSurfaceEntrypoint = VarinExtensionSurfaceEntrypoint & {
+  mode: Exclude<VarinExtensionSurfaceEntrypoint["mode"], "declarative">;
 };
 
 interface SurfaceActivationPlan {
-  contributions: PiariumExtensionStaticContribution[];
+  contributions: VarinExtensionStaticContribution[];
   entrypoint?: ExecutableSurfaceEntrypoint;
   entrypointId: string;
-  mode: PiariumExtensionSurfaceEntrypoint["mode"];
+  mode: VarinExtensionSurfaceEntrypoint["mode"];
 }
 
 interface CompatibleSurfacePlans {
   executable: SurfaceActivationPlan[];
-  incompatible: PiariumExtensionStaticContribution[];
+  incompatible: VarinExtensionStaticContribution[];
   manifest?: SurfaceActivationPlan;
 }
 
@@ -218,10 +218,10 @@ const sha256 = async (bytes: Uint8Array): Promise<string> => {
 };
 
 const verifyAsset = async (
-  value: PiariumExtensionAssetPayload,
+  value: VarinExtensionAssetPayload,
   expectedArtifactIntegrity: string,
-): Promise<{ bytes: Uint8Array; payload: PiariumExtensionAssetPayload }> => {
-  const payload = parsePiariumExtensionAssetPayload(value);
+): Promise<{ bytes: Uint8Array; payload: VarinExtensionAssetPayload }> => {
+  const payload = parseVarinExtensionAssetPayload(value);
   if (payload.artifactIntegrity !== expectedArtifactIntegrity) {
     throw new Error("Surface asset belongs to another extension artifact generation");
   }
@@ -232,20 +232,20 @@ const verifyAsset = async (
 
 export const evaluateManagedSurfaceModule: ManagedSurfaceModuleEvaluator = (source, identity) => {
   const module = { exports: {} as unknown };
-  const sourceUrl = `piarium-extension://${identity.extensionId}/${identity.integrity}/${identity.entrypointId}`;
+  const sourceUrl = `varin-extension://${identity.extensionId}/${identity.integrity}/${identity.entrypointId}`;
   const evaluate = new Function("module", "exports", `${source}\n//# sourceURL=${sourceUrl}`) as (
     module: { exports: unknown },
     exports: unknown,
   ) => void;
   evaluate(module, module.exports);
-  return module.exports as PiariumManagedSurfaceModule;
+  return module.exports as VarinManagedSurfaceModule;
 };
 
 const defaultStyleHost: ManagedStyleHost = {
   stage: (cssText, ownerLabel) => {
     if (typeof document === "undefined") return { commit: () => undefined, dispose: () => undefined };
     const element = document.createElement("style");
-    element.dataset.piariumExtensionOwner = ownerLabel;
+    element.dataset.varinExtensionOwner = ownerLabel;
     element.media = "not all";
     element.textContent = cssText;
     document.head.appendChild(element);
@@ -278,14 +278,14 @@ class ModuleResourceScope {
     this.#styleHost = options.styleHost;
   }
 
-  async stageBundledStyles(styles: PiariumExtensionAssetPayload[]): Promise<void> {
+  async stageBundledStyles(styles: VarinExtensionAssetPayload[]): Promise<void> {
     for (const style of styles) {
       const verified = await verifyAsset(style, this.#artifactIntegrity);
       this.#stageStyle(new TextDecoder().decode(verified.bytes), verified.payload.path);
     }
   }
 
-  context(base: SurfaceActivationContext): PiariumManagedSurfaceContext {
+  context(base: SurfaceActivationContext): VarinManagedSurfaceContext {
     return {
       ...base,
       assets: {
@@ -318,7 +318,7 @@ class ModuleResourceScope {
     for (const dispose of this.#disposers.reverse()) dispose();
   }
 
-  async #read(path: string): Promise<PiariumSurfaceAsset> {
+  async #read(path: string): Promise<VarinSurfaceAsset> {
     if (this.#disposed) throw new Error("Managed Surface resource owner is inactive");
     const verified = await verifyAsset(await this.#host.readAsset({ ...this.#identity, path }), this.#artifactIntegrity);
     return {
@@ -335,7 +335,7 @@ class ModuleResourceScope {
   }
 }
 
-const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): ArtifactSelection | null => {
+const publicCandidateSelection = (entry: VarinExtensionCatalogEntry): ArtifactSelection | null => {
   if (!entry.integrity) return null;
   return {
     capabilityGrants: entry.capabilityGrants,
@@ -347,15 +347,15 @@ const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): Artifact
 };
 
 const explicitCandidateSelection = (
-  entry: PiariumExtensionCatalogEntry,
+  entry: VarinExtensionCatalogEntry,
   integrity: string,
 ): ArtifactSelection => {
   const candidate = entry.candidate;
   if (!candidate || candidate.integrity !== integrity) {
-    throw new Error(`Piarium extension candidate is no longer current: ${entry.manifest.id}`);
+    throw new Error(`Varin extension candidate is no longer current: ${entry.manifest.id}`);
   }
   if (!candidate.capabilitiesReviewed) {
-    throw new Error(`Piarium extension candidate capability changes require review: ${entry.manifest.id}`);
+    throw new Error(`Varin extension candidate capability changes require review: ${entry.manifest.id}`);
   }
   return {
     capabilityGrants: candidate.capabilityGrants,
@@ -370,7 +370,7 @@ const selectionCapabilities = (selection: ArtifactSelection): string[] => select
   .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
   .map((grant) => grant.capability);
 
-const manifestOwnerEntrypointId = (manifest: PiariumExtensionManifest): string => {
+const manifestOwnerEntrypointId = (manifest: VarinExtensionManifest): string => {
   const occupied = new Set((manifest.entrypoints?.surfaces ?? []).map((entrypoint) => entrypoint.id));
   const base = `${manifest.id}.manifest`;
   if (!occupied.has(base)) return base;
@@ -380,8 +380,8 @@ const manifestOwnerEntrypointId = (manifest: PiariumExtensionManifest): string =
 };
 
 const compatibleActivationPlans = (
-  manifest: PiariumExtensionManifest,
-  surface: PiariumApplicationSurface,
+  manifest: VarinExtensionManifest,
+  surface: VarinApplicationSurface,
 ): CompatibleSurfacePlans => {
   const compatibleEntrypoints = (manifest.entrypoints?.surfaces ?? [])
     .filter((entrypoint) => entrypoint.supports.includes(surface));
@@ -396,8 +396,8 @@ const compatibleActivationPlans = (
       mode: entrypoint.mode,
     });
   }
-  const staticContributions: PiariumExtensionStaticContribution[] = [];
-  const incompatible: PiariumExtensionStaticContribution[] = [];
+  const staticContributions: VarinExtensionStaticContribution[] = [];
+  const incompatible: VarinExtensionStaticContribution[] = [];
   // Track which entrypoints have at least one incompatible static contribution
   // and which have at least one compatible static contribution.
   const entrypointHasIncompatible = new Set<string>();
@@ -409,7 +409,7 @@ const compatibleActivationPlans = (
   // selectVisibleContributions also filters them as a defense-in-depth measure.
   for (const contribution of manifest.contributions ?? []) {
     if (!contribution.supports.includes(surface)) continue;
-    const compatible = isPiariumContributionCompatible(contribution.kind, contribution.contractVersion);
+    const compatible = isVarinContributionCompatible(contribution.kind, contribution.contractVersion);
     if (!compatible) incompatible.push(contribution);
     if (contribution.entrypoint) {
       if (!compatibleEntrypointIds.has(contribution.entrypoint)) continue;
@@ -465,7 +465,7 @@ const entrypointIsEager = (entrypoint: ExecutableSurfaceEntrypoint): boolean => 
 );
 
 const targetMatchesPlan = (
-  manifest: PiariumExtensionManifest,
+  manifest: VarinExtensionManifest,
   plan: SurfaceActivationPlan,
   target: SurfaceActivationTarget,
 ): boolean => {
@@ -478,13 +478,13 @@ const targetMatchesPlan = (
 };
 
 const declarativeImplementation = (
-  descriptor: PiariumExtensionStaticContribution,
+  descriptor: VarinExtensionStaticContribution,
 ): DeclarativeSurfaceContributionImplementation => ({
   descriptor: structuredClone(descriptor),
   kind: "declarative",
 });
 
-const toReportedActual = (state: ReturnType<SurfaceExtensionRuntime["getSnapshot"]>["actual"][number]): PiariumExtensionActualState => ({
+const toReportedActual = (state: ReturnType<SurfaceExtensionRuntime["getSnapshot"]>["actual"][number]): VarinExtensionActualState => ({
   desiredRevision: state.desiredRevision,
   diagnostics: state.diagnostics,
   entrypointId: state.entrypointId,
@@ -511,7 +511,7 @@ export class SurfaceExtensionLoader {
   readonly #nativeRestartRequired = new Set<string>();
   readonly #realmId: string;
   readonly #styleHost: ManagedStyleHost;
-  readonly #surface: PiariumApplicationSurface;
+  readonly #surface: VarinApplicationSurface;
   readonly #surfaceRuntime: SurfaceExtensionRuntime;
   readonly #triggered = new Set<string>();
   readonly #watchRetry: (attempt: number, signal: AbortSignal) => Promise<void>;
@@ -561,18 +561,18 @@ export class SurfaceExtensionLoader {
     return () => this.#listeners.delete(listener);
   };
 
-  reconcile(availability?: PiariumExtensionCatalogAvailability): Promise<void> {
+  reconcile(availability?: VarinExtensionCatalogAvailability): Promise<void> {
     const operation = async () => {
       if (!availability) {
-        const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+        const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
         await this.#reconcileSnapshot(state.catalog, state);
         return;
       }
       const result = availability
-        ? parsePiariumExtensionCatalogAvailability(availability)
-        : parsePiariumExtensionCatalogAvailability(await this.#host.catalog());
+        ? parseVarinExtensionCatalogAvailability(availability)
+        : parseVarinExtensionCatalogAvailability(await this.#host.catalog());
       if (result.supported !== true || result.status !== "ready") return;
-      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+      const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       await this.#reconcileSnapshot(result.snapshot, state);
     };
     const result = this.#queue.then(operation, operation);
@@ -581,11 +581,11 @@ export class SurfaceExtensionLoader {
   }
 
   triggerActivation(
-    event: PiariumExtensionActivationEvent,
+    event: VarinExtensionActivationEvent,
     target: SurfaceActivationTarget = {},
   ): Promise<void> {
     const operation = async () => {
-      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+      const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       if (!state.catalog.authoritative) return;
       await this.#reconcileSnapshot(state.catalog, state);
       const matchedKeys: string[] = [];
@@ -620,24 +620,24 @@ export class SurfaceExtensionLoader {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
-    const operation = async (): Promise<PiariumExtensionCatalogSnapshot> => {
-      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+  ): Promise<VarinExtensionCatalogSnapshot> {
+    const operation = async (): Promise<VarinExtensionCatalogSnapshot> => {
+      const state = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       let snapshot = state.catalog;
       if (!snapshot.authoritative) throw new Error("Cannot apply a candidate from a stale extension catalog");
       if (snapshot.revision !== expectedRevision) {
         throw new Error(`Extension catalog revision conflict: expected ${expectedRevision}, actual ${snapshot.revision}`);
       }
       let entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-      if (!entry) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
       explicitCandidateSelection(entry, candidateIntegrity);
-      snapshot = parsePiariumExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
+      snapshot = parseVarinExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
         candidateIntegrity,
         expectedRevision,
         extensionId,
       }));
       entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-      if (!entry) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!entry) throw new Error(`Varin extension is not installed: ${extensionId}`);
       const selection = explicitCandidateSelection(entry, candidateIntegrity);
       const plans = compatibleActivationPlans(selection.manifest, this.#surface);
       const executablePlans = plans.executable.filter((plan) => (
@@ -646,10 +646,10 @@ export class SurfaceExtensionLoader {
         || this.#active.has(keyFor(extensionId, plan.entrypointId))
       ));
       const hasActiveOwners = [...this.#active.values()].some((active) => active.owner.extensionId === extensionId);
-      let committed: PiariumExtensionCatalogSnapshot | null = null;
+      let committed: VarinExtensionCatalogSnapshot | null = null;
       try {
         if (!entry.desired.enabled) {
-          committed = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
+          committed = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
             candidateIntegrity,
             expectedRevision: snapshot.revision,
             extensionId,
@@ -658,13 +658,13 @@ export class SurfaceExtensionLoader {
           committed = await this.#activatePlans(entry, selection, plans, executablePlans, executablePlans, snapshot);
         } else {
           await this.#host.prepareCandidate(extensionId, candidateIntegrity);
-          committed = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
+          committed = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
             candidateIntegrity,
             expectedRevision: snapshot.revision,
             extensionId,
           }));
         }
-        if (!committed) throw new Error(`Piarium extension candidate was not committed: ${extensionId}`);
+        if (!committed) throw new Error(`Varin extension candidate was not committed: ${extensionId}`);
         const retained = new Set(entry.desired.enabled
           ? [
               ...(plans.manifest ? [keyFor(extensionId, plans.manifest.entrypointId)] : []),
@@ -714,7 +714,7 @@ export class SurfaceExtensionLoader {
       await this.reconcile();
     } catch (error) {
       this.#diagnose(
-        "piarium.extensions",
+        "varin.extensions",
         "host_state_initial_reconcile_failed",
         error instanceof Error ? error.message : String(error),
       );
@@ -722,7 +722,7 @@ export class SurfaceExtensionLoader {
     }
     void this.#watch(controller).catch((error) => {
       if (!controller.signal.aborted) {
-        this.#diagnose("piarium.extensions", "host_state_watch_failed", error instanceof Error ? error.message : String(error));
+        this.#diagnose("varin.extensions", "host_state_watch_failed", error instanceof Error ? error.message : String(error));
         this.#publish();
       }
       if (this.#watchController === controller) this.#watchController = null;
@@ -742,10 +742,10 @@ export class SurfaceExtensionLoader {
   }
 
   async #reconcileSnapshot(
-    snapshotValue: PiariumExtensionCatalogSnapshot,
-    hostState: PiariumExtensionHostStateSnapshot,
+    snapshotValue: VarinExtensionCatalogSnapshot,
+    hostState: VarinExtensionHostStateSnapshot,
   ): Promise<void> {
-    let snapshot = parsePiariumExtensionCatalogSnapshot(snapshotValue);
+    let snapshot = parseVarinExtensionCatalogSnapshot(snapshotValue);
     if (!snapshot.authoritative) return;
     if (this.#hostId && this.#hostId !== snapshot.hostId) {
       await this.deactivateAll();
@@ -771,7 +771,7 @@ export class SurfaceExtensionLoader {
       if (!entry.desired.enabled || !selected) continue;
       const plans = compatibleActivationPlans(selected.manifest, this.#surface);
       for (const contribution of plans.incompatible) {
-        const compatibility = checkPiariumContributionCompatibility(
+        const compatibility = checkVarinContributionCompatibility(
           contribution.kind,
           contribution.contractVersion,
         );
@@ -911,13 +911,13 @@ export class SurfaceExtensionLoader {
   }
 
   async #activatePlans(
-    entry: PiariumExtensionCatalogEntry,
+    entry: VarinExtensionCatalogEntry,
     selection: ArtifactSelection,
     compatible: CompatibleSurfacePlans,
     desiredExecutablePlans: SurfaceActivationPlan[],
     executablePlansToActivate: SurfaceActivationPlan[],
-    snapshot: PiariumExtensionCatalogSnapshot,
-  ): Promise<PiariumExtensionCatalogSnapshot | null> {
+    snapshot: VarinExtensionCatalogSnapshot,
+  ): Promise<VarinExtensionCatalogSnapshot | null> {
     const executableEntrypointIds = new Set(desiredExecutablePlans.map((plan) => plan.entrypointId));
     const plans = [
       ...(compatible.manifest
@@ -937,15 +937,15 @@ export class SurfaceExtensionLoader {
     const requests: Array<{ activation: SurfaceActivation; options: SurfaceActivationOptions }> = [];
     const activated: ActiveEntrypoint[] = [];
     try {
-      let prepared: PiariumExtensionCandidatePreparationResult | null = null;
+      let prepared: VarinExtensionCandidatePreparationResult | null = null;
       if (selection.slot === "candidate") {
-        prepared = parsePiariumExtensionCandidatePreparationResult(
+        prepared = parseVarinExtensionCandidatePreparationResult(
           await this.#host.prepareCandidate(entry.manifest.id, selection.integrity),
         );
       } else if (executablePlansToActivate.length > 0) {
         await this.#host.activateExtension(entry.manifest.id);
       }
-      const currentHostState = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+      const currentHostState = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
       const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
       const serviceSelections = this.#resolvedServiceSelections(selection, currentHostState, externalProviders);
       const hostExternalServices = this.#externalServices(externalProviders);
@@ -982,7 +982,7 @@ export class SurfaceExtensionLoader {
           for (const contribution of plan.contributions) {
             // Skip incompatible contributions — they are retained in the plan
             // for catalog record-keeping but must not be registered or executed.
-            if (!isPiariumContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
+            if (!isVarinContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
             context.contribute(
               plan.mode === "declarative" && contribution.entrypoint
                 ? { ...contribution, entrypoint: plan.entrypointId }
@@ -995,7 +995,7 @@ export class SurfaceExtensionLoader {
           context: SurfaceActivationContext,
           run: (stagingContext: SurfaceActivationContext) => void | Promise<void>,
         ): Promise<void> => {
-          const dynamic = new Map<string, { descriptor: PiariumExtensionStaticContribution; implementation: unknown }>();
+          const dynamic = new Map<string, { descriptor: VarinExtensionStaticContribution; implementation: unknown }>();
           const stagingContext: SurfaceActivationContext = {
             ...context,
             contribute: (descriptor, implementation) => {
@@ -1008,7 +1008,7 @@ export class SurfaceExtensionLoader {
           await run(stagingContext);
           for (const contribution of plan.contributions) {
             // Skip incompatible contributions — retained for catalog but not registered
-            if (!isPiariumContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
+            if (!isVarinContributionCompatible(contribution.kind, contribution.contractVersion)) continue;
             if (!dynamic.has(contribution.id)) {
               context.contribute(contribution, declarativeImplementation(contribution));
             }
@@ -1024,7 +1024,7 @@ export class SurfaceExtensionLoader {
           activation = contributeDeclarative;
         } else {
           const entrypoint = plan.entrypoint;
-          const payload = parsePiariumExtensionManagedEntrypointPayload(await this.#host.readManagedEntrypoint({
+          const payload = parseVarinExtensionManagedEntrypointPayload(await this.#host.readManagedEntrypoint({
             entrypointId: entrypoint.id,
             extensionId: entry.manifest.id,
             integrity: selection.integrity,
@@ -1173,10 +1173,10 @@ export class SurfaceExtensionLoader {
         });
       }
 
-      let committedSnapshot: PiariumExtensionCatalogSnapshot | null = null;
+      let committedSnapshot: VarinExtensionCatalogSnapshot | null = null;
       await this.#surfaceRuntime.activateBatchWithCommit(requests, async () => {
         if (selection.slot === "selected") {
-          const latest = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+          const latest = parseVarinExtensionHostStateSnapshot(await this.#host.hostState());
           const latestEntry = latest.catalog.extensions.find((candidate) => candidate.manifest.id === entry.manifest.id);
           if (
             !latest.catalog.authoritative
@@ -1190,7 +1190,7 @@ export class SurfaceExtensionLoader {
         }
         for (const resource of resources) resource.commit();
         if (selection.slot !== "candidate") return;
-        committedSnapshot = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
+        committedSnapshot = parseVarinExtensionCatalogSnapshot(await this.#host.selectCandidate({
           candidateIntegrity: selection.integrity,
           expectedRevision: snapshot.revision,
           extensionId: entry.manifest.id,
@@ -1226,8 +1226,8 @@ export class SurfaceExtensionLoader {
         // After a transport failure, fetch an authoritative snapshot instead of resuming a long
         // poll from a possibly replaced Host identity or a revision the new Host never observed.
         const state = consecutiveFailures > 0 || !this.#hostId
-          ? parsePiariumExtensionHostStateSnapshot(await this.#host.hostState())
-          : parsePiariumExtensionHostStateSnapshot(await this.#host.waitForHostState({
+          ? parseVarinExtensionHostStateSnapshot(await this.#host.hostState())
+          : parseVarinExtensionHostStateSnapshot(await this.#host.waitForHostState({
             hostId: this.#hostId,
             revision: this.#hostStateRevision,
           }, controller.signal));
@@ -1242,7 +1242,7 @@ export class SurfaceExtensionLoader {
         consecutiveFailures += 1;
         if (consecutiveFailures === 1) {
           this.#diagnose(
-            "piarium.extensions",
+            "varin.extensions",
             "host_state_watch_interrupted",
             error instanceof Error ? error.message : String(error),
           );
@@ -1255,12 +1255,12 @@ export class SurfaceExtensionLoader {
 
   #resolveExternalProviders(
     selection: ArtifactSelection,
-    state: PiariumExtensionHostStateSnapshot,
-    prepared: PiariumExtensionCandidatePreparationResult | null,
-  ): PiariumExtensionServiceProviderSnapshot[] {
+    state: VarinExtensionHostStateSnapshot,
+    prepared: VarinExtensionCandidatePreparationResult | null,
+  ): VarinExtensionServiceProviderSnapshot[] {
     const requirements = selection.manifest.requires?.services ?? [];
     const preparedProviders = prepared?.providers ?? [];
-    const selectedProviders: PiariumExtensionServiceProviderSnapshot[] = [];
+    const selectedProviders: VarinExtensionServiceProviderSnapshot[] = [];
     for (const requirement of requirements) {
       const candidateKeys = new Set(preparedProviders
         .filter((provider) => provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version)
@@ -1292,7 +1292,7 @@ export class SurfaceExtensionLoader {
   }
 
   #externalServices(
-    providers: PiariumExtensionServiceProviderSnapshot[],
+    providers: VarinExtensionServiceProviderSnapshot[],
   ): NonNullable<SurfaceActivationOptions["externalServices"]> {
     return providers.map((provider) => ({
       descriptor: { ...provider.descriptor },
@@ -1312,7 +1312,7 @@ export class SurfaceExtensionLoader {
   }
 
   #matchingLocalServiceFactories(
-    requirements: readonly PiariumExtensionServiceRequirement[],
+    requirements: readonly VarinExtensionServiceRequirement[],
   ): SurfaceLocalExternalServiceFactory[] {
     return this.#externalServiceFactories.filter((factory) => requirements.some((requirement) => (
       requirement.id === factory.descriptor.id && requirement.version === factory.descriptor.version
@@ -1354,7 +1354,7 @@ export class SurfaceExtensionLoader {
     };
   }
 
-  #requirementsSatisfied(selection: ArtifactSelection, state: PiariumExtensionHostStateSnapshot): boolean {
+  #requirementsSatisfied(selection: ArtifactSelection, state: VarinExtensionHostStateSnapshot): boolean {
     const external = this.#resolveExternalProviders(selection, state, null);
     return (selection.manifest.requires?.services ?? []).every((requirement) => {
       if (requirement.optional) return true;
@@ -1389,8 +1389,8 @@ export class SurfaceExtensionLoader {
 
   #resolvedServiceSelections(
     selection: ArtifactSelection,
-    state: PiariumExtensionHostStateSnapshot,
-    providers: readonly PiariumExtensionServiceProviderSnapshot[],
+    state: VarinExtensionHostStateSnapshot,
+    providers: readonly VarinExtensionServiceProviderSnapshot[],
   ): Record<string, string> {
     const resolved: Record<string, string> = {};
     for (const requirement of selection.manifest.requires?.services ?? []) {
@@ -1407,7 +1407,7 @@ export class SurfaceExtensionLoader {
   }
 
   #serviceBindingSignature(
-    providers: PiariumExtensionServiceProviderSnapshot[],
+    providers: VarinExtensionServiceProviderSnapshot[],
     localFactories: readonly SurfaceLocalExternalServiceFactory[] = [],
   ): string {
     return [
@@ -1426,7 +1426,7 @@ export class SurfaceExtensionLoader {
   }
 
   async #ensureInactivePlans(
-    entry: PiariumExtensionCatalogEntry,
+    entry: VarinExtensionCatalogEntry,
     selection: ArtifactSelection,
     plans: SurfaceActivationPlan[],
     hostId: string,

@@ -1,8 +1,8 @@
 import type {
-  PiariumExtensionHostEntrypoint,
-  PiariumExtensionManifest,
-  PiariumExtensionSurfaceEntrypoint,
-} from "@piarium/extension-contract";
+  VarinExtensionHostEntrypoint,
+  VarinExtensionManifest,
+  VarinExtensionSurfaceEntrypoint,
+} from "@varin/extension-contract";
 
 export interface ExtensionBuildEntrypointConfig {
   source: string;
@@ -16,7 +16,7 @@ export interface ExtensionPackageMetadata {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   name?: string;
-  piarium?: {
+  varin?: {
     build?: ExtensionBuildConfig;
   };
   scripts?: Record<string, string>;
@@ -26,7 +26,7 @@ export interface ExtensionPackageMetadata {
 
 export interface LoadedExtensionProject {
   directory: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   manifestPath: string;
   packageJson: ExtensionPackageMetadata;
   packageJsonPath: string;
@@ -66,4 +66,4 @@ export interface TestResult {
   }>;
 }
 
-export type ExecutableEntrypoint = PiariumExtensionHostEntrypoint | PiariumExtensionSurfaceEntrypoint;
+export type ExecutableEntrypoint = VarinExtensionHostEntrypoint | VarinExtensionSurfaceEntrypoint;

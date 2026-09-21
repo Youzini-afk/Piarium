@@ -5,31 +5,31 @@ import { fileURLToPath } from "node:url";
 import semver from "semver";
 import * as Ajv2020Module from "ajv/dist/2020.js";
 import {
-  PiariumExtensionContractError,
-  assertPiariumExtensionManifestCompatibility,
-  parsePiariumExtensionCatalogAvailability,
-  parsePiariumExtensionCatalogDocument,
-  parsePiariumExtensionCandidateCapabilityReviewRequest,
-  parsePiariumExtensionCapabilityReviewRequest,
-  parsePiariumExtensionAssetPayload,
-  parsePiariumExtensionManagedEntrypointRequest,
-  parsePiariumExtensionLocalSourceReloadRequest,
-  parsePiariumExtensionLocalSourceReloadResult,
-  parsePiariumExtensionManifest,
-  parsePiariumExtensionRemoveRequest,
-  parsePiariumExtensionStorageOpenRequest,
+  VarinExtensionContractError,
+  assertVarinExtensionManifestCompatibility,
+  parseVarinExtensionCatalogAvailability,
+  parseVarinExtensionCatalogDocument,
+  parseVarinExtensionCandidateCapabilityReviewRequest,
+  parseVarinExtensionCapabilityReviewRequest,
+  parseVarinExtensionAssetPayload,
+  parseVarinExtensionManagedEntrypointRequest,
+  parseVarinExtensionLocalSourceReloadRequest,
+  parseVarinExtensionLocalSourceReloadResult,
+  parseVarinExtensionManifest,
+  parseVarinExtensionRemoveRequest,
+  parseVarinExtensionStorageOpenRequest,
 } from "../src/index.js";
 
 const manifest = () => ({
   schemaVersion: 1,
   id: "dev.example.memory-workbench",
   version: "1.2.0",
-  engines: { piarium: ">=0.2.0 <0.3.0" },
+  engines: { varin: ">=0.2.0 <0.3.0" },
   entrypoints: {
     host: { file: "dist/host.mjs", mode: "brokered" },
     surfaces: [{ id: "main", file: "dist/surface.mjs", mode: "managed", supports: ["web", "desktop"] }],
   },
-  requires: { services: [{ id: "piarium.sessions", version: 1 }] },
+  requires: { services: [{ id: "varin.sessions", version: 1 }] },
   provides: { services: [{ id: "dev.example.memory", version: 1, multiple: true }] },
   capabilities: { host: ["extension-storage"], surface: ["commands"] },
   contributions: [{
@@ -46,7 +46,7 @@ const manifest = () => ({
 
 test("validates content-addressed managed entrypoint requests and asset bytes", () => {
   const integrity = `sha256-${"a".repeat(64)}`;
-  assert.deepEqual(parsePiariumExtensionManagedEntrypointRequest({
+  assert.deepEqual(parseVarinExtensionManagedEntrypointRequest({
     entrypointId: "main",
     extensionId: "dev.example.memory-workbench",
     integrity,
@@ -57,50 +57,50 @@ test("validates content-addressed managed entrypoint requests and asset bytes", 
     integrity,
     slot: "candidate",
   });
-  assert.equal(parsePiariumExtensionAssetPayload({
+  assert.equal(parseVarinExtensionAssetPayload({
     artifactIntegrity: integrity,
     bytesBase64: "aGVsbG8=",
     contentType: "text/plain",
     integrity,
     path: "package/hello.txt",
   }).path, "package/hello.txt");
-  assert.throws(() => parsePiariumExtensionManagedEntrypointRequest({
+  assert.throws(() => parseVarinExtensionManagedEntrypointRequest({
     entrypointId: "main",
     extensionId: "../escape",
     integrity: "sha256-not-a-digest",
     slot: "selected",
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("validates explicit candidate capability decisions", () => {
-  const request = parsePiariumExtensionCandidateCapabilityReviewRequest({
+  const request = parseVarinExtensionCandidateCapabilityReviewRequest({
     candidateIntegrity: `sha256-${"b".repeat(64)}`,
     decisions: [{ capability: "workspace.files", granted: false, realm: "host" }],
     expectedRevision: 4,
     extensionId: "dev.example.memory-workbench",
   });
   assert.equal(request.decisions[0]?.granted, false);
-  assert.throws(() => parsePiariumExtensionCandidateCapabilityReviewRequest({
+  assert.throws(() => parseVarinExtensionCandidateCapabilityReviewRequest({
     ...request,
     decisions: [request.decisions[0], request.decisions[0]],
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("validates explicit selected-version capability decisions", () => {
-  const request = parsePiariumExtensionCapabilityReviewRequest({
+  const request = parseVarinExtensionCapabilityReviewRequest({
     decisions: [{ capability: "commands", granted: true, realm: "surface" }],
     expectedRevision: 2,
     extensionId: "dev.example.memory-workbench",
   });
   assert.equal(request.decisions[0]?.granted, true);
-  assert.throws(() => parsePiariumExtensionCapabilityReviewRequest({
+  assert.throws(() => parseVarinExtensionCapabilityReviewRequest({
     ...request,
     decisions: [request.decisions[0], request.decisions[0]],
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("validates local source reload requests and results without a source specifier", () => {
-  const request = parsePiariumExtensionLocalSourceReloadRequest({
+  const request = parseVarinExtensionLocalSourceReloadRequest({
     expectedRevision: 4,
     extensionId: "dev.example.memory-workbench",
   });
@@ -116,20 +116,20 @@ test("validates local source reload requests and results without a source specif
     diagnostics: [],
     extensions: [],
   };
-  const staged = parsePiariumExtensionLocalSourceReloadResult({
+  const staged = parseVarinExtensionLocalSourceReloadResult({
     candidateIntegrity: `sha256-${"c".repeat(64)}`,
     outcome: "staged",
     snapshot,
   });
   assert.equal(staged.outcome, "staged");
-  assert.throws(() => parsePiariumExtensionLocalSourceReloadResult({
+  assert.throws(() => parseVarinExtensionLocalSourceReloadResult({
     outcome: "staged",
     snapshot,
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("defaults legacy remove requests to retained data and validates explicit deletion", () => {
-  assert.deepEqual(parsePiariumExtensionRemoveRequest({
+  assert.deepEqual(parseVarinExtensionRemoveRequest({
     expectedRevision: 3,
     extensionId: "dev.example.memory-workbench",
   }), {
@@ -137,54 +137,54 @@ test("defaults legacy remove requests to retained data and validates explicit de
     expectedRevision: 3,
     extensionId: "dev.example.memory-workbench",
   });
-  assert.equal(parsePiariumExtensionRemoveRequest({
+  assert.equal(parseVarinExtensionRemoveRequest({
     deleteData: true,
     expectedRevision: 3,
     extensionId: "dev.example.memory-workbench",
   }).deleteData, true);
-  assert.throws(() => parsePiariumExtensionRemoveRequest({
+  assert.throws(() => parseVarinExtensionRemoveRequest({
     deleteData: "yes",
     expectedRevision: 3,
     extensionId: "dev.example.memory-workbench",
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("validates public storage addresses without accepting a forged extension namespace", () => {
-  assert.deepEqual(parsePiariumExtensionStorageOpenRequest({
+  assert.deepEqual(parseVarinExtensionStorageOpenRequest({
     key: "preferences",
     schemaVersion: 2,
     scope: "workspace",
   }), { key: "preferences", schemaVersion: 2, scope: "workspace" });
-  assert.throws(() => parsePiariumExtensionStorageOpenRequest({
+  assert.throws(() => parseVarinExtensionStorageOpenRequest({
     extensionId: "dev.example.someone-else",
     key: "preferences",
     scope: "workspace",
-  }), (error) => error instanceof PiariumExtensionContractError
-    && error.issues.some((issue) => issue.includes("assigned by the Piarium Host")));
+  }), (error) => error instanceof VarinExtensionContractError
+    && error.issues.some((issue) => issue.includes("assigned by the Varin Host")));
 });
 
-test("normalizes a complete Piarium extension manifest", () => {
-  const parsed = parsePiariumExtensionManifest(manifest());
+test("normalizes a complete Varin extension manifest", () => {
+  const parsed = parseVarinExtensionManifest(manifest());
   assert.equal(parsed.id, "dev.example.memory-workbench");
   assert.equal(parsed.entrypoints?.surfaces?.[0]?.mode, "managed");
   assert.equal(parsed.contributions?.[0]?.data.route, "memory");
 });
 
-test("rejects invalid Piarium SemVer ranges and checks compatibility at range boundaries", () => {
+test("rejects invalid Varin SemVer ranges and checks compatibility at range boundaries", () => {
   assert.throws(
-    () => parsePiariumExtensionManifest({ ...manifest(), engines: { piarium: "definitely not semver" } }),
-    (error) => error instanceof PiariumExtensionContractError
-      && error.issues.includes("engines.piarium must be a valid SemVer range"),
+    () => parseVarinExtensionManifest({ ...manifest(), engines: { varin: "definitely not semver" } }),
+    (error) => error instanceof VarinExtensionContractError
+      && error.issues.includes("engines.varin must be a valid SemVer range"),
   );
-  const parsed = parsePiariumExtensionManifest({
+  const parsed = parseVarinExtensionManifest({
     ...manifest(),
-    engines: { piarium: ">=1.2.3 <2.0.0" },
+    engines: { varin: ">=1.2.3 <2.0.0" },
   });
-  assert.doesNotThrow(() => assertPiariumExtensionManifestCompatibility(parsed, "1.2.3"));
-  assert.doesNotThrow(() => assertPiariumExtensionManifestCompatibility(parsed, "1.9.9"));
+  assert.doesNotThrow(() => assertVarinExtensionManifestCompatibility(parsed, "1.2.3"));
+  assert.doesNotThrow(() => assertVarinExtensionManifestCompatibility(parsed, "1.9.9"));
   assert.throws(
-    () => assertPiariumExtensionManifestCompatibility(parsed, "2.0.0"),
-    /requires Piarium >=1\.2\.3 <2\.0\.0; current version is 2\.0\.0/,
+    () => assertVarinExtensionManifestCompatibility(parsed, "2.0.0"),
+    /requires Varin >=1\.2\.3 <2\.0\.0; current version is 2\.0\.0/,
   );
 });
 
@@ -195,8 +195,8 @@ test("rejects traversal, duplicate IDs, and unsupported surfaces together", () =
     { id: "main", file: "dist/other.mjs", mode: "managed", supports: ["vscode"] },
   ];
   assert.throws(
-    () => parsePiariumExtensionManifest(candidate),
-    (error) => error instanceof PiariumExtensionContractError
+    () => parseVarinExtensionManifest(candidate),
+    (error) => error instanceof VarinExtensionContractError
       && error.issues.some((issue) => issue.includes("parent traversal"))
       && error.issues.some((issue) => issue.includes("duplicate entrypoint"))
       && error.issues.some((issue) => issue.includes("unsupported surface")),
@@ -204,7 +204,7 @@ test("rejects traversal, duplicate IDs, and unsupported surfaces together", () =
 });
 
 test("distinguishes a valid empty catalog from malformed persisted content", () => {
-  const empty = parsePiariumExtensionCatalogDocument({
+  const empty = parseVarinExtensionCatalogDocument({
     schemaVersion: 1,
     revision: 0,
     updatedAt: "2026-08-14T00:00:00.000Z",
@@ -212,13 +212,13 @@ test("distinguishes a valid empty catalog from malformed persisted content", () 
   });
   assert.deepEqual(empty.extensions, {});
   assert.throws(
-    () => parsePiariumExtensionCatalogDocument({ schemaVersion: 1, revision: 0, extensions: [] }),
-    PiariumExtensionContractError,
+    () => parseVarinExtensionCatalogDocument({ schemaVersion: 1, revision: 0, extensions: [] }),
+    VarinExtensionContractError,
   );
 });
 
 test("validates public catalog snapshots before a surface accepts them", () => {
-  const ready = parsePiariumExtensionCatalogAvailability({
+  const ready = parseVarinExtensionCatalogAvailability({
     supported: true,
     status: "ready",
     snapshot: {
@@ -233,18 +233,18 @@ test("validates public catalog snapshots before a surface accepts them", () => {
     },
   });
   assert.equal(ready.supported, true);
-  assert.throws(() => parsePiariumExtensionCatalogAvailability({
+  assert.throws(() => parseVarinExtensionCatalogAvailability({
     supported: true,
     status: "ready",
     snapshot: { schemaVersion: 1, extensions: [] },
-  }), PiariumExtensionContractError);
+  }), VarinExtensionContractError);
 });
 
 test("rejects unknown contribution kinds instead of coercing them", () => {
   const source = manifest();
   source.contributions = [{ ...source.contributions[0]!, kind: "unknown-kind" }];
-  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
-    error instanceof PiariumExtensionContractError
+  assert.throws(() => parseVarinExtensionManifest(source), (error: unknown) => (
+    error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("kind is unsupported"))
   ));
 });
@@ -264,7 +264,7 @@ test("accepts view, editor, and transition scene contribution kinds", () => {
       id: "dev.example.memory-workbench.transition",
       kind: "transition-scene",
       data: Object.assign({ route: "memory" }, {
-        contract: "piarium-transition-scene/v1",
+        contract: "varin-transition-scene/v1",
         durations: {
           "workbench-profile": {
             covering: { quick: 800, reduced: 0, standard: 1_600 },
@@ -275,7 +275,7 @@ test("accepts view, editor, and transition scene contribution kinds", () => {
       }),
     }, { replacement: { target: "workbench.transition" } }),
   ];
-  const parsed = parsePiariumExtensionManifest(source);
+  const parsed = parseVarinExtensionManifest(source);
   assert.deepEqual(parsed.contributions?.map((item) => item.kind), ["view", "editor", "transition-scene"]);
 });
 
@@ -286,13 +286,13 @@ test("rejects transition scenes without a complete timing contract", () => {
     id: "dev.example.memory-workbench.transition",
     kind: "transition-scene",
     data: Object.assign({ route: "memory" }, {
-      contract: "piarium-transition-scene/v1",
+      contract: "varin-transition-scene/v1",
       durations: { "workbench-profile": { covering: { quick: 1 } } },
       scenes: ["workbench-profile"],
     }),
   }, { replacement: { target: "workbench.transition" } })];
-  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
-    error instanceof PiariumExtensionContractError
+  assert.throws(() => parseVarinExtensionManifest(source), (error: unknown) => (
+    error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("data.durations.workbench-profile.covering.reduced"))
     && error.issues.some((issue) => issue.includes("data.durations.workbench-profile.revealing"))
   ));
@@ -305,7 +305,7 @@ test("requires transition scenes to use the public workbench transition target",
     id: "dev.example.memory-workbench.transition",
     kind: "transition-scene",
     data: Object.assign({ route: "memory" }, {
-      contract: "piarium-transition-scene/v1",
+      contract: "varin-transition-scene/v1",
       durations: {
         "workbench-profile": {
           covering: { quick: 1, reduced: 0, standard: 1 },
@@ -315,8 +315,8 @@ test("requires transition scenes to use the public workbench transition target",
       scenes: ["workbench-profile"],
     }),
   }, { replacement: { target: "dev.example.private-transition" } })];
-  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
-    error instanceof PiariumExtensionContractError
+  assert.throws(() => parseVarinExtensionManifest(source), (error: unknown) => (
+    error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("replacement.target must be workbench.transition"))
   ));
 });
@@ -329,14 +329,14 @@ test("rejects editor contributions without a resource selector", () => {
     kind: "editor",
     data: { route: "memory" },
   }];
-  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
-    error instanceof PiariumExtensionContractError
+  assert.throws(() => parseVarinExtensionManifest(source), (error: unknown) => (
+    error instanceof VarinExtensionContractError
     && error.issues.some((issue) => issue.includes("languageIds or filenames"))
   ));
 });
 
 test("published JSON Schema and runtime parser agree on shell seam fixtures", async () => {
-  const schemaPath = fileURLToPath(new URL("../schema/piarium.extension.schema.json", import.meta.url));
+  const schemaPath = fileURLToPath(new URL("../schema/varin.extension.schema.json", import.meta.url));
   const schema = JSON.parse(await readFile(schemaPath, "utf8"));
   type AjvInstance = { compile(schemaValue: unknown): (value: unknown) => boolean };
   type AjvConstructor = new (options: Record<string, unknown>) => AjvInstance;
@@ -364,7 +364,7 @@ test("published JSON Schema and runtime parser agree on shell seam fixtures", as
     contributions: [{
       contractVersion: 1,
       data: {
-        contract: "piarium-workbench-shell/v1",
+        contract: "varin-workbench-shell/v1",
         seams: { web: { replacementTargets: ["workbench.editor"], slots: ["workbench.editor.actions"] } },
       },
       entrypoint: "main",
@@ -417,7 +417,7 @@ test("published JSON Schema and runtime parser agree on shell seam fixtures", as
   ];
   for (const fixture of fixtures) {
     assert.equal(validateSchema(fixture.value), fixture.valid, `${fixture.name}: JSON Schema`);
-    if (fixture.valid) assert.doesNotThrow(() => parsePiariumExtensionManifest(fixture.value));
-    else assert.throws(() => parsePiariumExtensionManifest(fixture.value), `${fixture.name}: runtime parser`);
+    if (fixture.valid) assert.doesNotThrow(() => parseVarinExtensionManifest(fixture.value));
+    else assert.throws(() => parseVarinExtensionManifest(fixture.value), `${fixture.name}: runtime parser`);
   }
 });

@@ -1,10 +1,10 @@
-import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/application-client';
-import { installRuntimeFetchBridge } from '@piarium/application-client';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/application-client';
-import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
-import { configureRuntimeUrlResolver } from '@piarium/application-client';
-import { registerRelayTransport } from '@piarium/ui/lib/relay/register-transport';
-import type { EmbeddedSessionRuntimeBootstrap } from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
+import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
+import { installRuntimeFetchBridge } from '@varin/application-client';
+import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
+import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
+import { configureRuntimeUrlResolver } from '@varin/application-client';
+import { registerRelayTransport } from '@varin/ui/lib/relay/register-transport';
+import type { EmbeddedSessionRuntimeBootstrap } from '@varin/ui/components/layout/contextPanelEmbeddedChat';
 import { createWebAPIs } from './api';
 
 // Register the UI's relay tunnel implementation with the application-client
@@ -22,11 +22,11 @@ const sameOrigin = (left: string, right: string): boolean => {
 
 declare global {
   interface Window {
-    __PIARIUM_API_BASE_URL__?: string;
-    __PIARIUM_CLIENT_TOKEN__?: string;
-    __PIARIUM_RUNTIME_HEADERS__?: Record<string, string>;
-    __PIARIUM_LOCAL_ORIGIN__?: string;
-    __PIARIUM_RELAY_HOST_ID__?: string;
+    __VARIN_API_BASE_URL__?: string;
+    __VARIN_CLIENT_TOKEN__?: string;
+    __VARIN_RUNTIME_HEADERS__?: Record<string, string>;
+    __VARIN_LOCAL_ORIGIN__?: string;
+    __VARIN_RELAY_HOST_ID__?: string;
   }
 }
 
@@ -34,11 +34,11 @@ export const readRuntimeBootstrapConfig = (): EmbeddedSessionRuntimeBootstrap =>
   const readString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
   return {
-    apiBaseUrl: readString(window.__PIARIUM_API_BASE_URL__),
-    clientToken: readString(window.__PIARIUM_CLIENT_TOKEN__),
-    localOrigin: readString(window.__PIARIUM_LOCAL_ORIGIN__),
-    runtimeHeaders: window.__PIARIUM_RUNTIME_HEADERS__,
-    relayHostId: readString(window.__PIARIUM_RELAY_HOST_ID__),
+    apiBaseUrl: readString(window.__VARIN_API_BASE_URL__),
+    clientToken: readString(window.__VARIN_CLIENT_TOKEN__),
+    localOrigin: readString(window.__VARIN_LOCAL_ORIGIN__),
+    runtimeHeaders: window.__VARIN_RUNTIME_HEADERS__,
+    relayHostId: readString(window.__VARIN_RELAY_HOST_ID__),
   };
 };
 

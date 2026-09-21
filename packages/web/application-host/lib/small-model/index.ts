@@ -7,18 +7,18 @@ import type { ModelsMetadata } from '../platform/models-metadata.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
 import { callSmallModel, resolveProviderLogin } from './call.js';
 
-const PIARIUM_SETTINGS_FILE = path.join(
-  process.env.PIARIUM_DATA_DIR
-    ? path.resolve(process.env.PIARIUM_DATA_DIR)
+const VARIN_SETTINGS_FILE = path.join(
+  process.env.VARIN_DATA_DIR
+    ? path.resolve(process.env.VARIN_DATA_DIR)
     : process.platform === 'win32'
-      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Piarium')
+      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Varin')
       : process.platform === 'darwin'
-        ? path.join(os.homedir(), 'Library', 'Application Support', 'Piarium')
-        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'piarium'),
+        ? path.join(os.homedir(), 'Library', 'Application Support', 'Varin')
+        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'varin'),
   'settings.json',
 );
 
-// Piarium settings can explicitly override Pi's default small-model choice.
+// Varin settings can explicitly override Pi's default small-model choice.
 type AuthStore = Record<string, unknown>;
 type ModelRecord = Record<string, unknown>;
 
@@ -40,7 +40,7 @@ const catalogModel = (catalog: ModelsMetadata, providerID: string, modelID: stri
 
 const readSmallModelSettingsOverride = (): string | null => {
   try {
-    const raw = fs.readFileSync(PIARIUM_SETTINGS_FILE, 'utf8');
+    const raw = fs.readFileSync(VARIN_SETTINGS_FILE, 'utf8');
     const settings = JSON.parse(raw) as unknown;
     if (!isRecord(settings)) return null;
     if (settings.smallModelUseDefault !== false) return null;

@@ -1,19 +1,19 @@
 import { isRecord } from "./validation.js";
-import type { PiariumContextExpressionV1, PiariumContextValue } from "./types.js";
+import type { VarinContextExpressionV1, VarinContextValue } from "./types.js";
 
-export type { PiariumContextExpressionV1, PiariumContextValue };
+export type { VarinContextExpressionV1, VarinContextValue };
 
-export class PiariumContextExpressionError extends Error {
+export class VarinContextExpressionError extends Error {
   readonly issues: string[];
 
   constructor(message: string, issues: string[]) {
     super(message);
-    this.name = "PiariumContextExpressionError";
+    this.name = "VarinContextExpressionError";
     this.issues = issues;
   }
 }
 
-const isContextValue = (value: unknown): value is PiariumContextValue => (
+const isContextValue = (value: unknown): value is VarinContextValue => (
   typeof value === "string" || typeof value === "boolean"
   || (typeof value === "number" && Number.isFinite(value))
 );
@@ -28,17 +28,17 @@ const checkNoExtraFields = (value: Record<string, unknown>, allowed: string[], p
 };
 
 /**
- * Parse a raw JSON value into a PiariumContextExpressionV1.
- * Throws PiariumContextExpressionError on invalid structure.
+ * Parse a raw JSON value into a VarinContextExpressionV1.
+ * Throws VarinContextExpressionError on invalid structure.
  */
-export const parsePiariumContextExpression = (value: unknown): PiariumContextExpressionV1 => {
+export const parseVarinContextExpression = (value: unknown): VarinContextExpressionV1 => {
   const issues: string[] = [];
   const result = parseExpression(value, "when", issues);
-  if (issues.length > 0) throw new PiariumContextExpressionError("Invalid context expression", issues);
+  if (issues.length > 0) throw new VarinContextExpressionError("Invalid context expression", issues);
   return result;
 };
 
-const parseExpression = (value: unknown, path: string, issues: string[]): PiariumContextExpressionV1 => {
+const parseExpression = (value: unknown, path: string, issues: string[]): VarinContextExpressionV1 => {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object with an op property`);
     return { op: "defined", key: "invalid" };
@@ -108,9 +108,9 @@ const parseExpression = (value: unknown, path: string, issues: string[]): Piariu
  * - all: true when every expression is true (empty array is true)
  * - any: true when at least one expression is true (empty array is false)
  */
-export const evaluatePiariumContextExpression = (
-  expression: PiariumContextExpressionV1,
-  context: ReadonlyMap<string, PiariumContextValue>,
+export const evaluateVarinContextExpression = (
+  expression: VarinContextExpressionV1,
+  context: ReadonlyMap<string, VarinContextValue>,
 ): boolean => {
   switch (expression.op) {
     case "defined":
@@ -118,11 +118,11 @@ export const evaluatePiariumContextExpression = (
     case "equals":
       return context.get(expression.key) === expression.value;
     case "not":
-      return !evaluatePiariumContextExpression(expression.expression, context);
+      return !evaluateVarinContextExpression(expression.expression, context);
     case "all":
-      return expression.expressions.every((inner) => evaluatePiariumContextExpression(inner, context));
+      return expression.expressions.every((inner) => evaluateVarinContextExpression(inner, context));
     case "any":
-      return expression.expressions.some((inner) => evaluatePiariumContextExpression(inner, context));
+      return expression.expressions.some((inner) => evaluateVarinContextExpression(inner, context));
   }
 };
 
@@ -130,11 +130,11 @@ export const evaluatePiariumContextExpression = (
  * Collect all context keys referenced by an expression.
  * Useful for selective subscription notifications.
  */
-export const collectPiariumContextExpressionKeys = (
-  expression: PiariumContextExpressionV1,
+export const collectVarinContextExpressionKeys = (
+  expression: VarinContextExpressionV1,
 ): string[] => {
   const keys = new Set<string>();
-  const collect = (expr: PiariumContextExpressionV1): void => {
+  const collect = (expr: VarinContextExpressionV1): void => {
     switch (expr.op) {
       case "defined":
       case "equals":

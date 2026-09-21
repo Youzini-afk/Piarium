@@ -1,4 +1,4 @@
-import type { PiRuntimeManagerStatus } from '@piarium/protocol';
+import type { PiRuntimeManagerStatus } from '@varin/protocol';
 
 type DesktopWorkspaceView = 'loading' | 'main' | 'runtime-setup' | 'catalog-recovery';
 

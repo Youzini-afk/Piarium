@@ -1,5 +1,5 @@
 /**
- * Router module for URL-based navigation in Piarium.
+ * Router module for URL-based navigation in Varin.
  *
  * Provides bidirectional sync between URL query parameters and application state.
  * Works across web and desktop.

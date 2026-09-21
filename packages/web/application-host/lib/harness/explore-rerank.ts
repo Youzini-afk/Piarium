@@ -12,8 +12,8 @@ import {
   type HarnessRerankResult,
   type HarnessRerankSettings,
   type PiSettingsSnapshot,
-} from "@piarium/protocol";
-import type { ExploreModelParticipation } from "@piarium/protocol";
+} from "@varin/protocol";
+import type { ExploreModelParticipation } from "@varin/protocol";
 
 export function rerankSettingsFromSnapshot(snapshot: PiSettingsSnapshot | null | undefined): HarnessRerankSettings | undefined {
   const harness = snapshot?.global?.harness;

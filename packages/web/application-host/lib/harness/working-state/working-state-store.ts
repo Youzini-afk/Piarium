@@ -91,7 +91,7 @@ type StateNodePool = Record<string, StateTrieNode>;
 
 /**
  * Hydrate the current persisted map shape: `{trie: <root>}` references into
- * the shared `stateNodes` pool. Piarium has no users who need internal-format
+ * the shared `stateNodes` pool. Varin has no users who need internal-format
  * compatibility, so a flat map under schema 4 is malformed rather than a
  * hidden second representation (D-253).
  */
@@ -1402,7 +1402,7 @@ export class WorkingStateStore {
     const result: string[] = [];
     const entries = await this.fsPromises.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === ".piarium") continue;
+      if (entry.name === ".git" || entry.name === ".varin") continue;
       const absolute = this.pathModule.join(directory, entry.name);
       const relative = normalizeRelative(this.pathModule.relative(base, absolute));
       if (entry.isDirectory()) {
@@ -1440,7 +1440,7 @@ export class WorkingStateStore {
       if (!stat.isDirectory() || stat.isSymbolicLink()) return;
       const entries = await this.fsPromises.readdir(absolute, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name === ".git" || entry.name === ".piarium") continue;
+        if (entry.name === ".git" || entry.name === ".varin") continue;
         await visit(normalizeRelative(`${relative}/${entry.name}`));
       }
     };

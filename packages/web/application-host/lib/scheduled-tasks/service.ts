@@ -196,7 +196,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
       || Object.prototype.hasOwnProperty.call(input, 'loopError')
       || Object.prototype.hasOwnProperty.call(input, 'loopShadowed')
     ) {
-      throw new ScheduledTaskError('Loop metadata is managed by Piarium', 400);
+      throw new ScheduledTaskError('Loop metadata is managed by Varin', 400);
     }
     const incomingID = asNonEmptyString(input.id);
     if (incomingID) {

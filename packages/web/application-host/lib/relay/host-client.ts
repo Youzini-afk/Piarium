@@ -74,7 +74,7 @@ const errorMessage = (error: unknown): string => error instanceof Error ? error.
 
 const resolveBatchWindowMs = (option?: number): number => {
   if (typeof option === 'number' && Number.isFinite(option) && option >= 0) return option;
-  const envValue = Number.parseInt(process.env.PIARIUM_RELAY_BATCH_WINDOW_MS ?? '', 10);
+  const envValue = Number.parseInt(process.env.VARIN_RELAY_BATCH_WINDOW_MS ?? '', 10);
   if (Number.isFinite(envValue) && envValue >= 0) return envValue;
   return DEFAULT_BATCH_WINDOW_MS;
 };

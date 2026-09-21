@@ -2,12 +2,12 @@
  * Client-surface bridge (Stage S / D-309): targeted reads and applies of
  * device-local settings on connected UI surfaces.
  *
- * A surface identifies itself when it opens `/api/piarium/events` with
+ * A surface identifies itself when it opens `/api/varin/events` with
  * `?surface=<id>&kind=<kind>&session=<live-session>`, after an authenticated
  * bind operation. Host-side writes never guess the client identity — the
  * session binding selects the connection, and applies land only on
  * connections that declared that identity. The surface acknowledges over
- * `POST /api/piarium/client-settings/ack`; the request resolves with the
+ * `POST /api/varin/client-settings/ack`; the request resolves with the
  * surface-reported facts (saved/applied/failed), never an assumed success.
  */
 
@@ -198,7 +198,7 @@ export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: Surf
     try {
       for (const conn of selectedTargets) {
         writeSseEvent(conn.res, {
-          type: 'piarium:client-settings-request',
+          type: 'varin:client-settings-request',
           properties: {
             requestId,
             connectionId: conn.connectionId,

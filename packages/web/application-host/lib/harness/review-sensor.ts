@@ -11,7 +11,7 @@
  * project knowledge — not the parent conversation.
  */
 
-import type { ModelSelection, ThreadReviewFinding, ThreadVerificationProjection } from "@piarium/protocol";
+import type { ModelSelection, ThreadReviewFinding, ThreadVerificationProjection } from "@varin/protocol";
 import type { ResolvedPreset } from "./presets.js";
 import type { CreateThreadInput, Thread } from "./thread-registry.js";
 

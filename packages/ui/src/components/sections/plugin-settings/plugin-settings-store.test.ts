@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PackageDescriptor } from '@piarium/protocol';
+import type { PackageDescriptor } from '@varin/protocol';
 import {
   installedPluginSettingsPackages,
   pluginSettingsPackageIdentity,

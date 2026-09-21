@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { createDocumentAuthority } from "../../../web/application-host/lib/documents/authority.js";
 import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";

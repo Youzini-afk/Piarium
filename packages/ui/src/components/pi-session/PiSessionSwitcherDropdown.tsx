@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,

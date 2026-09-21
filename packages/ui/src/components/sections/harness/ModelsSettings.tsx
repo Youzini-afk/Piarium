@@ -1,5 +1,5 @@
 import React from 'react';
-import { applyHarnessModelPreset, type HarnessModelRole, type HarnessModelPreset } from '@piarium/protocol';
+import { applyHarnessModelPreset, type HarnessModelRole, type HarnessModelPreset } from '@varin/protocol';
 import { SettingsSection, SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';

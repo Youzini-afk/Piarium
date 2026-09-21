@@ -76,11 +76,11 @@ const joinPath = (base: string, segment: string): string => {
 };
 
 const buildRepoPlanPath = (directory: string, created: number, slug: string): string => {
-  return joinPath(joinPath(joinPath(directory, '.piarium'), 'plans'), `${created}-${slug}.md`);
+  return joinPath(joinPath(joinPath(directory, '.varin'), 'plans'), `${created}-${slug}.md`);
 };
 
 const buildHomePlanPath = (created: number, slug: string): string => {
-  return `~/.piarium/plans/${created}-${slug}.md`;
+  return `~/.varin/plans/${created}-${slug}.md`;
 };
 
 const resolveTilde = (path: string, homeDir: string | null): string => {
@@ -224,7 +224,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const editorViewRef = React.useRef<EditorView | null>(null);
   const editorWrapperRef = React.useRef<HTMLDivElement | null>(null);
 
-  const MD_VIEWER_MODE_KEY = 'piarium:plan:md-viewer-mode';
+  const MD_VIEWER_MODE_KEY = 'varin:plan:md-viewer-mode';
 
   React.useEffect(() => {
     try {

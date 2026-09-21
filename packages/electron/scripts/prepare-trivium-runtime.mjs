@@ -23,8 +23,8 @@ const assertTarget = (file) => {
 };
 
 export function prepareTriviumRuntime() {
-  const platform = process.env.PIARIUM_TARGET_PLATFORM || process.platform;
-  const architecture = normalizeKernelArchitecture(process.env.PIARIUM_TARGET_ARCH || process.arch);
+  const platform = process.env.VARIN_TARGET_PLATFORM || process.platform;
+  const architecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
   if (platform !== 'win32' || architecture !== 'arm64') return;
   const webRequire = createRequire(new URL('../../web/package.json', import.meta.url));
   const packageRoot = path.dirname(webRequire.resolve('triviumdb/package.json'));
@@ -32,7 +32,7 @@ export function prepareTriviumRuntime() {
   if (installedVersion !== VERSION) {
     throw new Error(`TriviumDB source recipe is for ${VERSION}, but the installed package is ${installedVersion}.`);
   }
-  const cache = path.join(os.homedir(), '.cache', 'piarium-native', `triviumdb-${COMMIT}-windows-arm64-r${RECIPE}`);
+  const cache = path.join(os.homedir(), '.cache', 'varin-native', `triviumdb-${COMMIT}-windows-arm64-r${RECIPE}`);
   const payload = path.join(cache, 'payload', BINARY);
   const receiptPath = path.join(cache, 'receipt.json');
   let receipt;
@@ -41,7 +41,7 @@ export function prepareTriviumRuntime() {
   const cached = receipt?.commit === COMMIT && receipt?.recipe === RECIPE && receipt?.version === VERSION
     && receipt?.target === TARGET && fs.existsSync(payload) && receipt.sha256 === sha256(payload);
   if (!cached) {
-    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-triviumdb-'));
+    const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-triviumdb-'));
     try {
       const source = path.join(temporary, 'source');
       run('git', ['init', source], temporary);

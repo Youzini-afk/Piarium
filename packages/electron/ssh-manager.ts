@@ -6,8 +6,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
 import type { Writable, Readable } from 'node:stream';
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { DesktopSshInstanceStatus, DesktopSshPhase } from '@piarium/application-client/desktop';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { DesktopSshInstanceStatus, DesktopSshPhase } from '@varin/application-client/desktop';
 import { recordOf } from './runtime-types.js';
 
 const LOCAL_HOST_ID = 'local';
@@ -21,7 +21,7 @@ const MAX_LOG_LINES_PER_INSTANCE = 1200;
 const MONITOR_INITIAL_POLL_MS = 2000;
 const MONITOR_STEADY_POLL_MS = 10000;
 const MONITOR_STABILIZE_TICKS = 5;
-const SSH_STATUS_EVENT = 'piarium:ssh-instance-status';
+const SSH_STATUS_EVENT = 'varin:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
 export interface ParsedSshCommand {
@@ -56,13 +56,13 @@ export interface SshPortForward {
 }
 
 export interface SshInstance {
-  auth: { piariumPassword?: StoredSecret; sshPassword?: StoredSecret };
+  auth: { varinPassword?: StoredSecret; sshPassword?: StoredSecret };
   connectionTimeoutSec: number;
   id: string;
   localForward: { bindHost: string; preferredLocalPort?: number };
   nickname?: string;
   portForwards: SshPortForward[];
-  remotePiarium: {
+  remoteVarin: {
     installMethod: string;
     keepRunning: boolean;
     mode: 'external' | 'managed';
@@ -313,9 +313,9 @@ const buildSshArgs = (parsed: ParsedSshCommand, preDestinationArgs: string[] = [
 const askpassScriptContent = (): string => `#!/bin/bash
 PROMPT="$1"
 
-if [[ -n "$PIARIUM_SSH_ASKPASS_VALUE" ]]; then
+if [[ -n "$VARIN_SSH_ASKPASS_VALUE" ]]; then
   if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
-    printf '%s\\n' "$PIARIUM_SSH_ASKPASS_VALUE"
+    printf '%s\\n' "$VARIN_SSH_ASKPASS_VALUE"
     exit 0
   fi
 fi
@@ -358,7 +358,7 @@ const writeAskpassScript = async (scriptPath: string): Promise<void> => {
   await fsp.chmod(scriptPath, 0o700);
 };
 
-const windowsAskpassScriptContent = (): string => `$value = [Environment]::GetEnvironmentVariable('PIARIUM_SSH_ASKPASS_VALUE')
+const windowsAskpassScriptContent = (): string => `$value = [Environment]::GetEnvironmentVariable('VARIN_SSH_ASKPASS_VALUE')
 if ($null -ne $value) {
   [Console]::Out.WriteLine($value)
 }
@@ -447,7 +447,7 @@ const waitLocalForwardReady = async (localPort: number): Promise<void> => {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
     pollMs = Math.min(pollMs * 2, 2000);
   }
-  throw new Error('Timed out waiting for forwarded Piarium health');
+  throw new Error('Timed out waiting for forwarded Varin health');
 };
 
 const parseVersionToken = (raw: unknown): string | null => {
@@ -475,7 +475,7 @@ export class ElectronSshManager {
   readonly settingsFilePath: string;
   readonly settingsStore: SettingsStore;
   readonly appVersion: string;
-  readonly emit: (event: 'piarium:ssh-instance-status', detail: DesktopSshInstanceStatus) => void;
+  readonly emit: (event: 'varin:ssh-instance-status', detail: DesktopSshInstanceStatus) => void;
   readonly platform: NodeJS.Platform;
   readonly spawnProcess: SpawnSsh;
   readonly logs: Map<string, string[]>;
@@ -489,7 +489,7 @@ export class ElectronSshManager {
 
   constructor(options: {
     appVersion: string;
-    emit(event: 'piarium:ssh-instance-status', detail: DesktopSshInstanceStatus): void;
+    emit(event: 'varin:ssh-instance-status', detail: DesktopSshInstanceStatus): void;
     platform?: NodeJS.Platform;
     settingsFilePath: string;
     settingsStore?: SettingsStore;
@@ -527,7 +527,7 @@ export class ElectronSshManager {
       SSH_ASKPASS_REQUIRE: 'force',
       SSH_ASKPASS: auth.askpassPath,
       DISPLAY: '1',
-      ...(auth.sshPassword ? { PIARIUM_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
+      ...(auth.sshPassword ? { VARIN_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
     };
   }
 
@@ -917,7 +917,7 @@ export class ElectronSshManager {
     }
 
     const parsed = parseSshCommand(sshCommand);
-    const remotePiarium = recordOf(value.remotePiarium);
+    const remoteVarin = recordOf(value.remoteVarin);
     const localForward = recordOf(value.localForward);
     const auth = recordOf(value.auth);
     const seen = new Set<string>();
@@ -931,7 +931,7 @@ export class ElectronSshManager {
           })
       : [];
     const sshPassword = this.sanitizeStoredSecret(auth.sshPassword);
-    const piariumPassword = this.sanitizeStoredSecret(auth.piariumPassword);
+    const varinPassword = this.sanitizeStoredSecret(auth.varinPassword);
 
     return {
       id,
@@ -941,14 +941,14 @@ export class ElectronSshManager {
       connectionTimeoutSec: typeof value.connectionTimeoutSec === 'number' && Number.isFinite(value.connectionTimeoutSec) && value.connectionTimeoutSec > 0
         ? value.connectionTimeoutSec
         : DEFAULT_CONNECTION_TIMEOUT_SEC,
-      remotePiarium: {
-        mode: remotePiarium.mode === 'external' ? 'external' : 'managed',
-        keepRunning: remotePiarium.keepRunning !== false,
-        ...(typeof remotePiarium.preferredPort === 'number' && Number.isFinite(remotePiarium.preferredPort) ? { preferredPort: remotePiarium.preferredPort } : {}),
-        installMethod: typeof remotePiarium.installMethod === 'string' && ['npm', 'bun', 'download_release', 'upload_bundle'].includes(remotePiarium.installMethod)
-          ? remotePiarium.installMethod
+      remoteVarin: {
+        mode: remoteVarin.mode === 'external' ? 'external' : 'managed',
+        keepRunning: remoteVarin.keepRunning !== false,
+        ...(typeof remoteVarin.preferredPort === 'number' && Number.isFinite(remoteVarin.preferredPort) ? { preferredPort: remoteVarin.preferredPort } : {}),
+        installMethod: typeof remoteVarin.installMethod === 'string' && ['npm', 'bun', 'download_release', 'upload_bundle'].includes(remoteVarin.installMethod)
+          ? remoteVarin.installMethod
           : 'bun',
-        uploadBundleOverSsh: Boolean(remotePiarium.uploadBundleOverSsh),
+        uploadBundleOverSsh: Boolean(remoteVarin.uploadBundleOverSsh),
       },
       localForward: {
         bindHost: sanitizeBindHost(localForward.bindHost),
@@ -956,7 +956,7 @@ export class ElectronSshManager {
       },
       auth: {
         ...(sshPassword ? { sshPassword } : {}),
-        ...(piariumPassword ? { piariumPassword } : {}),
+        ...(varinPassword ? { varinPassword } : {}),
       },
       portForwards,
     };
@@ -984,8 +984,8 @@ export class ElectronSshManager {
     });
   }
 
-  async issueClientToken(localUrl: string, piariumPassword: string | null, instanceId = 'connection'): Promise<string> {
-    const password = typeof piariumPassword === 'string' ? piariumPassword.trim() : '';
+  async issueClientToken(localUrl: string, varinPassword: string | null, instanceId = 'connection'): Promise<string> {
+    const password = typeof varinPassword === 'string' ? varinPassword.trim() : '';
     const dedupeKey = `desktop-ssh-managed:${instanceId}`;
     const settings = this.settingsStore.readSync();
     const retained = (Array.isArray(settings.desktopHosts) ? settings.desktopHosts : [])
@@ -1011,14 +1011,14 @@ export class ElectronSshManager {
           password,
           trustDevice: true,
           issueClientToken: true,
-          clientLabel: 'Piarium Desktop SSH',
+          clientLabel: 'Varin Desktop SSH',
           clientKind: 'desktop-ssh-coordinator',
           clientProfile: 'full-control',
           dedupeKey,
         }),
       });
       if (!loginResponse.ok) {
-        throw new Error(`Configured Piarium UI password was rejected by forwarded server (status ${loginResponse.status})`);
+        throw new Error(`Configured Varin UI password was rejected by forwarded server (status ${loginResponse.status})`);
       }
 
       const payload = await loginResponse.json().catch(() => null);
@@ -1037,7 +1037,7 @@ export class ElectronSshManager {
         ...(cookie ? { Cookie: cookie } : {}),
       },
       body: JSON.stringify({
-        label: 'Piarium Desktop SSH',
+        label: 'Varin Desktop SSH',
         clientKind: 'desktop-ssh-coordinator',
         profile: 'full-control',
         dedupeKey,
@@ -1157,8 +1157,8 @@ export class ElectronSshManager {
     throw new Error('SSH ControlMaster connection timed out');
   }
 
-  configuredPiariumPassword(instance: SshInstance): string | null {
-    const secret = instance?.auth?.piariumPassword;
+  configuredVarinPassword(instance: SshInstance): string | null {
+    const secret = instance?.auth?.varinPassword;
     return secret?.enabled && typeof secret.value === 'string' && secret.value.trim() ? secret.value.trim() : null;
   }
 
@@ -1171,29 +1171,29 @@ export class ElectronSshManager {
     }
   }
 
-  async currentRemotePiariumVersion(parsed: ParsedSshCommand, controlPath: string): Promise<string | null> {
+  async currentRemoteVarinVersion(parsed: ParsedSshCommand, controlPath: string): Promise<string | null> {
     try {
-      const output = await this.runRemoteCommand(parsed, controlPath, 'piarium --version 2>/dev/null || true');
+      const output = await this.runRemoteCommand(parsed, controlPath, 'varin --version 2>/dev/null || true');
       return parseVersionToken(output);
     } catch {
       return null;
     }
   }
 
-  async installPiariumManaged(parsed: ParsedSshCommand, controlPath: string, version: string, preferred: string): Promise<void> {
+  async installVarinManaged(parsed: ParsedSshCommand, controlPath: string, version: string, preferred: string): Promise<void> {
     const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
     const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
     const commands = [];
 
     if (preferred === 'bun') {
-      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @varin/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @varin/web@${version}`);
     } else if (preferred === 'npm') {
-      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
-      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @varin/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @varin/web@${version}`);
     } else {
-      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @varin/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @varin/web@${version}`);
     }
 
     if (commands.length === 0) {
@@ -1209,12 +1209,12 @@ export class ElectronSshManager {
         lastError = error;
       }
     }
-    throw lastError || new Error('Failed to install Piarium on remote host');
+    throw lastError || new Error('Failed to install Varin on remote host');
   }
 
-  async probeRemoteSystemInfo(parsed: ParsedSshCommand, controlPath: string, port: number, piariumPassword: string | null): Promise<Record<string, unknown>> {
-    const authPayload = piariumPassword ? JSON.stringify({ password: piariumPassword }) : '{}';
-    const authEnabled = piariumPassword ? '1' : '0';
+  async probeRemoteSystemInfo(parsed: ParsedSshCommand, controlPath: string, port: number, varinPassword: string | null): Promise<Record<string, unknown>> {
+    const authPayload = varinPassword ? JSON.stringify({ password: varinPassword }) : '{}';
+    const authEnabled = varinPassword ? '1' : '0';
     const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
@@ -1225,16 +1225,16 @@ export class ElectronSshManager {
 
     if (isLivenessHttpStatus(infoStatus)) {
       if (isAuthHttpStatus(infoStatus)) {
-        if (piariumPassword && authStatus !== 200) {
-          throw new Error(`Remote Piarium requires UI authentication and configured password was rejected (auth status ${authStatus})`);
+        if (varinPassword && authStatus !== 200) {
+          throw new Error(`Remote Varin requires UI authentication and configured password was rejected (auth status ${authStatus})`);
         }
         if (isLivenessHttpStatus(healthStatus)) return {};
-        throw new Error('Remote Piarium requires UI authentication on /api/system/info; configure Piarium UI password');
+        throw new Error('Remote Varin requires UI authentication on /api/system/info; configure Varin UI password');
       }
     } else if (isLivenessHttpStatus(healthStatus)) {
       return {};
     } else {
-      throw new Error(`Remote Piarium probe failed (info status ${infoStatus}, health status ${healthStatus})`);
+      throw new Error(`Remote Varin probe failed (info status ${infoStatus}, health status ${healthStatus})`);
     }
 
     try {
@@ -1244,9 +1244,9 @@ export class ElectronSshManager {
     }
   }
 
-  async remoteServerRunning(parsed: ParsedSshCommand, controlPath: string, port: number, piariumPassword: string | null): Promise<boolean> {
+  async remoteServerRunning(parsed: ParsedSshCommand, controlPath: string, port: number, varinPassword: string | null): Promise<boolean> {
     try {
-      await this.probeRemoteSystemInfo(parsed, controlPath, port, piariumPassword);
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, varinPassword);
       return true;
     } catch {
       return false;
@@ -1254,12 +1254,12 @@ export class ElectronSshManager {
   }
 
   async startRemoteServerManaged(parsed: ParsedSshCommand, controlPath: string, instance: SshInstance, desiredPort: number): Promise<number> {
-    let envPrefix = 'PIARIUM_RUNTIME=ssh-remote';
-    const secret = this.configuredPiariumPassword(instance);
+    let envPrefix = 'VARIN_RUNTIME=ssh-remote';
+    const secret = this.configuredVarinPassword(instance);
     if (secret) {
-      envPrefix += ` PIARIUM_UI_PASSWORD=${shellQuote(secret)}`;
+      envPrefix += ` VARIN_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} piarium serve --host 127.0.0.1 --port ${desiredPort}`);
+    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} varin serve --host 127.0.0.1 --port ${desiredPort}`);
     const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
     return port || desiredPort;
   }
@@ -1318,40 +1318,40 @@ export class ElectronSshManager {
   }
 
   async ensureRemoteServer(instance: SshInstance, parsed: ParsedSshCommand, controlPath: string): Promise<{ remotePort: number; startedByUs: boolean }> {
-    if (instance.remotePiarium.mode === 'external') {
-      if (!instance.remotePiarium.preferredPort) {
-        throw new Error('External mode requires a preferred remote Piarium port');
+    if (instance.remoteVarin.mode === 'external') {
+      if (!instance.remoteVarin.preferredPort) {
+        throw new Error('External mode requires a preferred remote Varin port');
       }
-      const port = instance.remotePiarium.preferredPort;
-      this.setStatus(instance.id, 'server_detecting', 'Probing external Piarium server', null, null, port, false, 0, false);
-      await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredPiariumPassword(instance));
+      const port = instance.remoteVarin.preferredPort;
+      this.setStatus(instance.id, 'server_detecting', 'Probing external Varin server', null, null, port, false, 0, false);
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredVarinPassword(instance));
       return { remotePort: port, startedByUs: false };
     }
 
-    this.setStatus(instance.id, 'remote_probe', 'Checking remote Piarium installation');
-    const installedVersion = await this.currentRemotePiariumVersion(parsed, controlPath);
+    this.setStatus(instance.id, 'remote_probe', 'Checking remote Varin installation');
+    const installedVersion = await this.currentRemoteVarinVersion(parsed, controlPath);
     if (!installedVersion) {
-      this.setStatus(instance.id, 'installing', 'Installing Piarium on remote host');
-      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
+      this.setStatus(instance.id, 'installing', 'Installing Varin on remote host');
+      await this.installVarinManaged(parsed, controlPath, this.appVersion, instance.remoteVarin.installMethod);
     } else if (installedVersion !== this.appVersion) {
-      this.setStatus(instance.id, 'updating', `Updating remote Piarium from ${installedVersion} to ${this.appVersion}`);
-      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
+      this.setStatus(instance.id, 'updating', `Updating remote Varin from ${installedVersion} to ${this.appVersion}`);
+      await this.installVarinManaged(parsed, controlPath, this.appVersion, instance.remoteVarin.installMethod);
     }
 
-    this.setStatus(instance.id, 'server_detecting', 'Detecting managed Piarium server');
-    let remotePort = instance.remotePiarium.preferredPort || null;
+    this.setStatus(instance.id, 'server_detecting', 'Detecting managed Varin server');
+    let remotePort = instance.remoteVarin.preferredPort || null;
     let startedByUs = false;
-    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
+    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredVarinPassword(instance)))) {
       remotePort = null;
     }
     if (!remotePort) {
-      this.setStatus(instance.id, 'server_starting', 'Starting managed Piarium server');
-      const desiredPort = instance.remotePiarium.preferredPort || randomPortCandidate(instance.id);
+      this.setStatus(instance.id, 'server_starting', 'Starting managed Varin server');
+      const desiredPort = instance.remoteVarin.preferredPort || randomPortCandidate(instance.id);
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
       startedByUs = true;
     }
-    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
-      throw new Error('Managed Piarium server failed to become reachable');
+    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredVarinPassword(instance)))) {
+      throw new Error('Managed Varin server failed to become reachable');
     }
     return { remotePort, startedByUs };
   }
@@ -1367,7 +1367,7 @@ export class ElectronSshManager {
     this.sessions.delete(id);
 
     if (session) {
-      if (session.startedByUs && session.remotePort && session.instance.remotePiarium.mode === 'managed' && !session.instance.remotePiarium.keepRunning) {
+      if (session.startedByUs && session.remotePort && session.instance.remoteVarin.mode === 'managed' && !session.instance.remoteVarin.keepRunning) {
         const localUrl = session.localPort ? `http://127.0.0.1:${session.localPort}` : null;
         const lifecycle = localUrl ? await this.managedExecutionLifecycle(localUrl, session.clientToken) : null;
         if (lifecycle && !lifecycle.keepAliveRequired && lifecycle.activeJobs === 0) {
@@ -1377,8 +1377,8 @@ export class ElectronSshManager {
             id,
             'INFO',
             lifecycle
-              ? `Leaving remote Piarium running to supervise ${lifecycle.activeJobs} accepted managed job(s)`
-              : 'Leaving remote Piarium running because managed-job lifecycle could not be confirmed',
+              ? `Leaving remote Varin running to supervise ${lifecycle.activeJobs} accepted managed job(s)`
+              : 'Leaving remote Varin running because managed-job lifecycle could not be confirmed',
           );
         }
       }
@@ -1509,7 +1509,7 @@ export class ElectronSshManager {
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
-    const clientToken = await this.issueClientToken(localUrl, this.configuredPiariumPassword(instance), instance.id);
+    const clientToken = await this.issueClientToken(localUrl, this.configuredVarinPassword(instance), instance.id);
     session.clientToken = clientToken;
     await this.updateHostRuntime(id, label, localUrl, clientToken);
     if (instance.localForward?.preferredLocalPort !== localPort) {

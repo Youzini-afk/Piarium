@@ -1,4 +1,4 @@
-import { DocumentsError } from '@piarium/application-client';
+import { DocumentsError } from '@varin/application-client';
 
 export const requireWorkspaceEpoch = (epoch: number | undefined): number => {
   if (!Number.isSafeInteger(epoch) || Number(epoch) < 1) {

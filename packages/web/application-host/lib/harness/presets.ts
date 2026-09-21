@@ -1,5 +1,5 @@
 /**
- * Execution presets — re-exported from @piarium/protocol.
+ * Execution presets — re-exported from @varin/protocol.
  *
  * Design: agent-harness.md §9.2.2 / D-285
  * Plan: agent-harness-plan.md §3.18A
@@ -19,4 +19,4 @@ export {
   isPresetId,
   resolvePresets,
   buildTeamPrompt,
-} from "@piarium/protocol";
+} from "@varin/protocol";

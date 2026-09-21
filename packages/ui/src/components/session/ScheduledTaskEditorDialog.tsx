@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
+import type { ModelDescriptor, ThinkingLevel } from '@varin/protocol';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';

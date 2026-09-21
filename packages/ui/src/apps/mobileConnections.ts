@@ -23,12 +23,12 @@ import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/c
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@varin/application-client';
 
-const MOBILE_CONNECTIONS_STORAGE_KEY = 'piarium.mobile.connections.v1';
-const MOBILE_SECURE_STORAGE_PREFIX = 'piarium.mobile.';
-const MOBILE_DEVICE_ID_STORAGE_KEY = 'piarium.mobile.deviceId';
+const MOBILE_CONNECTIONS_STORAGE_KEY = 'varin.mobile.connections.v1';
+const MOBILE_SECURE_STORAGE_PREFIX = 'varin.mobile.';
+const MOBILE_DEVICE_ID_STORAGE_KEY = 'varin.mobile.deviceId';
 
 // Stable per-install identifier for this phone, persisted in localStorage. Used
 // as the client dedupe key so every way this device authenticates to a given
@@ -1473,9 +1473,9 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       const redeemBody = JSON.stringify({
         pairingId: payload.pairingId,
         secret: payload.secret,
-        clientLabel: 'Piarium Mobile',
+        clientLabel: 'Varin Mobile',
         clientKind: 'mobile',
-        deviceName: 'Piarium Mobile',
+        deviceName: 'Varin Mobile',
         devicePlatform: mobileDevicePlatform(),
         // Re-pairing this same phone reuses its one device record instead of
         // adding a duplicate row on the server.
@@ -1561,7 +1561,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         // Same dedupe key as pairing: re-authenticating after a token expires
         // reuses this phone's existing device record instead of duplicating it.
-        body: JSON.stringify({ password, trustDevice: true, issueClientToken: true, clientLabel: 'Piarium Mobile', clientKind: 'mobile', devicePlatform: mobileDevicePlatform(), dedupeKey: mobileClientDedupeKey() }),
+        body: JSON.stringify({ password, trustDevice: true, issueClientToken: true, clientLabel: 'Varin Mobile', clientKind: 'mobile', devicePlatform: mobileDevicePlatform(), dedupeKey: mobileClientDedupeKey() }),
       };
       logConnect('password:start', { transport: chosen.kind });
       const response = chosen.kind === 'relay'

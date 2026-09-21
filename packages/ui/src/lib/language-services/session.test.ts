@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type {
   DocumentsAPI,
   LanguageServicesAPI,
-  PiariumLanguageDocumentSyncRequest,
-} from '@piarium/application-client';
+  VarinLanguageDocumentSyncRequest,
+} from '@varin/application-client';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import {
   acquireLanguageDocument,
@@ -58,7 +58,7 @@ afterEach(() => {
 
 describe('language document synchronization', () => {
   test('serializes open and incremental edits while preserving each captured revision', async () => {
-    const requests: PiariumLanguageDocumentSyncRequest[] = [];
+    const requests: VarinLanguageDocumentSyncRequest[] = [];
     let releaseOpen: (() => void) | undefined;
     const openGate = new Promise<void>((resolve) => {
       releaseOpen = resolve;
@@ -72,7 +72,7 @@ describe('language document synchronization', () => {
         languageId: 'typescript',
       }),
       subscribe: () => ({ close() {} }),
-      syncDocument: async (request: PiariumLanguageDocumentSyncRequest) => {
+      syncDocument: async (request: VarinLanguageDocumentSyncRequest) => {
         activeRequests += 1;
         maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
         requests.push(request);
@@ -138,7 +138,7 @@ describe('language document synchronization', () => {
   });
 
   test('reopens the current dirty buffer exactly once when the provider generation changes', async () => {
-    const requests: PiariumLanguageDocumentSyncRequest[] = [];
+    const requests: VarinLanguageDocumentSyncRequest[] = [];
     let listener: Parameters<LanguageServicesAPI['subscribe']>[1] | undefined;
     let generation = 1;
     const language = {
@@ -151,7 +151,7 @@ describe('language document synchronization', () => {
         listener = next;
         return { close() {} };
       },
-      syncDocument: async (request: PiariumLanguageDocumentSyncRequest) => {
+      syncDocument: async (request: VarinLanguageDocumentSyncRequest) => {
         requests.push(request);
         return {
           status: 'synced' as const,

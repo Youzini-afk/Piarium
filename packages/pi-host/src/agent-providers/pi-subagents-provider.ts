@@ -12,7 +12,7 @@ import type {
   PiAgentProviderActionResult,
   PiAgentProviderDescriptor,
   PiAgentSourceScope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { agentProviderEntityId } from "./identity.js";
 import type {
@@ -454,7 +454,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     );
     const probe = await this.#execute({
       action: "get",
-      agent: "__piarium_catalog_probe__",
+      agent: "__varin_catalog_probe__",
       agentScope: "both",
     });
     const missingNames = parseAvailableNames(probe.message).filter((name) => !activeNames.has(name));
@@ -513,7 +513,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
         agentScope: scope,
         // pi-subagents currently chooses the create destination from config.scope,
         // while agentScope controls discovery and other mutations. Keep the
-        // trusted top-level Piarium scope authoritative in both channels.
+        // trusted top-level Varin scope authoritative in both channels.
         config: createConfigForScope(
           record.config,
           scope,
@@ -557,7 +557,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     if (!this.#tool) return { message: "pi-subagents is unavailable", success: false };
     const wrapped = wrapRegisteredTool(this.#tool, this.#context.session.extensionRunner);
     try {
-      return toolResultText(await wrapped.execute(`piarium-${randomUUID()}`, params as never));
+      return toolResultText(await wrapped.execute(`varin-${randomUUID()}`, params as never));
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : String(error),

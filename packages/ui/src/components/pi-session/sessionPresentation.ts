@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { normalizePath } from '@/lib/pathNormalization';
 
 export interface PiSessionNode {

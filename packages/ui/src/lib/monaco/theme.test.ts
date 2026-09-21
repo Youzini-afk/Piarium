@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'vitest';
 
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { createPiariumMonacoTheme, monacoThemeName } from './theme';
+import { createVarinMonacoTheme, monacoThemeName } from './theme';
 
-describe('Piarium Monaco theme projection', () => {
+describe('Varin Monaco theme projection', () => {
   test.each([false, true])('projects semantic tokens for the %s dark preference', (prefersDark) => {
     const theme = getDefaultTheme(prefersDark);
-    const projected = createPiariumMonacoTheme(theme);
+    const projected = createVarinMonacoTheme(theme);
 
     expect(projected.base).toBe(prefersDark ? 'vs-dark' : 'vs');
     expect(projected.colors['editor.background']).toBe(theme.colors.surface.background);
@@ -27,14 +27,14 @@ describe('Piarium Monaco theme projection', () => {
     expect(monacoThemeName({
       ...theme,
       metadata: { ...theme.metadata, id: 'custom theme/one' },
-    })).toBe('piarium-custom-theme-one');
-    createPiariumMonacoTheme(theme);
+    })).toBe('varin-custom-theme-one');
+    createVarinMonacoTheme(theme);
     expect(theme).toEqual(original);
   });
 
-  test('uses Monaco high-contrast primitives only when the Piarium theme declares that contract', () => {
+  test('uses Monaco high-contrast primitives only when the Varin theme declares that contract', () => {
     const theme = getDefaultTheme(true);
-    expect(createPiariumMonacoTheme({
+    expect(createVarinMonacoTheme({
       ...theme,
       metadata: { ...theme.metadata, tags: [...theme.metadata.tags, 'high-contrast'] },
     }).base).toBe('hc-black');

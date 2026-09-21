@@ -2,12 +2,12 @@ import type {
   PiAssistantContent,
   PiAssistantMessage,
   PiSessionMessageEntry,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
-  buildPiariumDiagnosticsReport,
-  collectPiariumDiagnostics,
-} from '@/lib/piariumDiagnostics';
+  buildVarinDiagnosticsReport,
+  collectVarinDiagnostics,
+} from '@/lib/varinDiagnostics';
 import { usePiSessionStore, type PiSessionViewState } from '@/stores/usePiSessionStore';
 
 const currentSessionRecord = (): PiSessionViewState | null => {
@@ -75,18 +75,18 @@ const getLastAssistantMessage = () => {
   const entries = assistantEntries();
   const candidate = entries.at(-1);
   if (!candidate) {
-    console.info('[Piarium debug] No assistant message is loaded for the active Pi session.');
+    console.info('[Varin debug] No assistant message is loaded for the active Pi session.');
     return null;
   }
   const summary = summarizeAssistant(candidate.entry, candidate.message);
-  console.info('[Piarium debug] Last assistant message:', summary);
+  console.info('[Varin debug] Last assistant message:', summary);
   return summary;
 };
 
-const piariumDebug = {
+const varinDebug = {
   getCurrentSession() {
     const record = currentSessionRecord();
-    console.info('[Piarium debug] Current session:', record);
+    console.info('[Varin debug] Current session:', record);
     return record;
   },
 
@@ -103,14 +103,14 @@ const piariumDebug = {
           };
         })
       : messages;
-    console.info(`[Piarium debug] ${messages.length} messages loaded for the active branch.`, result);
+    console.info(`[Varin debug] ${messages.length} messages loaded for the active branch.`, result);
     return result;
   },
 
   getSessionEntries(scope: 'all' | 'branch' = 'branch') {
     const record = currentSessionRecord();
     const result = scope === 'all' ? record?.allEntries ?? null : record?.branchEntries ?? null;
-    console.info(`[Piarium debug] ${scope} entries:`, result);
+    console.info(`[Varin debug] ${scope} entries:`, result);
     return result;
   },
 
@@ -118,7 +118,7 @@ const piariumDebug = {
     const result = assistantEntries()
       .filter(({ message }) => isEmptyAssistantMessage(message))
       .map(({ entry, message }) => summarizeAssistant(entry, message));
-    console.info(`[Piarium debug] Found ${result.length} empty assistant messages.`, result);
+    console.info(`[Varin debug] Found ${result.length} empty assistant messages.`, result);
     return result;
   },
 
@@ -126,7 +126,7 @@ const piariumDebug = {
     const entries = assistantEntries();
     const candidate = entries.at(-1);
     const problematic = candidate ? isEmptyAssistantMessage(candidate.message) : false;
-    console.info('[Piarium debug] Last assistant message empty:', problematic);
+    console.info('[Varin debug] Last assistant message empty:', problematic);
     return problematic;
   },
 
@@ -143,30 +143,30 @@ const piariumDebug = {
       snapshot: record?.snapshot ?? null,
       toolExecutions: record?.toolExecutions ?? {},
     };
-    console.info('[Piarium debug] Runtime state:', result);
+    console.info('[Varin debug] Runtime state:', result);
     return result;
   },
 
   async getAppStatus() {
-    const result = await collectPiariumDiagnostics();
-    console.info('[Piarium debug] App diagnostics:', result);
+    const result = await collectVarinDiagnostics();
+    console.info('[Varin debug] App diagnostics:', result);
     return result;
   },
 
-  buildDiagnosticsReport: buildPiariumDiagnosticsReport,
+  buildDiagnosticsReport: buildVarinDiagnosticsReport,
 
   copyTextToClipboard,
 
   async copyDiagnosticsReport() {
-    const report = await buildPiariumDiagnosticsReport();
+    const report = await buildVarinDiagnosticsReport();
     const result = await copyTextToClipboard(report);
     return { ...result, report } as const;
   },
 
   showRetryHelp() {
-    console.info('[Piarium debug] If a Pi response is empty or interrupted:');
-    console.info('1. Inspect __piariumDebug.getRuntimeState() and getLastAssistantMessage().');
-    console.info('2. Open Piarium diagnostics with Ctrl/Cmd+Shift+O and check provider/resource errors.');
+    console.info('[Varin debug] If a Pi response is empty or interrupted:');
+    console.info('1. Inspect __varinDebug.getRuntimeState() and getLastAssistantMessage().');
+    console.info('2. Open Varin diagnostics with Ctrl/Cmd+Shift+O and check provider/resource errors.');
     console.info('3. Retry the turn, or select another configured Pi provider/model.');
   },
 
@@ -184,13 +184,13 @@ const piariumDebug = {
           stopReason: last.message.stopReason,
         }
       : null;
-    console.info('[Piarium debug] Completion status:', result);
+    console.info('[Varin debug] Completion status:', result);
     return result;
   },
 };
 
 if (typeof window !== 'undefined') {
-  window.__piariumDebug = piariumDebug;
+  window.__varinDebug = varinDebug;
 
   window.addEventListener('error', (event) => {
     try {

@@ -4,8 +4,8 @@ import {
   type SurfaceContextProvider,
   type SurfaceOwnerHandle,
   type SurfaceOwnerIdentity,
-} from '@piarium/extension-surface';
-import type { PiariumApplicationSurface, PiariumContextValue } from '@piarium/extension-contract';
+} from '@varin/extension-surface';
+import type { VarinApplicationSurface, VarinContextValue } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   batchWorkbenchContextKeyUpdates,
@@ -16,9 +16,9 @@ import {
 
 const FALLBACK_HOST_ID = '00000000-0000-4000-8000-000000000000';
 
-const readSurface = (): PiariumApplicationSurface => {
+const readSurface = (): VarinApplicationSurface => {
   if (typeof window === 'undefined') return 'web';
-  if (window.__PIARIUM_SURFACE__ === 'mobile') return 'mobile';
+  if (window.__VARIN_SURFACE__ === 'mobile') return 'mobile';
   const runtime = getRegisteredRuntimeAPIs()?.runtime;
   if (runtime?.isDesktop) return 'desktop';
   return 'web';
@@ -39,8 +39,8 @@ const workbenchContextProvider: SurfaceContextProvider = {
   batch(operation): void {
     batchWorkbenchContextKeyUpdates(operation);
   },
-  getContext(): ReadonlyMap<string, PiariumContextValue> {
-    return getWorkbenchContextKeyStore() as ReadonlyMap<string, PiariumContextValue>;
+  getContext(): ReadonlyMap<string, VarinContextValue> {
+    return getWorkbenchContextKeyStore() as ReadonlyMap<string, VarinContextValue>;
   },
   subscribe(keys: readonly string[], listener: () => void): () => void {
     const unsubscribers = keys.map((key) => subscribeWorkbenchContextKey(key, listener));
@@ -51,7 +51,7 @@ const workbenchContextProvider: SurfaceContextProvider = {
   },
 };
 
-export const piariumSurfaceRuntime = new SurfaceExtensionRuntime({
+export const varinSurfaceRuntime = new SurfaceExtensionRuntime({
   surface: readSurface(),
   contextProvider: workbenchContextProvider,
 });
@@ -110,11 +110,11 @@ export const createBuiltinSurfaceController = (
         generation: requestedGeneration,
       };
       if (!requestedEnabled) {
-        await piariumSurfaceRuntime.deactivate(owner);
+        await varinSurfaceRuntime.deactivate(owner);
         if (desiredRevision === requestedDesiredRevision && generation === requestedGeneration) handle = null;
         return;
       }
-      const activated = await piariumSurfaceRuntime.activate({ owner }, options.activate);
+      const activated = await varinSurfaceRuntime.activate({ owner }, options.activate);
       if (desiredRevision === requestedDesiredRevision && generation === requestedGeneration) handle = activated;
     });
     transition = next;

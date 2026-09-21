@@ -1,5 +1,5 @@
-import type { HostMethodParams } from '@piarium/protocol';
-import type { PiRuntimeBroker } from '@piarium/runtime-broker';
+import type { HostMethodParams } from '@varin/protocol';
+import type { PiRuntimeBroker } from '@varin/runtime-broker';
 import type { ScheduledTask, ScheduledTaskExecution } from '../projects/project-config.js';
 import type { SessionSettleOutcome } from './session-settle.js';
 

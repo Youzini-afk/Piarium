@@ -15,12 +15,12 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { splashCubeMarkup } from '../../packages/ui/src/components/ui/piarium-splash-cube';
-import { splashGroundScript } from '../../packages/ui/src/components/ui/piarium-splash-canvas';
+import { splashCubeMarkup } from '../../packages/ui/src/components/ui/varin-splash-cube';
+import { splashGroundScript } from '../../packages/ui/src/components/ui/varin-splash-canvas';
 import {
-  PIARIUM_SPLASH_COLORS,
+  VARIN_SPLASH_COLORS,
   splashPlaneCss,
-} from '../../packages/ui/src/components/ui/piarium-splash-lattice';
+} from '../../packages/ui/src/components/ui/varin-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '../../packages/ui/src/lib/splash';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
@@ -57,11 +57,11 @@ const patch = (file: string, kind: keyof typeof SENTINELS, content: string): voi
 
 const groundScript = splashGroundScript(INITIAL_SPLASH_IDS.ground);
 
-patch('packages/web/index.html', 'css', splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true }).trim());
+patch('packages/web/index.html', 'css', splashPlaneCss(VARIN_SPLASH_COLORS, { withMark: true }).trim());
 patch('packages/web/index.html', 'mark', splashCubeMarkup());
 patch('packages/web/index.html', 'js', groundScript);
 
 // Same palette, no cube. The mark's ink goes unused rather than being a separate palette, because
 // `withMark: false` emits no rule that could use it.
-patch('packages/web/mini-chat.html', 'css', splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false }).trim());
+patch('packages/web/mini-chat.html', 'css', splashPlaneCss(VARIN_SPLASH_COLORS, { withMark: false }).trim());
 patch('packages/web/mini-chat.html', 'js', groundScript);

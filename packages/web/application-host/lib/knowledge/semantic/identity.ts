@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { remoteEmbeddingSpaceParts } from "@piarium/protocol";
+import { remoteEmbeddingSpaceParts } from "@varin/protocol";
 import { CATALOG_EXTRACTOR_VERSION } from "../symbols.js";
 
 export const SEMANTIC_CHUNKER_VERSION = 3;

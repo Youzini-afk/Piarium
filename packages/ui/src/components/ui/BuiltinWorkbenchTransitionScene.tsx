@@ -1,7 +1,7 @@
 import React from 'react';
-import { PiariumSplash } from '@/components/ui/PiariumSplash';
+import { VarinSplash } from '@/components/ui/VarinSplash';
 import { useI18n } from '@/lib/i18n';
-import { usePiariumExtensionCatalog } from '@/lib/extensions/catalog-store';
+import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import type { WorkbenchTransitionSceneController } from '@/lib/workbench/profile-transition';
 
@@ -14,7 +14,7 @@ export const BuiltinWorkbenchTransitionScene: React.FC<BuiltinWorkbenchTransitio
   transition,
 }) => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const frame = React.useSyncExternalStore(
     transition.subscribe,
     transition.getSnapshot,
@@ -27,7 +27,7 @@ export const BuiltinWorkbenchTransitionScene: React.FC<BuiltinWorkbenchTransitio
     : t('splash.switching');
 
   return (
-    <PiariumSplash
+    <VarinSplash
       mode="switch"
       announce={false}
       direction={frame.direction}

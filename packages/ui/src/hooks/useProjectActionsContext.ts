@@ -1,7 +1,7 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import type { PiariumProjectRef as ProjectRef } from '@/lib/project-config';
+import type { VarinProjectRef as ProjectRef } from '@/lib/project-config';
 
 export interface ProjectActionsContext {
   projectRef: ProjectRef;

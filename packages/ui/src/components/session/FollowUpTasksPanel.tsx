@@ -1,12 +1,12 @@
 import * as React from 'react';
-import type { FollowUpDefinitionView } from '@piarium/protocol';
+import type { FollowUpDefinitionView } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { fetchFollowUps, postFollowUpAction } from '@/lib/followUpsApi';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
@@ -52,7 +52,7 @@ function FollowUpTasksList({ createOpen = false, onCreateOpenChange }: Props) {
   React.useEffect(() => {
     mounted.current = true;
     void refresh();
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'harness-experiment-changed' && event.fact === 'followup') void refresh();
     });
     return () => {

@@ -11,57 +11,57 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
   {
     name: 'pi-subagents',
     source: 'npm:pi-subagents',
-    descriptionKey: 'settings.piarium.plugins.package.subagents',
+    descriptionKey: 'settings.varin.plugins.package.subagents',
   },
   {
     name: 'pi-background-tasks',
     source: 'npm:pi-background-tasks',
-    descriptionKey: 'settings.piarium.plugins.package.backgroundTasks',
+    descriptionKey: 'settings.varin.plugins.package.backgroundTasks',
     workbench: 'fleet',
   },
   {
     name: '@cortexkit/pi-magic-context',
     source: 'npm:@cortexkit/pi-magic-context',
-    descriptionKey: 'settings.piarium.plugins.package.magicContext',
+    descriptionKey: 'settings.varin.plugins.package.magicContext',
   },
   {
     name: 'pi-openai-codex-compat',
     source: 'npm:pi-openai-codex-compat',
-    descriptionKey: 'settings.piarium.plugins.package.openaiCodexCompat',
+    descriptionKey: 'settings.varin.plugins.package.openaiCodexCompat',
   },
   {
     name: 'pi-observational-memory',
     source: 'npm:pi-observational-memory',
-    descriptionKey: 'settings.piarium.plugins.package.observationalMemory',
+    descriptionKey: 'settings.varin.plugins.package.observationalMemory',
   },
   {
     name: 'context-mode',
     source: 'npm:context-mode',
-    descriptionKey: 'settings.piarium.plugins.package.contextMode',
+    descriptionKey: 'settings.varin.plugins.package.contextMode',
   },
   {
     name: '@cortexkit/aft-pi',
     source: 'npm:@cortexkit/aft-pi',
-    descriptionKey: 'settings.piarium.plugins.package.aft',
+    descriptionKey: 'settings.varin.plugins.package.aft',
   },
   {
     name: 'pi-lens',
     source: 'npm:pi-lens',
-    descriptionKey: 'settings.piarium.plugins.package.piLens',
+    descriptionKey: 'settings.varin.plugins.package.piLens',
   },
   {
     name: 'pi-hermes-memory',
     source: 'npm:pi-hermes-memory',
-    descriptionKey: 'settings.piarium.plugins.package.hermesMemory',
+    descriptionKey: 'settings.varin.plugins.package.hermesMemory',
   },
   {
     name: 'pi-rtk-optimizer',
     source: 'npm:pi-rtk-optimizer',
-    descriptionKey: 'settings.piarium.plugins.package.rtk',
+    descriptionKey: 'settings.varin.plugins.package.rtk',
   },
   {
     name: 'pi-web-access',
     source: 'npm:pi-web-access',
-    descriptionKey: 'settings.piarium.plugins.package.webAccess',
+    descriptionKey: 'settings.varin.plugins.package.webAccess',
   },
 ];

@@ -322,6 +322,6 @@ export const usePreferencesStore = create<PreferencesState>()(
         }),
       },
     ),
-    { name: 'PiariumPreferences' },
+    { name: 'VarinPreferences' },
   ),
 );

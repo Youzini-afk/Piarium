@@ -103,9 +103,9 @@ export const McpQuickPopover: React.FC = () => {
               </Popover.Title>
               {status ? (
                 <div className="mt-2 grid grid-cols-3 gap-2 typography-micro text-muted-foreground">
-                  <span>{t('settings.piarium.mcp.runtime.connected')} <strong className="text-foreground">{status.connectedCount}</strong></span>
-                  <span>{t('settings.piarium.mcp.runtime.tools')} <strong className="text-foreground">{status.totalTools}</strong></span>
-                  <span>{t('settings.piarium.mcp.runtime.resources')} <strong className="text-foreground">{status.totalResources}</strong></span>
+                  <span>{t('settings.varin.mcp.runtime.connected')} <strong className="text-foreground">{status.connectedCount}</strong></span>
+                  <span>{t('settings.varin.mcp.runtime.tools')} <strong className="text-foreground">{status.totalTools}</strong></span>
+                  <span>{t('settings.varin.mcp.runtime.resources')} <strong className="text-foreground">{status.totalResources}</strong></span>
                 </div>
               ) : null}
             </div>
@@ -122,7 +122,7 @@ export const McpQuickPopover: React.FC = () => {
                           <div className="truncate typography-ui-label text-foreground">{name}</div>
                           {live ? (
                             <div className="truncate typography-micro text-muted-foreground">
-                              {t('settings.piarium.mcp.runtime.serverCounts', {
+                              {t('settings.varin.mcp.runtime.serverCounts', {
                                 tools: live.toolCount,
                                 resources: live.resourceCount ?? 0,
                               })}
@@ -139,8 +139,8 @@ export const McpQuickPopover: React.FC = () => {
               ) : (
                 <p className="px-2 py-5 text-center typography-meta text-muted-foreground">
                   {currentSessionId
-                    ? catalogState.error ?? t('settings.piarium.mcp.runtime.noStatus')
-                    : t('settings.piarium.mcp.runtime.noSession')}
+                    ? catalogState.error ?? t('settings.varin.mcp.runtime.noStatus')
+                    : t('settings.varin.mcp.runtime.noSession')}
                 </p>
               )}
             </div>

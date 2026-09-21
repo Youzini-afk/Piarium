@@ -2,7 +2,7 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import path from 'node:path';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
-import { requestPiariumApi } from './cli-runtime.js';
+import { requestVarinApi } from './cli-runtime.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -103,12 +103,12 @@ const resolveProjectID = async (port: number, target: {
   if (requestedProjectID) return requestedProjectID;
   const directory = asNonEmptyString(target.directory);
   if (!directory) throw new TunnelCliError('Missing required --project or --dir.', EXIT_CODE.USAGE_ERROR);
-  const settings = await requestPiariumApi(port, '/api/config/settings', options);
+  const settings = await requestVarinApi(port, '/api/config/settings', options);
   const resolved = path.resolve(directory);
   const project = (Array.isArray(settings?.projects) ? settings.projects : [])
     .map(recordOf)
     .find((entry) => typeof entry.path === 'string' && path.resolve(entry.path) === resolved);
-  if (typeof project?.id !== 'string' || !project.id) throw new TunnelCliError(`No Piarium project found for ${resolved}.`, EXIT_CODE.USAGE_ERROR);
+  if (typeof project?.id !== 'string' || !project.id) throw new TunnelCliError(`No Varin project found for ${resolved}.`, EXIT_CODE.USAGE_ERROR);
   return project.id;
 };
 
@@ -160,7 +160,7 @@ const outputTasks = (options: CliOptions, tasks: unknown): void => {
 
 async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promise<void> {
   if (action === 'help') {
-    process.stdout.write(`Piarium Schedule Commands\n\nUSAGE:\n  piarium schedule status [OPTIONS]\n  piarium schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  piarium schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  piarium schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  piarium schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  piarium schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  piarium schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from piarium projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       Piarium server port\n  --timezone <zone>       IANA timezone for created tasks\n  --agent <id>            Pi agent role/profile instruction\n  --thinking <level>      Pi thinking level\n  --goal                  Treat the scheduled run as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
+    process.stdout.write(`Varin Schedule Commands\n\nUSAGE:\n  varin schedule status [OPTIONS]\n  varin schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  varin schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  varin schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  varin schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from varin projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       Varin server port\n  --timezone <zone>       IANA timezone for created tasks\n  --agent <id>            Pi agent role/profile instruction\n  --thinking <level>      Pi thinking level\n  --goal                  Treat the scheduled run as an end-to-end goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
     return;
   }
 
@@ -173,7 +173,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
   };
 
   if (action === 'status') {
-    const body = await requestPiariumApi(port, '/api/piarium/scheduled-tasks/status', options);
+    const body = await requestVarinApi(port, '/api/varin/scheduled-tasks/status', options);
     if (isJsonMode(options)) {
       printJson(body || {});
       return;
@@ -191,7 +191,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
 
   if (action === 'list') {
     const projectID = await resolveProjectID(port, target, options);
-    const body = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, options);
+    const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, options);
     outputTasks(options, body?.tasks);
     return;
   }
@@ -216,7 +216,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
       disabled: options.disabled === true,
     };
     const projectID = await resolveProjectID(port, target, options);
-    const body = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, {
+    const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, {
       ...options,
       method: 'PUT',
       body: JSON.stringify({ task: buildScheduledTask(input) }),
@@ -239,7 +239,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
   if (action === 'run') {
     const taskID = assertRequired(options.task, '--task');
     const projectID = await resolveProjectID(port, target, options);
-    const body = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks/${encodeURIComponent(taskID)}/run`, {
+    const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks/${encodeURIComponent(taskID)}/run`, {
       ...options,
       method: 'POST',
     });
@@ -260,7 +260,7 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
   if (action === 'delete') {
     const taskID = assertRequired(options.task, '--task');
     const projectID = await resolveProjectID(port, target, options);
-    const body = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks/${encodeURIComponent(taskID)}`, {
+    const body = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks/${encodeURIComponent(taskID)}`, {
       ...options,
       method: 'DELETE',
     });
@@ -282,10 +282,10 @@ async function scheduleCommand(options: CliOptions = {}, action = 'help'): Promi
     const taskID = assertRequired(options.task, '--task');
     const enabled = action === 'enable';
     const projectID = await resolveProjectID(port, target, options);
-    const current = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, options);
+    const current = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, options);
     const existing = (Array.isArray(current.tasks) ? current.tasks : []).map(recordOf).find((entry) => entry.id === taskID);
     if (!existing) throw new TunnelCliError(`Scheduled task not found: ${taskID}`, EXIT_CODE.USAGE_ERROR);
-    const update = await requestPiariumApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, {
+    const update = await requestVarinApi(port, `/api/projects/${encodeURIComponent(projectID)}/scheduled-tasks`, {
       ...options,
       method: 'PUT',
       body: JSON.stringify({ task: { ...existing, enabled } }),

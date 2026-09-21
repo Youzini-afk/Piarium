@@ -4,7 +4,7 @@ This is a small, manual paired replay set for diagnosing behavior changes and
 comparing configurations when useful. It is not an activation gate. The runner
 does not call a model or mutate user settings by itself.
 
-Each case comes from a real Piarium change and pins both the repository state
+Each case comes from a real Varin change and pins both the repository state
 before the task and the known delivered change. The reference commit is evidence
 for reviewers, not an exact-patch oracle: a different implementation can pass if
 it meets the acceptance criteria.
@@ -31,6 +31,6 @@ node scripts/harness-replay.mjs summary --results D:\replays
 
 `new-run` only writes a run record and prints the base commit, prompt, and
 acceptance criteria. Preparing a checkout and starting a paid model remain
-explicit operator actions. Piarium now has a session memory-mode override, so an
+explicit operator actions. Varin now has a session memory-mode override, so an
 operator can select `off`, `assist`, or `takeover` for a run without changing the
 global default; this recorder still does not mutate it automatically.

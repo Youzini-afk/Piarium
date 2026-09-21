@@ -4,7 +4,7 @@ import { Value } from "typebox/value";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createRelatedTool } from "../../src/harness/related-tool.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
-import { DEFAULT_HARNESS_SETTINGS } from "@piarium/protocol";
+import { DEFAULT_HARNESS_SETTINGS } from "@varin/protocol";
 import { HostServicesBridge as Bridge } from "../../src/harness/host-services-bridge.js";
 
 describe("Host-backed related tool", () => {

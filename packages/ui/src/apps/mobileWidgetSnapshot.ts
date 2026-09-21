@@ -1,17 +1,17 @@
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 import { useUIStore } from '@/stores/useUIStore';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 /**
  * Builds the lightweight session overview the native iOS widgets render (home medium,
  * lock-screen, Control Center). The widget process can't see the WebView, so the native
- * shell pulls this snapshot via `window.__PIARIUM_WIDGET_SNAPSHOT__()` on
+ * shell pulls this snapshot via `window.__VARIN_WIDGET_SNAPSHOT__()` on
  * background/activate, writes it to the shared App Group, and reloads the widget timelines
  * (see SceneDelegate.writeWidgetSnapshot). Mirrors the sidebar's Pi attention logic so the
  * widget's "needs attention" mark matches the in-app completion/error indicator exactly:
@@ -104,7 +104,7 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   return { runtimeKey: getRuntimeKey(), attentionCount, recentSessions };
 };
 
-const SNAPSHOT_GLOBAL_KEY = '__PIARIUM_WIDGET_SNAPSHOT__';
+const SNAPSHOT_GLOBAL_KEY = '__VARIN_WIDGET_SNAPSHOT__';
 
 /**
  * Exposes the snapshot builder on `window` so the native shell can read it synchronously via

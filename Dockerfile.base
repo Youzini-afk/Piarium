@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# Slim runtime: enough to run the Piarium server, Git, SSH, and tunnels.
+# Slim runtime: enough to run the Varin server, Git, SSH, and tunnels.
 # Language toolchains stay in the `runtime-base` stage below.
 FROM oven/bun:1.3.14 AS slim
-WORKDIR /home/piarium/app
+WORKDIR /home/varin/app
 
 ARG TARGETARCH
 ARG NODE_VERSION=24.15.0
@@ -48,23 +48,23 @@ RUN set -eux; \
 
 RUN cloudflared --version
 
-# Replace the base image's 'bun' identity (UID/GID 1000) with Piarium so
+# Replace the base image's 'bun' identity (UID/GID 1000) with Varin so
 # mounted volumes retain predictable ownership on every supported platform.
 RUN (id -u bun >/dev/null 2>&1 && userdel bun || true) \
   && (getent group bun >/dev/null 2>&1 && groupdel bun || true) \
-  && groupadd -g 1000 piarium \
-  && useradd -u 1000 -g 1000 -m -s /bin/bash piarium \
-  && mkdir -p /home/piarium/app \
-  && chown -R piarium:piarium /home/piarium
+  && groupadd -g 1000 varin \
+  && useradd -u 1000 -g 1000 -m -s /bin/bash varin \
+  && mkdir -p /home/varin/app \
+  && chown -R varin:varin /home/varin
 
-USER piarium
+USER varin
 
-ENV HOME=/home/piarium
-ENV NPM_CONFIG_PREFIX=/home/piarium/.npm-global
-ENV PATH=/home/piarium/app/node_modules/.bin:${NPM_CONFIG_PREFIX}/bin:${PATH}
+ENV HOME=/home/varin
+ENV NPM_CONFIG_PREFIX=/home/varin/.npm-global
+ENV PATH=/home/varin/app/node_modules/.bin:${NPM_CONFIG_PREFIX}/bin:${PATH}
 
-RUN mkdir -p /home/piarium/.local /home/piarium/.config/piarium /home/piarium/.ssh /home/piarium/workspaces /home/piarium/.npm-global \
-  && npm config set prefix /home/piarium/.npm-global
+RUN mkdir -p /home/varin/.local /home/varin/.config/varin /home/varin/.ssh /home/varin/workspaces /home/varin/.npm-global \
+  && npm config set prefix /home/varin/.npm-global
 
 ENV NODE_ENV=production
 
@@ -144,25 +144,25 @@ RUN set -eux; \
   fi \
   && python3 --version \
   && rg --version \
-  && echo 'piarium:100000:65536' >> /etc/subuid \
-  && echo 'piarium:100000:65536' >> /etc/subgid \
+  && echo 'varin:100000:65536' >> /etc/subuid \
+  && echo 'varin:100000:65536' >> /etc/subgid \
   && rm -rf /root/.npm /var/lib/apt/lists/* /tmp/githubcli-archive-keyring.gpg /tmp/go*.tar.gz
 
-USER piarium
+USER varin
 
-ENV GOPATH=/home/piarium/go
-ENV CARGO_HOME=/home/piarium/.cargo
-ENV RUSTUP_HOME=/home/piarium/.rustup
-ENV PIARIUM_VALIDATION_NODE_MODULES=/home/piarium/.piarium-validation/node_modules
-ENV NODE_PATH=${PIARIUM_VALIDATION_NODE_MODULES}
-ENV PATH=/home/piarium/app/node_modules/.bin:${PIARIUM_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:/usr/local/go/bin:${PATH}
+ENV GOPATH=/home/varin/go
+ENV CARGO_HOME=/home/varin/.cargo
+ENV RUSTUP_HOME=/home/varin/.rustup
+ENV VARIN_VALIDATION_NODE_MODULES=/home/varin/.varin-validation/node_modules
+ENV NODE_PATH=${VARIN_VALIDATION_NODE_MODULES}
+ENV PATH=/home/varin/app/node_modules/.bin:${VARIN_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:/usr/local/go/bin:${PATH}
 
-RUN mkdir -p /home/piarium/go /home/piarium/.cache/go-build /home/piarium/.cargo /home/piarium/.rustup /home/piarium/.piarium-validation && \
+RUN mkdir -p /home/varin/go /home/varin/.cache/go-build /home/varin/.cargo /home/varin/.rustup /home/varin/.varin-validation && \
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
   rustup component add rust-analyzer rustfmt && \
   rustc --version && cargo --version && \
   go install golang.org/x/tools/gopls@${GOPLS_VERSION} && \
-  npm install --prefix /home/piarium/.piarium-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
+  npm install --prefix /home/varin/.varin-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
   npm install -g pnpm tsx typescript typescript-language-server yarn && \
   rust-analyzer --version && rustfmt --version && gopls version && tsc --version && typescript-language-server --version && vitest --version && node -e "require.resolve('@types/node/package.json')" && pnpm --version && yarn --version && \
   docker --version && buildctl --version

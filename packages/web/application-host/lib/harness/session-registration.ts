@@ -1,4 +1,4 @@
-import type { HarnessActorIdentity, PiSettingsSnapshot } from "@piarium/protocol";
+import type { HarnessActorIdentity, PiSettingsSnapshot } from "@varin/protocol";
 import type { HarnessServiceHost, HarnessSessionContext } from "./service-host.js";
 import { HarnessShellSettingsError, resolveHarnessShellSetting } from "./harness-shell-settings.js";
 import { resolveHarnessWebBinding } from "./harness-web-settings.js";

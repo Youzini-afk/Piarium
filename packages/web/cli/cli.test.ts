@@ -31,7 +31,7 @@ import {
 import {
   assertAuthenticatedNetworkExposure,
   commands,
-  discoverPiariumInstanceOnPort,
+  discoverVarinInstanceOnPort,
   discoverLifecycleInstances,
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
@@ -39,26 +39,26 @@ import {
   generateUiPassword,
   getInstanceFilePath,
   getPidFilePath,
-  isPiariumCmdline,
-  isPiariumProcessRunning,
+  isVarinCmdline,
+  isVarinProcessRunning,
   parseArgs,
   resolveServeHost,
   resolveServeUiPassword,
 } from './cli.js';
 
-async function withTempPiariumDataDir<Result>(
+async function withTempVarinDataDir<Result>(
   fn: (directory: string) => Promise<Result>,
 ): Promise<Result> {
-  const previous = process.env.PIARIUM_DATA_DIR;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cli-test-'));
-  process.env.PIARIUM_DATA_DIR = dir;
+  const previous = process.env.VARIN_DATA_DIR;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-cli-test-'));
+  process.env.VARIN_DATA_DIR = dir;
   try {
     return await fn(dir);
   } finally {
     if (typeof previous === 'string') {
-      process.env.PIARIUM_DATA_DIR = previous;
+      process.env.VARIN_DATA_DIR = previous;
     } else {
-      delete process.env.PIARIUM_DATA_DIR;
+      delete process.env.VARIN_DATA_DIR;
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -94,7 +94,7 @@ async function captureStdout(fn: () => Promise<unknown> | unknown): Promise<stri
   }
 }
 
-async function startMockPiariumServer(options: {
+async function startMockVarinServer(options: {
   pid?: number;
   runtime?: string;
 } = {}) {
@@ -194,11 +194,11 @@ async function waitForTcpPortClosed(port: number, timeoutMs = 3000): Promise<boo
   return !(await waitForTcpPort(port, 100));
 }
 
-function spawnPiariumLikeIdleProcess() {
-  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'piarium-idle'], { stdio: 'ignore' });
+function spawnVarinLikeIdleProcess() {
+  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'varin-idle'], { stdio: 'ignore' });
 }
 
-function spawnPiariumLikeHungServer(port: number) {
+function spawnVarinLikeHungServer(port: number) {
   const script = `
     const net = require('net');
     const sockets = new Set();
@@ -211,7 +211,7 @@ function spawnPiariumLikeHungServer(port: number) {
   `;
   const releaseEntry = path.join(
     os.tmpdir(),
-    'piarium',
+    'varin',
     'releases',
     'test-release',
     'packages',
@@ -246,10 +246,10 @@ describe('cli args', () => {
   });
 
   it('parses explicit connect-url server overrides', () => {
-    const parsed = parseArgs(['connect-url', '--server', 'https://piarium.example.com', '--port', '3002']);
+    const parsed = parseArgs(['connect-url', '--server', 'https://varin.example.com', '--port', '3002']);
 
     expect(parsed.command).toBe('connect-url');
-    expect(parsed.options.server).toBe('https://piarium.example.com');
+    expect(parsed.options.server).toBe('https://varin.example.com');
     expect(parsed.options.port).toBe(3002);
   });
 
@@ -356,7 +356,7 @@ describe('cli args', () => {
       '--worktree',
       'side-task',
       '--branch',
-      'piarium/side-task',
+      'varin/side-task',
       '--base',
       'main',
       '--no-upstream',
@@ -369,7 +369,7 @@ describe('cli args', () => {
     expect(parsed.options.prompt).toBe('Investigate cache invalidation');
     expect(parsed.options.model).toBe('openai/gpt-5.5');
     expect(parsed.options.worktree).toBe('side-task');
-    expect(parsed.options.branch).toBe('piarium/side-task');
+    expect(parsed.options.branch).toBe('varin/side-task');
     expect(parsed.options.startRef).toBe('main');
     expect(parsed.options.setUpstream).toBe(false);
   });
@@ -382,7 +382,7 @@ describe('cli args', () => {
       model: 'openai/gpt-5.5',
       agent: 'build',
       worktree: 'side-task',
-      branch: 'piarium/side-task',
+      branch: 'varin/side-task',
       startRef: 'main',
       setUpstream: true,
     })).toEqual({
@@ -390,7 +390,7 @@ describe('cli args', () => {
       title: 'Side task',
       worktree: {
         name: 'side-task',
-        branchName: 'piarium/side-task',
+        branchName: 'varin/side-task',
         startRef: 'main',
       },
       prompt: 'Investigate cache invalidation',
@@ -586,9 +586,9 @@ describe('cli args', () => {
   it('formats projects compactly', () => {
     expect(formatProjectLine({
       id: 'path_repo',
-      label: 'Piarium',
-      path: '/repo/piarium',
-    })).toBe('- `Piarium` — `path_repo` — `/repo/piarium`');
+      label: 'Varin',
+      path: '/repo/varin',
+    })).toBe('- `Varin` — `path_repo` — `/repo/varin`');
   });
 
   it('formats model defaults and favorites compactly', () => {
@@ -692,7 +692,7 @@ describe('cli API target resolution', () => {
       discoverDesktopInstance: async () => null,
       discoverLifecycleInstances: async () => [{ port: 3001 }, { port: 3002 }],
       isServerHealthReady: async () => false,
-    })).rejects.toThrow('Multiple Piarium instances are running');
+    })).rejects.toThrow('Multiple Varin instances are running');
   });
 });
 
@@ -713,15 +713,15 @@ describe('network-exposed auth validation', () => {
   });
 
   it('allows explicit unsafe LAN override from process env only', () => {
-    const previous = process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN;
-    process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN = 'true';
+    const previous = process.env.VARIN_ALLOW_UNAUTHENTICATED_LAN;
+    process.env.VARIN_ALLOW_UNAUTHENTICATED_LAN = 'true';
     try {
       expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).not.toThrow();
     } finally {
       if (typeof previous === 'string') {
-        process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN = previous;
+        process.env.VARIN_ALLOW_UNAUTHENTICATED_LAN = previous;
       } else {
-        delete process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN;
+        delete process.env.VARIN_ALLOW_UNAUTHENTICATED_LAN;
       }
     }
   });
@@ -747,30 +747,30 @@ describe('serve UI password resolution', () => {
 });
 
 describe('serve host resolution', () => {
-  it('uses PIARIUM_HOST when --host is not provided', () => {
-    const previous = process.env.PIARIUM_HOST;
-    process.env.PIARIUM_HOST = '192.0.2.20';
+  it('uses VARIN_HOST when --host is not provided', () => {
+    const previous = process.env.VARIN_HOST;
+    process.env.VARIN_HOST = '192.0.2.20';
     try {
       expect(resolveServeHost(undefined)).toBe('192.0.2.20');
     } finally {
       if (typeof previous === 'string') {
-        process.env.PIARIUM_HOST = previous;
+        process.env.VARIN_HOST = previous;
       } else {
-        delete process.env.PIARIUM_HOST;
+        delete process.env.VARIN_HOST;
       }
     }
   });
 
-  it('prefers explicit --host over PIARIUM_HOST', () => {
-    const previous = process.env.PIARIUM_HOST;
-    process.env.PIARIUM_HOST = '192.0.2.20';
+  it('prefers explicit --host over VARIN_HOST', () => {
+    const previous = process.env.VARIN_HOST;
+    process.env.VARIN_HOST = '192.0.2.20';
     try {
       expect(resolveServeHost('192.0.2.21')).toBe('192.0.2.21');
     } finally {
       if (typeof previous === 'string') {
-        process.env.PIARIUM_HOST = previous;
+        process.env.VARIN_HOST = previous;
       } else {
-        delete process.env.PIARIUM_HOST;
+        delete process.env.VARIN_HOST;
       }
     }
   });
@@ -778,7 +778,7 @@ describe('serve host resolution', () => {
 
 describe('CLI exports', () => {
   it('allows tunnel profile migration before command options are initialized', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const store = ensureTunnelProfilesMigrated();
 
       expect(store).toEqual({ version: 1, profiles: [] });
@@ -786,7 +786,7 @@ describe('CLI exports', () => {
   });
 
   it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = await allocateLoopbackPort();
       const output = await captureStdout(async () => {
         await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
@@ -799,7 +799,7 @@ describe('CLI exports', () => {
   });
 
   it('supports ngrok quick dry-run with an explicit port', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const output = await captureStdout(async () => {
         await commands.tunnel({
           json: true,
@@ -826,7 +826,7 @@ describe('CLI HTTP helpers', () => {
   it('sends one typed request to the Pi runtime endpoint', async () => {
     const originalFetch = globalThis.fetch;
     setFetchForTest(async (url, options = {}) => {
-      expect(new URL(String(url)).pathname).toBe('/api/piarium/runtime/request');
+      expect(new URL(String(url)).pathname).toBe('/api/varin/runtime/request');
       expect(options.method).toBe('POST');
       expect(JSON.parse(requestBodyText(options))).toEqual({
         method: 'session.snapshot',
@@ -845,7 +845,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('retries UI-authenticated API requests with the stored instance password', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45678;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -856,11 +856,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(requestBodyText(options))).toEqual({ password: 'secret' });
           return {
             ok: true,
-            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'piarium_ui_session=session-token; Path=/; HttpOnly' : null },
+            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'varin_ui_session=session-token; Path=/; HttpOnly' : null },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (requestHeader(options, 'Cookie') === 'piarium_ui_session=session-token') {
+        if (requestHeader(options, 'Cookie') === 'varin_ui_session=session-token') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -871,7 +871,7 @@ describe('CLI HTTP helpers', () => {
       });
 
       try {
-        const { response, body } = await requestJson(port, '/api/piarium/tunnel/start', {
+        const { response, body } = await requestJson(port, '/api/varin/tunnel/start', {
           method: 'POST',
           body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
         });
@@ -879,9 +879,9 @@ describe('CLI HTTP helpers', () => {
         expect(response.ok).toBe(true);
         expect(body).toEqual({ ok: true });
         expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
-          '/api/piarium/tunnel/start',
+          '/api/varin/tunnel/start',
           '/auth/session',
-          '/api/piarium/tunnel/start',
+          '/api/varin/tunnel/start',
         ]);
       } finally {
         Reflect.set(globalThis, 'fetch', originalFetch);
@@ -890,7 +890,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('prefers the stored instance password over a non-explicit env password', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45679;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -899,11 +899,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(requestBodyText(options))).toEqual({ password: 'stored-secret' });
           return {
             ok: true,
-            headers: { getSetCookie: () => ['piarium_ui_session=session-token; Path=/; HttpOnly'] },
+            headers: { getSetCookie: () => ['varin_ui_session=session-token; Path=/; HttpOnly'] },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (requestHeader(options, 'Cookie') === 'piarium_ui_session=session-token') {
+        if (requestHeader(options, 'Cookie') === 'varin_ui_session=session-token') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -914,7 +914,7 @@ describe('CLI HTTP helpers', () => {
       });
 
       try {
-        const { response, body } = await requestJson(port, '/api/piarium/scheduled-tasks/status', {
+        const { response, body } = await requestJson(port, '/api/varin/scheduled-tasks/status', {
           uiPassword: 'stale-env-secret',
           explicitUiPassword: false,
         });
@@ -928,15 +928,15 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('authenticates desktop-local API requests with the stored client token', async () => {
-    await withTempPiariumDataDir(async (dir) => {
+    await withTempVarinDataDir(async (dir) => {
       const port = 57123;
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
         desktopLocalPort: port,
-        desktopLocalClientToken: 'piarium_client_test',
+        desktopLocalClientToken: 'varin_client_test',
       }, null, 2));
       const originalFetch = globalThis.fetch;
       setFetchForTest(async (_url, options = {}) => {
-        if (requestHeader(options, 'Authorization') === 'Bearer piarium_client_test') {
+        if (requestHeader(options, 'Authorization') === 'Bearer varin_client_test') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -947,7 +947,7 @@ describe('CLI HTTP helpers', () => {
       });
 
       try {
-        const { response, body } = await requestJson(port, '/api/piarium/scheduled-tasks/status');
+        const { response, body } = await requestJson(port, '/api/varin/scheduled-tasks/status');
 
         expect(response.ok).toBe(true);
         expect(body).toEqual({ ok: true });
@@ -959,11 +959,11 @@ describe('CLI HTTP helpers', () => {
 });
 
 describe('cli entry detection', () => {
-  const modulePath = '/tmp/piarium/bin/cli.js';
+  const modulePath = '/tmp/varin/bin/cli.js';
   const moduleUrl = pathToFileURL(modulePath).href;
 
   it('resolves symlinked entry paths before comparing', () => {
-    const symlinkPath = '/usr/local/bin/piarium';
+    const symlinkPath = '/usr/local/bin/varin';
     const realpath = (filePath: string): string => {
       if (filePath === path.resolve(symlinkPath)) {
         return modulePath;
@@ -995,8 +995,8 @@ describe('cli entry detection', () => {
   });
 
   it('accepts wrapper binary name fallback when requested', () => {
-    const wrapperPath = '/home/user/.local/bin/piarium';
-    expect(isModuleCliExecution(wrapperPath, moduleUrl, undefined, 'piarium')).toBe(true);
+    const wrapperPath = '/home/user/.local/bin/varin';
+    expect(isModuleCliExecution(wrapperPath, moduleUrl, undefined, 'varin')).toBe(true);
   });
 
   it('normalizes direct paths when realpath fails', () => {
@@ -1009,39 +1009,39 @@ describe('cli entry detection', () => {
   });
 });
 
-describe('isPiariumCmdline', () => {
-  it('accepts Piarium CLI and daemon cmdlines', () => {
-    expect(isPiariumCmdline('node /x/@piarium/web/bin/cli.js serve')).toBe(true);
-    expect(isPiariumCmdline('node /x/@piarium/web/server/index.js --port 9090')).toBe(true);
-    expect(isPiariumCmdline('bun /home/u/projects/Piarium/packages/web/server/index.js --port 3001')).toBe(true);
-    expect(isPiariumCmdline('node /home/u/.local/share/piarium/releases/r1/packages/web/server/index.js')).toBe(true);
-    expect(isPiariumCmdline('node C:\\Users\\u\\AppData\\Local\\Piarium\\runtimes\\testing\\packages\\web\\bin\\cli.js')).toBe(true);
+describe('isVarinCmdline', () => {
+  it('accepts Varin CLI and daemon cmdlines', () => {
+    expect(isVarinCmdline('node /x/@varin/web/bin/cli.js serve')).toBe(true);
+    expect(isVarinCmdline('node /x/@varin/web/server/index.js --port 9090')).toBe(true);
+    expect(isVarinCmdline('bun /home/u/projects/Varin/packages/web/server/index.js --port 3001')).toBe(true);
+    expect(isVarinCmdline('node /home/u/.local/share/varin/releases/r1/packages/web/server/index.js')).toBe(true);
+    expect(isVarinCmdline('node C:\\Users\\u\\AppData\\Local\\Varin\\runtimes\\testing\\packages\\web\\bin\\cli.js')).toBe(true);
   });
 
   it('rejects recycled and unrelated processes (issue #1721)', () => {
-    expect(isPiariumCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
-    expect(isPiariumCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
-    expect(isPiariumCmdline('node /tmp/unrelated/packages/web/server/index.js')).toBe(false);
-    expect(isPiariumCmdline('')).toBe(false);
-    expect(isPiariumCmdline(null)).toBe(false);
+    expect(isVarinCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
+    expect(isVarinCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isVarinCmdline('node /tmp/unrelated/packages/web/server/index.js')).toBe(false);
+    expect(isVarinCmdline('')).toBe(false);
+    expect(isVarinCmdline(null)).toBe(false);
   });
 });
 
-describe('isPiariumProcessRunning', () => {
+describe('isVarinProcessRunning', () => {
   it('returns false for a dead PID', () => {
-    expect(isPiariumProcessRunning(2147483646)).toBe(false);
+    expect(isVarinProcessRunning(2147483646)).toBe(false);
   });
 
   // Identity verification is available on Linux (/proc) and macOS (ps); on those
   // platforms a live but unrelated process (a recycled stale PID) must read as
   // not-running so it can't trip the "already running" guard (issue #1721).
   it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
-    'returns false for a live non-Piarium PID',
+    'returns false for a live non-Varin PID',
     async () => {
       const child = spawn('sleep', ['30'], { stdio: 'ignore' });
       try {
         await new Promise((resolve) => setTimeout(resolve, 150));
-        expect(isPiariumProcessRunning(child.pid)).toBe(false);
+        expect(isVarinProcessRunning(child.pid)).toBe(false);
       } finally {
         child.kill('SIGKILL');
       }
@@ -1051,10 +1051,10 @@ describe('isPiariumProcessRunning', () => {
 
 describe('lifecycle instance discovery', () => {
   it('does not attribute a desktop runtime response to a different explicit port', async () => {
-    await withTempPiariumDataDir(async (dir) => {
+    await withTempVarinDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverPiariumInstanceOnPort(3003, {
+      const instance = await discoverVarinInstanceOnPort(3003, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1063,10 +1063,10 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('attributes a desktop runtime response to its configured desktop port', async () => {
-    await withTempPiariumDataDir(async (dir) => {
+    await withTempVarinDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverPiariumInstanceOnPort(57123, {
+      const instance = await discoverVarinInstanceOnPort(57123, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1079,7 +1079,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not mark tunnel attachability as desktop for a different explicit port', async () => {
-    await withTempPiariumDataDir(async (dir) => {
+    await withTempVarinDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
       const originalFetch = globalThis.fetch;
       setFetchForTest(async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }));
@@ -1094,7 +1094,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('keeps pid and instance files when live port probe confirms a cmdline mismatch', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45123;
       const pid = 12345;
       const pidFile = await getPidFilePath(port);
@@ -1104,7 +1104,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse({ runtime: 'web', pid }),
-        getPiariumProcessState: () => 'mismatched',
+        getVarinProcessState: () => 'mismatched',
       });
 
       expect(instances).toEqual([
@@ -1116,7 +1116,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('removes stale pid and instance files when a cmdline mismatch is not confirmed by live probe', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45124;
       const pid = 12346;
       const pidFile = await getPidFilePath(port);
@@ -1126,7 +1126,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getPiariumProcessState: () => 'mismatched',
+        getVarinProcessState: () => 'mismatched',
       });
 
       expect(instances).toEqual([]);
@@ -1136,7 +1136,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves matched pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45126;
       const pid = 12347;
       const pidFile = await getPidFilePath(port);
@@ -1146,7 +1146,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getPiariumProcessState: () => 'matched',
+        getVarinProcessState: () => 'matched',
       });
 
       expect(instances).toEqual([]);
@@ -1156,7 +1156,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves unknown-identity pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45129;
       const pid = 12350;
       const pidFile = await getPidFilePath(port);
@@ -1166,7 +1166,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getPiariumProcessState: () => 'unknown',
+        getVarinProcessState: () => 'unknown',
       });
 
       expect(instances).toEqual([]);
@@ -1175,8 +1175,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('uses the live system-info pid instead of a stale Piarium-looking pid-file pid', async () => {
-    await withTempPiariumDataDir(async () => {
+  it('uses the live system-info pid instead of a stale Varin-looking pid-file pid', async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45127;
       const stalePid = 12348;
       const livePid = 54321;
@@ -1187,7 +1187,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse({ runtime: 'web', pid: livePid }),
-        getPiariumProcessState: () => 'matched',
+        getVarinProcessState: () => 'matched',
       });
 
       expect(instances).toEqual([
@@ -1197,7 +1197,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('uses the explicit host when probing a pid-file entry without a stored host', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45128;
       const pid = 12349;
       const host = '192.0.2.10';
@@ -1212,7 +1212,7 @@ describe('lifecycle instance discovery', () => {
             urls.push(String(url));
             return createMockJsonResponse({ runtime: 'web', pid });
           },
-          getPiariumProcessState: () => 'matched',
+          getVarinProcessState: () => 'matched',
         },
       );
 
@@ -1224,7 +1224,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('tries loopback before treating an explicit-host pid-file probe as inconclusive', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45130;
       const pid = 12351;
       const host = '192.0.2.11';
@@ -1241,7 +1241,7 @@ describe('lifecycle instance discovery', () => {
               ? createMockJsonResponse({ runtime: 'web', pid })
               : createMockJsonResponse(null, false);
           },
-          getPiariumProcessState: () => 'matched',
+          getVarinProcessState: () => 'matched',
         },
       );
 
@@ -1254,7 +1254,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not accept a fallback loopback probe with a different pid for a concrete host registry', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45131;
       const pid = 12352;
       const otherPid = 54322;
@@ -1272,7 +1272,7 @@ describe('lifecycle instance discovery', () => {
               ? createMockJsonResponse({ runtime: 'web', pid: otherPid })
               : createMockJsonResponse(null, false);
           },
-          getPiariumProcessState: () => 'matched',
+          getVarinProcessState: () => 'matched',
         },
       );
 
@@ -1282,8 +1282,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('discovers an explicit live Piarium port without a pid-file registry entry', async () => {
-    await withTempPiariumDataDir(async () => {
+  it('discovers an explicit live Varin port without a pid-file registry entry', async () => {
+    await withTempVarinDataDir(async () => {
       const port = 45125;
       const instances = await discoverLifecycleInstances(
         { explicitPort: true, port },
@@ -1297,9 +1297,9 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('cleans a matched pid-file entry without stopping it when the recorded port is free', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnPiariumLikeIdleProcess();
+      const child = spawnVarinLikeIdleProcess();
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1321,9 +1321,9 @@ describe('lifecycle instance discovery', () => {
 });
 
 describe('lifecycle commands with unmanaged explicit ports', () => {
-  it('serve refuses to start on a live Piarium port without requiring pid files', async () => {
-    await withTempPiariumDataDir(async () => {
-      const server = await startMockPiariumServer();
+  it('serve refuses to start on a live Varin port without requiring pid files', async () => {
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer();
       try {
         await expect(commands.serve({ explicitPort: true, port: server.port, quiet: true })).rejects.toThrow(
           /already running on port/
@@ -1335,8 +1335,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('status --port reports a live unmanaged server when the registry is empty', async () => {
-    await withTempPiariumDataDir(async () => {
-      const server = await startMockPiariumServer();
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer();
       try {
         const output = await captureStdout(() => commands.status({ explicitPort: true, port: server.port, json: true }));
         const payload = JSON.parse(output);
@@ -1352,8 +1352,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port reaches unmanaged shutdown when the registry is empty', async () => {
-    await withTempPiariumDataDir(async () => {
-      const server = await startMockPiariumServer();
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer();
       try {
         await commands.stop({ explicitPort: true, port: server.port, quiet: true, suppressQuietOutput: true });
         expect(server.shutdownRequested).toBe(true);
@@ -1364,9 +1364,9 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnPiariumLikeHungServer(port);
+      const child = spawnVarinLikeHungServer(port);
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1386,9 +1386,9 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   }, 12_000);
 
   it('plain stop ignores a stale CLI registry entry that resolves to desktop runtime', async () => {
-    await withTempPiariumDataDir(async () => {
-      const server = await startMockPiariumServer({ runtime: 'desktop' });
-      const child = spawnPiariumLikeIdleProcess();
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer({ runtime: 'desktop' });
+      const child = spawnVarinLikeIdleProcess();
       const pidFile = await getPidFilePath(server.port);
       const instanceFile = await getInstanceFilePath(server.port);
       try {
@@ -1409,8 +1409,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('restart --port restarts a live unmanaged server through the shared explicit-port discovery path', async () => {
-    await withTempPiariumDataDir(async () => {
-      const server = await startMockPiariumServer();
+    await withTempVarinDataDir(async () => {
+      const server = await startMockVarinServer();
       const calls: Array<['serve' | 'stop', number | undefined, string | undefined]> = [];
       const host = '127.0.0.1';
       try {

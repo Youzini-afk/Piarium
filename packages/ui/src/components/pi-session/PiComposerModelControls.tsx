@@ -2,7 +2,7 @@ import React from 'react';
 import {
   THINKING_LEVELS,
   type ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';

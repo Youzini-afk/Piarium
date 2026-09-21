@@ -5,10 +5,10 @@ import type { NextFunction, RequestHandler } from 'express';
 import type { Options as ProxyOptions, RequestHandler as ProxyRequestHandler } from 'http-proxy-middleware';
 
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
-const TOKEN_COOKIE_NAME = 'piarium_preview_token';
-const TOKEN_QUERY_PARAM = 'piarium_preview_token';
-const CLIENT_TOKEN_QUERY_PARAM = 'piarium_client_token';
-const URL_AUTH_TOKEN_QUERY_PARAM = 'piarium_url_token';
+const TOKEN_COOKIE_NAME = 'varin_preview_token';
+const TOKEN_QUERY_PARAM = 'varin_preview_token';
+const CLIENT_TOKEN_QUERY_PARAM = 'varin_client_token';
+const URL_AUTH_TOKEN_QUERY_PARAM = 'varin_url_token';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 const PREVIEW_FRAME_POLICY_RESPONSE_HEADERS = [
@@ -16,7 +16,7 @@ const PREVIEW_FRAME_POLICY_RESPONSE_HEADERS = [
   'content-security-policy',
   'content-security-policy-report-only',
 ];
-export const PREVIEW_TARGET_ERROR_HEADER = 'x-piarium-preview-target-error';
+export const PREVIEW_TARGET_ERROR_HEADER = 'x-varin-preview-target-error';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -26,7 +26,7 @@ const LOOPBACK_HOSTS = new Set([
   '0.0.0.0',
 ]);
 
-const PREVIEW_BRIDGE_SCRIPT_ID = 'piarium-preview-bridge';
+const PREVIEW_BRIDGE_SCRIPT_ID = 'varin-preview-bridge';
 
 type HttpHeaderValue = string | readonly string[] | number;
 
@@ -385,14 +385,14 @@ export const classifyPreviewNavigation = ({
 };
 
 const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
-  if (window.__piariumPreviewBridgeInstalled) return;
-  window.__piariumPreviewBridgeInstalled = true;
+  if (window.__varinPreviewBridgeInstalled) return;
+  window.__varinPreviewBridgeInstalled = true;
 
-  const SOURCE = 'piarium-preview-bridge';
+  const SOURCE = 'varin-preview-bridge';
   const VERSION = 1;
   const MAX_TEXT = 500;
   const MAX_ARG = 1000;
-  const TARGET_ORIGIN = typeof window.__piariumPreviewTargetOrigin === 'string' ? window.__piariumPreviewTargetOrigin : '';
+  const TARGET_ORIGIN = typeof window.__varinPreviewTargetOrigin === 'string' ? window.__varinPreviewTargetOrigin : '';
   let inspectMode = false;
   let lastHoverKey = '';
   let pendingHover = null;
@@ -463,8 +463,8 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   };
 
   const installColorSchemeMatchMediaPatch = () => {
-    if (window.__piariumPreviewColorSchemePatched || typeof window.matchMedia !== 'function') return;
-    window.__piariumPreviewColorSchemePatched = true;
+    if (window.__varinPreviewColorSchemePatched || typeof window.matchMedia !== 'function') return;
+    window.__varinPreviewColorSchemePatched = true;
     nativeMatchMedia = window.matchMedia.bind(window);
     window.matchMedia = function(query) {
       const nativeMql = nativeMatchMedia(query);
@@ -516,7 +516,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     try {
       const root = document.documentElement;
       root.style.colorScheme = next;
-      root.dataset.piariumPreviewColorScheme = next;
+      root.dataset.varinPreviewColorScheme = next;
       if (shouldSyncDataTheme()) {
         root.dataset.theme = next;
       }
@@ -664,15 +664,15 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   };
 
   const installViteHmrProxyPatch = () => {
-    if (window.__piariumViteHmrProxyPatched || typeof window.WebSocket !== 'function') return;
-    window.__piariumViteHmrProxyPatched = true;
+    if (window.__varinViteHmrProxyPatched || typeof window.WebSocket !== 'function') return;
+    window.__varinViteHmrProxyPatched = true;
     const NativeWebSocket = window.WebSocket;
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1] + '/';
     const currentSearchParams = new URL(window.location.href).searchParams;
-    const previewToken = currentSearchParams.get('piarium_preview_token') || '';
-    const urlAuthToken = currentSearchParams.get('piarium_url_token') || '';
+    const previewToken = currentSearchParams.get('varin_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('varin_url_token') || '';
     let reloadTimer = 0;
 
     const schedulePreviewReload = () => {
@@ -695,15 +695,15 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
         if (parsed.pathname.indexOf(proxyBase) !== 0) {
           parsed.pathname = proxyBase;
         }
-        if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
-        if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
+        if (previewToken) parsed.searchParams.set('varin_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('varin_url_token', urlAuthToken);
         return parsed.toString();
       } catch {
         return url;
       }
     };
 
-    function PiariumPreviewWebSocket(url, protocols) {
+    function VarinPreviewWebSocket(url, protocols) {
       const protocolList = Array.isArray(protocols) ? protocols : [protocols];
       const isViteSocket = protocolList.indexOf('vite-hmr') >= 0;
       const nextUrl = rewriteUrl(url, protocols);
@@ -725,30 +725,30 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       return socket;
     }
 
-    PiariumPreviewWebSocket.prototype = NativeWebSocket.prototype;
-    Object.setPrototypeOf(PiariumPreviewWebSocket, NativeWebSocket);
-    Object.defineProperty(PiariumPreviewWebSocket, 'name', { value: 'WebSocket' });
-    window.WebSocket = PiariumPreviewWebSocket;
+    VarinPreviewWebSocket.prototype = NativeWebSocket.prototype;
+    Object.setPrototypeOf(VarinPreviewWebSocket, NativeWebSocket);
+    Object.defineProperty(VarinPreviewWebSocket, 'name', { value: 'WebSocket' });
+    window.WebSocket = VarinPreviewWebSocket;
   };
 
   const installAppRequestProxyPatch = () => {
-    if (window.__piariumAppRequestProxyPatched) return;
-    window.__piariumAppRequestProxyPatched = true;
+    if (window.__varinAppRequestProxyPatched) return;
+    window.__varinAppRequestProxyPatched = true;
     const proxyMatch = window.location.pathname.match(/^(\/api\/preview\/proxy\/[a-f0-9]{16,64})(?:\/|$)/i);
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1];
     const currentSearchParams = new URL(window.location.href).searchParams;
-    const previewToken = currentSearchParams.get('piarium_preview_token') || '';
-    const urlAuthToken = currentSearchParams.get('piarium_url_token') || '';
+    const previewToken = currentSearchParams.get('varin_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('varin_url_token') || '';
 
     const withProxyAuth = (value) => {
       if (typeof value !== 'string' || value.indexOf(proxyBase) !== 0) return value;
       if (!previewToken && !urlAuthToken) return value;
       try {
         const parsed = new URL(value, window.location.origin);
-        parsed.searchParams.delete('piarium_client_token');
-        if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
-        if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
+        parsed.searchParams.delete('varin_client_token');
+        if (previewToken) parsed.searchParams.set('varin_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('varin_url_token', urlAuthToken);
         return parsed.pathname + parsed.search + parsed.hash;
       } catch {
         return value;
@@ -788,9 +788,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
         const isWebSocketProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
         if (sameHost && isWebSocketProtocol && shouldProxyPath(parsed.pathname)) {
           parsed.pathname = proxyBase + parsed.pathname;
-          parsed.searchParams.delete('piarium_client_token');
-          if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
-          if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
+          parsed.searchParams.delete('varin_client_token');
+          if (previewToken) parsed.searchParams.set('varin_preview_token', previewToken);
+          if (urlAuthToken) parsed.searchParams.set('varin_url_token', urlAuthToken);
           return parsed.toString();
         }
       } catch {}
@@ -861,27 +861,27 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
 
     if (typeof window.EventSource === 'function') {
       const NativeEventSource = window.EventSource;
-      function PiariumPreviewEventSource(url, eventSourceInitDict) {
+      function VarinPreviewEventSource(url, eventSourceInitDict) {
         return new NativeEventSource(proxiedUrl(String(url)), eventSourceInitDict);
       }
-      PiariumPreviewEventSource.prototype = NativeEventSource.prototype;
-      Object.setPrototypeOf(PiariumPreviewEventSource, NativeEventSource);
-      Object.defineProperty(PiariumPreviewEventSource, 'name', { value: 'EventSource' });
-      window.EventSource = PiariumPreviewEventSource;
+      VarinPreviewEventSource.prototype = NativeEventSource.prototype;
+      Object.setPrototypeOf(VarinPreviewEventSource, NativeEventSource);
+      Object.defineProperty(VarinPreviewEventSource, 'name', { value: 'EventSource' });
+      window.EventSource = VarinPreviewEventSource;
     }
 
     if (typeof window.WebSocket === 'function') {
       const NativeWebSocket = window.WebSocket;
-      function PiariumPreviewAppWebSocket(url, protocols) {
+      function VarinPreviewAppWebSocket(url, protocols) {
         const nextUrl = proxiedWebSocketUrl(String(url));
         return arguments.length === 1
           ? new NativeWebSocket(nextUrl)
           : new NativeWebSocket(nextUrl, protocols);
       }
-      PiariumPreviewAppWebSocket.prototype = NativeWebSocket.prototype;
-      Object.setPrototypeOf(PiariumPreviewAppWebSocket, NativeWebSocket);
-      Object.defineProperty(PiariumPreviewAppWebSocket, 'name', { value: 'WebSocket' });
-      window.WebSocket = PiariumPreviewAppWebSocket;
+      VarinPreviewAppWebSocket.prototype = NativeWebSocket.prototype;
+      Object.setPrototypeOf(VarinPreviewAppWebSocket, NativeWebSocket);
+      Object.defineProperty(VarinPreviewAppWebSocket, 'name', { value: 'WebSocket' });
+      window.WebSocket = VarinPreviewAppWebSocket;
     }
   };
 
@@ -966,9 +966,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   const sendHover = (event) => {
     if (!inspectMode) return;
     pendingHover = event;
-    if (window.__piariumPreviewHoverFrame) return;
-    window.__piariumPreviewHoverFrame = window.requestAnimationFrame(() => {
-      window.__piariumPreviewHoverFrame = 0;
+    if (window.__varinPreviewHoverFrame) return;
+    window.__varinPreviewHoverFrame = window.requestAnimationFrame(() => {
+      window.__varinPreviewHoverFrame = 0;
       const currentEvent = pendingHover;
       pendingHover = null;
       if (!currentEvent || !inspectMode) return;
@@ -1050,7 +1050,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
     const data = event.data;
-    if (!data || data.source !== 'piarium-preview-parent' || data.version !== VERSION) return;
+    if (!data || data.source !== 'varin-preview-parent' || data.version !== VERSION) return;
     if (data.type === 'set-inspect-mode') {
       setInspectMode(data.enabled === true);
     }
@@ -1219,7 +1219,7 @@ export const normalizeProxyTargetUrl = (
     url.hostname = '127.0.0.1';
   }
 
-  // Only keep origin here; the proxy path is preserved on the Piarium side.
+  // Only keep origin here; the proxy path is preserved on the Varin side.
   return { ok: true, origin: url.origin };
 };
 
@@ -1239,7 +1239,7 @@ const appendProxyAuthToProxyUrl = (
     || value.includes(URL_AUTH_TOKEN_QUERY_PARAM);
   if (!needsQueryRewrite) return value;
   try {
-    const parsed = new URL(value, 'http://piarium-preview.local');
+    const parsed = new URL(value, 'http://varin-preview.local');
     parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
     parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
     if (previewToken) parsed.searchParams.set(TOKEN_QUERY_PARAM, previewToken);
@@ -1582,7 +1582,7 @@ export const createPreviewProxyRuntime = ({
       }
 
       const nonceAttr = bridgeNonce ? ` nonce="${bridgeNonce}"` : '';
-      const targetOriginScript = `<script${nonceAttr}>window.__piariumPreviewTargetOrigin=${JSON.stringify(targetOrigin || '')};</script>`;
+      const targetOriginScript = `<script${nonceAttr}>window.__varinPreviewTargetOrigin=${JSON.stringify(targetOrigin || '')};</script>`;
       const script = `${targetOriginScript}<script id="${PREVIEW_BRIDGE_SCRIPT_ID}"${nonceAttr}>${PREVIEW_BRIDGE_SCRIPT}</script>`;
       if (/<head(?:\s[^>]*)?>/i.test(bodyText)) {
         return bodyText.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${script}`);
@@ -1710,10 +1710,10 @@ export const createPreviewProxyRuntime = ({
       on: {
         proxyReq: (proxyReq, req) => {
           applyPreviewPassthroughRequestHeaders(req, proxyReq);
-          // Keep local dev servers from receiving Piarium credentials.
+          // Keep local dev servers from receiving Varin credentials.
           proxyReq.removeHeader('cookie');
           proxyReq.removeHeader('authorization');
-          proxyReq.removeHeader('x-piarium-ui-session');
+          proxyReq.removeHeader('x-varin-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
@@ -1724,7 +1724,7 @@ export const createPreviewProxyRuntime = ({
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
           const bridgeNonce = crypto.randomBytes(16).toString('base64');
-          // Allow the dev server response to be framed inside Piarium even
+          // Allow the dev server response to be framed inside Varin even
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers, bridgeNonce);

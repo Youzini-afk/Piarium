@@ -107,7 +107,7 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
 
   const normalizedTarget = parsed.toString();
 
-  const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+  const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
   if (desktop?.openExternal) {
     try {
       await desktop.openExternal(normalizedTarget);

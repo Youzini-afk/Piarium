@@ -11,7 +11,7 @@
  *   bypass → all allow; dispatch → askBefore[preset]
  * Rules evaluated top-down, first match wins.
  *
- * Pure types and evaluation functions are in @piarium/protocol
+ * Pure types and evaluation functions are in @varin/protocol
  * (permission-gate.ts) so both pi-host and web host can use them
  * without cross-package imports.
  */
@@ -33,4 +33,4 @@ export {
   permissionPatternIssue,
   validatePermissionMode,
   validatePermissionRule,
-} from "@piarium/protocol";
+} from "@varin/protocol";

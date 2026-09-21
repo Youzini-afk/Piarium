@@ -7,7 +7,7 @@ import { SessionMetadataStore } from "../src/session-metadata-store.js";
 
 describe("session metadata work focus", () => {
   it("persists selected, failed, and applied states without replacing the active generation early", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-focus-metadata-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-focus-metadata-"));
     try {
       const store = new SessionMetadataStore(root);
       const initial = await store.ensureWorkFocus("session-1", {

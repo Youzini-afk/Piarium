@@ -8,10 +8,10 @@ import { pathToFileURL } from "node:url";
 import { CliOutput, type CliConsole } from "./cli-output.js";
 
 const usage = `Usage:
-  piarium-extension init [dir] --id <extension-id> --name <display-name> [--template surface|shell|editor|view|language|debug|test]
-  piarium-extension check [dir]
-  piarium-extension build [dir]
-  piarium-extension test [dir]
+  varin-extension init [dir] --id <extension-id> --name <display-name> [--template surface|shell|editor|view|language|debug|test]
+  varin-extension check [dir]
+  varin-extension build [dir]
+  varin-extension test [dir]
 
 Global output options:
   --quiet  Emit one concise result line
@@ -92,7 +92,7 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
       cliOutput.success({
         human: [usage],
         json: { command: "help", usage },
-        quiet: "piarium-extension init|check|build|test",
+        quiet: "varin-extension init|check|build|test",
       });
       return 0;
     }
@@ -105,7 +105,7 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
         ...(parsed.template ? { template: parsed.template } : {}),
       });
       cliOutput.success({
-        human: [`Created Piarium extension template in ${created.directory}`],
+        human: [`Created Varin extension template in ${created.directory}`],
         json: {
           command: "init",
           directory: created.directory,
@@ -120,7 +120,7 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
     if (parsed.command === "check") {
       const result = await checkProject(parsed.directory);
       if (result.missingFiles.length > 0) {
-        throw new Error(`Manifest is valid, but referenced entrypoint files are missing: ${result.missingFiles.join(", ")}. Run piarium-extension build to create them.`);
+        throw new Error(`Manifest is valid, but referenced entrypoint files are missing: ${result.missingFiles.join(", ")}. Run varin-extension build to create them.`);
       }
       const incompatibleLines = result.incompatibleContributions.map((item) => (
         `  ${item.id} (${item.kind} contractVersion ${item.contractVersion} is not supported; supported: ${item.supportedVersions.join(", ")})`

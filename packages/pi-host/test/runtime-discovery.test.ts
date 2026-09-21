@@ -14,7 +14,7 @@ describe("discoverPiRuntimes", () => {
   it("resolves bundled startup without searching PATH or inspecting unrelated custom runtimes", async () => {
     const candidates = await discoverPiRuntimes({
       selectedId: "bundled",
-      env: { PIARIUM_PI_CUSTOM_ROOT: "unrelated-missing-install", PIARIUM_PI_SOURCE: "unrelated-source" },
+      env: { VARIN_PI_CUSTOM_ROOT: "unrelated-missing-install", VARIN_PI_SOURCE: "unrelated-source" },
       commandRunner: async () => { throw new Error("bundled startup must not run external commands"); },
     });
     assert.deepEqual(candidates.map(candidate => candidate.id), ["bundled"]);
@@ -32,7 +32,7 @@ describe("discoverPiRuntimes", () => {
   });
 
   it("reports bundled, system, and source runtimes with compatibility", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-runtime-"));
     try {
       const source = join(root, "pi");
       const custom = join(root, "custom-pi");
@@ -92,7 +92,7 @@ describe("discoverPiRuntimes", () => {
   });
 
   it("resolves commandPath, nodePath, and packageRoot from a real system shim", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-system-layout-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-system-layout-"));
     try {
       const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
       await mkdir(join(codingAgent, "dist"), { recursive: true });
@@ -140,7 +140,7 @@ describe("discoverPiRuntimes", () => {
   });
 
   it("classifies a user-global standalone layout separately from PATH system installs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-standalone-layout-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-standalone-layout-"));
     try {
       const localAppData = join(root, "AppData", "Local");
       const codingAgent = join(
@@ -186,7 +186,7 @@ describe("discoverPiRuntimes", () => {
       commandRunner: async () => ({ exitCode: 1, stderr: "not found", stdout: "" }),
       env: {},
       platform: "win32",
-      sourcePaths: [join(tmpdir(), "missing-piarium-source")],
+      sourcePaths: [join(tmpdir(), "missing-varin-source")],
     });
 
     assert.equal(candidates[1]?.available, false);
@@ -196,7 +196,7 @@ describe("discoverPiRuntimes", () => {
   });
 
   it("does not treat a prerelease at the minimum version as compatible", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-prerelease-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-prerelease-"));
     try {
       await mkdir(join(root, "packages", "coding-agent"), { recursive: true });
       await writeFile(
@@ -220,7 +220,7 @@ describe("discoverPiRuntimes", () => {
   it("executes a Windows cmd shim whose path requires quoting", {
     skip: process.platform !== "win32",
   }, async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-runtime-"));
     const bin = join(root, "bin with spaces");
     try {
       await mkdir(bin, { recursive: true });

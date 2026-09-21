@@ -6,7 +6,7 @@ Last updated: 2026-09-15
 
 ## 1. Purpose
 
-Piarium gives frequently used Pi packages a first-class graphical experience without becoming a
+Varin gives frequently used Pi packages a first-class graphical experience without becoming a
 second package runtime or configuration authority. This document fixes the page boundaries,
 provider ownership, and acceptance criteria used to retire the imported OpenChamber pages.
 
@@ -18,37 +18,37 @@ package's current schema, commands, public events, and documented lifecycle.
 ## 2. Product rules
 
 1. **Native files remain authoritative.** Pi settings, package manifests, extension JSON/JSONC,
-   session JSONL, extension databases, and extension artifacts are not mirrored into a Piarium
+   session JSONL, extension databases, and extension artifacts are not mirrored into a Varin
    store.
 2. **A GUI adapter is a view, not a reduced replacement schema.** It edits well-understood native
    keys and preserves every unknown key. A raw JSON/JSONC editor remains available for the complete
    document.
 3. **Package configuration wins.** The Agents catalog may provide common discovery and lifecycle
    actions, but a provider-specific editor takes precedence over generic fields.
-4. **Runtime actions require a public contract.** Piarium may call registered Pi commands, a
+4. **Runtime actions require a public contract.** Varin may call registered Pi commands, a
    documented event-bus bridge, or a versioned extension contract. It does not scrape terminal
    text, inspect private databases, or infer success from private files.
 5. **Configured and active are different states.** A package can be present in user/project
    settings but not loaded in the current session. Every adapter shows scope, source, active state,
    and actionable diagnostics separately.
-6. **No pre-release compatibility stack.** All Piarium surfaces use the single protocol v1 and
+6. **No pre-release compatibility stack.** All Varin surfaces use the single protocol v1 and
    change in lockstep. There are no legacy request aliases or version branches.
 7. **Risk is explained where the action occurs.** Destructive repair, history navigation, remote
    bind, cookie access, executable configuration, and credential sources receive focused warnings;
    ordinary settings are not hidden behind blanket restrictions.
 
-### 2.1 Pi packages versus Piarium extensions
+### 2.1 Pi packages versus Varin extensions
 
 This document describes graphical integration for Pi packages. It does not make those packages
-Piarium extensions. Pi packages remain owned by Pi's `PackageManager` and extension runner; the
-future Piarium extension platform has a separate application-host manager, lifecycle, manifest,
+Varin extensions. Pi packages remain owned by Pi's `PackageManager` and extension runner; the
+future Varin extension platform has a separate application-host manager, lifecycle, manifest,
 state, and Surface contribution model.
 
-The current first-class adapters are built into Piarium. During the migration defined by
-[piarium-extension-platform.md](piarium-extension-platform.md), they may become built-in Piarium
+The current first-class adapters are built into Varin. During the migration defined by
+[varin-extension-platform.md](varin-extension-platform.md), they may become built-in Varin
 integration extensions that consume the same public Pi contracts. Disabling such a UI integration
 must not disable, remove, reconfigure, or take ownership of its Pi package, and changing the Pi
-package must not silently mutate the Piarium extension's installation or layout state.
+package must not silently mutate the Varin extension's installation or layout state.
 
 ## 3. Information architecture
 
@@ -64,7 +64,7 @@ package must not silently mutate the Piarium extension's installation or layout 
 | Recovery sidebar | Current-session health, undo/redo/checkpoints/repair | Workspace snapshot storage |
 | Recovery settings | Default rollback policy, package/configuration entry points | Per-message rollback itself |
 
-An unknown package remains usable through Pi's generic extension UI bridge. If Piarium does not
+An unknown package remains usable through Pi's generic extension UI bridge. If Varin does not
 have a specialized adapter, Plugin Settings opens its declared or user-selected native JSON/JSONC
 document rather than fabricating common fields.
 
@@ -77,7 +77,7 @@ The current catalog surfaces follow those boundaries directly:
   Pi's update operation is
   truthfully described as source-wide across user and project scopes; the scope selector applies to
   installation and removal, not to a fictional scoped update implementation.
-- Pi Packages also presents the four global foundational integrations maintained by Piarium: MCP,
+- Pi Packages also presents the four global foundational integrations maintained by Varin: MCP,
   permission policy, workspace history, and prompt repair. Missing items are installed in the
   background on first observation, but they remain normal Pi packages with the same enable, disable,
   update, configuration, and removal controls. User removal is sticky until Restore; an existing
@@ -105,16 +105,16 @@ The current catalog surfaces follow those boundaries directly:
 The removed screens are represented here by capability, rather than kept as dormant source code
 that can accidentally become a second configuration system.
 
-| Retired surface | Useful capability clue | Piarium disposition |
+| Retired surface | Useful capability clue | Varin disposition |
 | --- | --- | --- |
 | Magic Context | Compression thresholds, memory/search, embeddings, SQLite, internal agents, fallbacks, and Dreamer schedules | Implemented in the current schema-driven Magic Context adapter with separate user/project documents and Advanced JSONC. |
 | Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, augmentation, and embedding actions | Current registered `ctx-*` commands are integrated as provider-owned session operations, including focused cost/maintenance confirmation and persisted public result entries. Private database inspection still waits for an explicit public contract. |
 | Magic Context | OpenCode plugin registration, OpenCode TUI sidebar, and Oh My OpenAgent hook-conflict diagnostics | Rejected as OpenCode-only behavior. Pi package health is derived from Pi package/runtime contracts instead. |
-| OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Piarium schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
+| OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Varin schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
 | OpenAgent | Discovering agents, showing defaults/source, and invoking lifecycle actions | Implemented by the provider-owned Agents catalog. Provider configuration remains higher priority than generic catalog presentation. |
 | OpenCode agent editor | Generic agent create/rename/duplicate controls and a shared OpenCode permission-map editor | Rejected from the Pi catalog. Definitions and permissions are mutated only through provider-advertised actions, a specialized package adapter, or that package's native configuration document. |
-| OpenCode Commands, Skills, and external Skills Catalog stores | Slash completion, inline skill links, command dispatch, resource editing, supporting files, and catalog installation | Callable/resource behavior is replaced by Pi `command.list`, `resource.list/get/create/update/delete/copy`, and Pi Packages. The client accepts only native `/skill:name`; old `/name` aliases, OpenCode CRUD/catalog endpoints, duplicate persisted selections, and browser debug globals are retired. The unused private supporting-file editor is not carried forward: Piarium will add it only through a native Pi resource contract, not by restoring OpenCode HTTP paths. |
-| Agent Orchestration | Switching among native OpenCode, oh-my-opencode-slim, and oh-my-openagent modes | Rejected. Piarium has one Pi runtime and does not retain an OpenCode orchestration-mode compatibility layer. |
+| OpenCode Commands, Skills, and external Skills Catalog stores | Slash completion, inline skill links, command dispatch, resource editing, supporting files, and catalog installation | Callable/resource behavior is replaced by Pi `command.list`, `resource.list/get/create/update/delete/copy`, and Pi Packages. The client accepts only native `/skill:name`; old `/name` aliases, OpenCode CRUD/catalog endpoints, duplicate persisted selections, and browser debug globals are retired. The unused private supporting-file editor is not carried forward: Varin will add it only through a native Pi resource contract, not by restoring OpenCode HTTP paths. |
+| Agent Orchestration | Switching among native OpenCode, oh-my-opencode-slim, and oh-my-openagent modes | Rejected. Varin has one Pi runtime and does not retain an OpenCode orchestration-mode compatibility layer. |
 | Agent Orchestration | Provider discovery, presets, model policy, fallback, runtime limits, and feature controls | Discovery/actions live in Agents; settings belong to the contributing Pi package adapter or its native JSON/JSONC document. No shared form fabricates unsupported fields. |
 
 The cleanup removes only the unreachable OpenCode pages, their private HTTP stores, their schema
@@ -202,7 +202,7 @@ configuration: session actions never imply that a draft was persisted.
 ### 5.0 Context and memory package boundaries
 
 `pi-openai-codex-compat` and `pi-observational-memory` are adapted only through their current native
-configuration authorities. Piarium does not assign compaction ownership, infer cross-plugin
+configuration authorities. Varin does not assign compaction ownership, infer cross-plugin
 priority, or add coexistence policy in this phase. `context-mode` remains available through the
 generic installed-package editor because it does not expose one canonical user configuration
 document suitable for a dedicated form. `pi-memory` is not a maintained adapter target.
@@ -213,7 +213,7 @@ Authority:
 
 - user/project Pi `settings.json` under `subagents`;
 - `<agentDir>/extensions/subagent/config.json` for runtime behavior;
-- `piarium.agent-provider.discover/v1` and `subagents:rpc:v1:*` for definitions and actions;
+- `varin.agent-provider.discover/v1` and `subagents:rpc:v1:*` for definitions and actions;
 - public lifecycle status/events/artifacts for active and recoverable tasks.
 
 Target settings sections:
@@ -229,7 +229,7 @@ Target settings sections:
 
 The current settings adapter discovers agents from the live `pi-subagents`
 catalog, exposes provider-advertised create/update actions, and uses
-the descriptor's runtime `name`—never Piarium's opaque descriptor id—as the `agentOverrides` key.
+the descriptor's runtime `name`—never Varin's opaque descriptor id—as the `agentOverrides` key.
 The definition dialog's Advanced JSON is specifically the plugin's management-action config, not a
 raw editor for Agent Markdown. It exposes only top-level fields accepted by the installed 0.55
 management `create`/`update` contract. Unknown native frontmatter remains
@@ -238,7 +238,7 @@ serializer. Manually adding an unsupported action key is rejected before dispatc
 silently ignored. Removing a supported advanced key sends that field's plugin-defined clear or
 default value, so a JSON edit cannot degrade into a misleading “no changes” response.
 
-`pi-subagents` 0.55 removed durable `.chain.*` definitions. Piarium therefore no longer advertises
+`pi-subagents` 0.55 removed durable `.chain.*` definitions. Varin therefore no longer advertises
 create/edit workflow resources that the plugin rejects. Repeatable orchestration remains plugin-owned
 through `workflowScript` and `/prompt-workflow`; it is an execution flow, not a persisted Agent
 catalog entity. Future thinking tokens still render as an unsupported value and remain unchanged
@@ -274,7 +274,7 @@ Implemented Fleet providers:
   `cwd`, output paths, PIDs, and the plugin kill message. There is no Plugin Settings schema and no
   `.pi/tasks` reader.
 
-Per-entry controls render only for DTO actions Piarium knows how to invoke (`logs`, `kill`, `run`).
+Per-entry controls render only for DTO actions Varin knows how to invoke (`logs`, `kill`, `run`).
 Richer workflow graphs remain a later public-contract slice.
 
 Acceptance:
@@ -318,7 +318,7 @@ present in a project document, validates the plugin's numeric five-field cron an
 requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
 flattening them into scalar controls. TodoWrite and the top-level `mural` block use their current
 native paths rather than the removed experimental namespace. Starting with Magic Context 0.39,
-Historian and Dreamer model execution is harness-scoped; Piarium uses `historian.pi`, `dreamer.pi`,
+Historian and Dreamer model execution is harness-scoped; Varin uses `historian.pi`, `dreamer.pi`,
 and `dreamer.pi.tasks` for new values on that version. A legacy flat value already accepted by the
 plugin remains visible and editable until the user or plugin migrates it, while an existing nested
 Pi value wins exactly as it does in the plugin loader.
@@ -332,7 +332,7 @@ user turn rather than a preview. Wrap-up, upgrade, and Dreamer receive focused e
 model cost/state effects. Full and ranged recompression deliberately keep Magic Context's native
 two-invocation, 60-second confirmation instead of trying to infer its armed state from output
 prose. The adapter renders the newest persisted public `ctx-status` entry from the current Pi
-branch with the same renderer used by chat. It never reads SQLite or copies status into Piarium
+branch with the same renderer used by chat. It never reads SQLite or copies status into Varin
 storage.
 
 The runtime surface groups those operations by intent: Context health contains the newest public
@@ -346,7 +346,7 @@ Acceptance:
 - unknown JSONC content and comments survive a GUI edit;
 - commands are invoked through the active extension and transport failures remain distinct from
   provider-reported status entries;
-- no memory or SQLite content is copied into Piarium storage.
+- no memory or SQLite content is copied into Varin storage.
 
 ### 5.3 pi-mcp-adapter
 
@@ -364,14 +364,14 @@ catalog: one row per deduplicated effective server, with runtime state joined by
 right pane shows the selected server, its runtime actions, and the highest-precedence native source
 that directly defines it. New-server and adapter-settings actions choose an explicit native source;
 source-local edits still use the revisioned `config.text` contract and preserve the raw JSON/JSONC
-draft. Piarium never folds source documents in the renderer.
+draft. Varin never folds source documents in the renderer.
 
 The public catalog contains only server identity, disabled state, transport kind and sanitized
 command/URL/socket display data, plus direct native-source membership. It does not expose arguments,
 environment, headers, bearer material, OAuth data, URL user information, query strings, or
 fragments. Imported or programmatic effective servers may therefore have no editable source. The
 adapter remains the sole owner of merge order, imports, URL credential binding, and effective
-transport selection. Piarium edits one selected native document and re-reads the adapter-owned
+transport selection. Varin edits one selected native document and re-reads the adapter-owned
 catalog after save.
 
 Saving a changed existing server URL clears URL-bound credentials present in that selected source,
@@ -382,7 +382,7 @@ previous transport while preserving unrelated and unknown server fields. Partial
 remain valid, so the GUI does not require a transport when a lower-precedence source supplies it.
 Host-config discovery stays explicit and defaults off. Socket configuration keeps a local trust
 warning beside the path. OpenCode is available only as an explicit compatibility import supported
-by the adapter; it is never an authoritative Piarium source.
+by the adapter; it is never an authoritative Varin source.
 
 The public `status/v1` snapshot remains the runtime authority and does not expose config provenance
 or failure text. The separate `configCatalog/v1` projection supplies effective identity and direct
@@ -425,7 +425,7 @@ modes, Chromium-cookie opt-in, summary and inline-content limits, GitHub/video/i
 PDF provider/size/page limits, domain policy, and SSRF exceptions. Tool-name aliases, shortcuts,
 less common budgets, authenticated-fetch profiles, and provider-specific tuning remain in the same
 draft's Advanced editor while
-unknown native keys are preserved. Piarium propagates its selected Pi agent directory through
+unknown native keys are preserved. Varin propagates its selected Pi agent directory through
 `PI_CODING_AGENT_DIR`, so the file edited by the GUI is the file loaded by extensions even when a
 custom agent directory is used.
 
@@ -459,11 +459,11 @@ entry point remains attached to a user message. The right sidebar reports curren
 recovery health and operations. Settings owns policy, storage location, retention, cleanup, and
 workspace-history deletion without becoming a second file or conversation authority.
 
-The selected `piarium.workspace-recovery@5` Host service owns affected-file checkpoints, dirty-buffer
+The selected `varin.workspace-recovery@5` Host service owns affected-file checkpoints, dirty-buffer
 fencing, combined restore, undo/redo, retention, and crash reconciliation. The official provider is
-the replaceable `piarium.builtin.recovery` extension. `pi-workspace-history` keeps its own optional
+the replaceable `varin.builtin.recovery` extension. `pi-workspace-history` keeps its own optional
 history and configuration, and `pi-wtf` keeps prompt-repair and command-word behavior; neither is
-installed, invoked, or treated as an authority by native Piarium recovery.
+installed, invoked, or treated as an authority by native Varin recovery.
 
 Acceptance:
 
@@ -481,7 +481,7 @@ Authority:
 - the nearest project JSON found while walking from the runtime working directory to the filesystem
   root, checking `.pi-lens.json` before `pi-lens.json` at each level;
 - the active session's registered `lens-*` commands for immediate actions;
-- no private cache, report, instance registry, or NDJSON log as Piarium state.
+- no private cache, report, instance registry, or NDJSON log as Varin state.
 
 The Host resolves both authorities and returns only the selected path, content, and revision. The
 renderer names the closed `pi-lens-global` or `pi-lens-project` authority and never receives an
@@ -501,7 +501,7 @@ arrives.
 
 Runtime actions are limited to commands actually returned by `command.list`: session activation,
 context injection, diagnostics widget, technical-debt index, project map, health, performance, and
-tool installation status. Piarium shows task labels rather than raw command identifiers and still
+tool installation status. Varin shows task labels rather than raw command identifiers and still
 dispatches the exact native slash command. It does not parse command output into a parallel status
 model.
 
@@ -511,7 +511,7 @@ Acceptance:
 - project-global-only keys are diagnosed without becoming a save blocker or being deleted;
 - clean external changes reload, dirty changes remain intact, and stale saves conflict in the Host;
 - runtime buttons appear only for commands observed in the active session;
-- no pi-lens private diagnostics cache or telemetry log becomes a Piarium authority.
+- no pi-lens private diagnostics cache or telemetry log becomes a Varin authority.
 
 ### 5.7 @cortexkit/aft-pi
 
@@ -522,12 +522,12 @@ Authority:
 - trusted project `.cortexkit/aft.jsonc` through the revisioned project text-document contract;
 - the active session's `command.list` result for the presence of `aft-status`;
 - no bridge cache, semantic index, call graph, backup tree, status output, or custom UI component as
-  Piarium state.
+  Varin state.
 
 Both scopes are JSONC drafts. Structured edits preserve comments, trailing commas, unknown fields,
 and the `bash` custom-object form. Known invalid fields block structured saving so AFT's partial
 loader cannot silently skip a malformed known section. Unknown top-level fields remain non-blocking:
-AFT's partial loader ignores them, while Piarium preserves them and explains that they are not
+AFT's partial loader ignores them, while Varin preserves them and explains that they are not
 currently effective.
 
 The project view follows AFT's native one-way and user-only merge rules instead of presenting the
@@ -538,9 +538,9 @@ the bounded inspect diagnostics timeout and GitHub CLI shim added in AFT 0.52.1.
 controls expose only fields the loader actually honors. Additional project read denials and complex
 native values remain available in Advanced.
 
-Runtime observation is deliberately command-only. Piarium marks AFT observed only when
+Runtime observation is deliberately command-only. Varin marks AFT observed only when
 `command.list` contains `aft-status`. It does not execute `/aft-status`: that command renders through
-`ctx.ui.custom`, while Piarium's RPC bridge can only project static custom UI. Saving uses the Host's
+`ctx.ui.custom`, while Varin's RPC bridge can only project static custom UI. Saving uses the Host's
 revision check and active-Host configuration reload boundary, but the UI does not claim that every
 AFT subsystem hot-reloads or that a newly saved value is already effective.
 
@@ -557,11 +557,11 @@ Acceptance:
 
 ### 5.8 Retired permission-system adapter (D-283)
 
-Piarium no longer provides a first-class adapter, Composer control, status bridge,
+Varin no longer provides a first-class adapter, Composer control, status bridge,
 quick mode, or foundational provisioning for `@gotgenes/pi-permission-system`.
-Interactive approvals are owned by the native Piarium Harness permission gate and
+Interactive approvals are owned by the native Varin Harness permission gate and
 its Harness Settings policy. The package may still be installed by a user as an
-ordinary Pi package through Pi's generic package surface, but Piarium does not
+ordinary Pi package through Pi's generic package surface, but Varin does not
 read or edit its policy files and it cannot replace or bypass the native gate.
 The previous adapter contract is retained only in history/decision records.
 
@@ -581,7 +581,7 @@ future fields. If both `memoryOverflowStrategy` and legacy `autoConsolidate` exi
 unchanged and the UI explains that the modern field takes precedence.
 
 Runtime observation checks only whether the active session's `command.list` contains
-`memory-insights`. Piarium does not execute the command, parse notifications or TUI output, inspect
+`memory-insights`. Varin does not execute the command, parse notifications or TUI output, inspect
 memory data, or infer background-review, Markdown, or SQLite health. No session, command-list
 failure, and command not observed remain separate states.
 
@@ -601,8 +601,8 @@ in Advanced; unknown and legacy values remain visible and non-blocking.
 
 Runtime observation is deliberately command-only. Only an exact `rtk` entry from `command.list`
 means the extension loaded. It does not establish that the external `rtk` binary is installed.
-Piarium may dispatch `/rtk show`, `/rtk verify`, `/rtk stats`, and `/rtk clear-stats`, but does not
-parse their notification text into status or copy metrics into Piarium state.
+Varin may dispatch `/rtk show`, `/rtk verify`, `/rtk stats`, and `/rtk clear-stats`, but does not
+parse their notification text into status or copy metrics into Varin state.
 
 ## 6. Implementation order
 

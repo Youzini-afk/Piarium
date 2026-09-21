@@ -1,11 +1,11 @@
 ---
 title: Installation
-description: Installez Piarium pour le desktop ou le web depuis les sources ou Docker.
+description: Installez Varin pour le desktop ou le web depuis les sources ou Docker.
 ---
 
 # Installation
 
-Piarium est en pre-1.0. Les façons prises en charge de l’exécuter aujourd’hui sont **depuis les sources** et **avec Docker**. Les téléchargements npm empaquetés et GitHub Release ne sont pas encore publiés.
+Varin est en pre-1.0. Les façons prises en charge de l’exécuter aujourd’hui sont **depuis les sources** et **avec Docker**. Les téléchargements npm empaquetés et GitHub Release ne sont pas encore publiés.
 
 Il existe deux surfaces produit principales :
 
@@ -24,13 +24,13 @@ Vous n’avez **pas** besoin d’une installation séparée d’OpenCode ou de l
 ## Depuis les sources (web)
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Ouvrez l’URL Vite affichée dans le terminal. Piarium démarre l’UI et le service API/runtime de confiance ensemble.
+Ouvrez l’URL Vite affichée dans le terminal. Varin démarre l’UI et le service API/runtime de confiance ensemble.
 
 ## Depuis les sources (desktop)
 
@@ -51,17 +51,17 @@ Un installeur Windows peut être construit localement avec `bun run electron:bui
 Sur un hôte Docker Linux :
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-Ouvrez `http://127.0.0.1:3000` et utilisez le mot de passe généré. Placez un reverse proxy TLS ou un tunnel approuvé devant tout déploiement exposé à Internet. En production, épinglez `PIARIUM_IMAGE` à un digest testé plutôt qu’à `:latest`.
+Ouvrez `http://127.0.0.1:3000` et utilisez le mot de passe généré. Placez un reverse proxy TLS ou un tunnel approuvé devant tout déploiement exposé à Internet. En production, épinglez `VARIN_IMAGE` à un digest testé plutôt qu’à `:latest`.
 
-Compose tire par défaut l’image allégée `ghcr.io/youzini-afk/piarium-slim:latest` (suffisante pour le serveur : Bun, Node, Git, SSH et cloudflared). Si l’agent doit compiler Python, Java, Go ou Rust dans le conteneur, appliquez la superposition outillage :
+Compose tire par défaut l’image allégée `ghcr.io/youzini-afk/varin-slim:latest` (suffisante pour le serveur : Bun, Node, Git, SSH et cloudflared). Si l’agent doit compiler Python, Java, Go ou Rust dans le conteneur, appliquez la superposition outillage :
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
@@ -69,4 +69,4 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ## One-liner CLI (non publié)
 
-`scripts/install.sh` et `npx @piarium/web` ciblent le paquet npm `@piarium/web`. Ce paquet n’est pas encore sur le registre public, donc l’installeur curl échouera jusqu’à la publication d’une release. Utilisez les sources ou Docker d’ici là.
+`scripts/install.sh` et `npx @varin/web` ciblent le paquet npm `@varin/web`. Ce paquet n’est pas encore sur le registre public, donc l’installeur curl échouera jusqu’à la publication d’une release. Utilisez les sources ou Docker d’ici là.

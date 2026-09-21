@@ -2,7 +2,7 @@ import type {
   RuntimeMethod,
   RuntimeMethodParams,
   RuntimeMethodResult,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { requestJson } from './cli-http.js';
 import type { CliOptions } from './cli-types.js';
@@ -19,7 +19,7 @@ export const requestRuntimeMethod = async <Method extends RuntimeMethod>(
   params: RuntimeMethodParams<Method>,
   options: CliOptions = {},
 ): Promise<RuntimeMethodResult<Method>> => {
-  const { response, body } = await requestJson(port, '/api/piarium/runtime/request', {
+  const { response, body } = await requestJson(port, '/api/varin/runtime/request', {
     ...options,
     timeoutMs: typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? options.timeoutMs
@@ -36,14 +36,14 @@ export const requestRuntimeMethod = async <Method extends RuntimeMethod>(
   );
 };
 
-export const requestPiariumApi = async (
+export const requestVarinApi = async (
   port: number,
   endpoint: string,
   options: CliOptions = {},
 ): Promise<Record<string, unknown>> => {
   const { response, body } = await requestJson(port, endpoint, options);
   if (response.ok) return body ?? {};
-  const message = asNonEmptyString(body?.error) || `Piarium API request failed: ${endpoint}`;
+  const message = asNonEmptyString(body?.error) || `Varin API request failed: ${endpoint}`;
   const status = Number(response?.status);
   throw new TunnelCliError(
     message,

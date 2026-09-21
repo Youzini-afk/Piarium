@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import {
   resolveDefaultDirectory,
   resolveRestoredDirectory,
@@ -11,13 +11,13 @@ import { waitForRuntimeSettingsSync } from './directoryPersistence';
 
 describe('resolveDefaultDirectory', () => {
   test('uses the runtime workspace root when the boot fallback is a filesystem root', () => {
-    expect(resolveDefaultDirectory('/', '/home/piarium/workspaces')).toBe('/home/piarium/workspaces');
+    expect(resolveDefaultDirectory('/', '/home/varin/workspaces')).toBe('/home/varin/workspaces');
     expect(resolveDefaultDirectory('C:/', 'C:/Users/example/projects')).toBe('C:/Users/example/projects');
   });
 
   test('preserves an explicit project directory', () => {
-    expect(resolveDefaultDirectory('/home/piarium/workspaces/project', '/home/piarium/workspaces')).toBe(
-      '/home/piarium/workspaces/project',
+    expect(resolveDefaultDirectory('/home/varin/workspaces/project', '/home/varin/workspaces')).toBe(
+      '/home/varin/workspaces/project',
     );
   });
 
@@ -29,16 +29,16 @@ describe('resolveDefaultDirectory', () => {
     expect(resolveRestoredDirectory({
       latestPersistedDirectory: null,
       persistedDirectory: null,
-      workspaceRoot: '/home/piarium/workspaces',
-    })).toBe('/home/piarium/workspaces');
+      workspaceRoot: '/home/varin/workspaces',
+    })).toBe('/home/varin/workspaces');
   });
 
   test('preserves a project selected while the workspace root was loading', () => {
     expect(resolveRestoredDirectory({
-      latestPersistedDirectory: '/home/piarium/workspaces/project',
+      latestPersistedDirectory: '/home/varin/workspaces/project',
       persistedDirectory: null,
-      workspaceRoot: '/home/piarium/workspaces',
-    })).toBe('/home/piarium/workspaces/project');
+      workspaceRoot: '/home/varin/workspaces',
+    })).toBe('/home/varin/workspaces/project');
   });
 
   test('uses home for general chat instead of replaying the last workspace directory', () => {
@@ -77,7 +77,7 @@ describe('waitForRuntimeSettingsSync', () => {
 
     const waiting = waitForRuntimeSettingsSync(fakeWindow);
     const registeredListener = listener as EventListener | null;
-    registeredListener?.(new Event('piarium:settings-synced'));
+    registeredListener?.(new Event('varin:settings-synced'));
     expect(await waiting).toBe(true);
     expect(cleared).toBe(17);
   });

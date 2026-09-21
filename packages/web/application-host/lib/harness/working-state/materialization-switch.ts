@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { ThreadWorktree } from "@piarium/protocol";
+import type { ThreadWorktree } from "@varin/protocol";
 
 export type MaterializationSwitchJournal = NonNullable<ThreadWorktree["materializationSwitch"]>;
 export type WorktreeOwnershipAssertion = (operation: string, candidates?: readonly string[]) => Promise<void>;

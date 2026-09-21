@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiSessionEntry, SessionSnapshot } from '@piarium/protocol';
+import type { PiSessionEntry, SessionSnapshot } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';

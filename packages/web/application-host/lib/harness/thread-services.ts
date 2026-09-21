@@ -1,4 +1,4 @@
-import { readHistoryPage } from "@piarium/protocol";
+import { readHistoryPage } from "@varin/protocol";
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_HARNESS_SETTINGS,
@@ -16,13 +16,13 @@ import {
   type ThreadReadWhat,
   type ThreadRun,
   type ThreadViewCursor,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { validateRetrievalEvidence } from "./retrieval-evidence.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { EXECUTION_PRESETS } from "./presets.js";
-import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@piarium/protocol";
+import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@varin/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
 import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError, type ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
@@ -310,7 +310,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           : preset?.worktree === "none" ? "none" as const : "isolated" as const);
       // `inherit` fixes the parent's committed input at dispatch time; a queued
       // Thread never re-reads later parent state (D-285.4 / 3.18B).
-      let inheritedContext: import("@piarium/protocol").ThreadInheritedContext | undefined;
+      let inheritedContext: import("@varin/protocol").ThreadInheritedContext | undefined;
       if (params.input === "inherit") {
         const parentSessionId = parent.kind === "session"
           ? parent.id

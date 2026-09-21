@@ -26,7 +26,7 @@ const surfaceHash = (text: string) => `sha256-${createHash('sha256').update(text
 it('assigns a nested runtime root its own workspace identity', async () => {
   const harness = await createDocumentAuthorityHarness();
   try {
-    const nestedRoot = path.join(harness.workspaceRoot, '.piarium', 'threads', 'child-worktree');
+    const nestedRoot = path.join(harness.workspaceRoot, '.varin', 'threads', 'child-worktree');
     await fs.promises.mkdir(nestedRoot, { recursive: true });
     const nested = await harness.authority.resolveWorkspace({ path: nestedRoot });
     expect(nested.workspaceId).not.toBe(harness.identity.workspaceId);

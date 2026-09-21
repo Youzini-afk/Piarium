@@ -16,7 +16,7 @@ export async function createNativeAuthorityTestRuntime(options: {
   sessionNavigation?: Parameters<typeof createWorkspaceRecoveryEngine>[0]["sessionNavigation"];
 }) {
   const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-  const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+  const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
   await fs.access(kernelPath);
   const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, "package.json"), "utf8")) as { version: string }).version;
   const storageRoot = path.join(options.dataDir, "kernel", options.hostId);

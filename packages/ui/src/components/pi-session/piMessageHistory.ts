@@ -1,4 +1,4 @@
-import type { PiSessionEntry, PiUserContent } from '@piarium/protocol';
+import type { PiSessionEntry, PiUserContent } from '@varin/protocol';
 
 const userContentText = (content: string | PiUserContent[]): string => (
   typeof content === 'string'

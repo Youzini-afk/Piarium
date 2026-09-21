@@ -7,8 +7,8 @@ import {
   markWorkbenchProfileTransitionTargetPainted,
   subscribeWorkbenchProfileTransition,
 } from '@/lib/workbench/profile-transition';
-import { usePiariumExtensionCatalog } from './catalog-store';
-import { piariumSurfaceRuntime } from './surface-runtime';
+import { useVarinExtensionCatalog } from './catalog-store';
+import { varinSurfaceRuntime } from './surface-runtime';
 import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -56,7 +56,7 @@ const WorkspaceResolutionFailure: React.FC<{ errorMessage: string; retry(): void
 export const WorkbenchShellHost: React.FC<{
   fallback?: React.ReactNode;
 }> = ({ fallback = LOADING_SHELL }) => {
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const surfaceSnapshot = useSurfaceRegistrySnapshot();
   const workspace = useWorkbenchWorkspace();
   const transition = React.useSyncExternalStore(
@@ -71,7 +71,7 @@ export const WorkbenchShellHost: React.FC<{
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const { resolved, view } = resolveWorkbenchShellView(
     catalog.snapshot,
-    piariumSurfaceRuntime.surface,
+    varinSurfaceRuntime.surface,
     workspaceId,
     surfaceSnapshot,
   );

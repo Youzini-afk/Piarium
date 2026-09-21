@@ -5,7 +5,7 @@ description: Zamień prompt w cel, nad którym agent pracuje automatycznie.
 
 # Cele sesji
 
-Cel zamienia jeden prompt w linię mety. Zamiast popychać agenta słowem „kontynuuj" po każdej odpowiedzi, ustawiasz cel raz — a Piarium automatycznie prowadzi sesję w jego stronę, sprawdzając postęp niezależnym audytorem po każdej turze. Praca trwa nawet pod twoją nieobecność.
+Cel zamienia jeden prompt w linię mety. Zamiast popychać agenta słowem „kontynuuj" po każdej odpowiedzi, ustawiasz cel raz — a Varin automatycznie prowadzi sesję w jego stronę, sprawdzając postęp niezależnym audytorem po każdej turze. Praca trwa nawet pod twoją nieobecność.
 
 ## Rozpoczęcie celu
 
@@ -31,7 +31,7 @@ Do drobnych kontekstowych poleceń cel nie jest potrzebny — wyślij zwykłą w
 
 ## Jak to działa
 
-Gdy agent się zatrzyma i sesja na chwilę ucichnie, Piarium:
+Gdy agent się zatrzyma i sesja na chwilę ucichnie, Varin:
 
 1. Prosi mały, tani model o audyt ostatniej tury względem celu: kontynuować, gotowe czy utknięto?
 2. Jeśli werdykt to „kontynuować", wysyła prompt kontynuacji i agent wraca do pracy.
@@ -63,7 +63,7 @@ W **Ustawienia → Czat → Cel** możesz ustawić domyślny budżet tokenów dl
 
 ## Miej na uwadze
 
-- Pętla celu działa na serwerze Piarium, nie w karcie przeglądarki. Zamknij kartę, zablokuj telefon — agent pracuje dalej, a gdy cel się rozstrzygnie, dostaniesz powiadomienie. Serwer (aplikacja desktopowa lub proces `piarium`) musi pozostać uruchomiony.
+- Pętla celu działa na serwerze Varin, nie w karcie przeglądarki. Zamknij kartę, zablokuj telefon — agent pracuje dalej, a gdy cel się rozstrzygnie, dostaniesz powiadomienie. Serwer (aplikacja desktopowa lub proces `varin`) musi pozostać uruchomiony.
 - Cele używają dostawcy i modelu twojej własnej sesji, łącznie z wywołaniami audytora — nic nie trafia do dostawców, których już nie używasz.
 - Jeden cel na sesję naraz.
 

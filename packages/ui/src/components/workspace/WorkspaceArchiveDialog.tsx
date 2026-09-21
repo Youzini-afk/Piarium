@@ -24,7 +24,7 @@ import { toast } from '@/components/ui';
 import type {
   WorkspaceArchiveExtractRequest,
   WorkspaceArchivePreview,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import {
   formatWorkspaceArchiveBytes,

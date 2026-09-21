@@ -4,7 +4,7 @@ Status: implemented architecture; R0–R6 and Stage R complete through D-282.
 
 Last updated: 2026-09-15
 
-本文规定 Piarium Rust 系统内核的当前职责和跨进程契约。R0–R6 的实施记录见
+本文规定 Varin Rust 系统内核的当前职责和跨进程契约。R0–R6 的实施记录见
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
@@ -13,8 +13,8 @@ R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration dura
 
 ## 1. 产品与阶段目标
 
-Piarium 是拥有工作台和 Agent Harness 的独立产品，默认内置钉住版本的 Pi。Pi 提供 Agent loop、模型/provider、
-会话树和扩展生态；Piarium 拥有工作状态、工具环境、任务治理与用户交互。产品归属不要求统一实现语言。
+Varin 是拥有工作台和 Agent Harness 的独立产品，默认内置钉住版本的 Pi。Pi 提供 Agent loop、模型/provider、
+会话树和扩展生态；Varin 拥有工作状态、工具环境、任务治理与用户交互。产品归属不要求统一实现语言。
 
 目标架构由三部分组成：Rust 系统内核、TypeScript Application Host/产品层、TypeScript/Node Pi worker。
 Rust 负责文件与资源的实际操作、工作状态和恢复事务、进程/PTY 底层、文件与结构计算；TS 负责模型和任务策略、
@@ -224,7 +224,7 @@ TriviumDB 已承担图/向量的原生查询，现有单写者 adapter 保留；
 同一对象库、分支或进程不允许 TS/Rust 同时当写者。接管后的 TS 代码只适配公开契约，旧存储/锁/写入实现一起删除。
 原实现仅在尚未接管其职责时继续运行，不设置新实现默认关闭、shadow 或运行失败回到旧写者的常驻机制。
 
-**当前没有用户，不建设旧 Piarium 内部格式兼容（D-253）。** 旧 catalog、WorkingState、缓存、索引和恢复元数据可直接
+**当前没有用户，不建设旧 Varin 内部格式兼容（D-253）。** 旧 catalog、WorkingState、缓存、索引和恢复元数据可直接
 清除重建。消费者一次更新为新契约，旧 reader/writer、升级导入器、多版本分支和旧后端 fallback 一起删除。
 Rust R1 从唯一的新内部格式启动，不要求建设 D-252 原先提出的“一次性存储转换”或旧库接管恢复阶段机。
 

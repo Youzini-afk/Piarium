@@ -4,8 +4,8 @@ import type {
   PiSessionEntry,
   PiSessionMessageEntry,
   PiUserMessage,
-} from '@piarium/protocol';
-import { PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE } from '@piarium/protocol';
+} from '@varin/protocol';
+import { VARIN_RECOVERY_NAVIGATION_MARKER_TYPE } from '@varin/protocol';
 import { projectPiTimeline } from './piTimelineProjection';
 
 const assistant = (text: string, timestamp = 1): PiAssistantMessage => ({
@@ -162,10 +162,10 @@ describe('Pi timeline projection', () => {
     expect(projection.items[0].turn.entries).toEqual([orphan]);
   });
 
-  test('hides persisted Piarium recovery navigation markers', () => {
+  test('hides persisted Varin recovery navigation markers', () => {
     const user = userEntry('user', 'hello', 1);
     const marker: PiSessionEntry = {
-      customType: PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
+      customType: VARIN_RECOVERY_NAVIGATION_MARKER_TYPE,
       data: {
         expectedLeafId: user.id,
         operationId: 'restore-1',

@@ -61,7 +61,7 @@ async function stopCommand(options: CliOptions): Promise<void> {
     };
 
     if (showOutput) {
-      clackIntro('Piarium Stop');
+      clackIntro('Varin Stop');
     }
 
     let runningInstances = await discoverLifecycleInstances(options);
@@ -79,7 +79,7 @@ async function stopCommand(options: CliOptions): Promise<void> {
           printJson({ stoppedCount: 0, results: jsonResults });
         }
         if (showOutput) {
-          logStatus('info', `no Piarium instance found on port ${portOf(options)}`);
+          logStatus('info', `no Varin instance found on port ${portOf(options)}`);
           finish('nothing to stop');
         }
         printQuietStopResults();
@@ -90,10 +90,10 @@ async function stopCommand(options: CliOptions): Promise<void> {
       if (explicitInstance.runtime === 'desktop') {
         jsonResults.push({ port: portOf(options), runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
         if (isJsonMode(options)) {
-          printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${portOf(options)} is managed by Piarium Desktop and cannot be stopped with this command.` }] });
+          printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${portOf(options)} is managed by Varin Desktop and cannot be stopped with this command.` }] });
         }
         if (showOutput) {
-          logStatus('warning', `port ${portOf(options)} is managed by Piarium Desktop`, 'cannot be stopped with this command');
+          logStatus('warning', `port ${portOf(options)} is managed by Varin Desktop`, 'cannot be stopped with this command');
           finish('no changes applied');
         }
         printQuietStopResults();
@@ -103,9 +103,9 @@ async function stopCommand(options: CliOptions): Promise<void> {
       if (explicitInstance.source === 'probe') {
         const unmanagedStopSpin = showOutput ? createSpinner(options) : null;
         if (showOutput && !unmanagedStopSpin) {
-          logStatus('info', `found unmanaged Piarium instance on port ${portOf(options)}`, 'attempting shutdown');
+          logStatus('info', `found unmanaged Varin instance on port ${portOf(options)}`, 'attempting shutdown');
         }
-        unmanagedStopSpin?.start(`Stopping unmanaged Piarium on port ${portOf(options)}...`);
+        unmanagedStopSpin?.start(`Stopping unmanaged Varin on port ${portOf(options)}...`);
         const requested = await requestServerShutdown(portOf(options), options.host);
 
         if (Number.isFinite(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
@@ -118,13 +118,13 @@ async function stopCommand(options: CliOptions): Promise<void> {
 
         const stopped = await isPortAvailable(portOf(options), options.host);
         if (stopped) {
-          unmanagedStopSpin?.stop(`Stopped unmanaged Piarium on port ${portOf(options)}`);
+          unmanagedStopSpin?.stop(`Stopped unmanaged Varin on port ${portOf(options)}`);
           jsonResults.push({ port: portOf(options), runtime: 'unmanaged', stopped: true });
           if (isJsonMode(options)) {
             printJson({ stoppedCount: 1, results: jsonResults });
           }
           if (showOutput && !unmanagedStopSpin) {
-            logStatus('success', `stopped Piarium on port ${portOf(options)}`);
+            logStatus('success', `stopped Varin on port ${portOf(options)}`);
             finish('stop complete');
           }
           printQuietStopResults();
@@ -145,18 +145,18 @@ async function stopCommand(options: CliOptions): Promise<void> {
           }
           printQuietStopResults();
         } else {
-          unmanagedStopSpin?.error(`Could not stop Piarium on port ${portOf(options)}`);
+          unmanagedStopSpin?.error(`Could not stop Varin on port ${portOf(options)}`);
           jsonResults.push({ port: portOf(options), runtime: 'unmanaged', stopped: false, reason: 'stop-failed' });
           if (isJsonMode(options)) {
             printJson({
               status: 'error',
               stoppedCount: 0,
               results: jsonResults,
-              messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop Piarium on port ${portOf(options)}.` }],
+              messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop Varin on port ${portOf(options)}.` }],
             });
           }
           if (showOutput && !unmanagedStopSpin) {
-            logStatus('error', `could not stop Piarium on port ${portOf(options)}`);
+            logStatus('error', `could not stop Varin on port ${portOf(options)}`);
             finish('failed');
           }
           printQuietStopResults();
@@ -167,9 +167,9 @@ async function stopCommand(options: CliOptions): Promise<void> {
       if (explicitInstance.source === 'registry-unconfirmed') {
         const unconfirmedStopSpin = showOutput ? createSpinner(options) : null;
         if (showOutput && !unconfirmedStopSpin) {
-          logStatus('info', `found unconfirmed Piarium pid ${explicitInstance.pid} on port ${portOf(options)}`, 'HTTP shutdown endpoint is unreachable; stopping by PID');
+          logStatus('info', `found unconfirmed Varin pid ${explicitInstance.pid} on port ${portOf(options)}`, 'HTTP shutdown endpoint is unreachable; stopping by PID');
         }
-        unconfirmedStopSpin?.start(`Stopping unconfirmed Piarium on port ${portOf(options)}...`);
+        unconfirmedStopSpin?.start(`Stopping unconfirmed Varin on port ${portOf(options)}...`);
         const stopped = await stopInstanceProcess(explicitInstance.pid, {
           shutdownWaitMs: 0,
           gracefulTimeoutMs: 2500,
@@ -179,7 +179,7 @@ async function stopCommand(options: CliOptions): Promise<void> {
         if (stopped || !isProcessRunning(explicitInstance.pid)) {
           removePidFile(explicitInstance.pidFilePath);
           removeInstanceFile(explicitInstance.instanceFilePath);
-          unconfirmedStopSpin?.stop(`Stopped Piarium PID ${explicitInstance.pid}`);
+          unconfirmedStopSpin?.stop(`Stopped Varin PID ${explicitInstance.pid}`);
           jsonResults.push({ port: portOf(options), pid: explicitInstance.pid, runtime: 'unconfirmed', stopped: true });
           if (isJsonMode(options)) {
             printJson({ stoppedCount: 1, results: jsonResults });
@@ -192,14 +192,14 @@ async function stopCommand(options: CliOptions): Promise<void> {
           return;
         }
 
-        unconfirmedStopSpin?.error(`Could not stop Piarium PID ${explicitInstance.pid}`);
+        unconfirmedStopSpin?.error(`Could not stop Varin PID ${explicitInstance.pid}`);
         jsonResults.push({ port: portOf(options), pid: explicitInstance.pid, runtime: 'unconfirmed', stopped: false, reason: 'stop-failed' });
         if (isJsonMode(options)) {
           printJson({
             status: 'error',
             stoppedCount: 0,
             results: jsonResults,
-            messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop Piarium PID ${explicitInstance.pid}.` }],
+            messages: [{ level: 'error', code: 'STOP_FAILED', message: `Could not stop Varin PID ${explicitInstance.pid}.` }],
           });
         }
         if (showOutput && !unconfirmedStopSpin) {
@@ -214,7 +214,7 @@ async function stopCommand(options: CliOptions): Promise<void> {
         printJson({ stoppedCount: 0, results: jsonResults });
       }
       if (showOutput) {
-        logStatus('info', 'No running Piarium instances found');
+        logStatus('info', 'No running Varin instances found');
         finish('nothing to stop');
       }
       printQuietStopResults();
@@ -226,7 +226,7 @@ async function stopCommand(options: CliOptions): Promise<void> {
       if (showOutput && !stopSpin) {
         logStatus('info', `stopping port ${instance.port} (PID: ${instance.pid})`);
       }
-      stopSpin?.start(`Stopping Piarium on port ${instance.port}...`);
+      stopSpin?.start(`Stopping Varin on port ${instance.port}...`);
       try {
         const requested = await requestServerShutdown(instance.port, instance.host || options.host);
         const stopped = await stopInstanceProcess(instance.pid, {
@@ -239,13 +239,13 @@ async function stopCommand(options: CliOptions): Promise<void> {
         }
         removePidFile(instance.pidFilePath);
         removeInstanceFile(instance.instanceFilePath);
-        stopSpin?.stop(`Stopped Piarium on port ${instance.port}`);
+        stopSpin?.stop(`Stopped Varin on port ${instance.port}`);
         jsonResults.push({ port: instance.port, pid: instance.pid, stopped: true });
         if (showOutput && !stopSpin) {
           logStatus('success', `stopped port ${instance.port}`);
         }
       } catch (error) {
-        stopSpin?.error(`Failed to stop Piarium on port ${instance.port}`);
+        stopSpin?.error(`Failed to stop Varin on port ${instance.port}`);
         jsonResults.push({ port: instance.port, pid: instance.pid, stopped: false, reason: error instanceof Error ? error.message : String(error) });
         if (showOutput) {
           logStatus('error', `error stopping port ${instance.port}`, errorMessage(error));
@@ -298,7 +298,7 @@ async function restartCommand(
     const restarted: RestartResult[] = [];
 
     if (showOutput) {
-      clackIntro('Piarium Restart');
+      clackIntro('Varin Restart');
     }
 
     const runningInstances = await discoverLifecycleInstances(options);
@@ -307,7 +307,7 @@ async function restartCommand(
         printJson({ restartedCount: 0, results: restarted });
       }
       if (showOutput) {
-        logStatus('info', 'No running Piarium instances to restart');
+        logStatus('info', 'No running Varin instances to restart');
         clackOutro('nothing to restart');
       } else if (isQuietMode(options)) {
         process.stdout.write('restarted 0\n');
@@ -317,7 +317,7 @@ async function restartCommand(
 
     for (const instance of runningInstances) {
       if (instance.runtime === 'desktop') {
-        const message = `Port ${instance.port} is managed by Piarium Desktop and cannot be restarted with this command.`;
+        const message = `Port ${instance.port} is managed by Varin Desktop and cannot be restarted with this command.`;
         if (isJsonMode(options)) {
           printJson({
             status: 'warning',
@@ -328,7 +328,7 @@ async function restartCommand(
           return;
         }
         if (showOutput) {
-          logStatus('warning', `port ${instance.port} is managed by Piarium Desktop`, 'cannot be restarted with this command');
+          logStatus('warning', `port ${instance.port} is managed by Varin Desktop`, 'cannot be restarted with this command');
           clackOutro('no changes applied');
         } else if (isQuietMode(options)) {
           process.stdout.write('restarted 0\n');
@@ -349,7 +349,7 @@ async function restartCommand(
       if (showOutput && !restartSpin) {
         logStatus('info', `restarting port ${instance.port}`, `mode: ${launchMode}`);
       }
-      restartSpin?.start(`Restarting Piarium on port ${instance.port}...`);
+      restartSpin?.start(`Restarting Varin on port ${instance.port}...`);
       try {
         await runStop({
           explicitPort: true,
@@ -385,15 +385,15 @@ async function restartCommand(
           suppressUiPasswordWarning: true,
           suppressQuietOutput: true,
         });
-        if (typeof restartedPort !== 'number') throw new Error('Piarium serve did not return a port');
+        if (typeof restartedPort !== 'number') throw new Error('Varin serve did not return a port');
         restarted.push({ fromPort: instance.port, toPort: restartedPort, launchMode, ok: true });
-        restartSpin?.stop(`Restarted Piarium on port ${restartedPort}`);
+        restartSpin?.stop(`Restarted Varin on port ${restartedPort}`);
         if (showOutput && !restartSpin) {
           logStatus('success', `port ${restartedPort} restarted`, `mode: ${launchMode}`);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        restartSpin?.error(`Failed to restart Piarium on port ${instance.port}`);
+        restartSpin?.error(`Failed to restart Varin on port ${instance.port}`);
         if (showOutput && !restartSpin) {
           logStatus('error', `failed to restart port ${instance.port}`, message);
         }

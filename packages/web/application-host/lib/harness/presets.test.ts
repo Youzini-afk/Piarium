@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolvePresets, buildTeamPrompt, EXECUTION_PRESETS } from "./presets.js";
-import type { ModelSelection } from "@piarium/protocol";
+import type { ModelSelection } from "@varin/protocol";
 
 const mainModel: ModelSelection = { providerId: "anthropic", modelId: "claude-sonnet-4" };
 const haiku: ModelSelection = { providerId: "anthropic", modelId: "claude-haiku" };

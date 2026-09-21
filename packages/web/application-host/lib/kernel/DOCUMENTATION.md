@@ -1,7 +1,7 @@
 # Rust kernel client and storage boundary
 
 The Application Host owns one `KernelClient` for its lifetime. `KernelClient.start()` spawns the
-real `piarium-kernel` executable, performs the build/protocol/epoch/grant handshake, and keeps the private
+real `varin-kernel` executable, performs the build/protocol/epoch/grant handshake, and keeps the private
 length-framed stdin/stdout transport separate from stderr. The kernel reports a compiled build identity and
 target; packaged Hosts verify the adjacent manifest, executable SHA-256 and actual PE/ELF/Mach-O architecture before spawning it. Large blob
 uploads and branch create/write batches use acknowledged request chunks through the handshake's request-credit window; `AbortSignal` cancellation
@@ -35,7 +35,7 @@ domain method; it is not a mutable global identity.
 
 The R0 production assembly starts from `application-host/index.ts` for Web/serve and Electron's embedded Host.
 Electron stages the executable outside `app.asar`; Web/cloud stage it in package `kernel/`.
-The private storage root is `<PIARIUM_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
+The private storage root is `<VARIN_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
 diagnostic record is not the lock) preventing two Hosts from writing it at once. Built-in Recovery shares
 this root and reports `application-data` with `storageManagement: false`; it is not independently relocatable.
 The public recovery v5 location methods remain available to replacement providers that advertise storage
@@ -91,14 +91,14 @@ unprovable state stays conflict/attention rather than being guessed complete. Re
 rebind is restricted to same-workspace owners created by a `recovery.maintenance` grant.
 
 Production Documents write/move/delete, workspace-scoped Files CRUD, Recovery/Integration disk apply and
-compensation, and Harness `fs.lock` use this boundary. Piarium-mode Pi `write`/`edit`/`apply_patch` routes real
+compensation, and Harness `fs.lock` use this boundary. Varin-mode Pi `write`/`edit`/`apply_patch` routes real
 disk/surface work through Host `document.surfaceWrite`; if that Host mutation backend is unavailable the worker
 fails rather than falling back to its own disk writer. Document Registry still owns unsaved buffers and grouped
 undo. Workspace/Git/bulk adapters that are not yet native Rust operations register exact/subtree writers with
 the same gate.
 
 R3 extends the same file-resource authority to baseline and managed execution directories. `file.scan` pages
-Host-admitted filesystem inventories while excluding `.git`/`.piarium`; `file.capture` installs the selected
+Host-admitted filesystem inventories while excluding `.git`/`.varin`; `file.capture` installs the selected
 body bytes as same-grant objects so WorkingState branch creation can consume them without owner rebinding.
 WorkingState recaptures the selected paths before publishing a baseline or materialized result and refuses a
 mixed view when content, metadata, or inventory changes. Git still supplies staged/unstaged/untracked, index

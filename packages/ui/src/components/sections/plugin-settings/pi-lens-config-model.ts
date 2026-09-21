@@ -1,4 +1,4 @@
-import type { PiConfigScope } from '@piarium/protocol';
+import type { PiConfigScope } from '@varin/protocol';
 import {
   hasJsonPath,
   readJsonPath,

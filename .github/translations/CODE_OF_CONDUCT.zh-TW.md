@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Contributor Covenant 行為準則
 
@@ -45,7 +45,7 @@
 ## 執行
 
 請透過 GitHub 向維護者回報事件：從儲存庫開啟與維護者的私人聯絡管道；若回報內容涉及漏洞，請提交
-[私人安全性公告](https://github.com/Youzini-afk/Piarium/security/advisories/new)。請勿將騷擾回報發布為
+[私人安全性公告](https://github.com/Youzini-afk/Varin/security/advisories/new)。請勿將騷擾回報發布為
 公開議題。
 
 所有投訴都會迅速且公平地接受審查與調查。

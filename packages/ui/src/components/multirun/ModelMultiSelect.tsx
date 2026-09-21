@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ModelDescriptor } from '@piarium/protocol';
+import type { ModelDescriptor } from '@varin/protocol';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';

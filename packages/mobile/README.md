@@ -1,30 +1,30 @@
-# Piarium Mobile
+# Varin Mobile
 
-Capacitor shell for the dedicated Piarium mobile web surface.
+Capacitor shell for the dedicated Varin mobile web surface.
 
 The mobile package reuses the web build, then rewrites `mobile.html` to `index.html` in `packages/mobile/dist` so native iOS/Android always launch `MobileApp` instead of the hosted surface selector.
 
-The native product identity is Piarium-owned:
+The native product identity is Varin-owned:
 
-- app/package ID: `dev.piarium.mobile`;
-- iOS App Group: `group.dev.piarium.mobile`;
-- widget extension: `dev.piarium.mobile.widget`;
-- notification service: `dev.piarium.mobile.notification-service`;
-- deep-link scheme: `piarium://`.
+- app/package ID: `dev.varin.mobile`;
+- iOS App Group: `group.dev.varin.mobile`;
+- widget extension: `dev.varin.mobile.widget`;
+- notification service: `dev.varin.mobile.notification-service`;
+- deep-link scheme: `varin://`.
 
 These identifiers intentionally do not accept the unreleased inherited OpenChamber identity as a
 compatibility alias.
 
 ## Runtime model
 
-- The native app bundles the mobile UI only; it does not embed the Piarium web server or Pi runtime.
-- On first launch in Capacitor, the app shows a connection screen for an existing Piarium server.
+- The native app bundles the mobile UI only; it does not embed the Varin web server or Pi runtime.
+- On first launch in Capacitor, the app shows a connection screen for an existing Varin server.
 - Connections are saved locally in the app and can be managed from the mobile overflow menu under `Instances`.
 - The connection screen and `Instances` menu item are Capacitor-only. Hosted `mobile.html` in a normal browser keeps the regular web behavior.
-- Password-protected Piarium servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
-- `piarium://` connection/session links open the native app on Android and iOS. Android declares a
+- Password-protected Varin servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
+- `varin://` connection/session links open the native app on Android and iOS. Android declares a
   browsable intent filter; iOS declares the same scheme for the app and bundled widgets.
-- The Terminal workspace surface runs its PTY on the active Piarium server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
+- The Terminal workspace surface runs its PTY on the active Varin server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
 
 ## Commands
 
@@ -78,13 +78,13 @@ Required local tools:
 The repository does not ship another product's Firebase or Apple credentials.
 
 - Android builds remain usable without Firebase, but push registration is disabled. Official
-  release automation must supply a Piarium-owned `android/app/google-services.json` for
-  `dev.piarium.mobile`; that file is ignored by Git.
-- iOS signing must provision `dev.piarium.mobile`, its widget and notification-service identifiers,
-  the `group.dev.piarium.mobile` App Group, and the APNs entitlement.
-- A central push relay is opt-in through `PIARIUM_PUSH_RELAY_URL`. Source builds have no inherited
+  release automation must supply a Varin-owned `android/app/google-services.json` for
+  `dev.varin.mobile`; that file is ignored by Git.
+- iOS signing must provision `dev.varin.mobile`, its widget and notification-service identifiers,
+  the `group.dev.varin.mobile` App Group, and the APNs entitlement.
+- A central push relay is opt-in through `VARIN_PUSH_RELAY_URL`. Source builds have no inherited
   default relay. Self-hosters can instead configure direct APNs delivery with the documented
-  `PIARIUM_APNS_*` environment variables.
+  `VARIN_APNS_*` environment variables.
 
 ## Troubleshooting
 
@@ -92,12 +92,12 @@ The repository does not ship another product's Firebase or Apple credentials.
 - If Android builds fail with `Unable to locate a Java Runtime` or `source release: 21`, install/use JDK 21 and set `JAVA_HOME` accordingly.
 - If Android SDK packages are missing, install `platform-tools`, `platforms;android-35`, and `build-tools;35.0.0`, then accept SDK licenses.
 - If CocoaPods cannot find Capacitor pods after reinstalling dependencies, run `bun install` from the workspace root, then rerun `bun run sync`.
-- If connecting to a remote Piarium server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
+- If connecting to a remote Varin server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
 - If `serve-sim` preview says the stream is not producing frames, check the raw MJPEG stream before assuming the simulator stopped. In prior testing the raw stream worked while the browser preview UI stayed stale.
 
 ## Generated assets
 
-Launcher, adaptive, and splash assets are generated from Piarium's shared startup-cube mark. From the
+Launcher, adaptive, and splash assets are generated from Varin's shared startup-cube mark. From the
 repository root, regenerate every product surface together:
 
 ```sh

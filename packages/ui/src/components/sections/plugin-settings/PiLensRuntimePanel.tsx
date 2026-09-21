@@ -1,11 +1,11 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
@@ -23,14 +23,14 @@ interface PiLensRuntimePanelProps {
 }
 
 const PI_LENS_RUNTIME_COMMAND_LABEL_KEYS: Record<PiLensRuntimeCommandId, I18nKey> = {
-  'lens-toggle': 'settings.piarium.pluginSettings.piLens.runtime.action.toggle',
-  'lens-context-toggle': 'settings.piarium.pluginSettings.piLens.runtime.action.context',
-  'lens-widget-toggle': 'settings.piarium.pluginSettings.piLens.runtime.action.widget',
-  'lens-tdi': 'settings.piarium.pluginSettings.piLens.runtime.action.technicalDebt',
-  'lens-map': 'settings.piarium.pluginSettings.piLens.runtime.action.projectMap',
-  'lens-health': 'settings.piarium.pluginSettings.piLens.runtime.action.health',
-  'lens-perf': 'settings.piarium.pluginSettings.piLens.runtime.action.performance',
-  'lens-tools': 'settings.piarium.pluginSettings.piLens.runtime.action.tools',
+  'lens-toggle': 'settings.varin.pluginSettings.piLens.runtime.action.toggle',
+  'lens-context-toggle': 'settings.varin.pluginSettings.piLens.runtime.action.context',
+  'lens-widget-toggle': 'settings.varin.pluginSettings.piLens.runtime.action.widget',
+  'lens-tdi': 'settings.varin.pluginSettings.piLens.runtime.action.technicalDebt',
+  'lens-map': 'settings.varin.pluginSettings.piLens.runtime.action.projectMap',
+  'lens-health': 'settings.varin.pluginSettings.piLens.runtime.action.health',
+  'lens-perf': 'settings.varin.pluginSettings.piLens.runtime.action.performance',
+  'lens-tools': 'settings.varin.pluginSettings.piLens.runtime.action.tools',
 };
 
 export const PiLensRuntimePanel: React.FC<PiLensRuntimePanelProps> = ({ runtimeTarget, targetKey }) => {
@@ -91,7 +91,7 @@ export const PiLensRuntimePanel: React.FC<PiLensRuntimePanelProps> = ({ runtimeT
     try {
       await executeCommand(sessionId, buildPiLensRuntimeCommand(command));
     } catch (cause) {
-      toast.error(t('settings.piarium.pluginSettings.piLens.runtime.commandFailed'), {
+      toast.error(t('settings.varin.pluginSettings.piLens.runtime.commandFailed'), {
         description: cause instanceof Error ? cause.message : String(cause),
       });
     } finally {
@@ -102,21 +102,21 @@ export const PiLensRuntimePanel: React.FC<PiLensRuntimePanelProps> = ({ runtimeT
   return (
     <div className="space-y-4 border-t border-border/60 pt-6">
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.piLens.runtime.title')}
+        title={t('settings.varin.pluginSettings.piLens.runtime.title')}
         contentClassName="space-y-3"
       >
         <div className="flex items-center justify-between gap-3">
           <span className="typography-meta text-muted-foreground">
-            {t(`settings.piarium.pluginSettings.piLens.runtime.state.${state}` as never)}
+            {t(`settings.varin.pluginSettings.piLens.runtime.state.${state}` as never)}
           </span>
           <Button type="button" variant="ghost" size="icon" disabled={loading || sessionId === null} onClick={() => void refresh()}>
             <Icon name="refresh" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-            <span className="sr-only">{t('settings.piarium.recovery.actions.refresh')}</span>
+            <span className="sr-only">{t('settings.varin.recovery.actions.refresh')}</span>
           </Button>
         </div>
         {state === 'failure' ? <p className="break-words typography-meta text-[var(--status-error)]">{error}</p> : null}
         {state === 'not-observed' ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.piarium.pluginSettings.piLens.runtime.notObserved')}</p>
+          <p className="typography-meta text-muted-foreground">{t('settings.varin.pluginSettings.piLens.runtime.notObserved')}</p>
         ) : null}
         {state === 'available' ? (
           <div className="flex flex-wrap gap-2">
@@ -137,7 +137,7 @@ export const PiLensRuntimePanel: React.FC<PiLensRuntimePanelProps> = ({ runtimeT
           </div>
         ) : null}
         {sessionBusy && state === 'available' ? (
-          <p className="typography-meta text-[var(--status-warning)]">{t('settings.piarium.pluginSettings.piLens.runtime.busy')}</p>
+          <p className="typography-meta text-[var(--status-warning)]">{t('settings.varin.pluginSettings.piLens.runtime.busy')}</p>
         ) : null}
       </SettingsControlGroup>
     </div>

@@ -1,4 +1,4 @@
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import type { PiRuntimeSnapshot } from '@varin/protocol';
 
 export const shouldApplyPiRuntimeSnapshot = (
   currentRevision: number,

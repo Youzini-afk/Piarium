@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Thread, ThreadSessionBinding } from "@piarium/protocol";
+import type { Thread, ThreadSessionBinding } from "@varin/protocol";
 import { resolveResearchCaller } from "./research-access.js";
 
 const thread = (id: string, parent: Thread["parent"], purpose = "delegated"): Thread => ({ id, parent, purpose } as Thread);

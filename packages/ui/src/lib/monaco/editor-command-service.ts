@@ -300,7 +300,7 @@ const shortcutCommands: ReadonlyArray<[shortcutId: string, commandId: FileEditor
 
 const installWorkbenchProjection = (): void => {
   if (bridgeDisposers.length > 0) return;
-  const ownerId = 'piarium.monaco.editor-commands';
+  const ownerId = 'varin.monaco.editor-commands';
   for (const commandId of Object.values(FILE_EDITOR_COMMAND_IDS)) {
     bridgeDisposers.push(registerWorkbenchCommand(commandId, ownerId, async () => {
       await executeActiveFileEditorCommand(commandId);

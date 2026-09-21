@@ -1,5 +1,5 @@
 import type { ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import type { PiFleetActionResult, PiFleetSnapshot } from "@piarium/protocol";
+import type { PiFleetActionResult, PiFleetSnapshot } from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { BG_READ_DEADLINE_MS } from "./background-tasks-eventbus.js";
 import type {

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import type { SurfaceContribution, SurfaceOwnerIdentity } from '@piarium/extension-surface';
+import type { SurfaceContribution, SurfaceOwnerIdentity } from '@varin/extension-surface';
 import { startWorkbenchMountSession } from './workbench-mount';
 
 mock.module('@/hooks/useProviderLogo', () => ({

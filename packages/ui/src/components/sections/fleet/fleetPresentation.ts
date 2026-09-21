@@ -5,7 +5,7 @@ import type {
   PiFleetProviderSnapshot,
   PiFleetProviderState,
   PiFleetSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 const fleetDurationSeconds = (startedAt: number, now: number): number => (
   Math.max(0, Math.floor((now - startedAt) / 1000))

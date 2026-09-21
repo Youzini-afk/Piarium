@@ -3,7 +3,7 @@ import type {
   PiAssistantMessage,
   PiSessionMessageEntry,
   SessionSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { projectPiTimeline } from './piTimelineProjection';
 import {
   findPiAssistantWaitingTurnId,

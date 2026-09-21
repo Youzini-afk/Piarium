@@ -1,13 +1,13 @@
 # Pi session automation
 
-Goal continuation and post-turn assistance run against Piarium's public Pi
+Goal continuation and post-turn assistance run against Varin's public Pi
 runtime contract. They do not call OpenCode endpoints and do not maintain a
 second session model.
 
 ## State ownership
 
-`@piarium/pi-host` stores `PiSessionFeatureState` as append-only custom
-entries named `piarium.session-features/v1` in the Pi session JSONL. The
+`@varin/pi-host` stores `PiSessionFeatureState` as append-only custom
+entries named `varin.session-features/v1` in the Pi session JSONL. The
 entries do not participate in model context. Because each update is a normal
 tree entry, Goal and Assist states follow conversation branches and are restored
 by Pi navigation.

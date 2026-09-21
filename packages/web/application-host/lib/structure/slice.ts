@@ -1,5 +1,5 @@
 import { SMALL_STRUCTURE_SPAN_LINES } from "./constants.js";
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import { isStructureContainerKind, structureContainerPredicate, structureSpanLines } from "./kinds.js";
 import { clipRange, mergeAdjacentRanges, rangeContainsLine } from "./ranges.js";
 import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "./types.js";

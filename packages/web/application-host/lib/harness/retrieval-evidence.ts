@@ -11,7 +11,7 @@ import {
   type RetrievalSourceCheck,
   type RetrievalUrlReceipt,
   type ThreadFactsSetParams,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { parseThreadScopePath, scopePathContainedBy } from "./thread-nesting.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
 import type { OutputStore } from "./output-store.js";

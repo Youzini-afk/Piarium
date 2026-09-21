@@ -154,7 +154,7 @@ describe("Pi protocol projector", () => {
 
   it("preserves tree identity and sanitizes extension entry data", () => {
     const projected = projectSessionEntry({
-      customType: "piarium.test",
+      customType: "varin.test",
       data: { count: 2, omitted: undefined },
       id: "entry-1",
       parentId: null,
@@ -163,7 +163,7 @@ describe("Pi protocol projector", () => {
     } as SessionEntry);
 
     assert.deepEqual(projected, {
-      customType: "piarium.test",
+      customType: "varin.test",
       data: { count: 2 },
       id: "entry-1",
       parentId: null,

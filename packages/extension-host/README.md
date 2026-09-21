@@ -1,6 +1,6 @@
-# @piarium/extension-host
+# @varin/extension-host
 
-Trusted application-host ownership for the Piarium extension catalog.
+Trusted application-host ownership for the Varin extension catalog.
 
 The host stores manifests, installation records, desired state, capability grants, application-host
 identity, and truthful diagnostics. It materializes npm, Git, local-directory, and registered built-in

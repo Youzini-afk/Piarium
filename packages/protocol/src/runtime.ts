@@ -5,7 +5,7 @@ import {
   type ErrorResponseEnvelope,
 } from "./envelopes.js";
 import {
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type ExtensionUiResponse,
   type HostHandshakeParams,
   type HostHandshakeResult,
@@ -106,7 +106,7 @@ type SessionScopedMethodMap = {
 };
 
 /**
- * Public Piarium runtime contract used by renderer, web, mobile, and editor
+ * Public Varin runtime contract used by renderer, web, mobile, and editor
  * surfaces. Worker-only lifecycle and trust-response methods are deliberately
  * absent. Catalog operations target either a live session or a broker-owned in-memory workspace
  * context because Pi resources and provider registrations can vary by workspace.
@@ -344,7 +344,7 @@ export function createRuntimeRequest<M extends RuntimeMethod>(
     kind: "request",
     method,
     params,
-    v: PIARIUM_PROTOCOL_VERSION,
+    v: VARIN_PROTOCOL_VERSION,
   } as RuntimeRequestEnvelope<M>;
 }
 
@@ -357,7 +357,7 @@ export function createRuntimeSuccessResponse<M extends RuntimeMethod>(
     kind: "response",
     ok: true,
     result,
-    v: PIARIUM_PROTOCOL_VERSION,
+    v: VARIN_PROTOCOL_VERSION,
   } as RuntimeSuccessResponseEnvelope<M>;
 }
 
@@ -380,7 +380,7 @@ export function createRuntimeEvent<E extends HostEvent>(
     kind: "event",
     seq,
     source,
-    v: PIARIUM_PROTOCOL_VERSION,
+    v: VARIN_PROTOCOL_VERSION,
   } as RuntimeEventEnvelope<E>;
 }
 

@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION } from "@piarium/protocol";
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION } from "@varin/protocol";
 import {
   createPackageProvisioningReceiptStore,
   packageProvisioningReceiptPath,
@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 async function createAgentDir(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "piarium-package-receipt-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-package-receipt-"));
   roots.push(root);
   return root;
 }
@@ -188,6 +188,6 @@ describe("package provisioning receipt store", () => {
     await Promise.all([firstTransaction, secondTransaction]);
     assert.deepEqual(order, ["first-enter", "first-exit", "second-enter"]);
     await assert.rejects(access(`${first.filePath}.lock`));
-    assert.equal(dirname(first.filePath), join(await realpath(agentDir), "piarium"));
+    assert.equal(dirname(first.filePath), join(await realpath(agentDir), "varin"));
   });
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiConfigScope } from '@piarium/protocol';
+import type { PiConfigScope } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -56,8 +56,8 @@ export const PluginDraftFooter: React.FC<{
           >
             <Icon name="refresh" className={controller.loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
             {controller.dirty
-              ? t('settings.piarium.pluginSettings.source.discard')
-              : t('settings.piarium.recovery.actions.refresh')}
+              ? t('settings.varin.pluginSettings.source.discard')
+              : t('settings.varin.recovery.actions.refresh')}
           </Button>
           <Button
             type="button"
@@ -76,7 +76,7 @@ export const PluginDraftFooter: React.FC<{
       ) : null}
       {blocked && !controller.loading ? (
         <p className="typography-meta text-[var(--status-warning)]">
-          {blockedMessage ?? t('settings.piarium.recovery.pluginSettings.projectUntrusted')}
+          {blockedMessage ?? t('settings.varin.recovery.pluginSettings.projectUntrusted')}
         </p>
       ) : null}
     </div>
@@ -89,17 +89,17 @@ export const PluginConfigSource: React.FC<{
   const { t } = useI18n();
   return (
     <SettingsFieldRow
-      label={t('settings.piarium.pluginSettings.source.label')}
-      info={t('settings.piarium.pluginSettings.source.description')}
+      label={t('settings.varin.pluginSettings.source.label')}
+      info={t('settings.varin.pluginSettings.source.description')}
       controlClassName="w-full max-w-[24rem]"
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <code className="min-w-0 break-all typography-micro text-muted-foreground">
-          {controller.path || t('settings.piarium.pluginSettings.loadingPath')}
+          {controller.path || t('settings.varin.pluginSettings.loadingPath')}
         </code>
         {controller.dirty ? (
           <span className="shrink-0 rounded-full border border-[var(--status-warning)]/30 px-2 py-0.5 typography-micro text-[var(--status-warning)]">
-            {t('settings.piarium.pluginSettings.source.unsaved')}
+            {t('settings.varin.pluginSettings.source.unsaved')}
           </span>
         ) : null}
       </div>

@@ -1,67 +1,67 @@
 ---
 title: Zmienne środowiskowe
-description: Skonfiguruj serwer Piarium, terminale, Git, głos i tunele za pomocą zmiennych środowiskowych.
+description: Skonfiguruj serwer Varin, terminale, Git, głos i tunele za pomocą zmiennych środowiskowych.
 ---
 
 # Zmienne środowiskowe
 
-Piarium odczytuje te zmienne środowiskowe przy starcie. W przypadku usług startowych `piarium startup enable` domyślnie zapisuje migawkę bieżącego środowiska, więc uruchom je ponownie po zmianie zmiennych, których ma używać usługa.
+Varin odczytuje te zmienne środowiskowe przy starcie. W przypadku usług startowych `varin startup enable` domyślnie zapisuje migawkę bieżącego środowiska, więc uruchom je ponownie po zmianie zmiennych, których ma używać usługa.
 
-Piarium osadza środowisko uruchomieniowe Pi. Nie ma osobnego serwera OpenCode ani zmiennych integracyjnych `OPENCODE_*`.
+Varin osadza środowisko uruchomieniowe Pi. Nie ma osobnego serwera OpenCode ani zmiennych integracyjnych `OPENCODE_*`.
 
-## Serwer Piarium
+## Serwer Varin
 
-### `PIARIUM_HOST`
+### `VARIN_HOST`
 
-Adres bindowania serwera WWW Piarium. Użyj `0.0.0.0`, aby zezwolić na dostęp z innych maszyn.
+Adres bindowania serwera WWW Varin. Użyj `0.0.0.0`, aby zezwolić na dostęp z innych maszyn.
 
-### `PIARIUM_UI_PASSWORD`
+### `VARIN_UI_PASSWORD`
 
 Hasło UI w przeglądarce. Użyj go przy bindowaniu poza localhost, przy tunelach albo przy pracy za reverse proxy.
 
-### `PIARIUM_API_ONLY`
+### `VARIN_API_ONLY`
 
-Uruchamia Piarium w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.
+Uruchamia Varin w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.
 
-### `PIARIUM_DATA_DIR`
+### `VARIN_DATA_DIR`
 
-Nadpisuje katalog danych Piarium. Domyślnie jest to `~/.config/piarium`.
+Nadpisuje katalog danych Varin. Domyślnie jest to `~/.config/varin`.
 
-### `PIARIUM_COMPRESS_API`
+### `VARIN_COMPRESS_API`
 
 Steruje kompresją odpowiedzi API. Użyj `true` lub `1`, aby wymusić włączenie, `false` lub `0`, aby wymusić wyłączenie.
 
-### `PIARIUM_SKIP_API_COMPRESSION`
+### `VARIN_SKIP_API_COMPRESSION`
 
-Wyłącza kompresję odpowiedzi API, gdy ustawione na `true` lub `1`. Ma pierwszeństwo przed `PIARIUM_COMPRESS_API`.
+Wyłącza kompresję odpowiedzi API, gdy ustawione na `true` lub `1`. Ma pierwszeństwo przed `VARIN_COMPRESS_API`.
 
-### `PIARIUM_VERBOSE_REQUEST_LOGS`
+### `VARIN_VERBOSE_REQUEST_LOGS`
 
 Włącza szczegółowe logi żądań HTTP, gdy ustawione na `true` lub `1`.
 
-### `PIARIUM_UPDATE_API_URL`
+### `VARIN_UPDATE_API_URL`
 
 Nadpisuje endpoint API sprawdzania aktualizacji. Większość użytkowników powinna zostawić to niezdefiniowane.
 
-### `PIARIUM_PACKAGE_MANAGER`
+### `VARIN_PACKAGE_MANAGER`
 
 Wymusza menedżera pakietów używanego przy aktualizacjach, gdy automatyczne wykrywanie jest błędne.
 
 ## Terminal i Git
 
-### `PIARIUM_TERMINAL_SHELL`
+### `VARIN_TERMINAL_SHELL`
 
-Plik wykonywalny powłoki używany w sesjach terminala Piarium.
+Plik wykonywalny powłoki używany w sesjach terminala Varin.
 
-### `PIARIUM_GIT_BINARY`
+### `VARIN_GIT_BINARY`
 
-Plik wykonywalny Git używany przez funkcje Git w Piarium.
+Plik wykonywalny Git używany przez funkcje Git w Varin.
 
 ### `GIT_BINARY`
 
-Alternatywne nadpisanie pliku wykonywalnego Git. Do konfiguracji specyficznej dla Piarium preferuj `PIARIUM_GIT_BINARY`.
+Alternatywne nadpisanie pliku wykonywalnego Git. Do konfiguracji specyficznej dla Varin preferuj `VARIN_GIT_BINARY`.
 
-### `PIARIUM_GIT_READ_CACHE_TTL_MS`
+### `VARIN_GIT_READ_CACHE_TTL_MS`
 
 Czas życia, w milisekundach, buforowanych odczytów plików opartych na Git. Ustaw `0`, aby wyłączyć ten cache podczas debugowania.
 
@@ -69,22 +69,22 @@ Czas życia, w milisekundach, buforowanych odczytów plików opartych na Git. Us
 
 ### `OPENAI_API_KEY`
 
-Klucz API używany przez funkcje głosowe Piarium, które wywołują usługi zgodne z OpenAI.
+Klucz API używany przez funkcje głosowe Varin, które wywołują usługi zgodne z OpenAI.
 
-### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 Zezwala na zdalne bazowe URL-e zgodne z OpenAI dla funkcji głosowych, gdy ustawione na `true` lub `1`.
 
 ### `NGROK_AUTHTOKEN`
 
-Token uwierzytelniania ngrok używany przez polecenia tuneli Piarium. Możesz też skonfigurować ngrok poleceniem `ngrok config add-authtoken <token>`.
+Token uwierzytelniania ngrok używany przez polecenia tuneli Varin. Możesz też skonfigurować ngrok poleceniem `ngrok config add-authtoken <token>`.
 
 ## Pomocniki runtime
 
 ### `BUN_BINARY`
 
-Plik wykonywalny Bun, którego Piarium powinno używać przy uruchamianiu procesów demona.
+Plik wykonywalny Bun, którego Varin powinno używać przy uruchamianiu procesów demona.
 
 ### `BUN_INSTALL`
 
-Katalog główny instalacji Bun. Piarium używa go do znalezienia `bin/bun` przy starcie demona i aktualizacjach.
+Katalog główny instalacji Bun. Varin używa go do znalezienia `bin/bun` przy starcie demona i aktualizacjach.

@@ -6,7 +6,7 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createObservers, determineWriteSource, determineTerminalSource } from "./observers.js";
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "piarium-test-observers");
+const TEST_DIR = join(tmpdir(), "varin-test-observers");
 
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });

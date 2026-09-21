@@ -10,7 +10,7 @@ import { ExtensionStorageStore } from "../src/storage-store.js";
 const hostId = "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a";
 
 test("service routing persists stable provider selections and rejects stale revisions", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-service-routing-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-service-routing-"));
   try {
     const storage = new ExtensionStorageStore(dataDir);
     const routes = new ServiceRoutingStore({ hostId, storage });

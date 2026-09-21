@@ -1,4 +1,4 @@
-import type { PiAgentDescriptor, PiAgentInvocationDescriptor } from '@piarium/protocol';
+import type { PiAgentDescriptor, PiAgentInvocationDescriptor } from '@varin/protocol';
 
 export interface PiComposerAgentSelection {
   description: string;

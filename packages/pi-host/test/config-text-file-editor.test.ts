@@ -7,7 +7,7 @@ import { ConfigTextFileEditor } from "../src/config-text-file-editor.js";
 
 describe("ConfigTextFileEditor", () => {
   it("preserves a complete JSONC document and detects stale writes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-text-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-text-"));
     const path = join(root, ".cortexkit", "magic-context.jsonc");
     const editor = new ConfigTextFileEditor(path, "jsonc");
     try {
@@ -30,7 +30,7 @@ describe("ConfigTextFileEditor", () => {
   });
 
   it("rejects invalid JSONC without replacing the current file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-text-invalid-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-text-invalid-"));
     const path = join(root, "config.jsonc");
     const editor = new ConfigTextFileEditor(path, "jsonc");
     try {

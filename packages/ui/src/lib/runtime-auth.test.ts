@@ -10,7 +10,7 @@ import {
   setRuntimeAuthCredentialProvider,
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 describe('runtime auth headers', () => {
   test('does not add authorization by default', async () => {
@@ -49,7 +49,7 @@ describe('runtime auth headers', () => {
       clearRuntimeAuthCredentialProvider();
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
-        value: { __PIARIUM_CLIENT_TOKEN__: ' injected-token ' },
+        value: { __VARIN_CLIENT_TOKEN__: ' injected-token ' },
       });
 
       expect(getRuntimeBearerTokenSync()).toBe('injected-token');

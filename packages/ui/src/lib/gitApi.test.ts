@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { GitAPI, GitStatus } from "@piarium/application-client"
+import type { GitAPI, GitStatus } from "@varin/application-client"
 import { getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 
 const status: GitStatus = {
@@ -16,7 +16,7 @@ const withRuntimeGit = async (git: GitAPI, callback: () => Promise<void>) => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      __PIARIUM_RUNTIME_APIS__: { git },
+      __VARIN_RUNTIME_APIS__: { git },
     },
   })
 

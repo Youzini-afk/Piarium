@@ -30,12 +30,12 @@ describe('Pi scheduled task executor', () => {
 
     await expect(execute({
       onSessionCreated,
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ thinkingLevel: 'high' }),
       title: 'Nightly review',
     })).resolves.toEqual({ dispatchedAsCommand: false, sessionID: 'pi-session-1' });
 
-    expect(broker.createSession).toHaveBeenCalledWith('C:/project/piarium', 'Nightly review');
+    expect(broker.createSession).toHaveBeenCalledWith('C:/project/varin', 'Nightly review');
     expect(onSessionCreated).toHaveBeenCalledWith('pi-session-1');
     expect(calls).toEqual([
       {
@@ -64,7 +64,7 @@ describe('Pi scheduled task executor', () => {
     const execute = createPiScheduledTaskExecutor({ broker: broker as unknown as Broker });
 
     await expect(execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ prompt: '/review src/components' }),
       title: 'Review',
     })).resolves.toEqual({ dispatchedAsCommand: true, sessionID: 'pi-session-2' });
@@ -85,7 +85,7 @@ describe('Pi scheduled task executor', () => {
     };
     const execute = createPiScheduledTaskExecutor({ broker: broker as unknown as Broker });
     await execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ goalTokenBudget: 25_000, runAsGoal: true }),
       title: 'Goal task',
     });
@@ -117,7 +117,7 @@ describe('Pi scheduled task executor', () => {
     const execute = createPiScheduledTaskExecutor({ broker: broker as unknown as Broker });
 
     await expect(execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task(),
       title: 'Review',
     })).rejects.toMatchObject({ sessionID: 'pi-session-failed' });
@@ -138,7 +138,7 @@ describe('Pi scheduled task executor', () => {
 
     let resolved = false;
     const run = execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task(),
       title: 'Review',
     }).then((result) => { resolved = true; return result; });
@@ -161,7 +161,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker as unknown as Broker,
     });
     await expect(execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task(),
       title: 'Review',
     })).rejects.toMatchObject({ message: 'the run was aborted before completion', sessionID: 'pi-session-doomed' });
@@ -171,7 +171,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker as unknown as Broker,
     });
     await expect(executeDead({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task(),
       title: 'Review',
     })).rejects.toMatchObject({ sessionID: 'pi-session-doomed' });
@@ -193,7 +193,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker({ status: 'complete' }) as unknown as Broker,
     });
     await expect(executeComplete({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ runAsGoal: true }),
       title: 'Goal task',
     })).resolves.toMatchObject({ sessionID: 'pi-session-goal' });
@@ -203,7 +203,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker({ status: 'blocked', statusReason: 'missing data' }) as unknown as Broker,
     });
     await expect(executeBlocked({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ runAsGoal: true }),
       title: 'Goal task',
     })).rejects.toThrow(/blocked: missing data/);
@@ -214,7 +214,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker({ status: 'paused', statusReason: 'waiting' }) as unknown as Broker,
     });
     await expect(executeWaiting({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ runAsGoal: true }),
       title: 'Goal task',
     })).resolves.toMatchObject({ sessionID: 'pi-session-goal' });
@@ -238,7 +238,7 @@ describe('Pi scheduled task executor', () => {
       broker: broker as unknown as Broker,
     });
     const run = execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ runAsGoal: true }),
       title: 'Multi-turn goal',
     });
@@ -270,7 +270,7 @@ describe('Pi scheduled task executor', () => {
     });
     let resolved = false;
     const run = execute({
-      projectPath: 'C:/project/piarium',
+      projectPath: 'C:/project/varin',
       task: task({ prompt: '/review src', runAsGoal: true }),
       title: 'Command goal',
     }).then((result) => { resolved = true; return result; });

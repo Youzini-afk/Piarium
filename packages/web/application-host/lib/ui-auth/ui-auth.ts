@@ -3,22 +3,22 @@ import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
 import { createUiPasskeys } from './ui-passkeys.js';
-import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import { resolveVarinDataDir } from '../platform/data-paths.js';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { NextFunction } from 'express';
-import type { PiariumAuthenticatedClient } from '../client-auth/request-context.js';
+import type { VarinAuthenticatedClient } from '../client-auth/request-context.js';
 
-const SESSION_COOKIE_NAME = 'piarium_ui_session';
+const SESSION_COOKIE_NAME = 'varin_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
-const URL_AUTH_TOKEN_PREFIX = 'piarium_url_';
+const URL_AUTH_TOKEN_PREFIX = 'varin_url_';
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.PIARIUM_RATE_LIMIT_MAX_ATTEMPTS) || 10;
+const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.VARIN_RATE_LIMIT_MAX_ATTEMPTS) || 10;
 const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
-const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.PIARIUM_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
+const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.VARIN_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
 
 interface UiAuthRequest {
   baseUrl?: string | undefined;
@@ -48,7 +48,7 @@ interface UiAuthResponse extends UiAuthHeaderResponse {
 }
 
 interface ClientAuthResult {
-  client?: PiariumAuthenticatedClient;
+  client?: VarinAuthenticatedClient;
   clientId?: string;
   id?: string;
   ok?: boolean;
@@ -327,14 +327,14 @@ const getBearerTokenFromRequest = (req: UiAuthRequest): string | null => {
 };
 
 const getUrlAuthTokenFromRequest = (req: UiAuthRequest): string | null => {
-  const headerToken = req?.headers?.['x-piarium-application-token'];
+  const headerToken = req?.headers?.['x-varin-application-token'];
   const normalizedHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (typeof normalizedHeader === 'string' && normalizedHeader.trim()) return normalizedHeader.trim();
-  const queryToken = req?.query?.piarium_url_token;
+  const queryToken = req?.query?.varin_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
   if (typeof token !== 'string' && typeof req?.url === 'string') {
     try {
-      token = new URL(req.url, 'http://localhost').searchParams.get('piarium_url_token') || undefined;
+      token = new URL(req.url, 'http://localhost').searchParams.get('varin_url_token') || undefined;
     } catch {
       token = undefined;
     }
@@ -343,19 +343,19 @@ const getUrlAuthTokenFromRequest = (req: UiAuthRequest): string | null => {
 };
 
 const isApplicationTokenWritePath = (pathname: string): boolean => (
-  /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/activate$/.test(pathname)
-  || /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/enabled$/.test(pathname)
-  || pathname === '/api/piarium/extensions/v1/assets/read'
-  || pathname === '/api/piarium/extensions/v1/entrypoints/read'
-  || pathname === '/api/piarium/extensions/v1/candidates/prepare'
-  || pathname === '/api/piarium/extensions/v1/candidates/discard-prepared'
-  || pathname === '/api/piarium/extensions/v1/candidates/review-capabilities'
-  || pathname === '/api/piarium/extensions/v1/candidates/select'
-  || pathname === '/api/piarium/extensions/v1/host-state/wait'
-  || pathname === '/api/piarium/extensions/v1/services/invoke'
-  || pathname === '/api/piarium/extensions/v1/services/select'
-  || pathname === '/api/piarium/extensions/v1/actual'
-  || pathname === '/api/piarium/extensions/v1/install'
+  /^\/api\/varin\/extensions\/v1\/extensions\/[^/]+\/activate$/.test(pathname)
+  || /^\/api\/varin\/extensions\/v1\/extensions\/[^/]+\/enabled$/.test(pathname)
+  || pathname === '/api/varin/extensions/v1/assets/read'
+  || pathname === '/api/varin/extensions/v1/entrypoints/read'
+  || pathname === '/api/varin/extensions/v1/candidates/prepare'
+  || pathname === '/api/varin/extensions/v1/candidates/discard-prepared'
+  || pathname === '/api/varin/extensions/v1/candidates/review-capabilities'
+  || pathname === '/api/varin/extensions/v1/candidates/select'
+  || pathname === '/api/varin/extensions/v1/host-state/wait'
+  || pathname === '/api/varin/extensions/v1/services/invoke'
+  || pathname === '/api/varin/extensions/v1/services/select'
+  || pathname === '/api/varin/extensions/v1/actual'
+  || pathname === '/api/varin/extensions/v1/install'
 );
 
 const getRequestPathname = (req: UiAuthRequest): string => {
@@ -381,11 +381,11 @@ const isWebSocketUpgrade = (req: UiAuthRequest): boolean => {
 };
 
 const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
-  return pathname === '/api/piarium/events'
-    || pathname === '/api/piarium/runtime-manager/events'
-    || pathname === '/api/piarium/extensions/v1/catalog'
-    || pathname === '/api/piarium/extensions/v1/host-state'
-    || pathname === '/api/piarium/realtime-proxy/sse'
+  return pathname === '/api/varin/events'
+    || pathname === '/api/varin/runtime-manager/events'
+    || pathname === '/api/varin/extensions/v1/catalog'
+    || pathname === '/api/varin/extensions/v1/host-state'
+    || pathname === '/api/varin/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
     || pathname === '/api/fs/serve'
@@ -395,8 +395,8 @@ const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
 };
 
 const isUrlAuthWebSocketPath = (pathname: string): boolean => {
-  return pathname === '/api/piarium/runtime/ws'
-    || pathname === '/api/piarium/realtime-proxy/ws'
+  return pathname === '/api/varin/runtime/ws'
+    || pathname === '/api/varin/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname.startsWith('/api/preview/proxy/');
@@ -451,11 +451,11 @@ const normalizePassword = (candidate: unknown): string => {
 
 const isTrustedDeviceRequest = (value: unknown): boolean => value === true;
 
-const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
-const JWT_SECRET_FILE = path.join(PIARIUM_DATA_DIR, 'jwt-secret');
+const VARIN_DATA_DIR = resolveVarinDataDir(process);
+const JWT_SECRET_FILE = path.join(VARIN_DATA_DIR, 'jwt-secret');
 
 function getOrCreateJwtSecret(): Uint8Array {
-  const envSecret = process.env.PIARIUM_JWT_SECRET;
+  const envSecret = process.env.VARIN_JWT_SECRET;
   if (envSecret) {
     return new TextEncoder().encode(envSecret);
   }
@@ -470,7 +470,7 @@ function getOrCreateJwtSecret(): Uint8Array {
 
   const secret = crypto.randomBytes(32).toString('hex');
   try {
-    fs.mkdirSync(PIARIUM_DATA_DIR, { recursive: true });
+    fs.mkdirSync(VARIN_DATA_DIR, { recursive: true });
     fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
     console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
   } catch (e) {
@@ -481,12 +481,12 @@ function getOrCreateJwtSecret(): Uint8Array {
 }
 
 function persistJwtSecret(secret: string): Uint8Array {
-  if (process.env.PIARIUM_JWT_SECRET) {
-    const error = Object.assign(new Error('Global sign-out is unavailable while PIARIUM_JWT_SECRET is set'), { statusCode: 400 });
+  if (process.env.VARIN_JWT_SECRET) {
+    const error = Object.assign(new Error('Global sign-out is unavailable while VARIN_JWT_SECRET is set'), { statusCode: 400 });
     throw error;
   }
 
-  fs.mkdirSync(PIARIUM_DATA_DIR, { recursive: true });
+  fs.mkdirSync(VARIN_DATA_DIR, { recursive: true });
   fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
   return new TextEncoder().encode(secret);
 }

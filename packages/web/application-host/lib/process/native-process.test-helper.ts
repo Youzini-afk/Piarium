@@ -10,7 +10,7 @@ import { KernelRecoveryContentStore, KernelRecoveryStore } from "../kernel/kerne
 import { createKernelProcessService } from "../kernel/process-service.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 export const hasNativeProcessKernel = fs.existsSync(kernelPath);
 
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
@@ -24,7 +24,7 @@ export function createNativeProcessTestHarness(authority?: DocumentAuthority) {
   }> | undefined;
   const get = () => initialized ??= (async () => {
     if (!hasNativeProcessKernel) throw new Error("Native process fixture needs bun run kernel:build");
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "piarium-process-consumer-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "varin-process-consumer-"));
     const buildVersion = (JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
     const client = createKernelClient({ hostId: "process-consumer", storageRoot: path.join(root, "storage"), kernelPath, buildVersion, allowCargoDevRunner: false });
     const documents = authority ?? createDocumentAuthority({ hostId: "process-consumer", dataDir: path.join(root, "documents"), isAllowedRoot: async () => true, isTrusted: async () => true });

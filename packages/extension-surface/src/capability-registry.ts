@@ -1,21 +1,21 @@
 import {
-  isPiariumExtensionId,
+  isVarinExtensionId,
   type JsonValue,
-  type PiariumApplicationSurface,
-} from "@piarium/extension-contract";
+  type VarinApplicationSurface,
+} from "@varin/extension-contract";
 import type { SurfaceOwnerIdentity } from "./types.js";
 
 export interface SurfaceCapabilityAccessContext {
   access: "local" | "remote";
   projectTrusted: boolean;
-  surface: PiariumApplicationSurface;
+  surface: VarinApplicationSurface;
 }
 
 export interface SurfaceCapabilityDescriptor {
   exposure: "local-only" | "remote-safe";
   id: string;
   projectTrust?: "required";
-  supports: readonly PiariumApplicationSurface[];
+  supports: readonly VarinApplicationSurface[];
 }
 
 export interface SurfaceCapabilityCallContext extends SurfaceCapabilityAccessContext {
@@ -47,7 +47,7 @@ export class SurfaceCapabilityRegistry {
   readonly #capabilities = new Map<string, RegisteredCapability>();
 
   register(descriptor: SurfaceCapabilityDescriptor, handler: SurfaceCapabilityHandler): () => void {
-    if (!isPiariumExtensionId(descriptor.id)) throw new Error(`Invalid Surface capability ID: ${descriptor.id}`);
+    if (!isVarinExtensionId(descriptor.id)) throw new Error(`Invalid Surface capability ID: ${descriptor.id}`);
     if (descriptor.supports.length === 0) throw new Error(`Surface capability must support at least one Surface: ${descriptor.id}`);
     if (new Set(descriptor.supports).size !== descriptor.supports.length) {
       throw new Error(`Surface capability contains duplicate Surface values: ${descriptor.id}`);

@@ -6,13 +6,13 @@ Last updated: 2026-08-30
 
 ## 1. Outcome
 
-Piarium's Agent workspace must make sending, switching sessions, reading long histories, and following
+Varin's Agent workspace must make sending, switching sessions, reading long histories, and following
 live work feel immediate without restoring OpenCode state or copying OpenChamber's large chat
 components. The current Pi protocol already carries the necessary authority: session entries,
 streaming deltas, queue/steer state, runtime snapshots, and read-only cold previews. This work turns
 those facts into one coherent client-side conversation model.
 
-The OpenChamber checkout is a behavioral reference. Piarium adopts its proven interaction invariants
+The OpenChamber checkout is a behavioral reference. Varin adopts its proven interaction invariants
 — transactional sends, turn projection, session materialization, one virtual list, and one scroll
 owner — while implementing them directly over Pi DTOs.
 
@@ -75,7 +75,7 @@ automatic movement. Row measurement, list data changes, and Composer height chan
 list/controller pair rather than independent effects.
 
 On session re-entry, a busy session, a session with unseen attention, or a session updated since its last
-view opens at the live edge. Otherwise Piarium restores the last visible turn plus its viewport offset.
+view opens at the live edge. Otherwise Varin restores the last visible turn plus its viewport offset.
 
 ## 6. Session switching
 
@@ -94,7 +94,7 @@ queue cap or start background workers merely to prefetch UI.
 - Busy Enter follows the selected Pi-native Queue or Steer behavior.
 - Stop is a separate action and remains available while a draft can be queued or steered.
 - Pi's authoritative queued/steering messages appear as typed rows above the Composer. Controls must map
-  to atomic Pi operations: Pi 0.84.3 supports clearing the queue as a whole, so Piarium does not simulate
+  to atomic Pi operations: Pi 0.84.3 supports clearing the queue as a whole, so Varin does not simulate
   single-row editing or removal by clearing and racing messages back into the runtime.
 - The Composer clears after a local submission transaction is committed, refocuses on desktop, and remains
   available for the next follow-up.
@@ -110,10 +110,10 @@ accessory stack. There is no independent bar for each feature.
 
 - A user prompt is the visual turn anchor and may stick at the top on desktop; mobile uses normal flow.
 - One assistant header identifies the turn. The actual provider/model appears once; trustworthy tool and
-  token facts appear in the footer. Piarium does not infer a fake duration from Pi's request-start timestamp.
+  token facts appear in the footer. Varin does not infer a fake duration from Pi's request-start timestamp.
 - Each completed assistant message may show the exact positive usage fields Pi reported: input, output,
   reasoning, cache read, cache write, optional one-hour cache write, and the provider-owned total. Missing
-  or all-zero usage stays absent; Piarium does not reconstruct unsupported fields or sum a turn into context use.
+  or all-zero usage stays absent; Varin does not reconstruct unsupported fields or sum a turn into context use.
 - Before the first assistant entry arrives, the newest unanswered turn shows the session model and a neutral
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
 - Chat presentation never changes Pi's live event transport. Live mode renders assistant text, thinking,
@@ -121,7 +121,7 @@ accessory stack. There is no independent bar for each feature.
   turn Activity group, with the terminal answer rendered after that group; unfinished answer text is withheld
   from the sorted body rather than turning the whole response into a non-streaming request.
 - Copy, recover, and branch/fork actions remain attached to the message that owns them and call Pi's
-  native session operations. Piarium does not pin messages or inject a second context layer over Pi packages.
+  native session operations. Varin does not pin messages or inject a second context layer over Pi packages.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.

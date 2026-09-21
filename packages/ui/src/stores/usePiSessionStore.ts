@@ -23,12 +23,12 @@ import type {
   PiUserMessage,
   AgentInputContext,
   WorkFocusId,
-} from '@piarium/protocol';
-import type { PiRuntimeClient } from '@piarium/runtime-client';
+} from '@varin/protocol';
+import type { PiRuntimeClient } from '@varin/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   captureSurfaceAgentInputContext,

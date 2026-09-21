@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
@@ -8,7 +8,7 @@ import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/Setting
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import {
   pluginSettingsPackageIdentity,
@@ -76,7 +76,7 @@ export const PluginSettingsSidebar: React.FC<PluginSettingsSidebarProps> = ({ on
             onClick={() => void refresh()}
           >
             <Icon name="refresh" className={state.loading ? 'size-4 animate-spin' : 'size-4'} />
-            <span className="sr-only">{t('settings.piarium.recovery.actions.refresh')}</span>
+            <span className="sr-only">{t('settings.varin.recovery.actions.refresh')}</span>
           </Button>
         </div>
       )}
@@ -101,7 +101,7 @@ export const PluginSettingsSidebar: React.FC<PluginSettingsSidebarProps> = ({ on
         <div className="px-3 py-10 text-center typography-meta text-muted-foreground">
           {state.loading
             ? <Icon name="loader-4" className="mx-auto size-5 animate-spin" />
-            : state.error ?? t('settings.piarium.pluginSettings.installed.empty')}
+            : state.error ?? t('settings.varin.pluginSettings.installed.empty')}
         </div>
       ) : null}
       {state.packages.length > 0 && state.error ? (

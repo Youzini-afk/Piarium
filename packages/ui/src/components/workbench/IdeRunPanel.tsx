@@ -16,14 +16,14 @@ import {
 } from '@/lib/run-debug/session';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import type {
-  PiariumBreakpoint,
-  PiariumDebugSessionStatus,
-  PiariumDebugStackFrame,
-  PiariumDebugVariable,
-  PiariumTaskConfiguration,
-  PiariumTestItem,
-} from '@piarium/application-client';
-import { RunServicesError } from '@piarium/application-client';
+  VarinBreakpoint,
+  VarinDebugSessionStatus,
+  VarinDebugStackFrame,
+  VarinDebugVariable,
+  VarinTaskConfiguration,
+  VarinTestItem,
+} from '@varin/application-client';
+import { RunServicesError } from '@varin/application-client';
 import { ideDebugControlAvailability } from '@/lib/workbench/ide-debug-controls';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
@@ -33,14 +33,14 @@ type TasksState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'empty' }
-  | { status: 'ready'; configurations: PiariumTaskConfiguration[] }
+  | { status: 'ready'; configurations: VarinTaskConfiguration[] }
   | { status: 'failure'; message: string };
 
 type TestsState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'empty' }
-  | { status: 'ready'; tests: PiariumTestItem[] }
+  | { status: 'ready'; tests: VarinTestItem[] }
   | { status: 'failure'; message: string };
 
 const ignoreStale = (error: unknown): boolean => (
@@ -55,10 +55,10 @@ export const IdeRunPanel: React.FC = () => {
   const apis = useRuntimeAPIs();
   const [tasks, setTasks] = React.useState<TasksState>({ status: 'idle' });
   const [tests, setTests] = React.useState<TestsState>({ status: 'idle' });
-  const [debugStatus, setDebugStatus] = React.useState<PiariumDebugSessionStatus | null>(null);
-  const [breakpoints, setBreakpoints] = React.useState<PiariumBreakpoint[]>([]);
-  const [stack, setStack] = React.useState<PiariumDebugStackFrame[]>([]);
-  const [variables, setVariables] = React.useState<PiariumDebugVariable[]>([]);
+  const [debugStatus, setDebugStatus] = React.useState<VarinDebugSessionStatus | null>(null);
+  const [breakpoints, setBreakpoints] = React.useState<VarinBreakpoint[]>([]);
+  const [stack, setStack] = React.useState<VarinDebugStackFrame[]>([]);
+  const [variables, setVariables] = React.useState<VarinDebugVariable[]>([]);
   const [watch, setWatch] = React.useState<string[]>([]);
   const [watchDraft, setWatchDraft] = React.useState('');
   const [consoleLines, setConsoleLines] = React.useState<string[]>([]);
@@ -86,7 +86,7 @@ export const IdeRunPanel: React.FC = () => {
     });
   }, [reportActionFailure, workspaceId]);
 
-  const runDebugAction = React.useCallback((operation: () => Promise<PiariumDebugSessionStatus>) => {
+  const runDebugAction = React.useCallback((operation: () => Promise<VarinDebugSessionStatus>) => {
     const ownerWorkspaceId = workspaceId;
     if (!ownerWorkspaceId) return;
     void operation().then((snapshot) => {
@@ -272,7 +272,7 @@ export const IdeRunPanel: React.FC = () => {
     };
   }, [apis.debug, apis.tasks, apis.tests, refresh, workspaceId]);
 
-  const selectStackFrame = React.useCallback((frame: PiariumDebugStackFrame): void => {
+  const selectStackFrame = React.useCallback((frame: VarinDebugStackFrame): void => {
     if (!workspaceId) return;
     rememberStackFrame(workspaceId, frame);
     if (frame.resourceId) {

@@ -1,4 +1,4 @@
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import type {
   LanguageSupportAPI,
   LanguageSupportInstallResult,
@@ -7,7 +7,7 @@ import type {
   LanguageSupportStatus,
   LanguageSupportStoreStatus,
   StructureGrammarStatus,
-} from "@piarium/application-client";
+} from "@varin/application-client";
 import { NO_STRUCTURE_CAPABILITIES } from "../structure/types.js";
 import { capabilitiesFromSpec, treeSitterLanguageSpec, treeSitterTagsSpec } from "../structure/languages.js";
 import type { GrammarInstaller } from "../structure/grammar-installer.js";

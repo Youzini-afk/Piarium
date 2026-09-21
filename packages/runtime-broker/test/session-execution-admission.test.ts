@@ -12,7 +12,7 @@ import {
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
 
 test("session execution admission precedes worker and agent execution and owns cleanup", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-session-admission-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-session-admission-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const startupMarker = join(root, "worker-started.txt");
@@ -167,7 +167,7 @@ test("session execution admission precedes worker and agent execution and owns c
 });
 
 test("workspace worker startup and project configuration writes are admitted before execution", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-workspace-admission-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-workspace-admission-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const startupMarker = join(root, "workspace-worker-started.txt");

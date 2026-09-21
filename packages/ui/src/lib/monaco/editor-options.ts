@@ -1,4 +1,4 @@
-import { PIARIUM_WORKBENCH_IDE_PROFILE_ID } from '@piarium/extension-contract';
+import { VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
 import type { editor } from 'monaco-editor/editor';
 
 import {
@@ -32,7 +32,7 @@ const PRESENTATIONS: Record<FileEditorPresentationPreset, FileEditorPresentation
 };
 
 export const fileEditorPresentationForProfile = (profileId: string): FileEditorPresentationPreset => (
-  profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID ? 'ide-full' : 'agent-compact'
+  profileId === VARIN_WORKBENCH_IDE_PROFILE_ID ? 'ide-full' : 'agent-compact'
 );
 
 const resolveToggle = (value: FileEditorProfileToggle, profileValue: boolean): boolean => (

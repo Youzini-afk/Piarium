@@ -9,18 +9,18 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const electronDir = path.resolve(__dirname, '..');
-const appPath = path.resolve(process.argv[2] ?? path.join(electronDir, 'dist', 'win-unpacked', 'Piarium.exe'));
+const appPath = path.resolve(process.argv[2] ?? path.join(electronDir, 'dist', 'win-unpacked', 'Varin.exe'));
 const smokeEnvironment = { ...process.env };
 for (const variable of [
-  'PIARIUM_PI_SOURCE',
-  'PIARIUM_PI_CUSTOM_ROOT',
-  'PIARIUM_PI_CUSTOM_NODE',
-  'PIARIUM_PI_PACKAGE_ROOT',
-  'PIARIUM_AGENT_DIR',
-  'PIARIUM_RUNTIME_SOURCE',
-  'PIARIUM_SKIP_LOCAL_SERVER',
-  'PIARIUM_SMOKE_PROFILE_SOURCE',
-  'PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK',
+  'VARIN_PI_SOURCE',
+  'VARIN_PI_CUSTOM_ROOT',
+  'VARIN_PI_CUSTOM_NODE',
+  'VARIN_PI_PACKAGE_ROOT',
+  'VARIN_AGENT_DIR',
+  'VARIN_RUNTIME_SOURCE',
+  'VARIN_SKIP_LOCAL_SERVER',
+  'VARIN_SMOKE_PROFILE_SOURCE',
+  'VARIN_SMOKE_LOCAL_SEMANTIC_PACK',
   'ELECTRON_RUN_AS_NODE',
   'NODE_PATH',
 ]) {
@@ -30,14 +30,14 @@ if (process.platform !== 'win32') {
   throw new Error('The unpacked Windows smoke test must run on Windows.');
 }
 if (!existsSync(appPath)) {
-  throw new Error(`Missing unpacked Piarium executable at ${appPath}`);
+  throw new Error(`Missing unpacked Varin executable at ${appPath}`);
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const DEVTOOLS_REQUEST_TIMEOUT_MS = 20_000;
-const MONACO_SMOKE_ENABLED = process.env.PIARIUM_MONACO_SMOKE === '1';
-const localSemanticPack = process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK?.trim()
-  ? path.resolve(process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK.trim())
+const MONACO_SMOKE_ENABLED = process.env.VARIN_MONACO_SMOKE === '1';
+const localSemanticPack = process.env.VARIN_SMOKE_LOCAL_SEMANTIC_PACK?.trim()
+  ? path.resolve(process.env.VARIN_SMOKE_LOCAL_SEMANTIC_PACK.trim())
   : null;
 
 const formatConsoleArg = (arg) => {
@@ -205,7 +205,7 @@ const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
       { workspaceId: workspace.workspaceId, languageId },
       'Packaged built-in language status',
     );
-    if (status?.status !== 'ready' || status.providerId !== 'piarium.typescript-language') {
+    if (status?.status !== 'ready' || status.providerId !== 'varin.typescript-language') {
       throw new Error(`Packaged built-in language provider returned ${JSON.stringify(status)}`);
     }
 
@@ -264,10 +264,10 @@ const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
 };
 
 const runPackagedRecoverySmoke = async (baseUrl) => {
-  const payload = await postJson(baseUrl, '/api/piarium/extensions/v1/services/invoke', {
+  const payload = await postJson(baseUrl, '/api/varin/extensions/v1/services/invoke', {
     args: [],
     method: 'listStorageWorkspaces',
-    serviceId: 'piarium.workspace-recovery',
+    serviceId: 'varin.workspace-recovery',
     version: 5,
   }, 'Packaged built-in recovery inventory');
   const result = payload?.result;
@@ -371,7 +371,7 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
 
 const runPackagedMobileEntrySmoke = async (devTools) => {
   const exceptionCountBeforeNavigation = devTools.exceptions.length;
-  const navigation = await devTools.navigate('piarium-ui://app/mobile.html');
+  const navigation = await devTools.navigate('varin-ui://app/mobile.html');
   if (navigation?.errorText) {
     throw describeSmokeFailure(`Unable to navigate to the packaged mobile entry: ${navigation.errorText}`, {
       consoleMessages: devTools.consoleMessages,
@@ -435,7 +435,7 @@ const runPackagedMobileEntrySmoke = async (devTools) => {
 };
 
 const runMonacoSmoke = async (devTools) => {
-  const navigation = await devTools.navigate('piarium-ui://app/monaco-smoke.html');
+  const navigation = await devTools.navigate('varin-ui://app/monaco-smoke.html');
   if (navigation?.errorText) {
     throw describeSmokeFailure(`Unable to navigate to the Monaco smoke entry: ${navigation.errorText}`, {
       consoleMessages: devTools.consoleMessages,
@@ -446,7 +446,7 @@ const runMonacoSmoke = async (devTools) => {
   let lastState;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     await delay(250);
-    const evaluation = await devTools.evaluate('window.__piariumMonacoSmoke ?? null');
+    const evaluation = await devTools.evaluate('window.__varinMonacoSmoke ?? null');
     if (evaluation?.exceptionDetails) continue;
     lastState = evaluation?.result?.value;
     if (lastState?.status === 'failed') {
@@ -495,7 +495,7 @@ const waitForRenderer = async (userDataDir) => {
     target = targets.find((candidate) => (
       candidate?.type === 'page'
       && typeof candidate.url === 'string'
-      && candidate.url.startsWith('piarium-ui://app')
+      && candidate.url.startsWith('varin-ui://app')
       && typeof candidate.webSocketDebuggerUrl === 'string'
     ));
   }
@@ -509,7 +509,7 @@ const waitForRenderer = async (userDataDir) => {
       const evaluation = await devTools.evaluate(`(() => {
         let diagnostics = null;
         try {
-          diagnostics = window.__piariumStartupDiagnostics ?? null;
+          diagnostics = window.__varinStartupDiagnostics ?? null;
         } catch {
           diagnostics = { error: 'startup diagnostics threw' };
         }
@@ -518,7 +518,7 @@ const waitForRenderer = async (userDataDir) => {
           diagnostics,
           localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
           mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
-          ready: window.__piariumAppReady === true,
+          ready: window.__varinAppReady === true,
         };
       })()`);
       if (evaluation?.exceptionDetails) {
@@ -571,7 +571,7 @@ const waitForRenderer = async (userDataDir) => {
   }
 };
 
-const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-win-smoke-'));
+const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
 const agentDir = path.join(smokeRoot, 'pi-agent');
 const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
@@ -599,8 +599,8 @@ const child = spawn(appPath, [
   env: {
     ...smokeEnvironment,
     PI_CODING_AGENT_DIR: agentDir,
-    PIARIUM_DATA_DIR: userDataDir,
-    PIARIUM_WORKSPACE_ROOT: smokeWorkspaceRoot,
+    VARIN_DATA_DIR: userDataDir,
+    VARIN_WORKSPACE_ROOT: smokeWorkspaceRoot,
   },
   stdio: 'ignore',
   windowsHide: true,
@@ -621,10 +621,10 @@ try {
     const match = log.match(/server listening on 127\.0\.0\.1:(\d+)/);
     if (match) port = Number(match[1]);
     if (child.exitCode !== null && port === undefined) {
-      throw new Error(`Packaged Piarium exited before startup completed (code ${child.exitCode}).\n${log}`);
+      throw new Error(`Packaged Varin exited before startup completed (code ${child.exitCode}).\n${log}`);
     }
   }
-  if (port === undefined) throw new Error(`Packaged Piarium did not become ready.\n${await readLog()}`);
+  if (port === undefined) throw new Error(`Packaged Varin did not become ready.\n${await readLog()}`);
 
   const baseUrl = `http://127.0.0.1:${port}`;
   const healthResponse = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(10_000) });

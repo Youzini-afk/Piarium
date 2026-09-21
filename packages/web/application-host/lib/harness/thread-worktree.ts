@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { terminateManagedProcess, type ManagedSpawn } from "../process/types.js";
-import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadSpaceMeasurement, ThreadWorktree } from "@piarium/protocol";
+import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadSpaceMeasurement, ThreadWorktree } from "@varin/protocol";
 import type { WorktreeBootstrapState } from "../git/types.js";
 import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
 import { mergeText3Way } from "./working-state/three-way-merge.js";
@@ -267,7 +267,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const entries = await readdirFn(src, { withFileTypes: true });
     await fsPromises.mkdir(dst, { recursive: true });
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === ".piarium") continue;
+      if (entry.name === ".git" || entry.name === ".varin") continue;
       const s = pathModule.join(src, entry.name);
       const d = pathModule.join(dst, entry.name);
       if (entry.isSymbolicLink()) {
@@ -288,7 +288,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const entries = await readdirFn(dir, { withFileTypes: true });
     const result: string[] = [];
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === ".piarium") continue;
+      if (entry.name === ".git" || entry.name === ".varin") continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = pathModule.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -420,7 +420,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           return;
         }
         for (const entry of entries) {
-          if (entry.name === ".git" || entry.name === ".piarium") continue;
+          if (entry.name === ".git" || entry.name === ".varin") continue;
           const full = pathModule.join(directory, entry.name);
           if (entry.isDirectory()) await scan(full);
           else {
@@ -442,8 +442,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const allocated = options.createScratch
       ? await options.createScratch(sourceRoot, threadId)
       : {
-          managedRoot: pathModule.resolve(sourceRoot, ".piarium", "worktrees"),
-          path: pathModule.resolve(sourceRoot, ".piarium", "worktrees", threadId),
+          managedRoot: pathModule.resolve(sourceRoot, ".varin", "worktrees"),
+          path: pathModule.resolve(sourceRoot, ".varin", "worktrees", threadId),
         };
     if (!allocated.managedRoot) throw new Error("Scratch backend did not return its managed ownership root");
     const managedRoot = allocated.managedRoot;
@@ -462,7 +462,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       path: targetDir,
       managedRoot,
       base,
-      branch: `piarium/${threadId}`,
+      branch: `varin/${threadId}`,
       materialized: false,
       preparationStage: "ready",
       viewMode: "virtual",
@@ -502,14 +502,14 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         const res = await options.createWorktree(sourceRoot, {
           mode: "new",
           worktreeName: threadId,
-          branchName: `piarium/${threadId}`,
+          branchName: `varin/${threadId}`,
         });
         targetDir = res.path;
         if (!res.managedRoot) throw new Error("Worktree backend did not return its managed ownership root");
         managedRoot = res.managedRoot;
         registerManagedRoot(managedRoot);
       } catch {
-        managedRoot = pathModule.resolve(sourceRoot, ".piarium", "worktrees");
+        managedRoot = pathModule.resolve(sourceRoot, ".varin", "worktrees");
         targetDir = pathModule.resolve(managedRoot, threadId);
         await fsPromises.mkdir(managedRoot, { recursive: true });
         await fsPromises.mkdir(targetDir, { recursive: true });
@@ -520,7 +520,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         path: targetDir,
         managedRoot,
         base: "zero-commit",
-        branch: `piarium/${threadId}`,
+        branch: `varin/${threadId}`,
         materialized: await pathExists(targetDir),
         preparationStage: "materializing",
         viewMode: "materialized",
@@ -541,7 +541,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const created = await options.createWorktree(sourceRoot, {
       mode: "new",
       worktreeName: threadId,
-      branchName: `piarium/${threadId}`,
+      branchName: `varin/${threadId}`,
       startRef: parentHead,
     });
     if (!created.managedRoot) throw new Error("Worktree backend did not return its managed ownership root");
@@ -550,7 +550,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       path: created.path,
       managedRoot: created.managedRoot,
       base: parentHead,
-      branch: `piarium/${threadId}`,
+      branch: `varin/${threadId}`,
       materialized: await pathExists(created.path),
       preparationStage: "materializing",
       viewMode: "materialized",
@@ -573,9 +573,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (patch.length > 0 || untracked.length > 0) {
       await runGit(created.path, ["add", "-A"]);
       await runGit(created.path, [
-        "-c", "user.name=Piarium Thread Baseline",
-        "-c", "user.email=thread-baseline@piarium.local",
-        "commit", "--no-verify", "--no-gpg-sign", "-m", "Piarium thread baseline",
+        "-c", "user.name=Varin Thread Baseline",
+        "-c", "user.email=thread-baseline@varin.local",
+        "commit", "--no-verify", "--no-gpg-sign", "-m", "Varin thread baseline",
       ]);
       executionBaseline = (await runGit(created.path, ["rev-parse", "HEAD"])).stdout.trim();
     }
@@ -829,9 +829,9 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (status.length > 0) {
       await runGit(worktree.path, ["add", "-A"]);
       await runGit(worktree.path, [
-        "-c", "user.name=Piarium Thread Result",
-        "-c", "user.email=thread-result@piarium.local",
-        "commit", "--no-verify", "--no-gpg-sign", "-m", "Piarium thread result",
+        "-c", "user.name=Varin Thread Result",
+        "-c", "user.email=thread-result@varin.local",
+        "commit", "--no-verify", "--no-gpg-sign", "-m", "Varin thread result",
       ]);
     }
     const [commitResult, branchResult, cleanResult] = await Promise.all([
@@ -1279,10 +1279,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     await runGit(livePath, ["init"]);
     await runGit(livePath, ["add", "-A"]);
     await runGit(livePath, [
-      "-c", "user.name=Piarium Thread",
-      "-c", "user.email=thread@piarium.local",
+      "-c", "user.name=Varin Thread",
+      "-c", "user.email=thread@varin.local",
       "commit", "--no-verify", "--no-gpg-sign", "--allow-empty",
-      "-m", "Piarium isolated execution baseline",
+      "-m", "Varin isolated execution baseline",
     ]);
     const head = (await runGit(livePath, ["rev-parse", "HEAD"])).stdout.trim();
     if (!head) throw new Error("Isolated execution Git baseline is not resolvable after git init");
@@ -1527,13 +1527,13 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       if (status) throw new Error(`Existing execution Git context is dirty and cannot be adopted: ${livePath}`);
       const subject = (await runGit(livePath, ["log", "-1", "--format=%s"])).stdout.trim();
       const parents = (await runGit(livePath, ["rev-list", "--parents", "-n", "1", "HEAD"])).stdout.trim().split(/\s+/).slice(1);
-      if (subject === "Piarium execution baseline" && resolvedBase && parents.length === 1 && parents[0] === resolvedBase) {
+      if (subject === "Varin execution baseline" && resolvedBase && parents.length === 1 && parents[0] === resolvedBase) {
         return { kind: "worktree", executionBaseline: head };
       }
-      if (subject === "Piarium isolated execution baseline" && parents.length === 0) {
+      if (subject === "Varin isolated execution baseline" && parents.length === 0) {
         return { kind: "init", executionBaseline: head };
       }
-      throw new Error(`Existing Git metadata is not a provable Piarium execution baseline: ${livePath}`);
+      throw new Error(`Existing Git metadata is not a provable Varin execution baseline: ${livePath}`);
     }
     const canDetach = Boolean(!worktree.readOnlyInput && source.isGit && resolvedBase && !liveInsideSource && !liveInheritsOther);
     if (canDetach) {
@@ -1569,10 +1569,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         await runGit(livePath, ["read-tree", ref]);
         await runGit(livePath, ["add", "-A"]);
         await runGit(livePath, [
-          "-c", "user.name=Piarium Thread Baseline",
-          "-c", "user.email=thread-baseline@piarium.local",
+          "-c", "user.name=Varin Thread Baseline",
+          "-c", "user.email=thread-baseline@varin.local",
           "commit", "--no-verify", "--no-gpg-sign", "--allow-empty",
-          "-m", "Piarium execution baseline",
+          "-m", "Varin execution baseline",
         ]);
         await fsPromises.rm(metadataPath, { recursive: true, force: true });
         return { kind: "worktree", executionBaseline: await resolveLiveHead(livePath) };

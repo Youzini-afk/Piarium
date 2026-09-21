@@ -2,10 +2,10 @@
 //
 // Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
 // modes, chosen at send time:
-//   - Relay (explicit): POST tokens + generic text to PIARIUM_PUSH_RELAY_URL, whose service
+//   - Relay (explicit): POST tokens + generic text to VARIN_PUSH_RELAY_URL, whose service
 //     holds the selected project APNs key and signs+sends.
 //   - Direct: sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves for
-//     self-hosters who configure PIARIUM_APNS_*.
+//     self-hosters who configure VARIN_APNS_*.
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
@@ -13,8 +13,8 @@ import {
   getOrCreateRelaySigningKeypair,
   signRelayMessage as signRelayMessageShared,
 } from '../relay/signing-key.js';
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { SettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { SettingsFileStore } from '@varin/settings-store';
 import type cryptoModule from 'node:crypto';
 import type { JsonWebKey } from 'node:crypto';
 import type fsPromisesModule from 'node:fs/promises';
@@ -26,7 +26,7 @@ const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
 // APNs rejects auth tokens older than 1h; refresh well inside that window.
 const JWT_TTL_MS = 50 * 60 * 1000;
-const DEFAULT_BUNDLE_ID = 'dev.piarium.mobile';
+const DEFAULT_BUNDLE_ID = 'dev.varin.mobile';
 const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
@@ -324,18 +324,18 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
   // ---------------------------------------------------------------------------
 
   const resolveApnsConfig = async (): Promise<ApnsConfig | null> => {
-    let keyId = trimmedEnv('PIARIUM_APNS_KEY_ID');
-    let teamId = trimmedEnv('PIARIUM_APNS_TEAM_ID');
-    let bundleId = trimmedEnv('PIARIUM_APNS_BUNDLE_ID');
-    let environment = (trimmedEnv('PIARIUM_APNS_ENVIRONMENT') || '').toLowerCase();
-    let p8 = normalizePem(process.env.PIARIUM_APNS_P8 || '');
+    let keyId = trimmedEnv('VARIN_APNS_KEY_ID');
+    let teamId = trimmedEnv('VARIN_APNS_TEAM_ID');
+    let bundleId = trimmedEnv('VARIN_APNS_BUNDLE_ID');
+    let environment = (trimmedEnv('VARIN_APNS_ENVIRONMENT') || '').toLowerCase();
+    let p8 = normalizePem(process.env.VARIN_APNS_P8 || '');
 
-    const p8Path = trimmedEnv('PIARIUM_APNS_P8_PATH');
+    const p8Path = trimmedEnv('VARIN_APNS_P8_PATH');
     if (!p8 && p8Path) {
       try {
         p8 = (await fsPromises.readFile(p8Path, 'utf8')).trim();
       } catch (error) {
-        console.warn('[APNs] Failed to read PIARIUM_APNS_P8_PATH:', error instanceof Error ? error.message : error);
+        console.warn('[APNs] Failed to read VARIN_APNS_P8_PATH:', error instanceof Error ? error.message : error);
       }
     }
 
@@ -480,16 +480,16 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
 
   // Relay mode is explicit: the selected service owns the APNs key, while this server POSTs
   // device tokens + generic text and receives token-drop results. Without a relay URL, direct
-  // mode below uses the deployment's PIARIUM_APNS_* configuration when available.
+  // mode below uses the deployment's VARIN_APNS_* configuration when available.
   const resolveRelayConfig = (): RelayConfig | null => {
-    if (trimmedEnv('PIARIUM_PUSH_RELAY_DISABLED') === 'true') return null;
-    const url = trimmedEnv('PIARIUM_PUSH_RELAY_URL');
+    if (trimmedEnv('VARIN_PUSH_RELAY_DISABLED') === 'true') return null;
+    const url = trimmedEnv('VARIN_PUSH_RELAY_URL');
     if (!url) return null;
-    const override = (trimmedEnv('PIARIUM_APNS_ENVIRONMENT') || '').toLowerCase();
+    const override = (trimmedEnv('VARIN_APNS_ENVIRONMENT') || '').toLowerCase();
     return {
       url,
       registerUrl: url.replace(/\/send$/, '/register-token'),
-      // Explicit PIARIUM_APNS_ENVIRONMENT forces every send to that environment; when
+      // Explicit VARIN_APNS_ENVIRONMENT forces every send to that environment; when
       // unset (null), each token is delivered to the environment it registered with.
       environment: override === 'sandbox' ? 'sandbox' : override === 'production' ? 'production' : null,
     };
@@ -502,7 +502,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
     environment: PushEnvironment,
   ): Promise<void> => {
     const tokens = deviceTokens.slice(0, 100);
-    const title = typeof payload?.title === 'string' && payload.title.length > 0 ? payload.title : 'Piarium';
+    const title = typeof payload?.title === 'string' && payload.title.length > 0 ? payload.title : 'Varin';
     const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
     const ts = Date.now();
     // Sign over the same canonical form the relay verifies: ts.sortedTokens.title.
@@ -553,7 +553,7 @@ export const createApnsRuntime = (deps: ApnsRuntimeDependencies) => {
       if (!warnedUnconfigured) {
         warnedUnconfigured = true;
         console.warn(
-          '[APNs] Relay disabled and no direct config; set PIARIUM_APNS_KEY_ID / PIARIUM_APNS_TEAM_ID / PIARIUM_APNS_P8 for direct send.',
+          '[APNs] Relay disabled and no direct config; set VARIN_APNS_KEY_ID / VARIN_APNS_TEAM_ID / VARIN_APNS_P8 for direct send.',
         );
       }
       return;

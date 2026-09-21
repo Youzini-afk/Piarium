@@ -14,7 +14,7 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 // Qwen, …) spend part of this budget on reasoning before the actual answer.
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
-const USER_AGENT = 'piarium/0.1';
+const USER_AGENT = 'varin/0.1';
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -518,7 +518,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
       Accept: 'text/event-stream',
       Authorization: `Bearer ${accessToken}`,
       ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
-      originator: 'piarium',
+      originator: 'varin',
       'User-Agent': USER_AGENT,
     },
     body: JSON.stringify({

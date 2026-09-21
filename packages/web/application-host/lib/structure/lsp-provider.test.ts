@@ -4,13 +4,13 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 import { createLspStructureProvider } from "./lsp-provider.js";
 
 const fixtureProvider = (overrides: { env?: NodeJS.ProcessEnv; languageIds?: string[] } = {}) => ({
   providerId: "fixture",
   command: process.execPath,
-  args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+  args: VARIN_LSP_FIXTURE_SERVER_ARGS,
   languageIds: overrides.languageIds ?? ["typescript"],
   source: "host" as const,
   ...(overrides.env ? { env: overrides.env } : {}),
@@ -92,7 +92,7 @@ describe("createLspStructureProvider", () => {
       expect(cold.status).toBe("unavailable");
       expect(cold.symbols).toEqual([]);
 
-      language.registerProvider(fixtureProvider({ env: { PIARIUM_LSP_FIXTURE_MINIMAL: "1" } }));
+      language.registerProvider(fixtureProvider({ env: { VARIN_LSP_FIXTURE_MINIMAL: "1" } }));
       const unsupported = await provider.outline({
         path: "note.ts",
         languageId: "typescript",

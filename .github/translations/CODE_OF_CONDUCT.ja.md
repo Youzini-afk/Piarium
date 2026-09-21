@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | 日本語
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | 日本語
 
 # Contributor Covenant 行動規範
 
@@ -50,7 +50,7 @@
 
 インシデントは、リポジトリからメンテナーへの非公開連絡を開始して GitHub 経由でメンテナーに報告して
 ください。報告が脆弱性に関するものである場合は、
-[非公開のセキュリティアドバイザリ](https://github.com/Youzini-afk/Piarium/security/advisories/new)
+[非公開のセキュリティアドバイザリ](https://github.com/Youzini-afk/Varin/security/advisories/new)
 を提出してください。嫌がらせの報告を公開 issue に投稿しないでください。
 
 すべての申し立ては、速やかに、公平に審査および調査されます。

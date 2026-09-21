@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
+import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@varin/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import { createUserThreadSendAdapter } from "./thread-ui-adapter.js";
@@ -140,7 +140,7 @@ describe("harness thread public send chain", () => {
         prepare: vi.fn(async (input: { mode: string }) => input.mode === "none"
           ? { cwd: "/workspace", worktree: null }
           : { cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }) as ThreadRuntimeOptions["worktrees"]["prepare"],
-        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
         merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
       },

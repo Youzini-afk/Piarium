@@ -66,16 +66,16 @@ describe('callSmallModel — custom provider config', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
-    delete process.env.PIARIUM_TEST_PROVIDER_KEY;
+    delete process.env.VARIN_TEST_PROVIDER_KEY;
   });
 
   describe('config-supplied credentials (no auth.json entry)', () => {
     it('resolves a Pi environment variable before sending the API key', async () => {
-      process.env.PIARIUM_TEST_PROVIDER_KEY = 'sk-env-key';
+      process.env.VARIN_TEST_PROVIDER_KEY = 'sk-env-key';
       readConfigMock.mockReturnValue({
         providers: {
           custom: {
-            apiKey: '$PIARIUM_TEST_PROVIDER_KEY',
+            apiKey: '$VARIN_TEST_PROVIDER_KEY',
             baseUrl: 'https://proxy.example.test/v1',
           },
         },

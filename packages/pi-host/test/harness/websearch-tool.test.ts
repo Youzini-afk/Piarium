@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createWebSearchTool } from "../../src/harness/websearch-tool.js";
-import type { HarnessRequestData } from "@piarium/protocol";
+import type { HarnessRequestData } from "@varin/protocol";
 
 function createTestBridge(sessionId: string) {
   const emitted: HarnessRequestData[] = [];

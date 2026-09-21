@@ -1,8 +1,8 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
-# 为 Piarium 贡献
+# 为 Varin 贡献
 
-感谢你帮助改进 Piarium。无论是 Pi 运行时边界、桌面与远程端、扩展集成、文档、测试、无障碍，
+感谢你帮助改进 Varin。无论是 Pi 运行时边界、桌面与远程端、扩展集成、文档、测试、无障碍，
 还是平台支持，都欢迎贡献。
 
 本文说明公开的贡献流程。具体实现工作还需要遵循 [AGENTS.md](../../AGENTS.md)、离改动最近的包 README，
@@ -20,7 +20,7 @@
 ## 开始之前
 
 - 请阅读[行为准则](CODE_OF_CONDUCT.zh-CN.md)。
-- 在 [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) 中报告可复现的缺陷、提出功能
+- 在 [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) 中报告可复现的缺陷、提出功能
   建议或展开聚焦的技术讨论。
 - 漏洞请通过[安全策略](SECURITY.zh-CN.md)中的私密流程报告。不要把利用细节发布到 Issue、
   Discussion、Pull Request、日志或截图中。
@@ -30,15 +30,15 @@
 
 ## 会影响贡献方式的项目原则
 
-Piarium 不是套在多个编程智能体 CLI 外面的通用壳。它只有一套 Pi 原生领域模型，以及一套当前有效的
+Varin 不是套在多个编程智能体 CLI 外面的通用壳。它只有一套 Pi 原生领域模型，以及一套当前有效的
 预发布运行时协议。
 
 1. **以 Pi 为权威。** 会话、模型、认证、设置、包和扩展运行时均由 Pi 负责。跨边界时投影成可安全
-   JSON 序列化的 Piarium 协议，不要把 Pi 状态复制进另一套应用 Schema。
+   JSON 序列化的 Varin 协议，不要把 Pi 状态复制进另一套应用 Schema。
 2. **保留插件的状态归属。** 通过公开命令、事件、设置和能力桥接集成扩展。不要为了制作 GUI 而解析
    私有数据库或复制插件迁移逻辑。
 3. **避免兼容层沉积。** 在 1.0 之前，各产品端同步演进。替代实现验收后，应删除过时的 OpenCode 和
-   Piarium 路径；除非确有持久化数据或独立客户端需要，不要堆积类似协议 v13/v14 的适配层。
+   Varin 路径；除非确有持久化数据或独立客户端需要，不要堆积类似协议 v13/v14 的适配层。
 4. **在可信边界执行权限校验。** 渲染器和远程客户端不能自行授权。文件系统、进程、网络、项目
    信任和凭据操作，必须由真正拥有该能力的宿主验证。
 5. **不要添加武断的产品限制。** 避免静默截断、模型数量上限、过短超时和隐藏的并发上限。运维预算
@@ -61,14 +61,14 @@ Piarium 不是套在多个编程智能体 CLI 外面的通用壳。它只有一�
 ### 克隆与安装
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run check:pi
 ```
 
 `bun.lock` 是依赖的权威记录。除非依赖变更确实需要，否则不要切换包管理器或重新生成锁文件。请仔细
-审查生命周期脚本的变化；Piarium 有意只允许确实需要执行的安装脚本。
+审查生命周期脚本的变化；Varin 有意只允许确实需要执行的安装脚本。
 
 ## 常用开发入口
 
@@ -213,6 +213,6 @@ Pull Request 应使审查者无需重走你的调查过程，就能验证结果�
 
 ## 许可证
 
-提交贡献即表示你同意相关内容可以按照 Piarium 的
+提交贡献即表示你同意相关内容可以按照 Varin 的
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）分发；导入的第三方内容仍应
 保留[第三方声明](../../THIRD_PARTY_NOTICES.md)所要求的署名和许可证文本。

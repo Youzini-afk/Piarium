@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue, PiAgentDescriptor } from '@piarium/protocol';
+import type { JsonValue, PiAgentDescriptor } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from './ModelSelector';
 import {
@@ -61,13 +61,13 @@ interface PiSubagentsDefinitionDialogProps {
 }
 
 function titleKey(mode: PiSubagentsDefinitionMode):
-  | 'settings.piarium.agents.definition.createAgent'
-  | 'settings.piarium.agents.definition.editAgent' {
+  | 'settings.varin.agents.definition.createAgent'
+  | 'settings.varin.agents.definition.editAgent' {
   switch (mode) {
     case 'create-agent':
-      return 'settings.piarium.agents.definition.createAgent';
+      return 'settings.varin.agents.definition.createAgent';
     case 'update-agent':
-      return 'settings.piarium.agents.definition.editAgent';
+      return 'settings.varin.agents.definition.editAgent';
   }
 }
 
@@ -111,20 +111,20 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
     switch (issue.code) {
       case 'invalid-integer': {
         const field = issue.field === 'timeoutMs'
-          ? tx('settings.piarium.agents.definition.field.timeLimit')
-          : tx('settings.piarium.agents.definition.field.delegationDepth');
-        return t('settings.piarium.agents.definition.validation.integer', { field });
+          ? tx('settings.varin.agents.definition.field.timeLimit')
+          : tx('settings.varin.agents.definition.field.delegationDepth');
+        return t('settings.varin.agents.definition.validation.integer', { field });
       }
       case 'invalid-json':
-        return t('settings.piarium.agents.definition.validation.json');
+        return t('settings.varin.agents.definition.validation.json');
       case 'json-object':
-        return t('settings.piarium.agents.definition.validation.jsonObject');
+        return t('settings.varin.agents.definition.validation.jsonObject');
       case 'name-description-required':
-        return t('settings.piarium.agents.definition.validation.nameDescription');
+        return t('settings.varin.agents.definition.validation.nameDescription');
       case 'no-changes':
-        return t('settings.piarium.agents.definition.validation.noChanges');
+        return t('settings.varin.agents.definition.validation.noChanges');
       case 'unsupported-advanced-field':
-        return `${t('settings.piarium.pluginSettings.field.unsupportedValue')}: ${issue.field}`;
+        return `${t('settings.varin.pluginSettings.field.unsupportedValue')}: ${issue.field}`;
     }
   }, [issue, t, tx]);
 
@@ -148,33 +148,33 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
           <DialogTitle>{t(titleKey(mode))}</DialogTitle>
           <DialogDescription>
             {t(createMode
-              ? 'settings.piarium.agents.definition.createDescription'
-              : 'settings.piarium.agents.definition.updateDescription')}
+              ? 'settings.varin.agents.definition.createDescription'
+              : 'settings.varin.agents.definition.updateDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 py-1">
           <SettingsControlGroup contentClassName="space-y-4">
             {createMode ? (
-              <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.saveLocation')} controlClassName="w-full max-w-lg">
+              <SettingsFieldRow label={tx('settings.varin.agents.definition.field.saveLocation')} controlClassName="w-full max-w-lg">
                 <Select value={scope} onValueChange={setScope} disabled={submitting}>
                   <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
                     <SelectValue>
                       {scope === 'project'
-                        ? t('settings.piarium.agents.scope.project')
-                        : t('settings.piarium.agents.scope.user')}
+                        ? t('settings.varin.agents.scope.project')
+                        : t('settings.varin.agents.scope.user')}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user">{t('settings.piarium.agents.scope.user')}</SelectItem>
+                    <SelectItem value="user">{t('settings.varin.agents.scope.user')}</SelectItem>
                     <SelectItem value="project" disabled={!projectTrusted}>
-                      {t('settings.piarium.agents.scope.project')}
+                      {t('settings.varin.agents.scope.project')}
                     </SelectItem>
                   </SelectContent>
                 </Select>
               </SettingsFieldRow>
             ) : null}
-            <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.name')} controlClassName="w-full max-w-lg">
+            <SettingsFieldRow label={tx('settings.varin.agents.definition.field.name')} controlClassName="w-full max-w-lg">
               <Input
                 value={draft.name}
                 disabled={submitting}
@@ -182,7 +182,7 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
                 className="min-w-0 flex-1"
               />
             </SettingsFieldRow>
-            <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.description')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+            <SettingsFieldRow label={tx('settings.varin.agents.definition.field.description')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
               <Textarea
                 value={draft.description}
                 disabled={submitting}
@@ -196,11 +196,11 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
             <>
               <SettingsControlGroup
                 className="border-t border-border/60 pt-5"
-                title={tx('settings.piarium.agents.definition.modelSection')}
-                description={tx('settings.piarium.agents.definition.modelSectionDescription')}
+                title={tx('settings.varin.agents.definition.modelSection')}
+                description={tx('settings.varin.agents.definition.modelSectionDescription')}
                 contentClassName="space-y-4"
               >
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.primaryModel')} controlClassName="w-full max-w-lg">
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.primaryModel')} controlClassName="w-full max-w-lg">
                   <div
                     aria-disabled={submitting}
                     className={submitting ? 'pointer-events-none opacity-60' : undefined}
@@ -208,17 +208,17 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
                   >
                     <ModelSelector
                       {...splitModel(draft.model)}
-                      placeholder={tx('settings.piarium.agents.definition.placeholder.inheritModel')}
+                      placeholder={tx('settings.varin.agents.definition.placeholder.inheritModel')}
                       onChange={(providerId, modelId) => update('model', providerId && modelId ? `${providerId}/${modelId}` : '')}
                       className="w-full max-w-72 justify-between"
                       dropdownPortalToBody
                     />
                   </div>
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.fallbackModels')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                  <Textarea value={draft.fallbackModels} disabled={submitting} placeholder={tx('settings.piarium.agents.definition.placeholder.fallbackModels')} onChange={(event) => update('fallbackModels', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.fallbackModels')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+                  <Textarea value={draft.fallbackModels} disabled={submitting} placeholder={tx('settings.varin.agents.definition.placeholder.fallbackModels')} onChange={(event) => update('fallbackModels', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.thinkingLevel')} controlClassName="w-full max-w-lg">
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.thinkingLevel')} controlClassName="w-full max-w-lg">
                   <Select
                     value={!draft.thinking
                       ? 'default'
@@ -231,21 +231,21 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
                     <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
                       <SelectValue>
                         {draft.thinking && !isSupportedPiSubagentsThinking(draft.thinking)
-                          ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+                          ? t('settings.varin.pluginSettings.field.unsupportedValue')
                           : draft.thinking
-                          ? tx(`settings.piarium.pluginSettings.subagents.thinking.${draft.thinking}`)
-                          : tx('settings.piarium.agents.definition.value.inheritThinking')}
+                          ? tx(`settings.varin.pluginSettings.subagents.thinking.${draft.thinking}`)
+                          : tx('settings.varin.agents.definition.value.inheritThinking')}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">{tx('settings.piarium.agents.definition.value.inheritThinking')}</SelectItem>
+                      <SelectItem value="default">{tx('settings.varin.agents.definition.value.inheritThinking')}</SelectItem>
                       {draft.thinking && !isSupportedPiSubagentsThinking(draft.thinking) ? (
                         <SelectItem value="unsupported" disabled>
-                          {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+                          {t('settings.varin.pluginSettings.field.unsupportedValue')}
                         </SelectItem>
                       ) : null}
                       {PI_SUBAGENTS_THINKING_LEVELS.map((level) => (
-                        <SelectItem key={level} value={level}>{tx(`settings.piarium.pluginSettings.subagents.thinking.${level}`)}</SelectItem>
+                        <SelectItem key={level} value={level}>{tx(`settings.varin.pluginSettings.subagents.thinking.${level}`)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -254,42 +254,42 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
 
               <SettingsControlGroup
                 className="border-t border-border/60 pt-5"
-                title={tx('settings.piarium.agents.definition.identitySection')}
+                title={tx('settings.varin.agents.definition.identitySection')}
                 contentClassName="space-y-4"
               >
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.systemInstructions')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                  <Textarea value={draft.systemPrompt} disabled={submitting} placeholder={tx('settings.piarium.agents.definition.placeholder.systemInstructions')} onChange={(event) => update('systemPrompt', event.target.value)} className="min-h-28 min-w-0 flex-1" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.systemInstructions')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+                  <Textarea value={draft.systemPrompt} disabled={submitting} placeholder={tx('settings.varin.agents.definition.placeholder.systemInstructions')} onChange={(event) => update('systemPrompt', event.target.value)} className="min-h-28 min-w-0 flex-1" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.startingContext')} controlClassName="w-full max-w-lg">
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.startingContext')} controlClassName="w-full max-w-lg">
                   <Select value={draft.defaultContext || 'default'} disabled={submitting} onValueChange={(value) => update('defaultContext', value === 'default' ? '' : value as 'fresh' | 'fork')}>
                     <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
                       <SelectValue>
                         {draft.defaultContext
-                          ? tx(`settings.piarium.pluginSettings.subagents.context.${draft.defaultContext}`)
-                          : t('settings.piarium.pluginSettings.field.pluginDefault')}
+                          ? tx(`settings.varin.pluginSettings.subagents.context.${draft.defaultContext}`)
+                          : t('settings.varin.pluginSettings.field.pluginDefault')}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-                      <SelectItem value="fresh">{tx('settings.piarium.pluginSettings.subagents.context.fresh')}</SelectItem>
-                      <SelectItem value="fork">{tx('settings.piarium.pluginSettings.subagents.context.fork')}</SelectItem>
+                      <SelectItem value="default">{t('settings.varin.pluginSettings.field.pluginDefault')}</SelectItem>
+                      <SelectItem value="fresh">{tx('settings.varin.pluginSettings.subagents.context.fresh')}</SelectItem>
+                      <SelectItem value="fork">{tx('settings.varin.pluginSettings.subagents.context.fork')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.allowedTools')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                  <Textarea value={draft.tools} disabled={submitting} placeholder={tx('settings.piarium.agents.definition.placeholder.tools')} onChange={(event) => update('tools', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.allowedTools')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+                  <Textarea value={draft.tools} disabled={submitting} placeholder={tx('settings.varin.agents.definition.placeholder.tools')} onChange={(event) => update('tools', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.availableSkills')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                  <Textarea value={draft.skills} disabled={submitting} placeholder={tx('settings.piarium.agents.definition.placeholder.skills')} onChange={(event) => update('skills', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.availableSkills')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+                  <Textarea value={draft.skills} disabled={submitting} placeholder={tx('settings.varin.agents.definition.placeholder.skills')} onChange={(event) => update('skills', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.extensions')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                  <Textarea value={draft.extensions} disabled={submitting} placeholder={tx('settings.piarium.agents.definition.placeholder.extensions')} onChange={(event) => update('extensions', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.extensions')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+                  <Textarea value={draft.extensions} disabled={submitting} placeholder={tx('settings.varin.agents.definition.placeholder.extensions')} onChange={(event) => update('extensions', event.target.value)} className="min-h-20 min-w-0 flex-1 font-mono" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.timeLimit')} controlClassName="w-full max-w-lg">
-                  <Input value={draft.timeoutMs} disabled={submitting} inputMode="numeric" placeholder={tx('settings.piarium.agents.definition.placeholder.milliseconds')} onChange={(event) => update('timeoutMs', event.target.value)} className="w-36" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.timeLimit')} controlClassName="w-full max-w-lg">
+                  <Input value={draft.timeoutMs} disabled={submitting} inputMode="numeric" placeholder={tx('settings.varin.agents.definition.placeholder.milliseconds')} onChange={(event) => update('timeoutMs', event.target.value)} className="w-36" />
                 </SettingsFieldRow>
-                <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.delegationDepth')} controlClassName="w-full max-w-lg">
-                  <Input value={draft.maxSubagentDepth} disabled={submitting} inputMode="numeric" placeholder={tx('settings.piarium.agents.definition.placeholder.depth')} onChange={(event) => update('maxSubagentDepth', event.target.value)} className="w-36" />
+                <SettingsFieldRow label={tx('settings.varin.agents.definition.field.delegationDepth')} controlClassName="w-full max-w-lg">
+                  <Input value={draft.maxSubagentDepth} disabled={submitting} inputMode="numeric" placeholder={tx('settings.varin.agents.definition.placeholder.depth')} onChange={(event) => update('maxSubagentDepth', event.target.value)} className="w-36" />
                 </SettingsFieldRow>
               </SettingsControlGroup>
             </>
@@ -299,14 +299,14 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
             <CollapsibleTrigger className="border border-border/60 px-3 py-2.5">
               <span className="typography-ui-label text-foreground">
                 {advancedOpen
-                  ? t('settings.piarium.pluginSettings.advanced.hide')
-                  : t('settings.piarium.pluginSettings.advanced.show')}
+                  ? t('settings.varin.pluginSettings.advanced.hide')
+                  : t('settings.varin.pluginSettings.advanced.show')}
               </span>
               <Icon name={advancedOpen ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 text-muted-foreground" />
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-2 pt-3">
               <label htmlFor="pi-subagents-advanced-config" className={SETTINGS_FIELD_LABEL_CLASS}>
-                {tx('settings.piarium.agents.definition.field.advancedOptions')}
+                {tx('settings.varin.agents.definition.field.advancedOptions')}
               </label>
               <Textarea
                 id="pi-subagents-advanced-config"
@@ -321,7 +321,7 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
 
           {scope === 'project' && !projectTrusted ? (
             <p className="typography-meta text-[var(--status-warning)]">
-              {t('settings.piarium.recovery.pluginSettings.projectUntrusted')}
+              {t('settings.varin.recovery.pluginSettings.projectUntrusted')}
             </p>
           ) : null}
           {issueText ? (

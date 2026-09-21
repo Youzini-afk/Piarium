@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import {
   activatePiEditorContextOwner,
   normalizePiActiveEditorFile,
@@ -41,7 +41,7 @@ describe('Pi editor context store', () => {
     expect(normalizePiActiveEditorFile({ fileName: 'missing-path.ts' })).toBeNull();
   });
 
-  test('accepts a host-owned editor without inventing a Piarium workspace identity', () => {
+  test('accepts a host-owned editor without inventing a Varin workspace identity', () => {
     expect(normalizePiActiveEditorFile({
       documentInstanceId: 'monaco:file:///work/example.ts:3',
       fileName: 'example.ts',

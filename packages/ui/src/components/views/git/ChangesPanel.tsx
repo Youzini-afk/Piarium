@@ -20,7 +20,7 @@ import {
   type ChangesTreeDirectoryNode,
   type FlattenedTreeRow,
 } from './changesTree';
-import type { GitStatus } from '@piarium/application-client';
+import type { GitStatus } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';

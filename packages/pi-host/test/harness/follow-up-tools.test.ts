@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createFollowUpTool } from "../../src/harness/follow-up-tools.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
-import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@piarium/protocol";
+import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@varin/protocol";
 
 const SESSION = "session-1";
 const isError = (result: unknown) => (result as { isError?: boolean }).isError;

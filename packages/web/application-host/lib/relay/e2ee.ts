@@ -11,7 +11,7 @@ import type { webcrypto } from 'node:crypto';
 const subtle = globalThis.crypto.subtle;
 
 export const RELAY_PROTOCOL_VERSION = 1;
-export const RELAY_HKDF_INFO = 'piarium-relay-v1';
+export const RELAY_HKDF_INFO = 'varin-relay-v1';
 
 // Encrypted frame layout: [1 byte version][12 byte IV][ciphertext + 16 byte GCM tag].
 export const ENCRYPTED_FRAME_VERSION = 1;

@@ -16,12 +16,12 @@ import {
 } from './capability.js';
 import { registerRunRoutes } from './routes.js';
 import {
-  PIARIUM_DAP_FIXTURE_ADAPTER_ARGS,
-  PIARIUM_TEST_FIXTURE_PROVIDER_ARGS,
+  VARIN_DAP_FIXTURE_ADAPTER_ARGS,
+  VARIN_TEST_FIXTURE_PROVIDER_ARGS,
 } from './servers.js';
 import type {
   DebugAdapterDescriptor,
-  PiariumTestEvent,
+  VarinTestEvent,
   TestProviderDescriptor,
 } from './types.js';
 
@@ -62,7 +62,7 @@ const requireReady = <Value extends { status: string }>(
 const fixtureAdapter = (overrides: Partial<DebugAdapterDescriptor> = {}): DebugAdapterDescriptor => ({
   adapterId: overrides.adapterId ?? 'fixture',
   command: process.execPath,
-  args: PIARIUM_DAP_FIXTURE_ADAPTER_ARGS,
+  args: VARIN_DAP_FIXTURE_ADAPTER_ARGS,
   languageIds: overrides.languageIds ?? ['javascript'],
   source: overrides.source ?? 'host',
   ...(overrides.env ? { env: overrides.env } : {}),
@@ -71,7 +71,7 @@ const fixtureAdapter = (overrides: Partial<DebugAdapterDescriptor> = {}): DebugA
 const fixtureTests = (overrides: Partial<TestProviderDescriptor> = {}): TestProviderDescriptor => ({
   providerId: overrides.providerId ?? 'fixture-tests',
   command: process.execPath,
-  args: PIARIUM_TEST_FIXTURE_PROVIDER_ARGS,
+  args: VARIN_TEST_FIXTURE_PROVIDER_ARGS,
   source: overrides.source ?? 'host',
   ...(overrides.env ? { env: overrides.env } : {}),
 });
@@ -208,7 +208,7 @@ describe('debug supervisor', () => {
     try {
       debug.registerAdapter(fixtureAdapter({
         adapterId: 'crash',
-        env: { PIARIUM_DAP_FIXTURE_CRASH: '1' },
+        env: { VARIN_DAP_FIXTURE_CRASH: '1' },
       }));
       const crashed = await debug.start({
         workspaceId: harness.identity.workspaceId,
@@ -282,7 +282,7 @@ describe('debug supervisor', () => {
 });
 
 describe('task runner and tests', () => {
-  it('runs a Node task from piarium.tasks.json only for a trusted workspace', async () => {
+  it('runs a Node task from varin.tasks.json only for a trusted workspace', async () => {
     const harness = await createDocumentAuthorityHarness();
     const tasks = createWorkspaceTaskRunner({
       documents: harness.authority,
@@ -296,7 +296,7 @@ describe('task runner and tests', () => {
         'console.log("hello-task");\n',
       );
       await fs.promises.writeFile(
-        path.join(harness.workspaceRoot, 'piarium.tasks.json'),
+        path.join(harness.workspaceRoot, 'varin.tasks.json'),
         JSON.stringify({
           version: 1,
           tasks: [{ id: 'hello', label: 'Hello', type: 'node', script: 'hello.js' }],
@@ -341,14 +341,14 @@ describe('task runner and tests', () => {
         'const test = require("node:test");\nconst assert = require("node:assert/strict");\ntest("adds", () => assert.equal(1 + 1, 2));\n',
       );
       tests.registerProvider({
-        providerId: 'piarium.node-test',
+        providerId: 'varin.node-test',
         kind: 'node-test',
         source: 'builtin',
       });
       const discovered = await tests.discover({ workspaceId: harness.identity.workspaceId });
       expect(discovered.status).toBe('ready');
       expect(discovered.tests.some((item) => item.resourceId === 'hello.test.js')).toBe(true);
-      const events: PiariumTestEvent[] = [];
+      const events: VarinTestEvent[] = [];
       tests.subscribe(harness.identity.workspaceId, (event) => events.push(event));
       await tests.run({ workspaceId: harness.identity.workspaceId });
       await waitUntil(() => events.some((event) => (
@@ -361,7 +361,7 @@ describe('task runner and tests', () => {
       expect(passed).toMatchObject({ runId: owner.runId, generation: owner.generation });
       tests.registerProvider(fixtureTests({
         providerId: 'crash',
-        env: { PIARIUM_TEST_FIXTURE_CRASH: '1' },
+        env: { VARIN_TEST_FIXTURE_CRASH: '1' },
       }));
       const crashed = await tests.run({
         workspaceId: harness.identity.workspaceId,
@@ -396,7 +396,7 @@ describe('task runner and tests', () => {
         'const test = require("node:test");\nconst assert = require("node:assert/strict");\ntest("adds", () => assert.equal(1 + 1, 2));\n',
       );
       await fs.promises.writeFile(
-        path.join(harness.workspaceRoot, 'piarium.tasks.json'),
+        path.join(harness.workspaceRoot, 'varin.tasks.json'),
         JSON.stringify({
           version: 1,
           tasks: [{ id: 'debuggee', label: 'Debuggee', type: 'node', script: 'debuggee.js' }],
@@ -415,7 +415,7 @@ describe('task runner and tests', () => {
       await waitUntil(() => taskOutput.join('').includes('42'));
       const discovered = await runtime.tests.discover({ workspaceId: harness.identity.workspaceId });
       expect(discovered.tests.some((item) => item.resourceId === 'hello.test.js')).toBe(true);
-      const testEvents: PiariumTestEvent[] = [];
+      const testEvents: VarinTestEvent[] = [];
       runtime.tests.subscribe(harness.identity.workspaceId, (event) => testEvents.push(event));
       await runtime.tests.run({ workspaceId: harness.identity.workspaceId });
       await waitUntil(() => testEvents.some((event) => event.kind === 'test' && event.test.status === 'passed'));

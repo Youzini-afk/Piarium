@@ -13,7 +13,7 @@ import {
   mergeHarnessSettings,
   type HarnessSettingsInput,
   type PiSettingsSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { Knowledge, KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId } from "../knowledge/store.js";
 
 // ── Types ──────────────────────────────────────────────────────────

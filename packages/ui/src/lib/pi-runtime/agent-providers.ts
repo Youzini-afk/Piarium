@@ -1,4 +1,4 @@
-import type { JsonValue, RuntimeContextTarget } from '@piarium/protocol';
+import type { JsonValue, RuntimeContextTarget } from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const listPiAgentProviders = async (target: RuntimeContextTarget) => {

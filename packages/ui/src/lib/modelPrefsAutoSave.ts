@@ -1,6 +1,6 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 
 type ModelRef = { providerID: string; modelID: string };

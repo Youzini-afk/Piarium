@@ -470,16 +470,16 @@ const defaultKernelCandidates = (): string[] => {
   const extension = process.platform === "win32" ? ".exe" : "";
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   return [
-    process.env.PIARIUM_KERNEL_PATH?.trim() || "",
-    path.resolve(moduleDirectory, "../../../../../kernel", `piarium-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../../kernel", `piarium-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "release", `piarium-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../../kernel", "target", "debug", `piarium-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../../kernel", `piarium-kernel${extension}`),
-    path.resolve(moduleDirectory, "../../../kernel", `piarium-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", `piarium-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`),
-    path.resolve(process.cwd(), "kernel", "target", "debug", `piarium-kernel${extension}`),
+    process.env.VARIN_KERNEL_PATH?.trim() || "",
+    path.resolve(moduleDirectory, "../../../../../kernel", `varin-kernel${extension}`),
+    path.resolve(moduleDirectory, "../../../../../../kernel", `varin-kernel${extension}`),
+    path.resolve(moduleDirectory, "../../../../../kernel", "target", "release", `varin-kernel${extension}`),
+    path.resolve(moduleDirectory, "../../../../../kernel", "target", "debug", `varin-kernel${extension}`),
+    path.resolve(moduleDirectory, "../../../../kernel", `varin-kernel${extension}`),
+    path.resolve(moduleDirectory, "../../../kernel", `varin-kernel${extension}`),
+    path.resolve(process.cwd(), "kernel", `varin-kernel${extension}`),
+    path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`),
+    path.resolve(process.cwd(), "kernel", "target", "debug", `varin-kernel${extension}`),
   ].filter(Boolean);
 };
 
@@ -496,11 +496,11 @@ const resolveKernelCommand = (options: KernelClientOptions): { command: string; 
   ].find((candidate) => fs.existsSync(candidate));
   const allowCargo = options.allowCargoDevRunner ?? process.env.NODE_ENV !== "production";
   if (allowCargo && manifest) {
-    return { command: process.platform === "win32" ? "cargo.exe" : "cargo", args: ["run", "--quiet", "--manifest-path", manifest, "--bin", "piarium-kernel"] };
+    return { command: process.platform === "win32" ? "cargo.exe" : "cargo", args: ["run", "--quiet", "--manifest-path", manifest, "--bin", "varin-kernel"] };
   }
   throw new KernelClientError({
     code: "kernel-entry-unavailable",
-    message: "Piarium Rust kernel executable is unavailable; build the kernel or set PIARIUM_KERNEL_PATH",
+    message: "Varin Rust kernel executable is unavailable; build the kernel or set VARIN_KERNEL_PATH",
     retryable: false,
   });
 };
@@ -519,7 +519,7 @@ export class KernelClient {
   private readonly exitListeners = new Set<(error: Error) => void>();
   private closed = false;
   private epoch: string | null = null;
-  private readonly clientToken = Symbol("piarium-kernel-client");
+  private readonly clientToken = Symbol("varin-kernel-client");
   private managementGrant: InternalGrantHandle | null = null;
   private handshakeResult: KernelHandshakeResult | null = null;
   private startPromise: Promise<KernelHandshakeResult> | null = null;
@@ -622,7 +622,7 @@ export class KernelClient {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
         ...process.env,
-        PIARIUM_KERNEL_BUILD_IDENTITY: this.options.kernelBuildIdentity ?? this.options.buildVersion,
+        VARIN_KERNEL_BUILD_IDENTITY: this.options.kernelBuildIdentity ?? this.options.buildVersion,
         ...this.options.env,
       },
       stdio: ["pipe", "pipe", "pipe"],
@@ -641,7 +641,7 @@ export class KernelClient {
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
       // request responses; the Host can attach a logger at the process layer.
-      if (process.env.PIARIUM_KERNEL_DEBUG === "1") process.stderr.write(chunk);
+      if (process.env.VARIN_KERNEL_DEBUG === "1") process.stderr.write(chunk);
     });
     child.once("error", (error) => this.failAll(new KernelClientError({ code: "kernel-spawn-failed", message: error.message, retryable: true })));
     child.once("exit", (code, signal) => {

@@ -6,7 +6,7 @@ in a renderer and is not a language-server replacement.
 
 ## Ownership
 
-- Language identity is `languageIdForPath` from `@piarium/protocol`. This module
+- Language identity is `languageIdForPath` from `@varin/protocol`. This module
   does not keep a third extension table.
 - Tree-sitter workspace parsing is a Rust-kernel compute responsibility. The
   Host resolves a language spec, registers the grammar/query recipe, validates
@@ -182,7 +182,7 @@ A missing or unloadable wasm/query is `unavailable`; explore then tries LSP or
 the ±3 window.
 
 On-demand grammars are listed in committed `grammar-packs.json` (publish-time
-sha256, D-125). Install writes `{PIARIUM_DATA_DIR}/structure-grammars/sha256/<hex>.wasm`
+sha256, D-125). Install writes `{VARIN_DATA_DIR}/structure-grammars/sha256/<hex>.wasm`
 plus `index.json`. `resolveStructureRuntimeFile` looks at the bundled
 `runtime/` directory first and only then at the download store (D-126). Host
 never starts a grammar download by itself; the settings page Install click is

@@ -3,12 +3,12 @@ import { toast } from 'sonner';
 
 import type {
   LanguageServicesAPI,
-  PiariumLanguageCodeAction,
-  PiariumLanguageCommand,
-  PiariumLanguageDiagnostic,
-  PiariumLanguageFeatureRequest,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinLanguageCodeAction,
+  VarinLanguageCommand,
+  VarinLanguageDiagnostic,
+  VarinLanguageFeatureRequest,
+  VarinResourceReference,
+} from '@varin/application-client';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
@@ -38,7 +38,7 @@ import {
   fromMonacoRange,
   markerOwner,
   parseMonacoResourceUri,
-  PIARIUM_SEMANTIC_TOKENS_LEGEND,
+  VARIN_SEMANTIC_TOKENS_LEGEND,
   toMonacoColorInformation,
   toMonacoColorPresentation,
   toMonacoCompletionItem,
@@ -58,7 +58,7 @@ import {
   type MonacoResolvableCompletionItem,
   type MonacoResolvableInlayHint,
   type MonacoResolvableLink,
-  type PiariumResolvableContext,
+  type VarinResolvableContext,
 } from './language-converters';
 import type { FileEditorModelRegistry } from './model-registry';
 import type { MonacoRuntime } from './runtime';
@@ -85,7 +85,7 @@ type ProviderEntry = {
 
 type MonacoLanguageBridgeOptions = {
   acquireDocument?: (identity: DocumentIdentity, languageId?: string) => void;
-  diagnosticsFor?: (identity: DocumentIdentity) => readonly PiariumLanguageDiagnostic[];
+  diagnosticsFor?: (identity: DocumentIdentity) => readonly VarinLanguageDiagnostic[];
   getLanguage?: () => LanguageServicesAPI | null;
   getDocumentRegistry?: () => DocumentRegistry;
   modelRegistry: FileEditorModelRegistry;
@@ -106,22 +106,22 @@ type FeatureContext = {
 };
 
 type LanguageCommandInvocation = {
-  context: PiariumResolvableContext;
+  context: VarinResolvableContext;
   kind: 'command';
-  command: PiariumLanguageCommand;
+  command: VarinLanguageCommand;
   model: editor.ITextModel;
 };
 
 type LanguageCodeActionInvocation = {
-  action: PiariumLanguageCodeAction;
-  context: PiariumResolvableContext;
+  action: VarinLanguageCodeAction;
+  context: VarinResolvableContext;
   kind: 'code-action';
   model: editor.ITextModel;
 };
 
 type LanguageInvocation = LanguageCommandInvocation | LanguageCodeActionInvocation;
 
-const PIARIUM_LANGUAGE_COMMAND_ID = 'piarium.language.execute';
+const VARIN_LANGUAGE_COMMAND_ID = 'varin.language.execute';
 
 const t = (key: I18nKey, params?: I18nParams): string => (
   formatMessage(useI18nStore.getState().dictionary, key, params)
@@ -146,7 +146,7 @@ const unique = (values: readonly string[]): string[] => [...new Set(values)].sor
 
 export class MonacoLanguageBridge {
   private readonly acquireDocument: (identity: DocumentIdentity, languageId?: string) => void;
-  private readonly diagnosticsFor: (identity: DocumentIdentity) => readonly PiariumLanguageDiagnostic[];
+  private readonly diagnosticsFor: (identity: DocumentIdentity) => readonly VarinLanguageDiagnostic[];
   private readonly getLanguage: () => LanguageServicesAPI | null;
   private readonly documentRegistry: () => DocumentRegistry;
   private readonly modelRegistry: FileEditorModelRegistry;
@@ -186,7 +186,7 @@ export class MonacoLanguageBridge {
     this.unsubscribeProviderStatus = (options.subscribeProviderStatus ?? subscribeLanguageProviderStatus)(
       () => this.refreshProviderConfigurations(),
     );
-    const openResource = (resource: PiariumResourceReference, selection?: IRange | IPosition): boolean => {
+    const openResource = (resource: VarinResourceReference, selection?: IRange | IPosition): boolean => {
       const range = navigationRange(selection);
       openWorkbenchEditor(resource.workspaceId, resource.resourceId, undefined, range ? {
         viewState: createMonacoNavigationViewState(range),
@@ -208,7 +208,7 @@ export class MonacoLanguageBridge {
           return openExternalUrl(uri.toString());
         },
       }),
-      this.monaco.editor.registerCommand(PIARIUM_LANGUAGE_COMMAND_ID, (_accessor, invocationId) => {
+      this.monaco.editor.registerCommand(VARIN_LANGUAGE_COMMAND_ID, (_accessor, invocationId) => {
         if (typeof invocationId !== 'string') return;
         void this.executeInvocation(invocationId);
       }),
@@ -302,7 +302,7 @@ export class MonacoLanguageBridge {
     return { entry, language, record, version: record.localEditRevision };
   }
 
-  private contextFromResolvable(context: PiariumResolvableContext | undefined): FeatureContext | null {
+  private contextFromResolvable(context: VarinResolvableContext | undefined): FeatureContext | null {
     if (!context) return null;
     for (const entry of this.entriesByModel.values()) {
       if (identityKey(entry.identity) !== identityKey(context.resource)) continue;
@@ -314,7 +314,7 @@ export class MonacoLanguageBridge {
     return null;
   }
 
-  private request(context: FeatureContext, extra: Partial<PiariumLanguageFeatureRequest> = {}): PiariumLanguageFeatureRequest {
+  private request(context: FeatureContext, extra: Partial<VarinLanguageFeatureRequest> = {}): VarinLanguageFeatureRequest {
     return {
       resource: context.entry.identity,
       languageId: context.entry.languageId,
@@ -404,7 +404,7 @@ export class MonacoLanguageBridge {
           endLineNumber: position.lineNumber,
           endColumn: word.endColumn,
         };
-        const resolvableContext: PiariumResolvableContext = {
+        const resolvableContext: VarinResolvableContext = {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
@@ -416,7 +416,7 @@ export class MonacoLanguageBridge {
           suggestions: result.value.map((item) => {
             const suggestion: MonacoResolvableCompletionItem = {
               ...toMonacoCompletionItem(this.monaco, item, fallbackRange),
-              __piariumContext: resolvableContext,
+              __varinContext: resolvableContext,
             };
             if (item.command) suggestion.command = this.captureCommand(model, resolvableContext, item.command);
             return suggestion;
@@ -424,20 +424,20 @@ export class MonacoLanguageBridge {
         };
       },
       resolveCompletionItem: async (item: MonacoResolvableCompletionItem, token) => {
-        if (!item.__piariumResolveToken || token.isCancellationRequested) return item;
-        const context = this.contextFromResolvable(item.__piariumContext);
+        if (!item.__varinResolveToken || token.isCancellationRequested) return item;
+        const context = this.contextFromResolvable(item.__varinContext);
         if (!context) return item;
         const result = await context.language.completionResolve(this.request(context, {
-          resolveToken: item.__piariumResolveToken,
+          resolveToken: item.__varinResolveToken,
         }));
         if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) return item;
         const fallbackRange = 'insert' in item.range ? item.range.replace : item.range;
         const resolved: MonacoResolvableCompletionItem = {
           ...toMonacoCompletionItem(this.monaco, result.value, fallbackRange),
-          __piariumContext: item.__piariumContext,
+          __varinContext: item.__varinContext,
         };
-        if (result.value.command && item.__piariumContext) {
-          resolved.command = this.captureCommand(context.entry.model, item.__piariumContext, result.value.command);
+        if (result.value.command && item.__varinContext) {
+          resolved.command = this.captureCommand(context.entry.model, item.__varinContext, result.value.command);
         }
         return resolved;
       },
@@ -537,7 +537,7 @@ export class MonacoLanguageBridge {
         if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) {
           return { actions: [], dispose() {} };
         }
-        const invocationContext: PiariumResolvableContext = {
+        const invocationContext: VarinResolvableContext = {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
@@ -556,7 +556,7 @@ export class MonacoLanguageBridge {
               ...(action.diagnostics?.length ? { diagnostics: [...actionContext.markers] } : {}),
               ...(!action.disabledReason ? {
                 command: {
-                  id: PIARIUM_LANGUAGE_COMMAND_ID,
+                  id: VARIN_LANGUAGE_COMMAND_ID,
                   title: action.title,
                   arguments: [this.captureInvocation(model, {
                     action,
@@ -574,7 +574,7 @@ export class MonacoLanguageBridge {
       providedCodeActionKinds: ['quickfix', 'refactor', 'source'],
     });
     const symbols = this.monaco.languages.registerDocumentSymbolProvider(monacoLanguageId, {
-      displayName: 'Piarium',
+      displayName: 'Varin',
       provideDocumentSymbols: async (model, token) => {
         const context = this.contextFor(model, token);
         if (!context) return [];
@@ -595,7 +595,7 @@ export class MonacoLanguageBridge {
       },
     });
     const formatting = this.monaco.languages.registerDocumentFormattingEditProvider(monacoLanguageId, {
-      displayName: 'Piarium',
+      displayName: 'Varin',
       provideDocumentFormattingEdits: async (model, options, token) => {
         const context = this.contextFor(model, token);
         if (!context) return [];
@@ -606,7 +606,7 @@ export class MonacoLanguageBridge {
       },
     });
     const rangeFormatting = this.monaco.languages.registerDocumentRangeFormattingEditProvider(monacoLanguageId, {
-      displayName: 'Piarium',
+      displayName: 'Varin',
       provideDocumentRangeFormattingEdits: async (model, range, options, token) => {
         const context = this.contextFor(model, token);
         if (!context) return [];
@@ -659,7 +659,7 @@ export class MonacoLanguageBridge {
       },
     });
     const semantic = this.monaco.languages.registerDocumentSemanticTokensProvider(monacoLanguageId, {
-      getLegend: () => PIARIUM_SEMANTIC_TOKENS_LEGEND,
+      getLegend: () => VARIN_SEMANTIC_TOKENS_LEGEND,
       provideDocumentSemanticTokens: async (model, lastResultId, token) => {
         const context = this.contextFor(model, token);
         if (!context) return null;
@@ -673,7 +673,7 @@ export class MonacoLanguageBridge {
       releaseDocumentSemanticTokens: () => undefined,
     });
     const inlay = this.monaco.languages.registerInlayHintsProvider(monacoLanguageId, {
-      displayName: 'Piarium',
+      displayName: 'Varin',
       provideInlayHints: async (model, range, token) => {
         const context = this.contextFor(model, token);
         if (!context) return { hints: [], dispose() {} };
@@ -681,7 +681,7 @@ export class MonacoLanguageBridge {
         if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) {
           return { hints: [], dispose() {} };
         }
-        const resolvableContext: PiariumResolvableContext = {
+        const resolvableContext: VarinResolvableContext = {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
@@ -691,20 +691,20 @@ export class MonacoLanguageBridge {
         return {
           hints: result.value.map((value) => ({
             ...toMonacoInlayHint(this.monaco, value),
-            __piariumContext: resolvableContext,
+            __varinContext: resolvableContext,
           })),
           dispose() {},
         };
       },
       resolveInlayHint: async (hint: MonacoResolvableInlayHint, token) => {
-        if (!hint.__piariumResolveToken || token.isCancellationRequested) return hint;
-        const context = this.contextFromResolvable(hint.__piariumContext);
+        if (!hint.__varinResolveToken || token.isCancellationRequested) return hint;
+        const context = this.contextFromResolvable(hint.__varinContext);
         if (!context) return hint;
         const result = await context.language.inlayHintResolve(this.request(context, {
-          resolveToken: hint.__piariumResolveToken,
+          resolveToken: hint.__varinResolveToken,
         }));
         return result.status === 'ready' && this.accepts(context, token, result.documentVersion)
-          ? { ...toMonacoInlayHint(this.monaco, result.value), __piariumContext: hint.__piariumContext }
+          ? { ...toMonacoInlayHint(this.monaco, result.value), __varinContext: hint.__varinContext }
           : hint;
       },
     });
@@ -714,7 +714,7 @@ export class MonacoLanguageBridge {
         if (!context) return { links: [] };
         const result = await context.language.documentLinks(this.request(context));
         if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) return { links: [] };
-        const resolvableContext: PiariumResolvableContext = {
+        const resolvableContext: VarinResolvableContext = {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
@@ -724,19 +724,19 @@ export class MonacoLanguageBridge {
         return {
           links: result.value.map((value) => ({
             ...toMonacoDocumentLink(this.monaco, value),
-            __piariumContext: resolvableContext,
+            __varinContext: resolvableContext,
           })),
         };
       },
       resolveLink: async (link: MonacoResolvableLink, token) => {
-        if (!link.__piariumResolveToken || token.isCancellationRequested) return link;
-        const context = this.contextFromResolvable(link.__piariumContext);
+        if (!link.__varinResolveToken || token.isCancellationRequested) return link;
+        const context = this.contextFromResolvable(link.__varinContext);
         if (!context) return link;
         const result = await context.language.documentLinkResolve(this.request(context, {
-          resolveToken: link.__piariumResolveToken,
+          resolveToken: link.__varinResolveToken,
         }));
         return result.status === 'ready' && this.accepts(context, token, result.documentVersion)
-          ? { ...toMonacoDocumentLink(this.monaco, result.value), __piariumContext: link.__piariumContext }
+          ? { ...toMonacoDocumentLink(this.monaco, result.value), __varinContext: link.__varinContext }
           : link;
       },
     });
@@ -794,11 +794,11 @@ export class MonacoLanguageBridge {
 
   private captureCommand(
     model: editor.ITextModel,
-    context: PiariumResolvableContext,
-    command: PiariumLanguageCommand,
+    context: VarinResolvableContext,
+    command: VarinLanguageCommand,
   ): languages.Command {
     return {
-      id: PIARIUM_LANGUAGE_COMMAND_ID,
+      id: VARIN_LANGUAGE_COMMAND_ID,
       title: command.title,
       arguments: [this.captureInvocation(model, { command, context, kind: 'command', model })],
     };
@@ -948,7 +948,7 @@ export class MonacoLanguageBridge {
   }
 
   private refreshMarkers(entry: LanguageEntry): void {
-    const byOwner = new Map<string, PiariumLanguageDiagnostic[]>();
+    const byOwner = new Map<string, VarinLanguageDiagnostic[]>();
     for (const diagnostic of this.diagnosticsFor(entry.identity)) {
       const owner = markerOwner(diagnostic.providerId ?? 'legacy', diagnostic.generation ?? 0);
       const values = byOwner.get(owner) ?? [];

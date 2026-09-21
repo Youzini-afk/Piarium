@@ -40,7 +40,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { PendingPairingRecord, RemoteClientRecord } from '@piarium/application-client';
+import type { PendingPairingRecord, RemoteClientRecord } from '@varin/application-client';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
@@ -66,8 +66,8 @@ import {
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@varin/application-client';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -114,9 +114,9 @@ const phaseLabelKey = (phase?: string): I18nKey => {
     case 'remote_probe':
       return 'settings.remoteInstances.page.phase.probingRemote';
     case 'installing':
-      return 'settings.remoteInstances.page.phase.installingPiarium';
+      return 'settings.remoteInstances.page.phase.installingVarin';
     case 'updating':
-      return 'settings.remoteInstances.page.phase.updatingPiarium';
+      return 'settings.remoteInstances.page.phase.updatingVarin';
     case 'server_detecting':
       return 'settings.remoteInstances.page.phase.detectingServer';
     case 'server_starting':
@@ -368,11 +368,11 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
           ? Math.max(1, Math.min(65535, Math.round(instance.localForward.preferredLocalPort)))
           : undefined,
     },
-    remotePiarium: {
-      ...instance.remotePiarium,
+    remoteVarin: {
+      ...instance.remoteVarin,
       preferredPort:
-        typeof instance.remotePiarium.preferredPort === 'number'
-          ? Math.max(1, Math.min(65535, Math.round(instance.remotePiarium.preferredPort)))
+        typeof instance.remoteVarin.preferredPort === 'number'
+          ? Math.max(1, Math.min(65535, Math.round(instance.remoteVarin.preferredPort)))
           : undefined,
     },
     portForwards: forwards,
@@ -544,9 +544,9 @@ export const RemoteInstancesPage: React.FC = () => {
     const redeemBody = JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
-      clientLabel: payload.label || 'Piarium Desktop',
+      clientLabel: payload.label || 'Varin Desktop',
       clientKind: 'desktop',
-      deviceName: 'Piarium Desktop',
+      deviceName: 'Varin Desktop',
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
     });
@@ -1105,14 +1105,14 @@ export const RemoteInstancesPage: React.FC = () => {
     }
 
     if (
-      normalized.auth.piariumPassword?.enabled &&
-      normalized.auth.piariumPassword.value?.trim() &&
-      normalized.auth.piariumPassword.store !== 'settings'
+      normalized.auth.varinPassword?.enabled &&
+      normalized.auth.varinPassword.value?.trim() &&
+      normalized.auth.varinPassword.store !== 'settings'
     ) {
       const store = window.confirm(t('settings.remoteInstances.page.confirm.storeUiPasswordPlaintext'));
-      normalized.auth.piariumPassword.store = store ? 'settings' : 'never';
+      normalized.auth.varinPassword.store = store ? 'settings' : 'never';
       if (!store) {
-        normalized.auth.piariumPassword.value = undefined;
+        normalized.auth.varinPassword.value = undefined;
       }
     }
 
@@ -1924,7 +1924,7 @@ export const RemoteInstancesPage: React.FC = () => {
     );
   }
 
-  const isManagedMode = draft.remotePiarium.mode === 'managed';
+  const isManagedMode = draft.remoteVarin.mode === 'managed';
   const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
 
   return (
@@ -2078,12 +2078,12 @@ export const RemoteInstancesPage: React.FC = () => {
                 />
             </div>
             <Select
-              value={draft.remotePiarium.mode}
+              value={draft.remoteVarin.mode}
               onValueChange={(value) =>
                 updateDraft((current) => ({
                   ...current,
-                  remotePiarium: {
-                    ...current.remotePiarium,
+                  remoteVarin: {
+                    ...current.remoteVarin,
                     mode: value === 'external' ? 'external' : 'managed',
                   },
                 }))
@@ -2112,12 +2112,12 @@ export const RemoteInstancesPage: React.FC = () => {
               max={65535}
               step={1}
               className="w-20 tabular-nums"
-              value={draft.remotePiarium.preferredPort}
+              value={draft.remoteVarin.preferredPort}
               onValueChange={(next) => {
                 updateDraft((current) => ({
                   ...current,
-                  remotePiarium: {
-                    ...current.remotePiarium,
+                  remoteVarin: {
+                    ...current.remoteVarin,
                     preferredPort: Number.isFinite(next) && next > 0 ? next : undefined,
                   },
                 }));
@@ -2125,8 +2125,8 @@ export const RemoteInstancesPage: React.FC = () => {
               onClear={() => {
                 updateDraft((current) => ({
                   ...current,
-                  remotePiarium: {
-                    ...current.remotePiarium,
+                  remoteVarin: {
+                    ...current.remoteVarin,
                     preferredPort: undefined,
                   },
                 }));
@@ -2144,12 +2144,12 @@ export const RemoteInstancesPage: React.FC = () => {
                 />
               </div>
               <Select
-                value={draft.remotePiarium.installMethod}
+                value={draft.remoteVarin.installMethod}
                 onValueChange={(value) =>
                   updateDraft((current) => ({
                     ...current,
-                    remotePiarium: {
-                      ...current.remotePiarium,
+                    remoteVarin: {
+                      ...current.remoteVarin,
                       installMethod:
                         value === 'npm' || value === 'download_release' || value === 'upload_bundle'
                           ? value
@@ -2181,12 +2181,12 @@ export const RemoteInstancesPage: React.FC = () => {
               </div>
               <div className="flex w-full items-center gap-2 md:max-w-xs">
                 <Switch
-                  checked={draft.remotePiarium.keepRunning}
+                  checked={draft.remoteVarin.keepRunning}
                   onCheckedChange={(checked) =>
                     updateDraft((current) => ({
                       ...current,
-                      remotePiarium: {
-                        ...current.remotePiarium,
+                      remoteVarin: {
+                        ...current.remoteVarin,
                         keepRunning: checked,
                       },
                     }))
@@ -2328,16 +2328,16 @@ export const RemoteInstancesPage: React.FC = () => {
             <Input
               className="h-7 md:max-w-sm"
               type="password"
-              value={draft.auth.piariumPassword?.value || ''}
+              value={draft.auth.varinPassword?.value || ''}
               onChange={(event) =>
                 updateDraft((current) => ({
                   ...current,
                   auth: {
                     ...current.auth,
-                    piariumPassword: {
+                    varinPassword: {
                       enabled: event.target.value.trim().length > 0,
                       value: event.target.value,
-                      store: current.auth.piariumPassword?.store || 'never',
+                      store: current.auth.varinPassword?.store || 'never',
                     },
                   },
                 }))

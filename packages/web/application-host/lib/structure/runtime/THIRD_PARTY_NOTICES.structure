@@ -1,4 +1,4 @@
-Piarium structure runtime third-party notices
+Varin structure runtime third-party notices
 ===========================================
 
 This directory vendors WebAssembly and checked-in tags queries used by the
@@ -8,7 +8,7 @@ and source paths are checked on every load, including cache hits.
 
 1. web-tree-sitter
    Source: https://www.npmjs.com/package/web-tree-sitter
-   Pinned with @piarium/web's web-tree-sitter dependency (0.27.x)
+   Pinned with @varin/web's web-tree-sitter dependency (0.27.x)
    File: web-tree-sitter.wasm
    License: MIT. See LICENSE.web-tree-sitter.
 
@@ -48,7 +48,7 @@ and source paths are checked on every load, including cache hits.
    Grammar licenses are MIT; see each package's published LICENSE.
    ABI 14 or 15, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
 
-6. Piarium tree-sitter queries
+6. Varin tree-sitter queries
    Adapted from Apache-2.0 query sets in Aider (paul-gauthier/aider) and
    nvim-treesitter (nvim-treesitter/nvim-treesitter), or authored from the
    corresponding grammar node shapes for packages without upstream tags.

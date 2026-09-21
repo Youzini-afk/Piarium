@@ -1,5 +1,5 @@
 {
-  "name": "@piarium/web",
+  "name": "@varin/web",
   "version": "0.9.12",
   "license": "AGPL-3.0-only",
   "private": false,
@@ -18,7 +18,7 @@
     }
   },
   "bin": {
-    "piarium": "./bin/cli.js"
+    "varin": "./bin/cli.js"
   },
   "imports": {
     "#application-host/*": "./server/*"
@@ -41,7 +41,7 @@
     "build:cli:raw": "node scripts/build-cli.mjs",
     "build:cli": "bun run build:application-host && bun run build:cli:raw",
     "build": "bun run build:application-host && bun run build:kernel && bun run build:cli:raw && bun run --cwd ../extension-builtins build && vite build",
-    "build:monaco-smoke": "cross-env PIARIUM_MONACO_SMOKE=1 PIARIUM_MONACO_BUNDLE_AUDIT=1 bun run build && node scripts/verify-monaco-bundle.mjs",
+    "build:monaco-smoke": "cross-env VARIN_MONACO_SMOKE=1 VARIN_MONACO_BUNDLE_AUDIT=1 bun run build && node scripts/verify-monaco-bundle.mjs",
     "build:watch": "vite build --watch",
     "type-check": "bun run type-check:kernel-protocol && tsc --noEmit && bun run type-check:application-host && bun run type-check:cli:raw",
     "type-check:kernel-protocol": "node ../../scripts/generate-kernel-protocol.mjs --check",
@@ -71,13 +71,13 @@
     "@konbakuyomu/smart-search": "^0.1.17",
     "@mozilla/readability": "0.6.0",
     "@octokit/rest": "^22.0.1",
-    "@piarium/application-client": "workspace:*",
-    "@piarium/extension-builtins": "workspace:*",
-    "@piarium/extension-contract": "workspace:*",
-    "@piarium/extension-host": "workspace:*",
-    "@piarium/protocol": "workspace:*",
-    "@piarium/runtime-broker": "workspace:*",
-    "@piarium/settings-store": "workspace:*",
+    "@varin/application-client": "workspace:*",
+    "@varin/extension-builtins": "workspace:*",
+    "@varin/extension-contract": "workspace:*",
+    "@varin/extension-host": "workspace:*",
+    "@varin/protocol": "workspace:*",
+    "@varin/runtime-broker": "workspace:*",
+    "@varin/settings-store": "workspace:*",
     "@simplewebauthn/server": "13.3.2",
     "adm-zip": "^0.6.1",
     "compression": "^1.8.1",
@@ -109,7 +109,7 @@
   },
   "devDependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@piarium/ui": "workspace:*",
+    "@varin/ui": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.0",

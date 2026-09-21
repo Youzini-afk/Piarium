@@ -1,9 +1,9 @@
 import * as React from 'react';
-import type { FollowUpDefinitionView } from '@piarium/protocol';
+import type { FollowUpDefinitionView } from '@varin/protocol';
 import { fetchFollowUps, postFollowUpAction } from '@/lib/followUpsApi';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { toast } from '@/components/ui/toast';
 
 /**
@@ -39,7 +39,7 @@ export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId })
   React.useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'harness-experiment-changed' && event.fact === 'followup') {
         void refresh();
       }

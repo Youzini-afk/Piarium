@@ -48,7 +48,7 @@ import type {
   GitHubAPI,
   GitHubPullRequestStatus,
   GitRemote,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';

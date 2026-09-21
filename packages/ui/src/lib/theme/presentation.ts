@@ -3,7 +3,7 @@ import type { I18nKey } from '@/lib/i18n';
 import { getThemeById } from './themes';
 
 const presetKeys = {
-  'piarium': 'settings.theme.preset.piarium',
+  'varin': 'settings.theme.preset.varin',
   'flexoki': 'settings.theme.preset.flexoki',
   'fields-of-the-shire': 'settings.theme.preset.fields-of-the-shire',
   'aura': 'settings.theme.preset.aura',

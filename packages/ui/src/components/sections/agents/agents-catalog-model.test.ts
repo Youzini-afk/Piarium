@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiAgentCatalogSnapshot } from '@piarium/protocol';
+import type { PiAgentCatalogSnapshot } from '@varin/protocol';
 import { filterAgentsCatalog } from './agents-catalog-model';
 
 const catalog: PiAgentCatalogSnapshot = {

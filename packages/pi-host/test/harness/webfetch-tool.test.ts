@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createWebFetchTool } from "../../src/harness/webfetch-tool.js";
-import type { HarnessRequestData, FetchResult } from "@piarium/protocol";
+import type { HarnessRequestData, FetchResult } from "@varin/protocol";
 
 /**
  * Helper: create a bridge that captures emitted requests and provides

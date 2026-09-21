@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PiSessionFeatureMutation, PiSessionFeatureState, PiSessionGoalState } from '@piarium/protocol';
+import type { PiSessionFeatureMutation, PiSessionFeatureState, PiSessionGoalState } from '@varin/protocol';
 import { createPiSessionAutomationRuntime } from './runtime.js';
 import type { GenerateSmallModelTextInput } from '../small-model/index.js';
 

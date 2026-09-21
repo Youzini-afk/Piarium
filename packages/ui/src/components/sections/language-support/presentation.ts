@@ -2,9 +2,9 @@ import type {
   LanguageSupportCapabilities,
   LanguageSupportLanguageRow,
   LanguageSupportServerInfo,
-  PiariumLanguageProviderStatus,
+  VarinLanguageProviderStatus,
   StructureGrammarStatus,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import type { I18nKey } from '@/lib/i18n/store';
 
 export type StatusTone = 'success' | 'warning' | 'danger' | 'muted';
@@ -32,7 +32,7 @@ export const serverAvailabilityKey = (status: LanguageSupportServerInfo['status'
 };
 
 export const languageServerStatusKey = (
-  status: PiariumLanguageProviderStatus['status'],
+  status: VarinLanguageProviderStatus['status'],
 ): I18nKey => {
   switch (status) {
     case 'absent':
@@ -49,7 +49,7 @@ export const languageServerStatusKey = (
 };
 
 export const languageServerStatusTone = (
-  status: PiariumLanguageProviderStatus['status'],
+  status: VarinLanguageProviderStatus['status'],
 ): StatusTone => {
   switch (status) {
     case 'ready':

@@ -14,7 +14,7 @@ describe("research root UI messaging", () => {
   });
 
   it("keeps the authenticated UI as the user while the principal root is active or settled", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-root-ui-send-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-root-ui-send-"));
     roots.push(dataDir);
     const registry = createThreadRegistry({ dataDir, hostId: "host" });
     const workspaceId = "workspace";

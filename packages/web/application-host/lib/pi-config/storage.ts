@@ -8,7 +8,7 @@ const isObject = (value: unknown): value is JsonObject => (
 );
 
 export const resolvePiAgentDir = (): string => {
-  const configured = process.env.PIARIUM_AGENT_DIR || process.env.PI_CODING_AGENT_DIR;
+  const configured = process.env.VARIN_AGENT_DIR || process.env.PI_CODING_AGENT_DIR;
   return typeof configured === 'string' && configured.trim()
     ? path.resolve(configured.trim())
     : path.join(os.homedir(), '.pi', 'agent');
@@ -43,7 +43,7 @@ export const readPiAuthFile = (): JsonObject => readJsonObject(getPiAuthFilePath
 export const writePiAuthFile = (auth: JsonObject): void => {
   const authFile = getPiAuthFilePath();
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
-  if (fs.existsSync(authFile)) fs.copyFileSync(authFile, `${authFile}.piarium.backup`);
+  if (fs.existsSync(authFile)) fs.copyFileSync(authFile, `${authFile}.varin.backup`);
   fs.writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
 };
 

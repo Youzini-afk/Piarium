@@ -1,4 +1,4 @@
-import type { AgentInputContext } from "@piarium/protocol";
+import type { AgentInputContext } from "@varin/protocol";
 import type { KernelComputeInput, KernelComputeOptions, KernelComputeResult } from "../kernel/compute-runner.js";
 
 export type StructureProviderId = "lsp" | "tree-sitter";

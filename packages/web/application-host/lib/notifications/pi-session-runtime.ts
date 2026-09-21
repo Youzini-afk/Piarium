@@ -1,4 +1,4 @@
-import type { PiRuntimeBrokerEvent } from '@piarium/runtime-broker';
+import type { PiRuntimeBrokerEvent } from '@varin/runtime-broker';
 
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -67,7 +67,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }: {
     const state = states.get(sessionId);
     const attentionEntry = attention.get(sessionId);
     broadcastEvent?.({
-      type: 'piarium:session-status',
+      type: 'varin:session-status',
       properties: {
         sessionID: sessionId,
         status: state?.status ?? attentionEntry?.status ?? 'idle',
@@ -90,7 +90,7 @@ export const createPiSessionRuntime = ({ broadcastEvent }: {
     if (previous === 'busy' && phase !== 'busy') activeSessionCount = Math.max(0, activeSessionCount - 1);
     if (previous !== 'busy' && phase === 'busy') activeSessionCount += 1;
     activity.set(sessionId, { phase, updatedAt: Date.now() });
-    broadcastEvent?.({ type: 'piarium:session-activity', properties: { sessionId, phase } });
+    broadcastEvent?.({ type: 'varin:session-activity', properties: { sessionId, phase } });
     if (phase === 'cooldown') {
       const cooldown = setTimeout(() => {
         cooldownTimers.delete(sessionId);

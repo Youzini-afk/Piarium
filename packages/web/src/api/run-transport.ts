@@ -1,10 +1,10 @@
-import { RunServicesError, parseRunServicesFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+import { RunServicesError, parseRunServicesFailureReason } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/application-client';
-import type { Subscription } from '@piarium/application-client';
+} from '@varin/application-client';
+import type { Subscription } from '@varin/application-client';
 
 const assertRunGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {

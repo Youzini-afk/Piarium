@@ -151,7 +151,7 @@ describe('editor workbench persist', () => {
             resourceId: 'file.ts',
             preview: false,
             pinned: true,
-            providerId: 'piarium.builtin.text',
+            providerId: 'varin.builtin.text',
             viewState: { cursorLine: 4, cursorColumn: 2 },
           }],
         },

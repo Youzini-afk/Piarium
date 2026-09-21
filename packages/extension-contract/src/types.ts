@@ -1,24 +1,24 @@
-export const PIARIUM_EXTENSION_MANIFEST_SCHEMA_VERSION = 1 as const;
-export const PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION = 1 as const;
-export const PIARIUM_EXTENSION_MANIFEST_FILE = "piarium.extension.json" as const;
+export const VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION = 1 as const;
+export const VARIN_EXTENSION_CATALOG_SCHEMA_VERSION = 1 as const;
+export const VARIN_EXTENSION_MANIFEST_FILE = "varin.extension.json" as const;
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
-export type PiariumApplicationSurface = "desktop" | "mobile" | "web";
-export type PiariumExtensionHostMode = "brokered" | "native";
+export type VarinApplicationSurface = "desktop" | "mobile" | "web";
+export type VarinExtensionHostMode = "brokered" | "native";
 
-export type PiariumContextValue = string | number | boolean;
+export type VarinContextValue = string | number | boolean;
 
-export type PiariumContextExpressionV1 =
+export type VarinContextExpressionV1 =
   | { op: "defined"; key: string }
-  | { op: "equals"; key: string; value: PiariumContextValue }
-  | { op: "not"; expression: PiariumContextExpressionV1 }
-  | { op: "all" | "any"; expressions: PiariumContextExpressionV1[] };
-export type PiariumExtensionSurfaceMode = "declarative" | "isolated" | "managed" | "native";
-export type PiariumExtensionIsolationKind = "iframe" | "worker";
-export type PiariumExtensionActivationEvent =
+  | { op: "equals"; key: string; value: VarinContextValue }
+  | { op: "not"; expression: VarinContextExpressionV1 }
+  | { op: "all" | "any"; expressions: VarinContextExpressionV1[] };
+export type VarinExtensionSurfaceMode = "declarative" | "isolated" | "managed" | "native";
+export type VarinExtensionIsolationKind = "iframe" | "worker";
+export type VarinExtensionActivationEvent =
   | "application-startup"
   | "background"
   | "command"
@@ -26,37 +26,37 @@ export type PiariumExtensionActivationEvent =
   | "service-request"
   | "workspace-match";
 
-export interface PiariumExtensionEntrypointBase {
-  activation?: PiariumExtensionActivationEvent[];
+export interface VarinExtensionEntrypointBase {
+  activation?: VarinExtensionActivationEvent[];
   file?: string;
 }
 
-export interface PiariumExtensionHostEntrypoint extends PiariumExtensionEntrypointBase {
+export interface VarinExtensionHostEntrypoint extends VarinExtensionEntrypointBase {
   file: string;
-  mode: PiariumExtensionHostMode;
+  mode: VarinExtensionHostMode;
 }
 
-export interface PiariumExtensionSurfaceEntrypoint extends PiariumExtensionEntrypointBase {
+export interface VarinExtensionSurfaceEntrypoint extends VarinExtensionEntrypointBase {
   id: string;
-  isolation?: PiariumExtensionIsolationKind;
-  mode: PiariumExtensionSurfaceMode;
-  supports: PiariumApplicationSurface[];
+  isolation?: VarinExtensionIsolationKind;
+  mode: VarinExtensionSurfaceMode;
+  supports: VarinApplicationSurface[];
 }
 
-export interface PiariumExtensionServiceRequirement {
+export interface VarinExtensionServiceRequirement {
   binding?: "all" | "selected" | "single";
   id: string;
   optional?: boolean;
   version: number;
 }
 
-export interface PiariumExtensionServiceProvision {
+export interface VarinExtensionServiceProvision {
   id: string;
   multiple?: boolean;
   version: number;
 }
 
-export type PiariumExtensionContributionKind =
+export type VarinExtensionContributionKind =
   | "command"
   | "composer-action"
   | "editor"
@@ -74,45 +74,45 @@ export type PiariumExtensionContributionKind =
   | "tool-renderer"
   | "view";
 
-export interface PiariumExtensionContributionPlacement {
+export interface VarinExtensionContributionPlacement {
   after?: string[];
   before?: string[];
   order?: number;
   slot?: string;
 }
 
-export interface PiariumExtensionContributionReplacement {
+export interface VarinExtensionContributionReplacement {
   priority?: number;
   target: string;
 }
 
-export interface PiariumExtensionStaticContribution {
+export interface VarinExtensionStaticContribution {
   contractVersion: number;
   data: JsonObject;
   entrypoint?: string;
   id: string;
-  kind: PiariumExtensionContributionKind;
-  placement?: PiariumExtensionContributionPlacement;
-  replacement?: PiariumExtensionContributionReplacement;
+  kind: VarinExtensionContributionKind;
+  placement?: VarinExtensionContributionPlacement;
+  replacement?: VarinExtensionContributionReplacement;
   requiresCapabilities?: string[];
-  supports: PiariumApplicationSurface[];
+  supports: VarinApplicationSurface[];
   title?: string;
-  when?: PiariumContextExpressionV1;
+  when?: VarinContextExpressionV1;
 }
 
-export interface PiariumExtensionManifest {
+export interface VarinExtensionManifest {
   capabilities?: {
     host?: string[];
     surface?: string[];
   };
-  contributions?: PiariumExtensionStaticContribution[];
+  contributions?: VarinExtensionStaticContribution[];
   displayName?: string;
   engines: {
-    piarium: string;
+    varin: string;
   };
   entrypoints?: {
-    host?: PiariumExtensionHostEntrypoint;
-    surfaces?: PiariumExtensionSurfaceEntrypoint[];
+    host?: VarinExtensionHostEntrypoint;
+    surfaces?: VarinExtensionSurfaceEntrypoint[];
   };
   id: string;
   integrates?: {
@@ -126,60 +126,60 @@ export interface PiariumExtensionManifest {
     repository?: string;
   };
   provides?: {
-    services?: PiariumExtensionServiceProvision[];
+    services?: VarinExtensionServiceProvision[];
   };
   requires?: {
-    services?: PiariumExtensionServiceRequirement[];
+    services?: VarinExtensionServiceRequirement[];
   };
-  schemaVersion: typeof PIARIUM_EXTENSION_MANIFEST_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_EXTENSION_MANIFEST_SCHEMA_VERSION;
   storage?: {
     schemaVersion: number;
   };
   version: string;
 }
 
-export type PiariumExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm";
+export type VarinExtensionPackageSourceKind = "builtin" | "git" | "local" | "npm";
 
-export interface PiariumExtensionPackageSource {
+export interface VarinExtensionPackageSource {
   display: string;
-  kind: PiariumExtensionPackageSourceKind;
+  kind: VarinExtensionPackageSourceKind;
   specifier: string;
 }
 
-export interface PiariumExtensionPublicPackageSource {
+export interface VarinExtensionPublicPackageSource {
   display: string;
-  kind: PiariumExtensionPackageSourceKind;
+  kind: VarinExtensionPackageSourceKind;
 }
 
-export interface PiariumExtensionCapabilityGrant {
+export interface VarinExtensionCapabilityGrant {
   capability: string;
   granted: boolean;
   manifestVersion: string;
-  realm: PiariumExtensionRealmKind;
+  realm: VarinExtensionRealmKind;
   updatedAt: string;
 }
 
-export interface PiariumExtensionCapabilityReference {
+export interface VarinExtensionCapabilityReference {
   capability: string;
-  realm: PiariumExtensionRealmKind;
+  realm: VarinExtensionRealmKind;
 }
 
-export interface PiariumExtensionCapabilityDelta {
-  added: PiariumExtensionCapabilityReference[];
-  removed: PiariumExtensionCapabilityReference[];
+export interface VarinExtensionCapabilityDelta {
+  added: VarinExtensionCapabilityReference[];
+  removed: VarinExtensionCapabilityReference[];
 }
 
-export interface PiariumExtensionCapabilityDecision extends PiariumExtensionCapabilityReference {
+export interface VarinExtensionCapabilityDecision extends VarinExtensionCapabilityReference {
   granted: boolean;
 }
 
-export interface PiariumExtensionDesiredState {
+export interface VarinExtensionDesiredState {
   enabled: boolean;
   revision: number;
   updatedAt: string;
 }
 
-export type PiariumExtensionActualStatus =
+export type VarinExtensionActualStatus =
   | "active"
   | "activating"
   | "deactivating"
@@ -192,9 +192,9 @@ export type PiariumExtensionActualStatus =
   | "updating"
   | "waiting";
 
-export type PiariumExtensionRealmKind = "host" | "surface";
+export type VarinExtensionRealmKind = "host" | "surface";
 
-export interface PiariumExtensionDiagnostic {
+export interface VarinExtensionDiagnostic {
   code: string;
   extensionId?: string;
   message: string;
@@ -203,90 +203,90 @@ export interface PiariumExtensionDiagnostic {
   timestamp: string;
 }
 
-export interface PiariumExtensionActualState {
+export interface VarinExtensionActualState {
   desiredRevision: number;
-  diagnostics: PiariumExtensionDiagnostic[];
+  diagnostics: VarinExtensionDiagnostic[];
   entrypointId: string;
   generation: number;
   hostId: string;
   realmId: string;
-  realmKind: PiariumExtensionRealmKind;
-  status: PiariumExtensionActualStatus;
+  realmKind: VarinExtensionRealmKind;
+  status: VarinExtensionActualStatus;
   updatedAt: string;
 }
 
-export interface PiariumExtensionInstallationRecord {
-  candidate?: PiariumExtensionCandidateRecord;
-  capabilityGrants: PiariumExtensionCapabilityGrant[];
-  desired: PiariumExtensionDesiredState;
+export interface VarinExtensionInstallationRecord {
+  candidate?: VarinExtensionCandidateRecord;
+  capabilityGrants: VarinExtensionCapabilityGrant[];
+  desired: VarinExtensionDesiredState;
   installedAt: string;
   integrity?: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   resolvedVersion: string;
   resolvedPath?: string;
   selectedVersion: string;
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
   updatedAt: string;
 }
 
-export interface PiariumExtensionCandidateRecord {
+export interface VarinExtensionCandidateRecord {
   applyRequested: boolean;
   capabilitiesReviewed: boolean;
-  capabilityDelta: PiariumExtensionCapabilityDelta;
-  capabilityGrants: PiariumExtensionCapabilityGrant[];
+  capabilityDelta: VarinExtensionCapabilityDelta;
+  capabilityGrants: VarinExtensionCapabilityGrant[];
   integrity: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   preparedAt: string;
   resolvedPath: string;
   resolvedVersion: string;
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
 }
 
-export interface PiariumExtensionPreparedArtifact {
+export interface VarinExtensionPreparedArtifact {
   integrity: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   preparedAt: string;
   resolvedPath: string;
   resolvedVersion: string;
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
 }
 
-export interface PiariumExtensionPublicCandidate {
+export interface VarinExtensionPublicCandidate {
   applyRequested: boolean;
   capabilitiesReviewed: boolean;
-  capabilityDelta: PiariumExtensionCapabilityDelta;
-  capabilityGrants: PiariumExtensionCapabilityGrant[];
+  capabilityDelta: VarinExtensionCapabilityDelta;
+  capabilityGrants: VarinExtensionCapabilityGrant[];
   integrity: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   preparedAt: string;
   resolvedVersion: string;
-  source: PiariumExtensionPublicPackageSource;
+  source: VarinExtensionPublicPackageSource;
 }
 
-export interface PiariumExtensionCatalogEntry {
-  actual: PiariumExtensionActualState[];
-  candidate?: PiariumExtensionPublicCandidate;
-  capabilityGrants: PiariumExtensionCapabilityGrant[];
-  desired: PiariumExtensionDesiredState;
+export interface VarinExtensionCatalogEntry {
+  actual: VarinExtensionActualState[];
+  candidate?: VarinExtensionPublicCandidate;
+  capabilityGrants: VarinExtensionCapabilityGrant[];
+  desired: VarinExtensionDesiredState;
   installedAt: string;
   integrity?: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   resolvedVersion: string;
   selectedVersion: string;
-  source: PiariumExtensionPublicPackageSource;
+  source: VarinExtensionPublicPackageSource;
   updatedAt: string;
 }
 
-export type PiariumExtensionArtifactSlot = "candidate" | "selected";
+export type VarinExtensionArtifactSlot = "candidate" | "selected";
 
-export interface PiariumExtensionAssetRequest {
+export interface VarinExtensionAssetRequest {
   extensionId: string;
   integrity: string;
   path: string;
-  slot: PiariumExtensionArtifactSlot;
+  slot: VarinExtensionArtifactSlot;
 }
 
-export interface PiariumExtensionAssetPayload {
+export interface VarinExtensionAssetPayload {
   artifactIntegrity: string;
   bytesBase64: string;
   contentType: string;
@@ -294,201 +294,201 @@ export interface PiariumExtensionAssetPayload {
   path: string;
 }
 
-export interface PiariumExtensionManagedEntrypointRequest {
+export interface VarinExtensionManagedEntrypointRequest {
   entrypointId: string;
   extensionId: string;
   integrity: string;
-  slot: PiariumExtensionArtifactSlot;
+  slot: VarinExtensionArtifactSlot;
 }
 
-export interface PiariumExtensionManagedEntrypointPayload {
+export interface VarinExtensionManagedEntrypointPayload {
   artifactIntegrity: string;
   entrypointId: string;
-  module: PiariumExtensionAssetPayload;
-  styles: PiariumExtensionAssetPayload[];
+  module: VarinExtensionAssetPayload;
+  styles: VarinExtensionAssetPayload[];
 }
 
-export interface PiariumExtensionCandidateSelectionRequest {
+export interface VarinExtensionCandidateSelectionRequest {
   candidateIntegrity: string;
   expectedRevision: number;
   extensionId: string;
 }
 
-export interface PiariumExtensionCandidateCapabilityReviewRequest {
+export interface VarinExtensionCandidateCapabilityReviewRequest {
   candidateIntegrity: string;
-  decisions: PiariumExtensionCapabilityDecision[];
+  decisions: VarinExtensionCapabilityDecision[];
   expectedRevision: number;
   extensionId: string;
 }
 
-export interface PiariumExtensionCapabilityReviewRequest {
-  decisions: PiariumExtensionCapabilityDecision[];
+export interface VarinExtensionCapabilityReviewRequest {
+  decisions: VarinExtensionCapabilityDecision[];
   expectedRevision: number;
   extensionId: string;
 }
 
-export interface PiariumExtensionPackageInstallRequest {
+export interface VarinExtensionPackageInstallRequest {
   expectedRevision: number;
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
 }
 
-export interface PiariumExtensionLocalSourceReloadRequest {
+export interface VarinExtensionLocalSourceReloadRequest {
   expectedRevision: number;
   extensionId: string;
 }
 
-export type PiariumExtensionLocalSourceReloadResult =
+export type VarinExtensionLocalSourceReloadResult =
   | {
       outcome: "unchanged";
-      snapshot: PiariumExtensionCatalogSnapshot;
+      snapshot: VarinExtensionCatalogSnapshot;
     }
   | {
       candidateIntegrity: string;
       outcome: "staged";
-      snapshot: PiariumExtensionCatalogSnapshot;
+      snapshot: VarinExtensionCatalogSnapshot;
     };
 
-export interface PiariumExtensionRemoveRequest {
+export interface VarinExtensionRemoveRequest {
   deleteData: boolean;
   expectedRevision: number;
   extensionId: string;
 }
 
-export type PiariumExtensionServiceProviderStatus = "active" | "candidate" | "draining";
+export type VarinExtensionServiceProviderStatus = "active" | "candidate" | "draining";
 
-export interface PiariumExtensionServiceProviderSnapshot {
-  descriptor: PiariumExtensionServiceProvision;
+export interface VarinExtensionServiceProviderSnapshot {
+  descriptor: VarinExtensionServiceProvision;
   entrypointId: string;
   extensionId: string;
   extensionVersion: string;
   generation: number;
   providerId: string;
   providerKey: string;
-  status: PiariumExtensionServiceProviderStatus;
+  status: VarinExtensionServiceProviderStatus;
 }
 
-export interface PiariumExtensionServiceCatalogSnapshot {
+export interface VarinExtensionServiceCatalogSnapshot {
   hostId: string;
-  providers: PiariumExtensionServiceProviderSnapshot[];
+  providers: VarinExtensionServiceProviderSnapshot[];
   revision: number;
   selections: Record<string, string>;
 }
 
-export interface PiariumExtensionServiceInvocationRequest {
+export interface VarinExtensionServiceInvocationRequest {
   args: JsonValue[];
   method: string;
   providerId?: string;
-  routing?: import("./service-routing.js").PiariumExtensionServiceRoutingContext;
+  routing?: import("./service-routing.js").VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
 
-export interface PiariumExtensionServiceSelectionRequest {
+export interface VarinExtensionServiceSelectionRequest {
   providerId: string | null;
   serviceId: string;
   version: number;
 }
 
-export interface PiariumExtensionCandidatePreparationResult {
+export interface VarinExtensionCandidatePreparationResult {
   extensionId: string;
   integrity: string;
-  providers: PiariumExtensionServiceProviderSnapshot[];
+  providers: VarinExtensionServiceProviderSnapshot[];
 }
 
-export interface PiariumExtensionHostStateSnapshot {
-  catalog: PiariumExtensionCatalogSnapshot;
+export interface VarinExtensionHostStateSnapshot {
+  catalog: VarinExtensionCatalogSnapshot;
   revision: number;
-  services: PiariumExtensionServiceCatalogSnapshot;
-  routing: import("./service-routing.js").PiariumExtensionServiceRoutingSnapshot;
-  workbench: import("./workbench.js").PiariumWorkbenchProfileSnapshot;
+  services: VarinExtensionServiceCatalogSnapshot;
+  routing: import("./service-routing.js").VarinExtensionServiceRoutingSnapshot;
+  workbench: import("./workbench.js").VarinWorkbenchProfileSnapshot;
 }
 
-export interface PiariumExtensionHostStateWaitRequest {
+export interface VarinExtensionHostStateWaitRequest {
   hostId: string;
   revision: number;
 }
 
-export type PiariumExtensionStorageScope = "application" | "profile" | "session" | "surface" | "workspace";
+export type VarinExtensionStorageScope = "application" | "profile" | "session" | "surface" | "workspace";
 
-export interface PiariumExtensionStorageAddress {
+export interface VarinExtensionStorageAddress {
   extensionId: string;
   key: string;
-  scope: PiariumExtensionStorageScope;
+  scope: VarinExtensionStorageScope;
 }
 
-export interface PiariumExtensionStorageOpenRequest {
+export interface VarinExtensionStorageOpenRequest {
   key: string;
   schemaVersion?: number;
-  scope: PiariumExtensionStorageScope;
+  scope: VarinExtensionStorageScope;
 }
 
-export interface PiariumExtensionStorageDocument {
+export interface VarinExtensionStorageDocument {
   data: JsonObject;
   revision: number;
   schemaVersion: number;
   updatedAt: string;
 }
 
-export interface PiariumExtensionStorageSnapshot {
-  address: PiariumExtensionStorageAddress;
+export interface VarinExtensionStorageSnapshot {
+  address: VarinExtensionStorageAddress;
   authoritative: boolean;
-  diagnostics: PiariumExtensionDiagnostic[];
-  document: PiariumExtensionStorageDocument;
+  diagnostics: VarinExtensionDiagnostic[];
+  document: VarinExtensionStorageDocument;
   exists: boolean;
   storageState: "missing" | "ready" | "stale";
 }
 
-export type PiariumExtensionCatalogStorageState = "missing" | "ready" | "stale";
+export type VarinExtensionCatalogStorageState = "missing" | "ready" | "stale";
 
-export interface PiariumExtensionCatalogSnapshot {
+export interface VarinExtensionCatalogSnapshot {
   authoritative: boolean;
-  diagnostics: PiariumExtensionDiagnostic[];
-  extensions: PiariumExtensionCatalogEntry[];
+  diagnostics: VarinExtensionDiagnostic[];
+  extensions: VarinExtensionCatalogEntry[];
   hostId: string;
   loadedAt: string;
   revision: number;
-  schemaVersion: typeof PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION;
-  storageState: PiariumExtensionCatalogStorageState;
+  schemaVersion: typeof VARIN_EXTENSION_CATALOG_SCHEMA_VERSION;
+  storageState: VarinExtensionCatalogStorageState;
 }
 
-export interface PiariumExtensionCatalogError {
+export interface VarinExtensionCatalogError {
   code: string;
   message: string;
   retryable: boolean;
 }
 
-export type PiariumExtensionCatalogAvailability =
+export type VarinExtensionCatalogAvailability =
   | {
       supported: false;
       reason: string;
     }
   | {
-      error: PiariumExtensionCatalogError;
+      error: VarinExtensionCatalogError;
       supported: true;
       status: "error";
     }
   | {
-      snapshot: PiariumExtensionCatalogSnapshot;
+      snapshot: VarinExtensionCatalogSnapshot;
       supported: true;
       status: "ready";
     };
 
-export interface PiariumExtensionCatalogDocument {
-  extensions: Record<string, PiariumExtensionInstallationRecord>;
+export interface VarinExtensionCatalogDocument {
+  extensions: Record<string, VarinExtensionInstallationRecord>;
   revision: number;
-  schemaVersion: typeof PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_EXTENSION_CATALOG_SCHEMA_VERSION;
   updatedAt: string;
 }
 
-export interface PiariumExtensionHostIdentityDocument {
+export interface VarinExtensionHostIdentityDocument {
   createdAt: string;
   hostId: string;
-  schemaVersion: typeof PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_EXTENSION_CATALOG_SCHEMA_VERSION;
 }
 
-export interface PiariumExtensionPackageCandidate {
+export interface VarinExtensionPackageCandidate {
   integrity?: string;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   resolvedPath: string;
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
 }

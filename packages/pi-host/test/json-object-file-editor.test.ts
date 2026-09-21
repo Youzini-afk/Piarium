@@ -7,7 +7,7 @@ import { JsonObjectFileEditor } from "../src/json-object-file-editor.js";
 
 describe("JsonObjectFileEditor", () => {
   it("patches arbitrary plugin settings without dropping concurrent top-level changes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-settings-editor-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-settings-editor-"));
     const agentDir = join(root, "agent");
     const settingsPath = join(agentDir, "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
@@ -32,7 +32,7 @@ describe("JsonObjectFileEditor", () => {
   });
 
   it("writes project settings independently and preserves an invalid file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-project-settings-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-project-settings-"));
     const cwd = join(root, "workspace");
     const projectPath = join(cwd, ".pi", "settings.json");
     const editor = new JsonObjectFileEditor(projectPath);
@@ -58,7 +58,7 @@ describe("JsonObjectFileEditor", () => {
   });
 
   it("rejects a revisioned update after an external write", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-settings-conflict-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-settings-conflict-"));
     const settingsPath = join(root, "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
     try {
@@ -83,7 +83,7 @@ describe("JsonObjectFileEditor", () => {
   });
 
   it("allows only one concurrent writer for the same expected revision", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-settings-cas-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-settings-cas-"));
     const settingsPath = join(root, "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
     try {

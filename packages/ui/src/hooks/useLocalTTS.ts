@@ -2,7 +2,7 @@
  * useLocalTTS Hook
  *
  * React hook for local (Kokoro via sherpa-onnx) text-to-speech playback.
- * Synthesis runs on the Piarium server in the dictation worker.
+ * Synthesis runs on the Varin server in the dictation worker.
  *
  * Long texts are pipelined by sentence chunks: the first chunk starts playing
  * as soon as it is synthesized while the next chunk synthesizes in the
@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 export interface LocalTTSSpeakOptions {
     /** Kokoro speaker id (0-10) */

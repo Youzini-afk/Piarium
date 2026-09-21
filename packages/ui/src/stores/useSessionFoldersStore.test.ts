@@ -31,7 +31,7 @@ mock.module('./utils/safeStorage', () => ({
 mock.module('@/lib/desktop', () => ({
 }));
 
-mock.module('@piarium/application-client', () => ({
+mock.module('@varin/application-client', () => ({
   getRuntimeKey: () => runtimeKey,
   runtimeFetch: mock(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
 }));

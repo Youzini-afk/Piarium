@@ -1,16 +1,16 @@
 import {
-  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PiariumTransitionSceneContractError,
-  parsePiariumTransitionSceneContributionData,
-  type PiariumTransitionSceneContributionDataV1,
-} from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import { piariumSurfaceRuntime } from './surface-runtime';
+  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VarinTransitionSceneContractError,
+  parseVarinTransitionSceneContributionData,
+  type VarinTransitionSceneContributionDataV1,
+} from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
+import { varinSurfaceRuntime } from './surface-runtime';
 
 export interface WorkbenchTransitionSceneCapture {
   contributionId: string;
-  data: PiariumTransitionSceneContributionDataV1;
+  data: VarinTransitionSceneContributionDataV1;
   desiredRevision: number;
   entrypointId: string;
   extensionId: string;
@@ -52,11 +52,11 @@ const matchesCapture = (
 };
 
 const captureContribution = (contribution: SurfaceContribution): WorkbenchTransitionSceneCapture => {
-  const data = parsePiariumTransitionSceneContributionData(contribution.descriptor.data);
-  if (!data.scenes.includes(PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE)) {
-    throw new PiariumTransitionSceneContractError(
+  const data = parseVarinTransitionSceneContributionData(contribution.descriptor.data);
+  if (!data.scenes.includes(VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE)) {
+    throw new VarinTransitionSceneContractError(
       'Workbench transition scene does not support Profile transitions',
-      [`data.scenes must contain ${PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE}`],
+      [`data.scenes must contain ${VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE}`],
     );
   }
   return {
@@ -75,7 +75,7 @@ const captureContribution = (contribution: SurfaceContribution): WorkbenchTransi
 const transitionSceneCandidates = (snapshot: SurfaceRegistrySnapshot): SurfaceContribution[] => (
   snapshot.contributions.filter((contribution) => (
     contribution.descriptor.kind === 'transition-scene'
-    && contribution.descriptor.replacement?.target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition
+    && contribution.descriptor.replacement?.target === VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition
   ))
 );
 
@@ -84,7 +84,7 @@ const resolveContribution = (
   replacementSelections: Readonly<Record<string, string>>,
 ): SurfaceContribution | undefined => {
   const candidates = transitionSceneCandidates(snapshot);
-  const selectedId = replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition];
+  const selectedId = replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition];
   if (selectedId) return candidates.find((candidate) => candidate.descriptor.id === selectedId);
   return candidates.find((candidate) => candidate.descriptor.data.fallback === true);
 };
@@ -142,7 +142,7 @@ export const holdWorkbenchTransitionSceneContribution = (input: {
 export const prepareWorkbenchTransitionScene = async (
   replacementSelections: Readonly<Record<string, string>>,
 ): Promise<WorkbenchTransitionScenePreparation> => {
-  let resolution = resolveWorkbenchTransitionScene(piariumSurfaceRuntime.getSnapshot(), replacementSelections);
+  let resolution = resolveWorkbenchTransitionScene(varinSurfaceRuntime.getSnapshot(), replacementSelections);
   if (resolution.status === 'missing') return { scene: null, status: 'missing' };
   if (resolution.status === 'failed') return { error: resolution.error, scene: null, status: 'failed' };
   let contribution = resolution.contribution;
@@ -153,7 +153,7 @@ export const prepareWorkbenchTransitionScene = async (
         contributionId: contribution.descriptor.id,
         extensionId: contribution.owner.extensionId,
       });
-      resolution = resolveWorkbenchTransitionScene(piariumSurfaceRuntime.getSnapshot(), replacementSelections);
+      resolution = resolveWorkbenchTransitionScene(varinSurfaceRuntime.getSnapshot(), replacementSelections);
       if (resolution.status === 'missing') return { scene: null, status: 'missing' };
       if (resolution.status === 'failed') return { error: resolution.error, scene: null, status: 'failed' };
       contribution = resolution.contribution;

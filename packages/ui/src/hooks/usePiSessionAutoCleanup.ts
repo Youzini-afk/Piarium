@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 

@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 
-const STORAGE_KEY = 'piarium.sessionPinned.v1';
+const STORAGE_KEY = 'varin.sessionPinned.v1';
 
 export type SessionPinnedTarget = { directory: string; sessionId: string };
 

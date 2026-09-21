@@ -61,9 +61,9 @@ async function createApp(
   app.use(express.json({ limit: '5mb' }));
   registerWorkspaceRoutes(app, {
     env: {
-      PIARIUM_WORKSPACE_ROOT: workspaceRoot,
-      PIARIUM_WORKSPACE_TRASH: 'true',
-      PIARIUM_WORKSPACE_MAX_READ_MB: '1',
+      VARIN_WORKSPACE_ROOT: workspaceRoot,
+      VARIN_WORKSPACE_TRASH: 'true',
+      VARIN_WORKSPACE_MAX_READ_MB: '1',
       ...env,
     },
     fsPromises: fs.promises,
@@ -367,7 +367,7 @@ describe('workspace routes', () => {
   });
 
   it('rejects folder downloads that exceed download limits', async () => {
-    const app = await createApp({ PIARIUM_WORKSPACE_MAX_DOWNLOAD_MB: '0.0001' });
+    const app = await createApp({ VARIN_WORKSPACE_MAX_DOWNLOAD_MB: '0.0001' });
     fs.mkdirSync(path.join(workspaceRoot, 'demo'), { recursive: true });
     fs.writeFileSync(path.join(workspaceRoot, 'demo', 'big.txt'), 'x'.repeat(1024));
 
@@ -380,7 +380,7 @@ describe('workspace routes', () => {
   });
 
   it('only applies folder download file-count limits when explicitly configured', async () => {
-    const app = await createApp({ PIARIUM_WORKSPACE_MAX_DOWNLOAD_FILES: '2' });
+    const app = await createApp({ VARIN_WORKSPACE_MAX_DOWNLOAD_FILES: '2' });
     fs.mkdirSync(path.join(workspaceRoot, 'demo'), { recursive: true });
     fs.writeFileSync(path.join(workspaceRoot, 'demo', 'a.txt'), 'a');
     fs.writeFileSync(path.join(workspaceRoot, 'demo', 'b.txt'), 'b');

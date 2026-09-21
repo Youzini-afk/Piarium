@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
-import type { ResearchSourceView, SourceListParams, SourceListResult, SourceRegisterParams } from "@piarium/protocol";
+import type { ResearchSourceView, SourceListParams, SourceListResult, SourceRegisterParams } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
 import type { ExperimentCaller } from "./experiments.js";
 

@@ -1,8 +1,8 @@
 import {
   createSettingsFileStore,
-  type PiariumSettingsDocument,
+  type VarinSettingsDocument,
   type SettingsFileStore,
-} from '@piarium/settings-store';
+} from '@varin/settings-store';
 import type crypto from 'node:crypto';
 
 const MOBILE_DEVICES_VERSION = 1;
@@ -37,7 +37,7 @@ export interface PublicMobileDevice extends Omit<StoredMobileDevice, 'pushToken'
   pushEnabled: boolean;
 }
 
-interface MobileDeviceDocument extends PiariumSettingsDocument {
+interface MobileDeviceDocument extends VarinSettingsDocument {
   devices: StoredMobileDevice[];
   version: number;
 }
@@ -124,7 +124,7 @@ export const createMobileDeviceStore = (deps: MobileDeviceStoreDependencies) => 
 
   const updateStore = async (
     mutate: (current: MobileDeviceDocument) => MobileDeviceDocument | Promise<MobileDeviceDocument>,
-  ): Promise<PiariumSettingsDocument> => {
+  ): Promise<VarinSettingsDocument> => {
     return deviceStore.update(async (stored) => {
       if (stored.version !== MOBILE_DEVICES_VERSION || !Array.isArray(stored.devices)) {
         throw new Error(`Unsupported mobile devices version: ${String(stored.version)}`);

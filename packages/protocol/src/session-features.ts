@@ -1,4 +1,4 @@
-export const PIARIUM_SESSION_FEATURES_SCHEMA_VERSION = 1 as const;
+export const VARIN_SESSION_FEATURES_SCHEMA_VERSION = 1 as const;
 
 export type PiSessionGoalStatus =
   | "active"
@@ -39,7 +39,7 @@ export interface PiSessionFeatureState {
   assist?: PiSessionAssistState;
   goal?: PiSessionGoalState;
   revision: number;
-  schemaVersion: typeof PIARIUM_SESSION_FEATURES_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_SESSION_FEATURES_SCHEMA_VERSION;
 }
 
 export type PiSessionFeatureMutation =

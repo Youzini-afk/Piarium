@@ -8,7 +8,7 @@ import { pathInRoots } from "./explore-graph.js";
 import { createRelatedQueryService } from "./related-service.js";
 import type { HarnessServiceContext } from "./router.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-related-scope");
+const TEST_DIR = join(tmpdir(), "varin-related-scope");
 const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 };
 
 let store: KnowledgeStore;

@@ -2,7 +2,7 @@ English | [简体中文](CONTRIBUTING.zh-CN.md)
 
 # Docs Authoring Guide
 
-This package is the source of truth for Piarium docs content.
+This package is the source of truth for Varin docs content.
 **Write English first; other locales are translations.**
 
 ## Voice & style
@@ -17,17 +17,17 @@ stays the same no matter who is writing.
 ### Who you're writing for
 
 - Assume curiosity, not expertise. The reader knows what they want to do, not
-  how Piarium works inside.
+  how Varin works inside.
 - One page = one job. If a page is answering two unrelated questions, split it.
 
 ### Keep it short
 
 - Lead with the task, not background. The first line should say what the page is
-  for ("Use `piarium tunnel` to expose a running Piarium instance.").
+  for ("Use `varin tunnel` to expose a running Varin instance.").
 - Cut anything that doesn't change what the reader does next.
 - A basic page should fit in a screen or two. Long, dense reference pages (like
   Reverse Proxy) are the exception — and they say so in their first line ("Use
-  this page if you run Piarium behind...").
+  this page if you run Varin behind...").
 
 ### Steps
 
@@ -37,17 +37,17 @@ stays the same no matter who is writing.
   they did it right.
 
 ```mdx
-3. Run `piarium --ui-password be-creative-here`.
+3. Run `varin --ui-password be-creative-here`.
 4. Open the printed URL (usually `http://localhost:3000`).
 
-You should land on the Piarium session list. If you see it, the server is
+You should land on the Varin session list. If you see it, the server is
 running.
 ```
 
 ### Plain language
 
 - Explain a term the first time it appears, in parentheses, in everyday words:
-  - good: start a tunnel (a public link to your local Piarium)
+  - good: start a tunnel (a public link to your local Varin)
   - bad: start a tunnel — the reader doesn't know what that is yet
 - Prefer common words over internal ones. "App", "version", "page" beat
   "surface", "instance", "route" when the meaning is the same. If an internal
@@ -93,7 +93,7 @@ running.
    ```mdx
    ---
    title: Remote access
-   description: Access Piarium from outside the local network.
+   description: Access Varin from outside the local network.
    ---
    ```
 
@@ -194,7 +194,7 @@ Notes:
 
 ## Localization
 
-The docs are translated into the same languages the Piarium app ships in.
+The docs are translated into the same languages the Varin app ships in.
 **English is the source of truth and lives at the root of `content/docs/`.**
 Every other language mirrors the English files under a locale folder.
 
@@ -249,7 +249,7 @@ Each translated file needs its **own translated frontmatter** (`title` and
 ```mdx
 ---
 title: Встановлення
-description: Встановіть Piarium для десктопа, вебу або VS Code.
+description: Встановіть Varin для десктопа, вебу або VS Code.
 ---
 ```
 
@@ -301,7 +301,7 @@ A label with no translation for the active locale falls back to the English
 
 ### What not to translate
 
-- brand and product nouns: Piarium, Pi, VS Code, PWA, GitHub, Discord,
+- brand and product nouns: Varin, Pi, VS Code, PWA, GitHub, Discord,
   macOS, SSH. Keep `OpenCode Go` only when documenting that third-party quota
   product. Do not reintroduce OpenChamber or an OpenCode server.
 - code blocks, shell commands, file paths, flags, and config keys

@@ -1,10 +1,10 @@
 import React from 'react';
-import type { PiCommandDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { PiCommandDescriptor, RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 interface ContextModeSettingsProps {
@@ -65,19 +65,19 @@ export const ContextModeSettings: React.FC<ContextModeSettingsProps> = ({ runtim
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-3">
         <div className="min-w-0">
           <div className="typography-ui font-medium">
-            {t('settings.piarium.pluginSettings.contextMode.runtime.title')}
+            {t('settings.varin.pluginSettings.contextMode.runtime.title')}
           </div>
           <div className="mt-1 typography-meta text-muted-foreground">
             {loading
-              ? t('settings.piarium.pluginSettings.status.runtime.checking')
+              ? t('settings.varin.pluginSettings.status.runtime.checking')
               : commands.length > 0
-                ? t('settings.piarium.pluginSettings.contextMode.runtime.available')
-                : t('settings.piarium.pluginSettings.contextMode.runtime.unavailable')}
+                ? t('settings.varin.pluginSettings.contextMode.runtime.available')
+                : t('settings.varin.pluginSettings.contextMode.runtime.unavailable')}
           </div>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={() => void refresh()} disabled={loading}>
           <Icon name="refresh" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-          <span className="sr-only">{t('settings.piarium.recovery.actions.refresh')}</span>
+          <span className="sr-only">{t('settings.varin.recovery.actions.refresh')}</span>
         </Button>
       </div>
       {commands.length > 0 ? (
@@ -102,7 +102,7 @@ export const ContextModeSettings: React.FC<ContextModeSettingsProps> = ({ runtim
       ) : null}
       {!sessionId && commands.length > 0 ? (
         <div className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.contextMode.runtime.sessionRequired')}
+          {t('settings.varin.pluginSettings.contextMode.runtime.sessionRequired')}
         </div>
       ) : null}
       {error ? <div className="typography-meta text-[var(--status-error)]">{error}</div> : null}

@@ -1,33 +1,32 @@
 [English](../../README.md) | [简体中文](README.zh-CN.md) | 繁體中文 | [Français](README.fr.md) | [日本語](README.ja.md)
 
-# Piarium
+# Varin
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
-    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Varin" width="128" />
   </picture>
 </p>
 
-[![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
-[![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
+[![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
+[![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
-**一個 Pi 原生、可重組的程式設計智慧體工作空間與受治理的 Agent Harness：以本地與桌面體驗為中心，
+**獨立的 Agent 工作台與完整 Harness，面向程式設計、研究和其他專案工作：以本地與桌面體驗為中心，
 同時涵蓋 Web、編輯器與行動端。**
 
-Piarium 將 [Pi 程式設計智慧體](https://github.com/earendil-works/pi)擴展為一套完整的產品。
-Pi 繼續作為智慧體內核——模型與提供商堆疊、工作階段樹、套件管理器與擴充模型——而 Piarium 擁有
-它周圍的一切：工具環境、工作狀態、復原、檢索、上下文策略與任務治理，以及智慧體執行於其中的
-工作台介面。它直接使用 Pi 的公開 SDK，而不是擷取終端輸出。
+它內建 [Pi](https://github.com/earendil-works/pi) 執行時期；模型與提供商堆疊、工作階段樹、套件管理器與擴充模型
+仍由 Pi 提供，而 Varin 負責周圍的工具環境、工作狀態、復原、檢索、上下文策略、任務治理與工作台介面。
+它直接使用 Pi 的公開 SDK，而不是擷取終端輸出。
 
-它的介面不是固定外殼。Piarium 內建兩套官方工作形態：**Agent Workspace** 以工作階段、任務與
+它的介面不是固定外殼。Varin 內建兩套官方工作形態：**Agent Workspace** 以工作階段、任務與
 上下文為中心，**IDE Workbench** 以編輯器、搜尋、Git、診斷與偵錯為中心，並把智慧體作為可停駐
-面板。兩者都是普通的 Piarium 擴充，由 Workbench Profile 選擇，因此你可以整體替換其中任意一套，
+面板。兩者都是普通的 Varin 擴充，由 Workbench Profile 選擇，因此你可以整體替換其中任意一套，
 也可以只替換其中某一個部分。
 
 > [!IMPORTANT]
-> Piarium 目前仍處於 1.0 之前的活躍開發階段。各產品端與私有執行時協定會同步演進，較舊組建
+> Varin 目前仍處於 1.0 之前的活躍開發階段。各產品端與私有執行時協定會同步演進，較舊組建
 > 不保證與較新組建互通。請備份重要工作區；長期部署時，請固定到已經驗證的映像摘要。
 
 ## 產品介面
@@ -38,23 +37,23 @@ Pi 繼續作為智慧體內核——模型與提供商堆疊、工作階段樹�
 
 專案與工作階段始終可見，主區域將目前的智慧體、上下文工具與輸入框集中在同一個工作空間中。
 
-![Piarium Agent Workspace](assets/agent-workspace.png)
+![Varin Agent Workspace](assets/agent-workspace.png)
 
 ### IDE Workbench
 
 IDE Profile 將工作區導覽與編輯器基礎設施，和完整的 Pi 智慧體並排組合，而不是把聊天拆成另一個應用。
 
-![Piarium IDE Workbench](assets/ide-workbench.png)
+![Varin IDE Workbench](assets/ide-workbench.png)
 
 ### 行動端工作空間
 
 回應式介面在手機螢幕上保留同一套專案、智慧體控制、上下文介面與輸入框。
 
 <p align="center">
-  <img src="assets/mobile-workspace.png" alt="Piarium 行動端工作空間" width="390" />
+  <img src="assets/mobile-workspace.png" alt="Varin 行動端工作空間" width="390" />
 </p>
 
-## Piarium 提供什麼
+## Varin 提供什麼
 
 ### 受治理的 Agent Harness
 
@@ -109,41 +108,42 @@ IDE Profile 將工作區導覽與編輯器基礎設施，和完整的 Pi 智慧�
 
 ## 已維護的擴充整合
 
-Piarium 不會 fork 這些擴充，也不會複製它們的私有狀態。已維護的配接器只消費各擴充公開的命令、
+Varin 不會 fork 這些擴充，也不會複製它們的私有狀態。已維護的配接器只消費各擴充公開的命令、
 事件、設定檔案與能力協定——包括子智慧體集群、上下文管理、工作區歷史、MCP 服務、Web 存取、
 記憶系統、背景任務與 LSP/工具鏈設定——因此外掛可以繼續獨立更新。
 
-每個擴充的整合面——Piarium 讀取或呼叫哪些命令、事件與原生設定，以及哪些檔案仍歸外掛所有——記錄在
-[擴充整合契約](../../docs/extension-compatibility.md)。Piarium 不逐版本認證外掛與 Pi 的搭配。
+每個擴充的整合面——Varin 讀取或呼叫哪些命令、事件與原生設定，以及哪些檔案仍歸外掛所有——記錄在
+[擴充整合契約](../../docs/extension-compatibility.md)。Varin 不逐版本認證外掛與 Pi 的搭配。
 
-## 開發 Piarium 擴充
+## 開發 Varin 擴充
 
-Piarium 應用擴充與 Pi 外掛是兩個獨立的產品物件：前者擴展 Piarium 的工作台、頁面與可信宿主，
-後者執行於 Pi 智慧體中。公開的 npm 工具鏈不要求檢出 Piarium 原始碼，也不要求擴充匯入產品私有 UI：
+Varin 應用擴充與 Pi 外掛是兩個獨立的產品物件：前者擴展 Varin 的工作台、頁面與可信宿主，
+後者執行於 Pi 智慧體中。規劃中的 npm 工具鏈不要求檢出 Varin 原始碼，也不要求擴充匯入產品私有 UI；
+`@varin/*` 套件尚未發布：
 
-- `@piarium/extension-contract`：清單、貢獻、服務、路由與探索協定及 JSON Schema；
-- `@piarium/extension-sdk`：與 UI 框架無關的 Surface、隔離執行域與 Host 開發 API；
-- `@piarium/extension-react`：可選的 React 19 配接器；
-- `@piarium/extension-surface`：供進階測試與替代宿主使用的底層生命週期與註冊表；
-- `@piarium/extension-cli`：專案初始化、檢查、組建與一致性測試。
+- `@varin/extension-contract`：清單、貢獻、服務、路由與探索協定及 JSON Schema；
+- `@varin/extension-sdk`：與 UI 框架無關的 Surface、隔離執行域與 Host 開發 API；
+- `@varin/extension-react`：可選的 React 19 配接器；
+- `@varin/extension-surface`：供進階測試與替代宿主使用的底層生命週期與註冊表；
+- `@varin/extension-cli`：專案初始化、檢查、組建與一致性測試。
 
-建立一個完整的擴充專案：
+這些套件發布後，可以用以下命令建立完整的擴充專案：
 
 ```sh
-npx @piarium/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
+npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
 cd my-extension
 npm install
-npx piarium-extension build
-npx piarium-extension test
+npx varin-extension build
+npx varin-extension test
 ```
 
 完整的清單格式、能力、生命週期、儲存、發布與測試說明見
-[Piarium 擴充開發指南](../../docs/piarium-extension-authoring.md)。
+[Varin 擴充開發指南](../../docs/varin-extension-authoring.md)。
 
 ## 下載桌面版
 
-Windows x64/ARM64、Linux x64/ARM64，以及 macOS Intel/Apple Silicon 桌面套件發布在
-[GitHub Releases](https://github.com/Youzini-afk/Piarium/releases)。
+目前尚未發布 Varin 桌面套件。[GitHub Releases](https://github.com/Youzini-afk/Varin/releases) 頁面保留歷史
+資產；在 Varin 套件發布前，請使用下方的原始碼或 Docker 方式。
 
 ## 從原始碼開始
 
@@ -159,8 +159,8 @@ Rust 系統內核是必需的執行時元件，不是可選加速器。原始碼
 Host 會透過 Cargo 直接執行它；`bun run kernel:build` 產出套件配置要求的、附 manifest 校驗的
 發行可執行檔。
 
-Piarium 內建捆綁的 Pi 執行時，並透過 Runtime Manager 探索使用者級 Pi 安裝，由它選擇、安裝或僅向上
-升級 Pi；完成真實 Host 握手後即可使用，無需重啟 Piarium。Electron 內建執行應用所需的 Node 環境，
+Varin 內建捆綁的 Pi 執行時，並透過 Runtime Manager 探索使用者級 Pi 安裝，由它選擇、安裝或僅向上
+升級 Pi；完成真實 Host 握手後即可使用，無需重啟 Varin。Electron 內建執行應用所需的 Node 環境，
 但 Pi 本身仍作為獨立的使用者級工具存在。Windows、Linux 與 macOS 的 x64/ARM64 原生桌面套件均在
 對應架構的 runner 上驗證應用啟動、Runtime Manager、健康檢查與終端生命週期；可選離線套件仍待後續
 提供。容器固定內建經過驗證的 Pi 執行時，以保證無人值守部署可重現。
@@ -168,13 +168,13 @@ Piarium 內建捆綁的 Pi 執行時，並透過 Runtime Manager 探索使用者
 ### 執行 Web 開發環境
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-開啟終端輸出的 Vite 位址。Piarium 會選擇可用的開發連接埠，並同時啟動 UI 與可信 API/執行時服務。
+開啟終端輸出的 Vite 位址。Varin 會選擇可用的開發連接埠，並同時啟動 UI 與可信 API/執行時服務。
 
 ### 執行桌面應用
 
@@ -203,20 +203,20 @@ NSIS 安裝套件、更新中繼資料與 blockmap 會輸出到 `packages/electr
 
 ## 執行雲端映像
 
-Compose 預設使用精簡映像 `ghcr.io/youzini-afk/piarium-slim:latest`。在 Linux Docker 主機上執行：
+Compose 預設使用精簡映像 `ghcr.io/youzini-afk/varin-slim:latest`。在 Linux Docker 主機上執行：
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
 開啟 `http://127.0.0.1:3000`，使用剛產生的密碼登入。任何面向公網的部署都應置於 TLS 反向代理
 或經過審核的隧道之後，具體轉發要求見[反向代理設定](../../docs/REVERSE_PROXY.md)。生產環境請將
-`PIARIUM_IMAGE` 固定為已驗證的不可變摘要，不要依賴浮動標籤。
+`VARIN_IMAGE` 固定為已驗證的不可變摘要，不要依賴浮動標籤。
 
 若智慧體要在容器裡編譯 Python、Java、Go 或 Rust，疊加工具鏈覆寫層：
 
@@ -231,31 +231,31 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ```mermaid
 flowchart LR
-    S["渲染器：由 Workbench Profile 選定外殼擴充"] --> C["@piarium/application-client"]
+    S["渲染器：由 Workbench Profile 選定外殼擴充"] --> C["@varin/application-client"]
     S --> D["文件、搜尋、語言與執行偵錯 API"]
     C --> T["帶認證的 HTTP/WebSocket 或編輯器傳輸"]
-    T --> A["應用宿主：@piarium/web 服務"]
+    T --> A["應用宿主：@varin/web 服務"]
     D --> A
-    A --> K["piarium-kernel：私有 Rust 系統內核"]
-    A --> B["@piarium/runtime-broker"]
-    B --> H["隔離的 @piarium/pi-host 工作處理序"]
+    A --> K["varin-kernel：私有 Rust 系統內核"]
+    A --> B["@varin/runtime-broker"]
+    B --> H["隔離的 @varin/pi-host 工作處理序"]
     H --> P["Pi SDK + 受信任的 Pi 套件"]
 ```
 
-應用宿主是唯一的可信後端。每個宿主擁有一個私有 `piarium-kernel` 子處理序，它是持久化與貼近機器
+應用宿主是唯一的可信後端。每個宿主擁有一個私有 `varin-kernel` 子處理序，它是持久化與貼近機器
 資源的生產權威：不可變工作狀態 root、內容物件與 GC、復原中繼資料、canonical 檔案資源與具體化、
 PTY 與管道處理序樹、固定視圖的檔案與結構計算。宿主保留產品策略——actor 准入、文件協調、
 Thread/Run 生命週期、知識與模型編排——並透過私有 framed stdio 協定與內核通訊，從不開放公開
 連接埠。每類資源只有一個生產寫者，內核之後不再保留 TypeScript 兜底權威。
 
 Broker 管理一個目錄工作處理序與每個工作階段各自的工作處理序。渲染器重新載入不會終止正在執行
-的任務，Pi 工作處理序異常也不會讓渲染器一同當機。跨處理序傳輸的是 Piarium 協定 DTO；SDK 回呼、
+的任務，Pi 工作處理序異常也不會讓渲染器一同當機。跨處理序傳輸的是 Varin 協定 DTO；SDK 回呼、
 憑證物件與擴充實作細節不會越過這條邊界。
 
 Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面後端；只有視窗、選單、對話框這類真正的
 原生能力才跨過 Electron preload 邊界。
 
-第三方 Pi 套件是擁有目前使用者作業系統權限的可執行程式碼。Piarium 會展示觀察到的能力，並對專案內
+第三方 Pi 套件是擁有目前使用者作業系統權限的可執行程式碼。Varin 會展示觀察到的能力，並對專案內
 可執行資源設定授權門檻，但不會把受信任擴充宣傳成完整的沙箱。在公開遠端執行個體或安裝陌生程式碼
 之前，請閱讀[安全政策](../../.github/SECURITY.md)和[安全模型](../../docs/security.md)。
 
@@ -268,7 +268,7 @@ Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面�
 | `packages/ui` | 共用的 Pi 原生 React UI、狀態、設定與擴充介面 |
 | `packages/web` | 瀏覽器/遠端前端、可信 Application Host 與雲端 CLI |
 | `packages/electron` | 原生桌面外殼、特權邊界、套件、SSH 與更新 |
-| `packages/mobile` | 連接 Piarium 服務端的 Capacitor iOS/Android 外殼 |
+| `packages/mobile` | 連接 Varin 服務端的 Capacitor iOS/Android 外殼 |
 | `packages/protocol` | 帶版本且可安全 JSON 序列化的工作處理序/產品端協定 |
 | `packages/runtime-client` | 可在瀏覽器中使用的執行時請求/事件客戶端 |
 | `packages/runtime-broker` | 目錄/工作階段工作處理序的管理、路由與關閉 |
@@ -279,7 +279,7 @@ Electron 在主處理序裡執行同一個宿主，而不是再造一套桌面�
 | `packages/extension-sdk`、`-react`、`-cli` | 公開的作者 SDK、React 配接器與作者工具鏈 |
 | `packages/extension-host` | 可信應用宿主的目錄、構件、儲存與服務 |
 | `packages/extension-loader` | 帶認證的 managed Surface 模組載入器與隔離執行域 |
-| `packages/extension-builtins` | Piarium 內建擴充的清單，含兩套官方外殼 |
+| `packages/extension-builtins` | Varin 內建擴充的清單，含兩套官方外殼 |
 | `packages/docs` | 面向使用者的文件站原始碼 |
 | `docs` | 架構、harness、內核、工作台、遷移、復原、雲端與安全約定 |
 | `scripts` | 開發、內核組建/測量、發布、雲端、部署與校驗工具 |
@@ -320,7 +320,7 @@ CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執�
 - [Rust 系統內核設計](../../docs/rust-kernel-design.md)與[審查記錄](../../docs/rust-kernel-audit.md)
 - [可組合工作台與 IDE 約定](../../docs/composable-workbench.md)
 - [統一檔案編輯器平台](../../docs/unified-file-editor-platform.md)
-- [Piarium 擴充平台](../../docs/piarium-extension-platform.md)
+- [Varin 擴充平台](../../docs/varin-extension-platform.md)
 - [從 OpenChamber 遷移到 Pi 的約定](../../docs/openchamber-pi-migration.md)
 - [外掛 GUI 與狀態歸屬設計](../../docs/plugin-gui-design.md)
 - [復原模型](../../docs/recovery.md)
@@ -329,8 +329,8 @@ CI 固定為三條職責不同的門禁：Ubuntu 原始碼品質、Windows 執�
 
 ## 專案沿革與授權條款
 
-Piarium 是維護者 OpenChamber fork 的 Pi 原生重構。
+Varin 是維護者 OpenChamber fork 的 Pi 原生重構。
 
-Piarium 作為組合後的完整作品，按照
+Varin 作為組合後的完整作品，按照
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）發布。透過網路向使用者提供
 修改版時，必須按照授權條款要求向這些使用者提供對應原始碼。

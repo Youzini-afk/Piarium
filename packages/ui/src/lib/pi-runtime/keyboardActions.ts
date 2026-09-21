@@ -2,7 +2,7 @@ import {
   type ModelDescriptor,
   type SessionSnapshot,
   type ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface FavoriteModelReference {
   modelID: string;

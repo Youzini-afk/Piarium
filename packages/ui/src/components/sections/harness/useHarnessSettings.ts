@@ -1,9 +1,9 @@
 import React from 'react';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { reportSettingsSaveState } from '@/lib/persistence';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { HarnessSettingsController } from './harness-settings-state';
 
 // Only retain controllers with unfinished edits when their page unmounts.
@@ -46,7 +46,7 @@ export function useHarnessSettings() {
       queueMicrotask(release);
     };
   }, [controller, entry, targetKey]);
-  React.useEffect(() => subscribePiariumEvents((event) => {
+  React.useEffect(() => subscribeVarinEvents((event) => {
     if (event.type === 'settings-changed' && event.owner === 'pi-settings') {
       void controller.refresh();
     }

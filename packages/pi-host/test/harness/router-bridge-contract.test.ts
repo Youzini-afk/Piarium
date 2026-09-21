@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge, HarnessRequestError } from "../../src/harness/host-services-bridge.js";
-import { buildHarnessRespondParams, type HarnessRequestData, type HarnessError, type HarnessRespondParams } from "@piarium/protocol";
+import { buildHarnessRespondParams, type HarnessRequestData, type HarnessError, type HarnessRespondParams } from "@varin/protocol";
 
 /**
- * Contract test: buildHarnessRespondParams (from @piarium/protocol) produces
+ * Contract test: buildHarnessRespondParams (from @varin/protocol) produces
  * a HarnessRespondParams that the host-controller's "harness.respond" handler
  * forwards to SessionHost.respondHarness, which calls bridge.respond, which
  * resolves the bridge's waiting caller.

@@ -7,22 +7,22 @@ description: Problemas comuns de configuração e execução, com correções r�
 
 Deu ruim? Encontre o sintoma abaixo e tente a correção.
 
-## O comando do Piarium sai ou não inicia
+## O comando do Varin sai ou não inicia
 
 - confirme Node.js `>=22.19` (Node.js 24 é a linha de base de desenvolvimento suportada)
 - a partir de um checkout de código-fonte, execute `bun run dev` ou `bun run start:web`
-- se você tiver uma CLI publicada, execute `piarium --version` e reinstale se precisar
+- se você tiver uma CLI publicada, execute `varin --version` e reinstale se precisar
 
 ## A UI web não está acessível
 
 - a partir de um checkout de código-fonte, leia o terminal que iniciou `bun run dev`
-- se você tiver uma CLI publicada, verifique os logs do servidor com `piarium logs`
+- se você tiver uma CLI publicada, verifique os logs do servidor com `varin logs`
 - verifique a porta ativa (o desenvolvimento usa a URL do Vite; o padrão do servidor é `3000`)
 - abra `http://localhost:3000` diretamente primeiro antes de testar links de túnel
 
 ## O link remoto/túnel não funciona
 
-- execute `piarium tunnel status --all` quando a CLI estiver instalada
+- execute `varin tunnel status --all` quando a CLI estiver instalada
 - reinicie o túnel a partir da mesma instância/porta
 - regenere o link de conexão se o token anterior já tiver sido usado
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiAgentStatus, RuntimeContextTarget } from '@piarium/protocol';
+import type { PiAgentStatus, RuntimeContextTarget } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,7 @@ import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/Setting
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { AGENT_KIND_LABEL_KEYS, filterAgentsCatalog } from './agents-catalog-model';
 import {
@@ -38,11 +38,11 @@ const STATUS_FILTERS: readonly AgentStatusFilter[] = [
 ];
 
 const STATUS_KEYS: Partial<Record<PiAgentStatus, I18nKey>> = {
-  available: 'settings.piarium.pluginSettings.subagents.status.available',
-  disabled: 'settings.piarium.pluginSettings.subagents.status.disabled',
-  error: 'settings.piarium.pluginSettings.subagents.status.error',
-  unavailable: 'settings.piarium.pluginSettings.subagents.status.unavailable',
-  unconfigured: 'settings.piarium.pluginSettings.subagents.status.unconfigured',
+  available: 'settings.varin.pluginSettings.subagents.status.available',
+  disabled: 'settings.varin.pluginSettings.subagents.status.disabled',
+  error: 'settings.varin.pluginSettings.subagents.status.error',
+  unavailable: 'settings.varin.pluginSettings.subagents.status.unavailable',
+  unconfigured: 'settings.varin.pluginSettings.subagents.status.unconfigured',
 };
 
 interface AgentsSidebarProps {
@@ -96,7 +96,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="ghost" size="icon" className="size-7">
                       <Icon name="add" className="size-4" />
-                      <span className="sr-only">{t('settings.piarium.agents.definition.createAgent')}</span>
+                      <span className="sr-only">{t('settings.varin.agents.definition.createAgent')}</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -108,7 +108,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                           onItemSelect?.();
                         }}
                       >
-                        {t('settings.piarium.agents.definition.createAgent')}
+                        {t('settings.varin.agents.definition.createAgent')}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -122,8 +122,8 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
               <Input
                 value={state.query}
                 onChange={(event) => setAgentsCatalogQuery(event.target.value)}
-                placeholder={t('settings.piarium.agents.search.placeholder')}
-                aria-label={t('settings.piarium.agents.search.placeholder')}
+                placeholder={t('settings.varin.agents.search.placeholder')}
+                aria-label={t('settings.varin.agents.search.placeholder')}
                 className="h-8 pl-8"
               />
             </div>
@@ -136,25 +136,25 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                       {filterCount}
                     </span>
                   ) : null}
-                  <span className="sr-only">{t('settings.piarium.agents.filters.allProviders')}</span>
+                  <span className="sr-only">{t('settings.varin.agents.filters.allProviders')}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
-                <DropdownMenuLabel>{t('settings.piarium.agents.detail.provider')}</DropdownMenuLabel>
+                <DropdownMenuLabel>{t('settings.varin.agents.detail.provider')}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={state.providerFilter} onValueChange={setAgentsCatalogProviderFilter}>
-                  <DropdownMenuRadioItem value="all">{t('settings.piarium.agents.filters.allProviders')}</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="all">{t('settings.varin.agents.filters.allProviders')}</DropdownMenuRadioItem>
                   {state.catalog.providers.map((provider) => (
                     <DropdownMenuRadioItem key={provider.id} value={provider.id}>{provider.label}</DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t('settings.piarium.pluginSettings.subagents.definition.status')}</DropdownMenuLabel>
+                <DropdownMenuLabel>{t('settings.varin.pluginSettings.subagents.definition.status')}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={state.statusFilter} onValueChange={(value) => setAgentsCatalogStatusFilter(value as AgentStatusFilter)}>
                   {STATUS_FILTERS.map((status) => (
                     <DropdownMenuRadioItem key={status} value={status}>
                       {status === 'all'
-                        ? t('settings.piarium.agents.filters.allStatuses')
-                        : t(STATUS_KEYS[status] ?? 'settings.piarium.pluginSettings.field.unsupportedValue')}
+                        ? t('settings.varin.agents.filters.allStatuses')
+                        : t(STATUS_KEYS[status] ?? 'settings.varin.pluginSettings.field.unsupportedValue')}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -170,7 +170,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
           <SettingsSidebarItem
             key={agent.id}
             title={agent.name}
-            metadata={`${provider?.label ?? agent.providerId} · ${t(AGENT_KIND_LABEL_KEYS[agent.kind] ?? 'settings.piarium.pluginSettings.field.unsupportedValue')}`}
+            metadata={`${provider?.label ?? agent.providerId} · ${t(AGENT_KIND_LABEL_KEYS[agent.kind] ?? 'settings.varin.pluginSettings.field.unsupportedValue')}`}
             selected={agent.id === selectedId}
             onSelect={() => {
               selectAgentsCatalogAgent(agent.id);
@@ -184,8 +184,8 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
           {state.loading
             ? <Icon name="loader-4" className="mx-auto size-5 animate-spin" />
             : state.error ?? (state.catalog.agents.length === 0
-              ? t('settings.piarium.agents.empty.title')
-              : t('settings.piarium.agents.catalog.noMatches'))}
+              ? t('settings.varin.agents.empty.title')
+              : t('settings.varin.agents.catalog.noMatches'))}
         </div>
       )}
     </SettingsSidebarLayout>

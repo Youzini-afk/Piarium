@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@piarium/protocol';
+import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@varin/protocol';
 import {
   Select,
   SelectContent,
@@ -11,11 +11,11 @@ import {
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { MultiRunAgentSelection } from '@/types/multirun';
 
-const DIRECT_PI_VALUE = '__piarium_direct__';
+const DIRECT_PI_VALUE = '__varin_direct__';
 
 const EMPTY_CATALOG: PiAgentCatalogSnapshot = {
   agents: [],

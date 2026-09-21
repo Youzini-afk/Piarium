@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ProviderConfigInput } from "@piarium/protocol";
+import type { ProviderConfigInput } from "@varin/protocol";
 import { ProviderConfigurationManager } from "../src/provider-configuration.js";
 
 function config(
@@ -32,7 +32,7 @@ function config(
 
 describe("ProviderConfigurationManager", () => {
   it("writes native Pi models.json while preserving comments and configured keys", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-config-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-config-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await mkdir(agentDir, { recursive: true });
@@ -46,7 +46,7 @@ describe("ProviderConfigurationManager", () => {
       "name": "Old name",
       "baseUrl": "https://old.example.test/v1",
       "api": "openai-completions",
-      "apiKey": "$PIARIUM_TEST_KEY",
+      "apiKey": "$VARIN_TEST_KEY",
       "models": []
     }
   }
@@ -67,8 +67,8 @@ describe("ProviderConfigurationManager", () => {
       assert.equal(details.locations.user.exists, true);
       const content = await readFile(join(agentDir, "models.json"), "utf8");
       assert.match(content, /Keep this operator note/);
-      assert.match(content, /\$PIARIUM_TEST_KEY/);
-      assert.doesNotMatch(JSON.stringify(details), /PIARIUM_TEST_KEY/);
+      assert.match(content, /\$VARIN_TEST_KEY/);
+      assert.doesNotMatch(JSON.stringify(details), /VARIN_TEST_KEY/);
       assert.equal(runtime.getModel("local", "local-model")?.input.includes("image"), true);
     } finally {
       await rm(root, { force: true, recursive: true });
@@ -76,7 +76,7 @@ describe("ProviderConfigurationManager", () => {
   });
 
   it("layers project and explicit custom Pi configurations over the user catalog", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-layers-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-layers-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const customPath = join(root, "operator", "models.json");
@@ -163,13 +163,13 @@ describe("ProviderConfigurationManager", () => {
   });
 
   it("replaces editable fields without deleting native credentials or unknown keys", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-replace-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-replace-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await mkdir(agentDir, { recursive: true });
     await mkdir(cwd, { recursive: true });
     await writeFile(join(agentDir, "models.json"), `{
-  // Keep the native document and fields Piarium does not own.
+  // Keep the native document and fields Varin does not own.
   "providers": {
     "editable": {
       "name": "Remove me",
@@ -216,7 +216,7 @@ describe("ProviderConfigurationManager", () => {
   });
 
   it("does not read or mutate project providers until the project is trusted", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-trust-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-trust-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await mkdir(agentDir, { recursive: true });

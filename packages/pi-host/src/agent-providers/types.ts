@@ -5,7 +5,7 @@ import type {
   PiAgentDiagnostic,
   PiAgentProviderActionResult,
   PiAgentProviderDescriptor,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export interface AgentProviderContext {
   agentDir: string;

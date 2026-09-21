@@ -89,7 +89,7 @@ describe("evaluateGate", () => {
     expect(evaluateGate("bash", { command: "rm" }, policy).decision).toBe("ask");
   });
 
-  it("unknown tools ask because Piarium is the sole permission authority", () => {
+  it("unknown tools ask because Varin is the sole permission authority", () => {
     const policy: PermissionPolicy = { mode: "normal", rules: defaultRules("normal") };
     expect(evaluateGate("unknown_tool", {}, policy).decision).toBe("ask");
   });

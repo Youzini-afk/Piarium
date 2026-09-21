@@ -5,7 +5,7 @@ import {
   RiCloseLine,
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
-import type { GitMergeInProgress, GitRebaseInProgress } from '@piarium/application-client';
+import type { GitMergeInProgress, GitRebaseInProgress } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 
 interface InProgressOperationBannerProps {

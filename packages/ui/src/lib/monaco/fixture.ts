@@ -1,7 +1,7 @@
 import type { Theme } from '@/types/theme';
 import { markMonacoPerformance } from './performance';
 import { loadMonacoRuntime } from './runtime';
-import { registerPiariumMonacoTheme } from './theme';
+import { registerVarinMonacoTheme } from './theme';
 
 export type MonacoSmokeFixture = {
   dispose(): void;
@@ -44,7 +44,7 @@ export const mountMonacoSmokeFixture = async (
   theme: Theme,
 ): Promise<MonacoSmokeFixture> => {
   const monaco = await loadMonacoRuntime();
-  const themeName = registerPiariumMonacoTheme(monaco, theme);
+  const themeName = registerVarinMonacoTheme(monaco, theme);
   const resources: Array<{ dispose(): void }> = [];
   let disposed = false;
   const dispose = (): void => {
@@ -65,13 +65,13 @@ export const mountMonacoSmokeFixture = async (
     const original = monaco.editor.createModel(
       'export const value = 1;\n',
       'plaintext',
-      monaco.Uri.parse('piarium-fixture://phase-8/original'),
+      monaco.Uri.parse('varin-fixture://phase-8/original'),
     );
     resources.push(original);
     const modified = monaco.editor.createModel(
       'export const value = 2;\n',
       'plaintext',
-      monaco.Uri.parse('piarium-fixture://phase-8/modified'),
+      monaco.Uri.parse('varin-fixture://phase-8/modified'),
     );
     resources.push(modified);
     const diffEditor = monaco.editor.createDiffEditor(container, {
@@ -126,9 +126,9 @@ export const measureMonacoEditorPerformance = async (
   const runtimeStartedAt = performance.now();
   const monaco = await loadMonacoRuntime();
   const runtimeReadyMs = performance.now() - runtimeStartedAt;
-  const themeName = registerPiariumMonacoTheme(monaco, theme);
+  const themeName = registerVarinMonacoTheme(monaco, theme);
   const baselineModels = new Set(monaco.editor.getModels());
-  const modelUri = monaco.Uri.parse('piarium-fixture://phase-8/large-file');
+  const modelUri = monaco.Uri.parse('varin-fixture://phase-8/large-file');
   let disposedModelCount = 0;
   let remainingFixtureModelCount = 0;
   const modelStartedAt = performance.now();
@@ -156,7 +156,7 @@ export const measureMonacoEditorPerformance = async (
       await coldEditor.renderAsync();
       coldFirstPaintMs = performance.now() - coldPaintStartedAt;
       const coldEditStartedAt = performance.now();
-      coldEditor.executeEdits('piarium.phase-8.large-file.cold', [{
+      coldEditor.executeEdits('varin.phase-8.large-file.cold', [{
         range: new monaco.Range(1, 1, 1, 1),
         text: '// cold edit\n',
       }]);
@@ -179,7 +179,7 @@ export const measureMonacoEditorPerformance = async (
       await warmEditor.renderAsync();
       warmFirstPaintMs = performance.now() - warmPaintStartedAt;
       const warmEditStartedAt = performance.now();
-      warmEditor.executeEdits('piarium.phase-8.large-file.warm', [{
+      warmEditor.executeEdits('varin.phase-8.large-file.warm', [{
         range: new monaco.Range(1, 1, 1, 1),
         text: '// warm edit\n',
       }]);

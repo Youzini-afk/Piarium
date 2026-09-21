@@ -14,7 +14,7 @@ import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.j
 import { canonicalizePathIdentity, isPathWithinRoot } from "../workspace/path-safety.js";
 
 const MANAGED_EXPERIMENTS_DIRECTORY = path.join("managed", "experiments");
-const CAPTURE_EXCLUDED_DIRECTORIES = [".git", ".piarium"] as const;
+const CAPTURE_EXCLUDED_DIRECTORIES = [".git", ".varin"] as const;
 
 export interface ExperimentWorkspaceCaller {
   /** Workspace that owns the durable experiment/spec facts and source branch. */
@@ -47,7 +47,7 @@ export interface ExperimentInputSnapshot {
   inventoryFingerprint: string;
   /** The source file authority does not apply Git ignore rules. */
   captureSemantics: {
-    excludedDirectories: readonly [".git", ".piarium"];
+    excludedDirectories: readonly [".git", ".varin"];
     gitignore: "not-applied";
     ignoredFilesIncluded: true;
   };

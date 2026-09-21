@@ -21,7 +21,7 @@ import {
   type HarnessRerankSettings,
   type HarnessSettingsInput,
   type HarnessVectorSpaceBinding,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
 import { requestOpenAICompatibleEmbeddings } from "./openai-embeddings.js";

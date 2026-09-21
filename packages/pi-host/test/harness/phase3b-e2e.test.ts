@@ -18,7 +18,7 @@ import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createBashTool } from "../../src/harness/bash-tool.js";
 import { createGrepTool } from "../../src/harness/grep-tool.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "../../src/harness/permission-gate-extension.js";
-import { evaluateGate, defaultRules, type PermissionPolicy } from "@piarium/protocol";
+import { evaluateGate, defaultRules, type PermissionPolicy } from "@varin/protocol";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3b-e2e-session";

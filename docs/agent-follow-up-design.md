@@ -1,4 +1,4 @@
-# Piarium 会话等待、触发与续接设计
+# Varin 会话等待、触发与续接设计
 
 Status: Stage W delivered through D-311: durable composite/source observations, ordinary-shell observation, unified delivery, recovery and calendar management are wired
 
@@ -32,7 +32,7 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 | --- | --- | --- |
 | 项目定时任务、daily/weekly/once/cron、队列和计时器 | [runtime.ts](../packages/web/application-host/lib/scheduled-tasks/runtime.ts) | 已按任务时区、真实终态、准入、missed slot 和启动/停止 generation 收口；跨进程文件 CAS 不作保证 |
 | 新会话、模型/思考选择、prompt/命令/Goal 启动 | [pi-executor.ts](../packages/web/application-host/lib/scheduled-tasks/pi-executor.ts) | 每次新建会话；普通 prompt 与 slash-command Goal 均等待真实终态 |
-| GUI/CLI/Markdown 任务定义 | [scheduled-tasks 模块](../packages/web/application-host/lib/scheduled-tasks/DOCUMENTATION.md) | Agent 管理接到同一服务；Piarium 内 loop 写者串行 CAS，外部编辑器仍按文件系统事实处理 |
+| GUI/CLI/Markdown 任务定义 | [scheduled-tasks 模块](../packages/web/application-host/lib/scheduled-tasks/DOCUMENTATION.md) | Agent 管理接到同一服务；Varin 内 loop 写者串行 CAS，外部编辑器仍按文件系统事实处理 |
 | Agent prompt 的接受边界 | [session-host.ts](../packages/pi-host/src/session-host.ts) | accepted 代表已开始运行，后续结果必须由事件/真实状态收集 |
 | 后台命令与事件等待 | [Harness 5.9](agent-harness.md#59-并发) | 可在当前工作中等待/读结果，但不等于持久登记后自动恢复已空闲的会话 |
 | Goal 自动续做 | [pi-session-automation 模块](../packages/web/application-host/lib/pi-session-automation/DOCUMENTATION.md) | 需要识别明确等待，避免 settled 后继续审计/唤醒一个正在等外部条件的 Agent |

@@ -10,11 +10,11 @@ import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeExtraHeadersSync } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeExtraHeadersSync } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import { dismissInitialSplash } from '@/lib/splash';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
@@ -41,13 +41,13 @@ const STATUS_CHECK_ENDPOINT = '/auth/session';
 // answers (200/401/429) are never retried.
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
-const TRUST_DEVICE_STORAGE_KEY = 'piarium.uiAuth.trustDevice';
+const TRUST_DEVICE_STORAGE_KEY = 'varin.uiAuth.trustDevice';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 
 const readLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__;
+  const injected = (window as typeof window & { __VARIN_LOCAL_ORIGIN__?: string }).__VARIN_LOCAL_ORIGIN__;
   return typeof injected === 'string' ? injected.trim() : '';
 };
 
@@ -131,7 +131,7 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
       password,
       trustDevice,
       issueClientToken,
-      clientLabel: 'Piarium Desktop',
+      clientLabel: 'Varin Desktop',
       ...desktopClientAuthMetadata(),
     }),
   });
@@ -150,7 +150,7 @@ const issueDesktopClientToken = async (): Promise<string> => {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ label: 'Piarium Desktop', ...desktopClientAuthMetadata() }),
+    body: JSON.stringify({ label: 'Varin Desktop', ...desktopClientAuthMetadata() }),
   }).catch(() => null);
   if (!response?.ok) {
     return '';
@@ -771,7 +771,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     try {
       const payload = await authenticateWithPasskey(trustDevice, {
         issueClientToken: shouldIssueDesktopClientToken(),
-        clientLabel: 'Piarium Desktop',
+        clientLabel: 'Varin Desktop',
         ...desktopClientAuthMetadata(),
       }) as { clientToken?: unknown } | null;
       const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()
@@ -902,7 +902,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
                 <div className="relative flex-1">
                   <RiLockLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
                   <Input
-                    id="piarium-ui-password"
+                    id="varin-ui-password"
                     ref={passwordInputRef}
                     type="password"
                     autoComplete="current-password"

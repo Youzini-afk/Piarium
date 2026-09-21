@@ -2,7 +2,7 @@ import React from 'react';
 import type {
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -179,12 +179,12 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
                 className="rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-interactive-hover/50"
               >
                 <span className="block typography-ui-label font-medium text-foreground">
-                  {t('settings.piarium.recovery.preference.both.label')}
+                  {t('settings.varin.recovery.preference.both.label')}
                 </span>
                 <span className="mt-1 block typography-meta text-muted-foreground">
                   {plan.conflicts.length > 0
                     ? t('chat.recoveryDialog.reviewRequired')
-                    : t('settings.piarium.recovery.preference.both.description')}
+                    : t('settings.varin.recovery.preference.both.description')}
                 </span>
               </button>
             ) : null}
@@ -194,10 +194,10 @@ export const PiRecoveryDialog: React.FC<PiRecoveryDialogProps> = ({
               className="rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-interactive-hover/50"
             >
               <span className="block typography-ui-label font-medium text-foreground">
-                {t('settings.piarium.recovery.preference.conversation.label')}
+                {t('settings.varin.recovery.preference.conversation.label')}
               </span>
               <span className="mt-1 block typography-meta text-muted-foreground">
-                {t('settings.piarium.recovery.preference.conversation.description')}
+                {t('settings.varin.recovery.preference.conversation.description')}
               </span>
             </button>
           </div>

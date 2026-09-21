@@ -1,8 +1,8 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
-# Contribuer à Piarium
+# Contribuer à Varin
 
-Merci de contribuer à l'amélioration de Piarium. Les contributions sont les bienvenues dans tous les domaines :
+Merci de contribuer à l'amélioration de Varin. Les contributions sont les bienvenues dans tous les domaines :
 limite d'exécution Pi, interfaces de bureau et distantes, intégrations d'extensions, documentation, tests,
 accessibilité et prise en charge des plateformes.
 
@@ -24,7 +24,7 @@ de langue afin que les lecteurs n'aient jamais besoin de revenir à l'index du d
 ## Avant de commencer
 
 - Lisez le [Code de conduite](CODE_OF_CONDUCT.fr.md).
-- Utilisez les [Issues GitHub](https://github.com/Youzini-afk/Piarium/issues) pour les bugs reproductibles, les
+- Utilisez les [Issues GitHub](https://github.com/Youzini-afk/Varin/issues) pour les bugs reproductibles, les
   propositions de fonctionnalités et les discussions techniques ciblées.
 - Envoyez les vulnérabilités via le processus privé décrit dans [SECURITY.md](../SECURITY.md). Ne publiez pas de
   détails d'exploitation dans une issue, une discussion, une pull request, un journal ou une capture d'écran.
@@ -35,17 +35,17 @@ de langue afin que les lecteurs n'aient jamais besoin de revenir à l'index du d
 
 ## Principes du projet qui influencent les contributions
 
-Piarium n'est pas un wrapper générique autour de plusieurs CLI d'agents de code. Il possède un domaine natif Pi
+Varin n'est pas un wrapper générique autour de plusieurs CLI d'agents de code. Il possède un domaine natif Pi
 unique et un seul contrat d'exécution préliminaire actuel.
 
 1. **Gardez Pi comme autorité.** Pi possède les sessions, les modèles, l'authentification, les paramètres, les
-   packages et le runtime des extensions. Projetez un contrat Piarium compatible JSON ; ne recopiez pas l'état de Pi
+   packages et le runtime des extensions. Projetez un contrat Varin compatible JSON ; ne recopiez pas l'état de Pi
    dans un schéma applicatif parallèle.
 2. **Préservez la propriété des plugins.** Intégrez les extensions via les commandes, événements, paramètres et ponts
    de capacités publics. N'analysez pas les bases de données privées et ne dupliquez pas les migrations de plugins
    simplement pour créer une interface graphique.
 3. **Évitez le sédiment de compatibilité.** Pendant le développement pré-1.0, toutes les surfaces du produit évoluent
-   ensemble. Supprimez les chemins OpenCode obsolètes et les anciens chemins Piarium dès que le remplacement est
+   ensemble. Supprimez les chemins OpenCode obsolètes et les anciens chemins Varin dès que le remplacement est
    accepté ; n'accumulez pas de couches de compatibilité de type protocole v13/v14 sans besoin réel de données
    persistées ou de client externe.
 4. **Appliquez les privilèges à la frontière de confiance.** Les renderers et les clients distants ne peuvent pas
@@ -74,14 +74,14 @@ Lisez [Architecture](../../docs/architecture.md), [Conception de l'interface gra
 ### Cloner et installer
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run check:pi
 ```
 
 `bun.lock` fait autorité. Ne changez pas de gestionnaire de packages et ne régénérez pas le lockfile, sauf si la
-modification de dépendance l'exige. Examinez attentivement les modifications des scripts de cycle de vie ; Piarium
+modification de dépendance l'exige. Examinez attentivement les modifications des scripts de cycle de vie ; Varin
 n'autorise intentionnellement à l'installation que les scripts requis.
 
 ## Surfaces de développement courantes
@@ -246,5 +246,5 @@ Vous pouvez également aider en :
 ## Licence
 
 En soumettant une contribution, vous acceptez qu'elle puisse être distribuée sous la
-[GNU Affero General Public License v3.0](../../LICENSE) de Piarium (`AGPL-3.0-only`) et que le matériel tiers importé
+[GNU Affero General Public License v3.0](../../LICENSE) de Varin (`AGPL-3.0-only`) et que le matériel tiers importé
 conserve les mentions requises par les [avis sur les composants tiers](../../THIRD_PARTY_NOTICES.md).

@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
+import { SurfaceExtensionRuntime } from "@varin/extension-surface";
 import {
-  createPiariumEditorMonacoClient,
+  createVarinEditorMonacoClient,
   defineEditorMount,
   defineSurfaceMount,
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
   resolveSurfaceExtensionModule,
-  type PiariumExtensionMigrationInput,
+  type VarinExtensionMigrationInput,
 } from "../src/index.js";
 import {
   runEditorExtensionConformance,
@@ -98,7 +98,7 @@ test("the typed optional Monaco client uses the same serializable service in man
         generation: 2,
         kind: "text" as const,
         languageId: "typescript",
-        providerId: "piarium.builtin.text",
+        providerId: "varin.builtin.text",
         resource: { resourceId: "src/main.ts", workspaceId: "workspace" },
         selection: null,
         viewId: "view-1",
@@ -113,33 +113,33 @@ test("the typed optional Monaco client uses the same serializable service in man
       state: { activeViewId: "view-1", revision: 2, views: [] },
     }),
   };
-  const managed = createPiariumEditorMonacoClient({
+  const managed = createVarinEditorMonacoClient({
     useService: () => service as never,
   });
   assert.equal((await managed.getActiveView()).status, "ready");
   const managedState = await managed.waitForState({ afterRevision: 1 });
   assert.equal(managedState.status, "ready");
   assert.equal(managedState.status === "ready" ? managedState.state.revision : null, 2);
-  assert.equal((await createPiariumEditorMonacoClient({ useService: () => undefined }).getActiveView()).status, "absent");
+  assert.equal((await createVarinEditorMonacoClient({ useService: () => undefined }).getActiveView()).status, "absent");
 
   let isolatedStatus = "missing";
   await runIsolatedExtensionConformance({
     activation: async (context) => {
-      const client = createPiariumEditorMonacoClient(context);
+      const client = createVarinEditorMonacoClient(context);
       isolatedStatus = (await client.getActiveView()).status;
       const isolatedState = await client.getState();
       assert.equal(isolatedState.status === "ready" ? isolatedState.state.revision : null, 1);
     },
     services: [{
-      descriptor: { id: "piarium.editor.monaco", version: 1 },
+      descriptor: { id: "varin.editor.monaco", version: 1 },
       implementation: service,
-      providerId: "piarium.builtin.text",
+      providerId: "varin.builtin.text",
     }],
   });
   assert.equal(isolatedStatus, "ready");
   await runIsolatedExtensionConformance({
     activation: async (context) => {
-      isolatedStatus = (await createPiariumEditorMonacoClient(context).getActiveView()).status;
+      isolatedStatus = (await createVarinEditorMonacoClient(context).getActiveView()).status;
     },
   });
   assert.equal(isolatedStatus, "absent");
@@ -151,7 +151,7 @@ test("module resolvers preserve extension-object method ownership", async () => 
     activate() {
       assert.equal((this as { value: string }).value, "host-owned");
     },
-    migrate(input: PiariumExtensionMigrationInput) {
+    migrate(input: VarinExtensionMigrationInput) {
       assert.equal((this as { value: string }).value, "host-owned");
       return input.data;
     },
@@ -214,8 +214,8 @@ test("defineSurfaceMount exposes the framework-neutral DOM lifecycle contract", 
 });
 
 test("workspace.documents capability helper forwards resource-scoped calls", async () => {
-  const { callWorkspaceDocuments, PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY } = await import("../src/index.js");
-  assert.equal(PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY, "workspace.documents");
+  const { callWorkspaceDocuments, VARIN_WORKSPACE_DOCUMENTS_CAPABILITY } = await import("../src/index.js");
+  assert.equal(VARIN_WORKSPACE_DOCUMENTS_CAPABILITY, "workspace.documents");
   const calls: Array<[string, string, unknown]> = [];
   const result = await callWorkspaceDocuments({
     call: async (capability, method, params) => {
@@ -235,11 +235,11 @@ test("workspace.search and workspace.language capability helpers forward host ca
   const {
     callWorkspaceLanguage,
     callWorkspaceSearch,
-    PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY,
-    PIARIUM_WORKSPACE_SEARCH_CAPABILITY,
+    VARIN_WORKSPACE_LANGUAGE_CAPABILITY,
+    VARIN_WORKSPACE_SEARCH_CAPABILITY,
   } = await import("../src/index.js");
-  assert.equal(PIARIUM_WORKSPACE_SEARCH_CAPABILITY, "workspace.search");
-  assert.equal(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, "workspace.language");
+  assert.equal(VARIN_WORKSPACE_SEARCH_CAPABILITY, "workspace.search");
+  assert.equal(VARIN_WORKSPACE_LANGUAGE_CAPABILITY, "workspace.language");
   const calls: Array<[string, string, unknown]> = [];
   const client = {
     call: async (capability: string, method: string, params: unknown) => {
@@ -262,13 +262,13 @@ test("typed document and language clients plus workbench mounts are public SDK c
     defineEditorMount,
     defineLanguageProvider,
     defineShellMount,
-    PIARIUM_WORKBENCH_CONTEXT_KEYS,
-    PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-    PIARIUM_WORKBENCH_SLOTS,
+    VARIN_WORKBENCH_CONTEXT_KEYS,
+    VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+    VARIN_WORKBENCH_SLOTS,
   } = await import("../src/index.js");
-  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
-  assert.equal(PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
-  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
+  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
+  assert.equal(VARIN_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
+  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
   const calls: Array<[string, string]> = [];
   const capabilities = {
     call: async (capability: string, method: string) => {
@@ -332,15 +332,15 @@ test("debug and test host helpers register through capabilities and unregister o
     callWorkspaceTasks,
     defineDebugAdapter,
     defineTestProvider,
-    PIARIUM_WORKBENCH_CONTEXT_KEYS,
-    PIARIUM_WORKSPACE_DEBUG_CAPABILITY,
-    PIARIUM_WORKSPACE_TASKS_CAPABILITY,
-    PIARIUM_WORKSPACE_TEST_CAPABILITY,
+    VARIN_WORKBENCH_CONTEXT_KEYS,
+    VARIN_WORKSPACE_DEBUG_CAPABILITY,
+    VARIN_WORKSPACE_TASKS_CAPABILITY,
+    VARIN_WORKSPACE_TEST_CAPABILITY,
   } = await import("../src/index.js");
-  assert.equal(PIARIUM_WORKSPACE_DEBUG_CAPABILITY, "workspace.debug");
-  assert.equal(PIARIUM_WORKSPACE_TEST_CAPABILITY, "workspace.test");
-  assert.equal(PIARIUM_WORKSPACE_TASKS_CAPABILITY, "workspace.tasks");
-  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.debugIsPaused, "debugIsPaused");
+  assert.equal(VARIN_WORKSPACE_DEBUG_CAPABILITY, "workspace.debug");
+  assert.equal(VARIN_WORKSPACE_TEST_CAPABILITY, "workspace.test");
+  assert.equal(VARIN_WORKSPACE_TASKS_CAPABILITY, "workspace.tasks");
+  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.debugIsPaused, "debugIsPaused");
   const calls: Array<[string, string]> = [];
   const capabilities = {
     call: async (capability: string, method: string) => {

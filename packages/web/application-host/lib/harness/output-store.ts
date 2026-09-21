@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { sliceUtf8ByBytes, type OutputRef, type OutputSlice } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type OutputRef, type OutputSlice } from "@varin/protocol";
 
 interface StoredOutput {
   bytes: Buffer;

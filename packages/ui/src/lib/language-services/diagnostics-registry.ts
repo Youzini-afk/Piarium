@@ -1,4 +1,4 @@
-import type { PiariumLanguageDiagnostic } from '@piarium/application-client';
+import type { VarinLanguageDiagnostic } from '@varin/application-client';
 import { setWorkbenchProblems } from '@/lib/workbench/editors/panels';
 
 const recordKey = (
@@ -12,16 +12,16 @@ const recordKey = (
 );
 
 const listeners = new Set<() => void>();
-const byKey = new Map<string, PiariumLanguageDiagnostic[]>();
-const byResource = new Map<string, readonly PiariumLanguageDiagnostic[]>();
-const EMPTY_DIAGNOSTICS: readonly PiariumLanguageDiagnostic[] = [];
+const byKey = new Map<string, VarinLanguageDiagnostic[]>();
+const byResource = new Map<string, readonly VarinLanguageDiagnostic[]>();
+const EMPTY_DIAGNOSTICS: readonly VarinLanguageDiagnostic[] = [];
 
 const resourceKey = (workspaceId: string, resourceId: string): string => (
   `${workspaceId}\0${resourceId}`
 );
 
 const rebuildResourceSnapshot = (workspaceId: string, resourceId: string): void => {
-  const items: PiariumLanguageDiagnostic[] = [];
+  const items: VarinLanguageDiagnostic[] = [];
   const prefix = `${workspaceId}\0${resourceId}\0`;
   for (const [key, diagnostics] of byKey) {
     if (key.startsWith(prefix)) items.push(...diagnostics);
@@ -45,7 +45,7 @@ export const subscribeLanguageDiagnostics = (listener: () => void): (() => void)
 export const getLanguageDiagnosticsForResource = (
   workspaceId: string,
   resourceId: string,
-): readonly PiariumLanguageDiagnostic[] => (
+): readonly VarinLanguageDiagnostic[] => (
   byResource.get(resourceKey(workspaceId, resourceId)) ?? EMPTY_DIAGNOSTICS
 );
 
@@ -84,7 +84,7 @@ export const replaceLanguageDiagnostics = (
   workspaceId: string,
   languageId: string,
   resourceId: string,
-  items: PiariumLanguageDiagnostic[],
+  items: VarinLanguageDiagnostic[],
   acceptedVersion: (resourceId: string, documentVersion: number) => boolean,
   owner?: { providerId: string; generation: number },
 ): void => {

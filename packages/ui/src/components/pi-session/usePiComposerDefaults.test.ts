@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiSettingsSnapshot } from '@piarium/protocol';
+import type { PiSettingsSnapshot } from '@varin/protocol';
 import { resolvePiComposerDefaults } from './usePiComposerDefaults';
 
 const snapshot = (global: PiSettingsSnapshot['global'], project: PiSettingsSnapshot['project']): PiSettingsSnapshot => ({
@@ -21,7 +21,7 @@ describe('Pi composer defaults', () => {
     });
   });
 
-  test('Piarium project metadata wins only for the model', () => {
+  test('Varin project metadata wins only for the model', () => {
     expect(resolvePiComposerDefaults(snapshot(
       { defaultModel: 'global-model', defaultProvider: 'global', defaultThinkingLevel: 'medium' },
       {},

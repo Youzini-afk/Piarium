@@ -43,7 +43,7 @@ import {
 import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -94,7 +94,7 @@ const toNavigationUrl = (rawUrl: string): string => {
 
 const getLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  return window.__PIARIUM_LOCAL_ORIGIN__ || window.location.origin;
+  return window.__VARIN_LOCAL_ORIGIN__ || window.location.origin;
 };
 
 const getLocalClientToken = async (): Promise<string> => {
@@ -295,7 +295,7 @@ const resolveCurrentHost = (hosts: DesktopHost[]) => {
     return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
   }
 
-  if (currentHref.startsWith('piarium-ui://')) {
+  if (currentHref.startsWith('varin-ui://')) {
     return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
   }
 
@@ -1433,7 +1433,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
             type="button"
             onClick={() => setOpen(true)}
             aria-label={t('desktopHostSwitcher.actions.switchInstanceAria')}
-            data-piarium-host-switcher
+            data-varin-host-switcher
             className={cn(headerIconButtonClass, 'relative w-auto px-3')}
           >
             <RiServerLine className="h-5 w-5" />
@@ -1520,7 +1520,7 @@ export function DesktopHostSwitcherInline() {
         type="button"
         variant="ghost"
         size="sm"
-        data-piarium-host-switcher
+        data-varin-host-switcher
         className="w-full justify-center"
         onClick={() => setOpen(true)}
       >

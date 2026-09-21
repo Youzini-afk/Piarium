@@ -1,4 +1,4 @@
-import type { PiariumApplicationSurface } from "../src/types.js";
+import type { VarinApplicationSurface } from "../src/types.js";
 
 export interface ManifestFixture {
   readonly label: string;
@@ -8,13 +8,13 @@ export interface ManifestFixture {
   readonly compatible: boolean;
 }
 
-const surface = (s: PiariumApplicationSurface): PiariumApplicationSurface => s;
+const surface = (s: VarinApplicationSurface): VarinApplicationSurface => s;
 
 const baseManifest = () => ({
   schemaVersion: 1,
   id: "dev.example.fixtures",
   version: "1.0.0",
-  engines: { piarium: ">=0.2.0" },
+  engines: { varin: ">=0.2.0" },
 });
 
 const baseContribution = () => ({
@@ -191,7 +191,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
     label: "invalid engine range",
     manifest: {
       ...baseManifest(),
-      engines: { piarium: "not-a-range" },
+      engines: { varin: "not-a-range" },
       contributions: [baseContribution()],
     },
     schemaValid: false, // semver-range format now uses real semver.validRange
@@ -275,7 +275,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "shell",
         contractVersion: 1,
         data: {
-          contract: "piarium-workbench-shell/v1",
+          contract: "varin-workbench-shell/v1",
           seams: {
             web: { replacementTargets: ["workbench.editor"], slots: [] },
           },
@@ -297,7 +297,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "shell",
         contractVersion: 1,
         data: {
-          contract: "piarium-workbench-shell/v1",
+          contract: "varin-workbench-shell/v1",
           seams: {},
         },
         supports: ["web"],
@@ -317,7 +317,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "shell",
         contractVersion: 1,
         data: {
-          contract: "piarium-workbench-shell/v1",
+          contract: "varin-workbench-shell/v1",
           seams: {
             web: { replacementTargets: [], slots: [], extraField: true },
           },
@@ -340,7 +340,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "transition-scene",
         contractVersion: 1,
         data: {
-          contract: "piarium-transition-scene/v1",
+          contract: "varin-transition-scene/v1",
           scenes: ["workbench-profile"],
           durations: {
             "workbench-profile": {
@@ -446,7 +446,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "shell",
         contractVersion: 1,
         data: {
-          contract: "piarium-workbench-shell/v1",
+          contract: "varin-workbench-shell/v1",
           seams: {
             web: { replacementTargets: ["workbench.editor"], slots: [] },
           },
@@ -469,7 +469,7 @@ export const manifestFixtures: readonly ManifestFixture[] = [
         kind: "transition-scene",
         contractVersion: 1,
         data: {
-          contract: "piarium-transition-scene/v1",
+          contract: "varin-transition-scene/v1",
           scenes: ["workbench-profile"],
           durations: {
             "workbench-profile": {

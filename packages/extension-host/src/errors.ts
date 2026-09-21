@@ -19,7 +19,7 @@ export class ExtensionCatalogRevisionConflictError extends Error {
   readonly expectedRevision: number;
 
   constructor(expectedRevision: number, actualRevision: number) {
-    super(`Piarium extension catalog changed: expected revision ${expectedRevision}, actual revision ${actualRevision}`);
+    super(`Varin extension catalog changed: expected revision ${expectedRevision}, actual revision ${actualRevision}`);
     this.name = "ExtensionCatalogRevisionConflictError";
     this.actualRevision = actualRevision;
     this.expectedRevision = expectedRevision;
@@ -50,7 +50,7 @@ export class ExtensionStorageRevisionConflictError extends Error {
   readonly expectedRevision: number;
 
   constructor(expectedRevision: number, actualRevision: number) {
-    super(`Piarium extension storage changed: expected revision ${expectedRevision}, actual revision ${actualRevision}`);
+    super(`Varin extension storage changed: expected revision ${expectedRevision}, actual revision ${actualRevision}`);
     this.name = "ExtensionStorageRevisionConflictError";
     this.actualRevision = actualRevision;
     this.expectedRevision = expectedRevision;

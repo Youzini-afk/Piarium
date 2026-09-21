@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { PiSettingsSnapshot } from "@piarium/protocol";
+import type { PiSettingsSnapshot } from "@varin/protocol";
 import { resolveThreadWorktreeSettings } from "./thread-worktree-settings.js";
 
 const snapshot = (projectTrusted: boolean): PiSettingsSnapshot => ({

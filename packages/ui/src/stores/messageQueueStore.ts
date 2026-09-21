@@ -3,7 +3,7 @@ import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 
@@ -201,7 +201,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 },
             }),
             {
-                name: 'piarium.messageQueue.v1',
+                name: 'varin.messageQueue.v1',
                 storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
@@ -210,7 +210,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             }
         ),
         {
-            name: 'piarium-message-queue',
+            name: 'varin-message-queue',
         }
     )
 );

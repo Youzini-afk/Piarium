@@ -5,7 +5,7 @@ import type osModule from 'node:os';
 import type pathModule from 'node:path';
 import type { Express, Request, Response } from 'express';
 import type { DocumentAuthority } from '../documents/authority.js';
-import type { PiariumAuthenticatedClient } from '../client-auth/request-context.js';
+import type { VarinAuthenticatedClient } from '../client-auth/request-context.js';
 
 const FULL_CONTROL_PROFILES = new Set(['full-control', 'external-agent', 'rescue']);
 const MAX_READ_BYTES = 10 * 1024 * 1024;
@@ -57,7 +57,7 @@ interface ExternalRootRuntimeOptions {
   fsPromises: FsPromises;
   os: typeof osModule;
   path: PathModule;
-  piariumDataDir: string;
+  varinDataDir: string;
   process: NodeJS.Process;
   resolveProjectDirectory?: (req: Request) => Promise<{ directory?: string | null }>;
 }
@@ -65,7 +65,7 @@ interface ExternalRootRuntimeOptions {
 interface ExternalAccessDependencies extends ExternalRootRuntimeOptions {
   buildAugmentedPath?: (basePath: string) => string;
   documents?: Pick<DocumentAuthority, 'runMutationForScope'>;
-  piariumVersion: string;
+  varinVersion: string;
   remoteClientAuthRuntime?: { listAuditEvents(input: { limit?: unknown }): Promise<unknown[]> };
   runtimeName?: string;
   serverStartedAt?: string;
@@ -236,16 +236,16 @@ const uniqueRoots = (roots: ExternalRootDefinition[], pathModule: PathModule): E
   return result;
 };
 
-const getClient = (req: Request): PiariumAuthenticatedClient | null => req.piariumAuth?.client || null;
+const getClient = (req: Request): VarinAuthenticatedClient | null => req.varinAuth?.client || null;
 
-const getClientCapabilities = (client: PiariumAuthenticatedClient | null): Set<string> => new Set(
+const getClientCapabilities = (client: VarinAuthenticatedClient | null): Set<string> => new Set(
   Array.isArray(client?.capabilities)
     ? client.capabilities.filter((entry) => typeof entry === 'string')
     : []
 );
 
 const hasCapability = (req: Request, capability: string): boolean => {
-  const context = req.piariumAuth;
+  const context = req.varinAuth;
   if (context?.type === 'session') return true;
   if (context?.type !== 'client') return false;
   const client = getClient(req);
@@ -259,7 +259,7 @@ const hasCapability = (req: Request, capability: string): boolean => {
 };
 
 const requireCapability = (req: Request, res: Response, capability: string): boolean => {
-  if (!req.piariumAuth) {
+  if (!req.varinAuth) {
     res.status(401).json({ error: 'Authentication required' });
     return false;
   }
@@ -292,13 +292,13 @@ export const createExternalAccessRootRuntime = ({
   os,
   process,
   __dirname,
-  piariumDataDir,
+  varinDataDir,
   resolveProjectDirectory,
   deploymentRoot,
 }: ExternalRootRuntimeOptions) => {
   const resolveRoots = async (req: Request): Promise<ExternalRootStatus[]> => {
-    const envDeploymentRoot = typeof process.env.PIARIUM_DEPLOYMENT_ROOT === 'string'
-      ? process.env.PIARIUM_DEPLOYMENT_ROOT.trim()
+    const envDeploymentRoot = typeof process.env.VARIN_DEPLOYMENT_ROOT === 'string'
+      ? process.env.VARIN_DEPLOYMENT_ROOT.trim()
       : '';
     const serverPackageRoot = path.resolve(__dirname, '..');
     const discoveredDeploymentRoot = deploymentRoot
@@ -309,18 +309,18 @@ export const createExternalAccessRootRuntime = ({
         startPaths: [process.cwd(), __dirname, serverPackageRoot],
       })
       || process.cwd();
-    const piAgentDir = typeof process.env.PIARIUM_AGENT_DIR === 'string' && process.env.PIARIUM_AGENT_DIR.trim()
-      ? process.env.PIARIUM_AGENT_DIR.trim()
+    const piAgentDir = typeof process.env.VARIN_AGENT_DIR === 'string' && process.env.VARIN_AGENT_DIR.trim()
+      ? process.env.VARIN_AGENT_DIR.trim()
       : typeof process.env.PI_CODING_AGENT_DIR === 'string' && process.env.PI_CODING_AGENT_DIR.trim()
         ? process.env.PI_CODING_AGENT_DIR.trim()
         : path.join(os.homedir(), '.pi', 'agent');
 
     const roots: ExternalRootDefinition[] = [
-      { id: 'deployment', label: 'Piarium deployment', path: discoveredDeploymentRoot, source: 'deployment' },
-      { id: 'server-package', label: 'Piarium web package', path: serverPackageRoot, source: 'server-package' },
+      { id: 'deployment', label: 'Varin deployment', path: discoveredDeploymentRoot, source: 'deployment' },
+      { id: 'server-package', label: 'Varin web package', path: serverPackageRoot, source: 'server-package' },
       { id: 'process-cwd', label: 'Server working directory', path: process.cwd(), source: 'process' },
-      { id: 'data', label: 'Piarium data', path: piariumDataDir, source: 'data' },
-      { id: 'logs', label: 'Piarium logs', path: path.join(piariumDataDir, 'logs'), source: 'logs' },
+      { id: 'data', label: 'Varin data', path: varinDataDir, source: 'data' },
+      { id: 'logs', label: 'Varin logs', path: path.join(varinDataDir, 'logs'), source: 'logs' },
       { id: 'pi-agent', label: 'Pi agent configuration', path: piAgentDir, source: 'pi-agent' },
     ];
 
@@ -568,8 +568,8 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
     process,
     spawn,
     buildAugmentedPath,
-    piariumDataDir,
-    piariumVersion,
+    varinDataDir,
+    varinVersion,
     runtimeName,
     serverStartedAt,
     remoteClientAuthRuntime,
@@ -585,7 +585,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
     os,
     process,
     __dirname,
-    piariumDataDir,
+    varinDataDir,
     ...(resolveProjectDirectory ? { resolveProjectDirectory } : {}),
     ...(deploymentRoot ? { deploymentRoot } : {}),
   });
@@ -613,7 +613,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
   };
 
   app.get('/api/external/me', (req, res) => {
-    const context = req.piariumAuth || null;
+    const context = req.varinAuth || null;
     if (!context) return res.status(401).json({ error: 'Authentication required' });
     return res.json({
       type: context.type,
@@ -623,7 +623,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
   });
 
   app.get('/api/external/capabilities', (req, res) => {
-    const context = req.piariumAuth || null;
+    const context = req.varinAuth || null;
     if (!context) return res.status(401).json({ error: 'Authentication required' });
     const client = context.client || null;
     res.json({
@@ -654,14 +654,14 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
     if (!requireCapability(req, res, 'instance:read')) return;
     try {
       res.json({
-        piariumVersion,
+        varinVersion,
         runtime: runtimeName || 'web',
         startedAt: serverStartedAt || null,
         pid: process.pid,
         platform: process.platform,
         arch: process.arch,
         cwd: process.cwd(),
-        dataDir: piariumDataDir,
+        dataDir: varinDataDir,
         node: process.version,
         uptimeSeconds: Math.round(process.uptime()),
       });

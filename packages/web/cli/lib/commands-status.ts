@@ -97,7 +97,7 @@ async function statusCommand(options: CliOptions = {}): Promise<void> {
     return;
   }
 
-  clackIntro('Piarium Status');
+  clackIntro('Varin Status');
 
   if (runningCount === 0) {
     logStatus('warning', 'stopped');

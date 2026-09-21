@@ -22,8 +22,8 @@ import type { WalkthroughSource } from './types.js';
 
 const TEMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-home-2607-'));
 process.env.HOME = TEMP_HOME;
-const DATA_DIR = path.join(TEMP_HOME, '.config', 'piarium');
-process.env.PIARIUM_DATA_DIR = DATA_DIR;
+const DATA_DIR = path.join(TEMP_HOME, '.config', 'varin');
+process.env.VARIN_DATA_DIR = DATA_DIR;
 
 const CATALOG = {
   deepseek: {

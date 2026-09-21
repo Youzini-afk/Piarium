@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";

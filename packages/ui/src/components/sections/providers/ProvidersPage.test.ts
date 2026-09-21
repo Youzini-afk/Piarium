@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProviderConfigDetails } from '@piarium/protocol';
+import type { ProviderConfigDetails } from '@varin/protocol';
 import {
   buildProviderSourcesFromDetails,
   canEditProviderFromDetails,

@@ -1,119 +1,119 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  parsePiariumContextExpression,
-  evaluatePiariumContextExpression,
-  collectPiariumContextExpressionKeys,
-  PiariumContextExpressionError,
-  parsePiariumExtensionManifest,
-  PiariumExtensionContractError,
+  parseVarinContextExpression,
+  evaluateVarinContextExpression,
+  collectVarinContextExpressionKeys,
+  VarinContextExpressionError,
+  parseVarinExtensionManifest,
+  VarinExtensionContractError,
 } from "../src/index.js";
 
 const ctx = (entries: Record<string, string | number | boolean>) => new Map(Object.entries(entries));
 
-test("parsePiariumContextExpression parses defined", () => {
-  const expr = parsePiariumContextExpression({ op: "defined", key: "editorIsOpen" });
+test("parseVarinContextExpression parses defined", () => {
+  const expr = parseVarinContextExpression({ op: "defined", key: "editorIsOpen" });
   assert.deepEqual(expr, { op: "defined", key: "editorIsOpen" });
 });
 
-test("parsePiariumContextExpression parses equals", () => {
-  const expr = parsePiariumContextExpression({ op: "equals", key: "editorLanguage", value: "markdown" });
+test("parseVarinContextExpression parses equals", () => {
+  const expr = parseVarinContextExpression({ op: "equals", key: "editorLanguage", value: "markdown" });
   assert.deepEqual(expr, { op: "equals", key: "editorLanguage", value: "markdown" });
 });
 
-test("parsePiariumContextExpression parses not", () => {
-  const expr = parsePiariumContextExpression({ op: "not", expression: { op: "defined", key: "editorIsDirty" } });
+test("parseVarinContextExpression parses not", () => {
+  const expr = parseVarinContextExpression({ op: "not", expression: { op: "defined", key: "editorIsDirty" } });
   assert.deepEqual(expr, { op: "not", expression: { op: "defined", key: "editorIsDirty" } });
 });
 
-test("parsePiariumContextExpression parses all", () => {
-  const expr = parsePiariumContextExpression({ op: "all", expressions: [] });
+test("parseVarinContextExpression parses all", () => {
+  const expr = parseVarinContextExpression({ op: "all", expressions: [] });
   assert.deepEqual(expr, { op: "all", expressions: [] });
 });
 
-test("parsePiariumContextExpression parses any", () => {
-  const expr = parsePiariumContextExpression({ op: "any", expressions: [{ op: "defined", key: "a" }] });
+test("parseVarinContextExpression parses any", () => {
+  const expr = parseVarinContextExpression({ op: "any", expressions: [{ op: "defined", key: "a" }] });
   assert.deepEqual(expr, { op: "any", expressions: [{ op: "defined", key: "a" }] });
 });
 
-test("parsePiariumContextExpression rejects invalid op", () => {
+test("parseVarinContextExpression rejects invalid op", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "invalid", key: "a" }),
-    PiariumContextExpressionError,
+    () => parseVarinContextExpression({ op: "invalid", key: "a" }),
+    VarinContextExpressionError,
   );
 });
 
-test("parsePiariumContextExpression rejects missing key", () => {
+test("parseVarinContextExpression rejects missing key", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "defined" }),
-    PiariumContextExpressionError,
+    () => parseVarinContextExpression({ op: "defined" }),
+    VarinContextExpressionError,
   );
 });
 
-test("parsePiariumContextExpression rejects non-object", () => {
+test("parseVarinContextExpression rejects non-object", () => {
   assert.throws(
-    () => parsePiariumContextExpression("string"),
-    PiariumContextExpressionError,
+    () => parseVarinContextExpression("string"),
+    VarinContextExpressionError,
   );
 });
 
-test("evaluatePiariumContextExpression: defined returns true when key exists", () => {
-  const expr = parsePiariumContextExpression({ op: "defined", key: "editorIsOpen" });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ editorIsOpen: true })), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), false);
+test("evaluateVarinContextExpression: defined returns true when key exists", () => {
+  const expr = parseVarinContextExpression({ op: "defined", key: "editorIsOpen" });
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ editorIsOpen: true })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), false);
 });
 
-test("evaluatePiariumContextExpression: equals compares strictly", () => {
-  const expr = parsePiariumContextExpression({ op: "equals", key: "editorLanguage", value: "markdown" });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ editorLanguage: "markdown" })), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ editorLanguage: "typescript" })), false);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), false);
+test("evaluateVarinContextExpression: equals compares strictly", () => {
+  const expr = parseVarinContextExpression({ op: "equals", key: "editorLanguage", value: "markdown" });
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ editorLanguage: "markdown" })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ editorLanguage: "typescript" })), false);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), false);
 });
 
-test("evaluatePiariumContextExpression: not negates", () => {
-  const expr = parsePiariumContextExpression({ op: "not", expression: { op: "defined", key: "editorIsDirty" } });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ editorIsDirty: true })), false);
+test("evaluateVarinContextExpression: not negates", () => {
+  const expr = parseVarinContextExpression({ op: "not", expression: { op: "defined", key: "editorIsDirty" } });
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ editorIsDirty: true })), false);
 });
 
-test("evaluatePiariumContextExpression: empty all is true", () => {
-  const expr = parsePiariumContextExpression({ op: "all", expressions: [] });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), true);
+test("evaluateVarinContextExpression: empty all is true", () => {
+  const expr = parseVarinContextExpression({ op: "all", expressions: [] });
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), true);
 });
 
-test("evaluatePiariumContextExpression: empty any is false", () => {
-  const expr = parsePiariumContextExpression({ op: "any", expressions: [] });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), false);
+test("evaluateVarinContextExpression: empty any is false", () => {
+  const expr = parseVarinContextExpression({ op: "any", expressions: [] });
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), false);
 });
 
-test("evaluatePiariumContextExpression: all requires every expression true", () => {
-  const expr = parsePiariumContextExpression({
+test("evaluateVarinContextExpression: all requires every expression true", () => {
+  const expr = parseVarinContextExpression({
     op: "all",
     expressions: [
       { op: "defined", key: "a" },
       { op: "equals", key: "b", value: 1 },
     ],
   });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ a: true, b: 1 })), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ a: true, b: 2 })), false);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ b: 1 })), false);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ a: true, b: 1 })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ a: true, b: 2 })), false);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ b: 1 })), false);
 });
 
-test("evaluatePiariumContextExpression: any requires at least one true", () => {
-  const expr = parsePiariumContextExpression({
+test("evaluateVarinContextExpression: any requires at least one true", () => {
+  const expr = parseVarinContextExpression({
     op: "any",
     expressions: [
       { op: "defined", key: "a" },
       { op: "equals", key: "b", value: 1 },
     ],
   });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), false);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ a: true })), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ b: 1 })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), false);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ a: true })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ b: 1 })), true);
 });
 
-test("evaluatePiariumContextExpression: nested not + all", () => {
-  const expr = parsePiariumContextExpression({
+test("evaluateVarinContextExpression: nested not + all", () => {
+  const expr = parseVarinContextExpression({
     op: "not",
     expression: {
       op: "all",
@@ -123,13 +123,13 @@ test("evaluatePiariumContextExpression: nested not + all", () => {
       ],
     },
   });
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({})), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ a: true })), true);
-  assert.equal(evaluatePiariumContextExpression(expr, ctx({ a: true, b: true })), false);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({})), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ a: true })), true);
+  assert.equal(evaluateVarinContextExpression(expr, ctx({ a: true, b: true })), false);
 });
 
-test("collectPiariumContextExpressionKeys collects all keys", () => {
-  const expr = parsePiariumContextExpression({
+test("collectVarinContextExpressionKeys collects all keys", () => {
+  const expr = parseVarinContextExpression({
     op: "all",
     expressions: [
       { op: "defined", key: "a" },
@@ -137,26 +137,26 @@ test("collectPiariumContextExpressionKeys collects all keys", () => {
       { op: "not", expression: { op: "defined", key: "c" } },
     ],
   });
-  const keys = collectPiariumContextExpressionKeys(expr);
+  const keys = collectVarinContextExpressionKeys(expr);
   assert.deepEqual(keys.sort(), ["a", "b", "c"]);
 });
 
-test("collectPiariumContextExpressionKeys: single key", () => {
-  const expr = parsePiariumContextExpression({ op: "defined", key: "editorIsOpen" });
-  assert.deepEqual(collectPiariumContextExpressionKeys(expr), ["editorIsOpen"]);
+test("collectVarinContextExpressionKeys: single key", () => {
+  const expr = parseVarinContextExpression({ op: "defined", key: "editorIsOpen" });
+  assert.deepEqual(collectVarinContextExpressionKeys(expr), ["editorIsOpen"]);
 });
 
-test("collectPiariumContextExpressionKeys: empty all has no keys", () => {
-  const expr = parsePiariumContextExpression({ op: "all", expressions: [] });
-  assert.deepEqual(collectPiariumContextExpressionKeys(expr), []);
+test("collectVarinContextExpressionKeys: empty all has no keys", () => {
+  const expr = parseVarinContextExpression({ op: "all", expressions: [] });
+  assert.deepEqual(collectVarinContextExpressionKeys(expr), []);
 });
 
-test("parsePiariumExtensionManifest accepts structured when on view", () => {
+test("parseVarinExtensionManifest accepts structured when on view", () => {
   const manifest = {
     schemaVersion: 1,
     id: "dev.example.when",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [{
       id: "dev.example.when.view",
       kind: "view",
@@ -166,22 +166,22 @@ test("parsePiariumExtensionManifest accepts structured when on view", () => {
       when: { op: "defined", key: "editorIsOpen" },
     }],
   };
-  const parsed = parsePiariumExtensionManifest(manifest);
+  const parsed = parseVarinExtensionManifest(manifest);
   assert.deepEqual(parsed.contributions![0]!.when, { op: "defined", key: "editorIsOpen" });
 });
 
-test("parsePiariumExtensionManifest rejects when on shell", () => {
+test("parseVarinExtensionManifest rejects when on shell", () => {
   const manifest = {
     schemaVersion: 1,
     id: "dev.example.when",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [{
       id: "dev.example.when.shell",
       kind: "shell",
       contractVersion: 1,
       data: {
-        contract: "piarium-workbench-shell/v1",
+        contract: "varin-workbench-shell/v1",
         seams: { web: { replacementTargets: [], slots: [] } },
       },
       supports: ["web"],
@@ -190,26 +190,26 @@ test("parsePiariumExtensionManifest rejects when on shell", () => {
     }],
   };
   assert.throws(
-    () => parsePiariumExtensionManifest(manifest),
+    () => parseVarinExtensionManifest(manifest),
     (error: unknown) => {
-      if (!(error instanceof PiariumExtensionContractError)) return false;
+      if (!(error instanceof VarinExtensionContractError)) return false;
       return error.issues.some((issue) => issue.includes("when is not allowed for shell or transition-scene"));
     },
   );
 });
 
-test("parsePiariumExtensionManifest rejects when on transition-scene", () => {
+test("parseVarinExtensionManifest rejects when on transition-scene", () => {
   const manifest = {
     schemaVersion: 1,
     id: "dev.example.when",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [{
       id: "dev.example.when.transition",
       kind: "transition-scene",
       contractVersion: 1,
       data: {
-        contract: "piarium-transition-scene/v1",
+        contract: "varin-transition-scene/v1",
         scenes: ["workbench-profile"],
         durations: {
           "workbench-profile": {
@@ -224,20 +224,20 @@ test("parsePiariumExtensionManifest rejects when on transition-scene", () => {
     }],
   };
   assert.throws(
-    () => parsePiariumExtensionManifest(manifest),
+    () => parseVarinExtensionManifest(manifest),
     (error: unknown) => {
-      if (!(error instanceof PiariumExtensionContractError)) return false;
+      if (!(error instanceof VarinExtensionContractError)) return false;
       return error.issues.some((issue) => issue.includes("when is not allowed for shell or transition-scene"));
     },
   );
 });
 
-test("parsePiariumExtensionManifest rejects invalid when expression", () => {
+test("parseVarinExtensionManifest rejects invalid when expression", () => {
   const manifest = {
     schemaVersion: 1,
     id: "dev.example.when",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [{
       id: "dev.example.when.view",
       kind: "view",
@@ -248,69 +248,69 @@ test("parsePiariumExtensionManifest rejects invalid when expression", () => {
     }],
   };
   assert.throws(
-    () => parsePiariumExtensionManifest(manifest),
+    () => parseVarinExtensionManifest(manifest),
     (error: unknown) => {
-      if (!(error instanceof PiariumExtensionContractError)) return false;
+      if (!(error instanceof VarinExtensionContractError)) return false;
       return error.issues.some((issue) => issue.includes("op must be defined"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects extra fields on defined", () => {
+test("parseVarinContextExpression rejects extra fields on defined", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "defined", key: "a", extra: true }),
+    () => parseVarinContextExpression({ op: "defined", key: "a", extra: true }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("unexpected field"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects extra fields on equals", () => {
+test("parseVarinContextExpression rejects extra fields on equals", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "equals", key: "a", value: 1, extra: true }),
+    () => parseVarinContextExpression({ op: "equals", key: "a", value: 1, extra: true }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("unexpected field"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects extra fields on not", () => {
+test("parseVarinContextExpression rejects extra fields on not", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "not", expression: { op: "defined", key: "a" }, extra: true }),
+    () => parseVarinContextExpression({ op: "not", expression: { op: "defined", key: "a" }, extra: true }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("unexpected field"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects extra fields on all", () => {
+test("parseVarinContextExpression rejects extra fields on all", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "all", expressions: [], extra: true }),
+    () => parseVarinContextExpression({ op: "all", expressions: [], extra: true }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("unexpected field"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects NaN value in equals", () => {
+test("parseVarinContextExpression rejects NaN value in equals", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "equals", key: "a", value: NaN }),
+    () => parseVarinContextExpression({ op: "equals", key: "a", value: NaN }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("finite number"));
     },
   );
 });
 
-test("parsePiariumContextExpression rejects Infinity value in equals", () => {
+test("parseVarinContextExpression rejects Infinity value in equals", () => {
   assert.throws(
-    () => parsePiariumContextExpression({ op: "equals", key: "a", value: Infinity }),
+    () => parseVarinContextExpression({ op: "equals", key: "a", value: Infinity }),
     (error: unknown) => {
-      if (!(error instanceof PiariumContextExpressionError)) return false;
+      if (!(error instanceof VarinContextExpressionError)) return false;
       return error.issues.some((issue) => issue.includes("finite number"));
     },
   );

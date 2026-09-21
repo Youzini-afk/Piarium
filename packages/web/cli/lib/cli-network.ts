@@ -29,8 +29,8 @@ function isUnsafeBrowserPort(port: unknown): boolean {
 function resolveConfiguredBindHost(hostOverride?: unknown): string {
   const configured = typeof hostOverride === 'string' && hostOverride.trim()
     ? hostOverride.trim()
-    : typeof process.env.PIARIUM_HOST === 'string'
-      ? process.env.PIARIUM_HOST.trim()
+    : typeof process.env.VARIN_HOST === 'string'
+      ? process.env.VARIN_HOST.trim()
       : '';
   const candidate = configured || '127.0.0.1';
   const normalized = normalizeBindHost(candidate);
@@ -117,7 +117,7 @@ async function detectLanIPv4Address(): Promise<string | null> {
 
 
 function formatUnsafePortWarning(port: number): string {
-  return `Port ${port} is browser-unsafe (ERR_UNSAFE_PORT) and is not supported for Piarium UI at ${buildLocalUrl(port, '/')}.`;
+  return `Port ${port} is browser-unsafe (ERR_UNSAFE_PORT) and is not supported for Varin UI at ${buildLocalUrl(port, '/')}.`;
 }
 
 function assertSafeBrowserPort(port: number, { context = 'This action' }: { context?: string } = {}): void {

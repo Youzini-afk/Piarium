@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { buildPiChatCatalog, type PiChatCatalog } from '@/lib/pi-runtime/chat-catalog';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { listPiResources } from '@/lib/pi-runtime/resources';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
 export interface PiChatCatalogEntry extends PiChatCatalog {
   error: string | null;

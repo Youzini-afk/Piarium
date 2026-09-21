@@ -1,4 +1,4 @@
-import type { ExperimentResourceRequest, ResourceMachineView } from "@piarium/protocol";
+import type { ExperimentResourceRequest, ResourceMachineView } from "@varin/protocol";
 import type { GpuAllocation } from "./gpu-resources.js";
 import type { KernelBranchState } from "../kernel/protocol.generated.js";
 

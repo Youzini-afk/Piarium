@@ -1,6 +1,6 @@
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
-import type { Zone2AssembleResult, Zone2StatusResult } from "@piarium/protocol";
+import type { Zone2AssembleResult, Zone2StatusResult } from "@varin/protocol";
 import type { ContextRequestBoundaryOptions } from "./context-request-boundary.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { retainedContextState } from "./retained-context.js";
@@ -17,7 +17,7 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
     const raw = buildSessionContext(branch).messages;
     let eventCursor: number | undefined;
     for (const message of raw) {
-      if (message.role !== "custom" || message.customType !== "piarium-context") continue;
+      if (message.role !== "custom" || message.customType !== "varin-context") continue;
       const details = message.details as Record<string, unknown> | undefined;
       if (typeof details?.eventCursor === "number") eventCursor = details.eventCursor;
     }
@@ -45,11 +45,11 @@ export function createRequestContextInjector(bridge: HostServicesBridge): NonNul
     const additions: Message[] = [];
     if (material?.content) additions.push(observation(material.content));
     else if (environment.status === "rejected") {
-      additions.push(observation('<piarium-context status="unavailable">Current environment observations could not be read. Previously observed facts may be stale.</piarium-context>'));
+      additions.push(observation('<varin-context status="unavailable">Current environment observations could not be read. Previously observed facts may be stale.</varin-context>'));
     }
     additions.push(observation(roster?.content ?? (roster?.status === "empty"
-      ? '<piarium-status status="empty">No teammates in the current authorized scope.</piarium-status>'
-      : '<piarium-status status="unavailable">Current teammate status could not be read. This does not mean there are no teammates.</piarium-status>')));
+      ? '<varin-status status="empty">No teammates in the current authorized scope.</varin-status>'
+      : '<varin-status status="unavailable">Current teammate status could not be read. This does not mean there are no teammates.</varin-status>')));
     return {
       request: { ...request, context: { ...request.context, messages: [...request.context.messages, ...additions] } },
       ...(material?.content ? {

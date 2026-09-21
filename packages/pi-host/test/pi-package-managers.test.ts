@@ -11,7 +11,7 @@ import {
 
 describe("package manager detection", () => {
   it("prefers a Windows .exe over cmd and PowerShell shims", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-pm-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-pm-"));
     try {
       const cmd = join(root, "npm.cmd");
       const exe = join(root, "npm.exe");

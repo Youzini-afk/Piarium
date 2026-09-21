@@ -1,6 +1,6 @@
-import type { JsonObject, JsonValue, PiariumExtensionContributionKind } from '@piarium/extension-contract';
-import type { PiariumWorkbenchChildMount, PiariumWorkbenchCompositionHost } from '@piarium/extension-sdk';
-import type { SurfaceContribution } from '@piarium/extension-surface';
+import type { JsonObject, JsonValue, VarinExtensionContributionKind } from '@varin/extension-contract';
+import type { VarinWorkbenchChildMount, VarinWorkbenchCompositionHost } from '@varin/extension-sdk';
+import type { SurfaceContribution } from '@varin/extension-surface';
 import { createElement, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { startWorkbenchMountSession, type WorkbenchMountSession } from './workbench-mount';
@@ -17,12 +17,12 @@ export interface WorkbenchCompositionHostOptions {
   allowedSlots: ReadonlySet<string>;
   activate(contributions: readonly SurfaceContribution[]): Promise<void>;
   resolveReplacement(target: string): ReplacementCandidate | undefined;
-  resolveSlotCandidates(slot: string, kind?: PiariumExtensionContributionKind): SurfaceContribution[];
+  resolveSlotCandidates(slot: string, kind?: VarinExtensionContributionKind): SurfaceContribution[];
   subscribe(listener: () => void): () => void;
   onError(error: unknown, phase: 'dispose' | 'mount' | 'render'): void;
 }
 
-export interface WorkbenchCompositionHostController extends PiariumWorkbenchCompositionHost {
+export interface WorkbenchCompositionHostController extends VarinWorkbenchCompositionHost {
   dispose(reason?: unknown): Promise<void>;
 }
 
@@ -33,7 +33,7 @@ interface MountedChild {
   session: WorkbenchMountSession;
 }
 
-interface CompositionBinding extends PiariumWorkbenchChildMount {
+interface CompositionBinding extends VarinWorkbenchChildMount {
   start(): Promise<void>;
 }
 
@@ -114,10 +114,10 @@ const normalizeProps = (value: JsonObject | undefined): JsonObject => {
 
 const createChildContainer = (container: HTMLElement, kind: 'replacement' | 'slot'): HTMLElement => {
   const child = container.ownerDocument.createElement('div');
-  child.dataset.piariumWorkbenchChild = kind;
+  child.dataset.varinWorkbenchChild = kind;
   if (kind === 'replacement') child.className = 'h-full min-h-0 w-full min-w-0';
   else {
-    child.className = 'piarium-workbench-slot-child';
+    child.className = 'varin-workbench-slot-child';
     child.style.display = 'contents';
   }
   container.appendChild(child);
@@ -249,7 +249,7 @@ export const createWorkbenchCompositionHost = (
   const bindings: CompositionBinding[] = [];
   let disposed = false;
 
-  const own = async (binding: CompositionBinding): Promise<PiariumWorkbenchChildMount> => {
+  const own = async (binding: CompositionBinding): Promise<VarinWorkbenchChildMount> => {
     if (disposed) {
       await binding.dispose('Shell composition host is disposed');
       throw new Error('Shell composition host is disposed');

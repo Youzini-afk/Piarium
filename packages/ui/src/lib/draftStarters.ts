@@ -1,11 +1,11 @@
 import type { IconName } from "@/components/icon/icons";
 import type { I18nKey } from "@/lib/i18n";
-import type { DraftStarterRef, DraftStarterType } from "@piarium/application-client";
+import type { DraftStarterRef, DraftStarterType } from "@varin/application-client";
 
 // Re-export the framework-neutral types for backward compatibility.
 export type { DraftStarterRef, DraftStarterType };
 
-// Piarium's built-in session commands. They are always
+// Varin's built-in session commands. They are always
 // available to pin, keep their bespoke icons, and seed the default global set.
 export type BuiltInStarter = {
     name: string;

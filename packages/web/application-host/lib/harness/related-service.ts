@@ -1,4 +1,4 @@
-import type { HarnessServiceMap, RelatedQueryResult } from "@piarium/protocol";
+import type { HarnessServiceMap, RelatedQueryResult } from "@varin/protocol";
 import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";

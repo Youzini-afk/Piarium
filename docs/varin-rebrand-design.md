@@ -1,12 +1,12 @@
 # Varin 全面更名设计
 
-Status: accepted design / planned; D-313; branding and runtime rename not implemented
+Status: implemented product/source cutover; D-313; first Varin distribution pending publication
 
 Last updated: 2026-09-21
 
 本设计确定产品由 **Piarium 全面更名为 Varin**。实施顺序见
 [阶段 B](agent-harness-plan.md#阶段-bvarin-全面更名d-313)，实际完成情况只记入
-[能力状态](agent-harness-status.md)。当前提交只交付设计，代码、仓库和发行资源仍使用现有名称。
+[能力状态](agent-harness-status.md)。产品源码、品牌资源和 GitHub 仓库已切换；新发行资产与 npm 发布状态单独记录。
 
 ## 1. 产品决定与边界
 
@@ -129,7 +129,7 @@ HTTP/SSE、WebSocket、worker/broker、Electron preload/IPC、kernel、Surface �
 `@varin/*` 可以作为本地 workspace 合同设计，不能据此声称 npm scope 已可发布。若目标资源不可用，
 明确具体冲突并单独决定该分发坐标，不悄悄恢复旧品牌或扩出通用兼容框架。第三方约定的环境变量名保持不变。
 
-本次文档任务不执行外部资源改名、注册购买或新版本发布。实施阶段在已有授权内准备完整仓库改动和可核对的
+更名实施与新版本发布分别处理，不自动注册购买域名或覆盖历史发行。实施阶段在已有授权内准备完整仓库改动和可核对的
 外部操作清单，已有更名/发布授权直接使用，不重复询问；确实缺少授权时只针对那项动作确认。
 仓库外某个地址尚未切换与内部代码未完成分别记录，不把占位地址标为可用。
 

@@ -1,17 +1,17 @@
 import { createConfiguredWebAPIs } from './runtimeConfig';
-import type { RuntimeAPIs } from '@piarium/application-client';
-import '@piarium/ui/styles/application';
-import '@piarium/ui/styles/fonts';
+import type { RuntimeAPIs } from '@varin/application-client';
+import '@varin/ui/styles/application';
+import '@varin/ui/styles/fonts';
 
 declare global {
   interface Window {
-    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
+    __VARIN_RUNTIME_APIS__?: RuntimeAPIs;
   }
 }
 
-window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs();
+window.__VARIN_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
-void import('@piarium/ui/apps/renderElectronMiniChatApp')
+void import('@varin/ui/apps/renderElectronMiniChatApp')
   .then(({ renderElectronMiniChatApp }) => {
-    renderElectronMiniChatApp(window.__PIARIUM_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
+    renderElectronMiniChatApp(window.__VARIN_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
   });

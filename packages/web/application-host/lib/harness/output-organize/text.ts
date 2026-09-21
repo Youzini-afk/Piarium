@@ -1,5 +1,5 @@
 import { stripControlSequences } from "../shell-supervisor.js";
-import { sliceUtf8ByBytes } from "@piarium/protocol";
+import { sliceUtf8ByBytes } from "@varin/protocol";
 
 export const SHELL_DISPLAY_BUDGET = 32_768;
 export const SHELL_DISPLAY_CHROME = 512;

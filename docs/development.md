@@ -1,4 +1,4 @@
-# Piarium engineering guide
+# Varin engineering guide
 
 This document is the entry point for contributors and coding agents. It describes where current
 project knowledge lives and how to choose useful verification without turning every change into the
@@ -6,7 +6,7 @@ same fixed ceremony.
 
 ## Sources of truth
 
-Piarium uses a docs-first repository model rather than repository-local workflow Skills:
+Varin uses a docs-first repository model rather than repository-local workflow Skills:
 
 1. Code, types, schemas, tests, and `package.json` scripts define executable behavior.
 2. The nearest package or module `README.md` / `DOCUMENTATION.md` records local ownership and
@@ -24,13 +24,13 @@ or implementation in the same coherent change.
 | Area | Current authority |
 | --- | --- |
 | Product/process/data architecture | [architecture.md](architecture.md) |
-| Planned Varin rebrand and clean naming cutover | [varin-rebrand-design.md](varin-rebrand-design.md), Stage B in the harness plan; not implemented |
+| Varin naming and distribution cutover | [varin-rebrand-design.md](varin-rebrand-design.md), Stage B in the harness plan; source/repository implemented, first publication tracked in status |
 | Agent harness contract, plan, status, decision log | [agent-harness.md](agent-harness.md), [agent-harness-plan.md](agent-harness-plan.md), [agent-harness-status.md](agent-harness-status.md), [agent-harness-decisions.md](agent-harness-decisions.md) |
 | Rust system kernel | [rust-kernel-design.md](rust-kernel-design.md), [rust-kernel-audit.md](rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
 | OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](openchamber-pi-migration.md) |
 | Workbench profiles and extension composition | [composable-workbench.md](composable-workbench.md) |
 | Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
-| Piarium extension platform | [piarium-extension-platform.md](piarium-extension-platform.md) and [piarium-extension-authoring.md](piarium-extension-authoring.md) |
+| Varin extension platform | [varin-extension-platform.md](varin-extension-platform.md) and [varin-extension-authoring.md](varin-extension-authoring.md) |
 | Shared UI, themes, localization, settings, interactions | [packages/ui/DOCUMENTATION.md](../packages/ui/DOCUMENTATION.md) |
 | Shared runtime APIs, authenticated URLs, runtime switching | [packages/application-client/README.md](../packages/application-client/README.md) and [packages/ui/src/lib/api/DOCUMENTATION.md](../packages/ui/src/lib/api/DOCUMENTATION.md) |
 | UI stores, synchronization, cache identity, visible-demand work | [packages/ui/src/stores/DOCUMENTATION.md](../packages/ui/src/stores/DOCUMENTATION.md) |
@@ -47,7 +47,7 @@ Begin at the owner rather than at a universal checklist:
 
 - Read the nearest module documentation and the code paths that consume the behavior.
 - Identify the real authority: renderer view state, application-host data, Pi runtime state, plugin-owned
-  configuration, or persistent Piarium metadata.
+  configuration, or persistent Varin metadata.
 - Keep failure distinguishable from successful empty state, and reject stale asynchronous work at the
   owner boundary when that lifecycle applies.
 - Prefer an existing primitive, contract, or script when it already expresses the behavior. Do not
@@ -101,7 +101,7 @@ the phase 7 plan and current harness status for subsequent capability routing an
   Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
-- `@piarium/ui` runs under Vitest as part of `bun run test:pi`.
+- `@varin/ui` runs under Vitest as part of `bun run test:pi`.
 - Electron's `type-check` covers both `tsconfig.json` (product) and `tsconfig.tests.json` (tests).
   `bun run type-check:electron` prepares workspace type dependencies and emits current Application Host
   declarations into a type-only generated directory; it does not replace a running/locked `server/` runtime.

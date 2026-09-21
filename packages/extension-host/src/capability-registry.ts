@@ -1,8 +1,8 @@
 import {
-  isPiariumExtensionId,
+  isVarinExtensionId,
   type JsonValue,
-  type PiariumExtensionCapabilityGrant,
-} from "@piarium/extension-contract";
+  type VarinExtensionCapabilityGrant,
+} from "@varin/extension-contract";
 import type { HostServiceOwnerIdentity } from "./service-registry.js";
 
 export interface HostCapabilityCallContext {
@@ -20,7 +20,7 @@ export class HostCapabilityRegistry {
   readonly #handlers = new Map<string, HostCapabilityHandler>();
 
   register(capability: string, handler: HostCapabilityHandler): () => void {
-    if (!isPiariumExtensionId(capability)) throw new Error(`Invalid Host capability ID: ${capability}`);
+    if (!isVarinExtensionId(capability)) throw new Error(`Invalid Host capability ID: ${capability}`);
     if (this.#handlers.has(capability)) throw new Error(`Host capability is already registered: ${capability}`);
     this.#handlers.set(capability, handler);
     return () => { if (this.#handlers.get(capability) === handler) this.#handlers.delete(capability); };
@@ -28,7 +28,7 @@ export class HostCapabilityRegistry {
 
   invoke(
     owner: HostServiceOwnerIdentity,
-    grants: readonly PiariumExtensionCapabilityGrant[],
+    grants: readonly VarinExtensionCapabilityGrant[],
     capability: string,
     method: string,
     params: JsonValue,

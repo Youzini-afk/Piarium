@@ -66,55 +66,55 @@ button,
    The window is created transparent with a native 'sidebar' NSVisualEffectView
    behind it. We keep the whole app opaque (bg-background covers the window)
    EXCEPT the left sidebar, which is the only translucent surface that lets the
-   native vibrancy show through. `data-piarium-vibrancy` = vibrancy active;
-   `data-piarium-vibrancy-ready` = native layer has settled (set from the main
+   native vibrancy show through. `data-varin-vibrancy` = vibrancy active;
+   `data-varin-vibrancy-ready` = native layer has settled (set from the main
    process after show/restore) — until then the sidebar stays solid to avoid a
    flash of raw transparency. */
-html[data-piarium-vibrancy] body,
-html[data-piarium-vibrancy] #root {
+html[data-varin-vibrancy] body,
+html[data-varin-vibrancy] #root {
   background: transparent !important;
   background-color: transparent !important;
 }
 
-html[data-piarium-vibrancy] .main-content-safe-area {
+html[data-varin-vibrancy] .main-content-safe-area {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Left sidebar: solid until the native layer is ready, then a translucent
    overlay so the vibrancy frosts through. */
-html[data-piarium-vibrancy] .piarium-vibrancy-surface {
+html[data-varin-vibrancy] .varin-vibrancy-surface {
   background: var(--sidebar) !important;
 }
 
-html[data-piarium-vibrancy][data-piarium-vibrancy-ready] .piarium-vibrancy-surface {
+html[data-varin-vibrancy][data-varin-vibrancy-ready] .varin-vibrancy-surface {
   background: var(--sidebar-vibrancy-overlay) !important;
 }
 
 /* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
    opaque fill, or they'd cover the frosted effect. */
-html[data-piarium-vibrancy] .piarium-vibrancy-surface .bg-sidebar {
+html[data-varin-vibrancy] .varin-vibrancy-surface .bg-sidebar {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Project-actions pill over the open sidebar: drop its opaque surface so it
    frosts to the exact same level as the sidebar (border keeps its outline). */
-html[data-piarium-vibrancy] .piarium-vibrancy-pill {
+html[data-varin-vibrancy] .varin-vibrancy-pill {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Accessibility: drop translucency when the OS asks for reduced transparency. */
 @media (prefers-reduced-transparency: reduce) {
-  html[data-piarium-vibrancy] body,
-  html[data-piarium-vibrancy] #root,
-  html[data-piarium-vibrancy] .main-content-safe-area {
+  html[data-varin-vibrancy] body,
+  html[data-varin-vibrancy] #root,
+  html[data-varin-vibrancy] .main-content-safe-area {
     background: var(--surface-background) !important;
   }
 
-  html[data-piarium-vibrancy] .piarium-vibrancy-surface,
-  html[data-piarium-vibrancy][data-piarium-vibrancy-ready] .piarium-vibrancy-surface {
+  html[data-varin-vibrancy] .varin-vibrancy-surface,
+  html[data-varin-vibrancy][data-varin-vibrancy-ready] .varin-vibrancy-surface {
     background: var(--sidebar) !important;
   }
 }
@@ -1035,12 +1035,12 @@ html:not(.dark) .chat-scroll {
 }
 
 .markdown-content.markdown-reasoning a,
-.markdown-content.markdown-reasoning [data-piarium-file-link="true"] {
+.markdown-content.markdown-reasoning [data-varin-file-link="true"] {
   color: var(--surface-muted-foreground) !important;
 }
 
 .markdown-content.markdown-reasoning a:hover,
-.markdown-content.markdown-reasoning [data-piarium-file-link="true"]:hover {
+.markdown-content.markdown-reasoning [data-varin-file-link="true"]:hover {
   color: var(--surface-foreground) !important;
 }
 
@@ -1132,7 +1132,7 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link-hover, var(--primary));
 }
 
-.markdown-content [data-piarium-file-link="true"] {
+.markdown-content [data-varin-file-link="true"] {
   color: var(--markdown-link, var(--primary));
   cursor: pointer;
   text-decoration: underline;
@@ -1141,17 +1141,17 @@ html:not(.dark) .chat-scroll {
   -webkit-user-select: text !important;
 }
 
-.markdown-content [data-piarium-file-link="true"]:hover {
+.markdown-content [data-varin-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
 }
 
 /* Agent/skill mentions use the primary accent, not the markdown link color */
-.markdown-content a[data-piarium-agent-mention="true"],
+.markdown-content a[data-varin-agent-mention="true"],
 .markdown-content a[data-skill-name] {
   color: var(--primary);
 }
 
-.markdown-content a[data-piarium-agent-mention="true"]:hover,
+.markdown-content a[data-varin-agent-mention="true"]:hover,
 .markdown-content a[data-skill-name]:hover {
   color: var(--primary);
 }
@@ -1745,19 +1745,19 @@ html.desktop-runtime
 html.desktop-runtime [class*="cursor-pointer"] {
   cursor: default !important;
 }
-html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
+html.desktop-runtime .markdown-content [data-varin-file-link="true"] {
   cursor: default;
 }
 
-.piarium-editor-inline-comment-line {
+.varin-editor-inline-comment-line {
   background: color-mix(in srgb, var(--status-info) 9%, transparent);
 }
 
-.piarium-editor-inline-comment-glyph {
+.varin-editor-inline-comment-glyph {
   position: relative;
 }
 
-.piarium-editor-inline-comment-glyph::before {
+.varin-editor-inline-comment-glyph::before {
   position: absolute;
   inset: 4px;
   border: 1px solid color-mix(in srgb, var(--status-info) 72%, var(--surface-foreground));
@@ -1766,13 +1766,13 @@ html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   content: '';
 }
 
-.piarium-monaco-breakpoint-glyph,
-.piarium-monaco-current-debug-frame-glyph,
-.piarium-monaco-test-failure-glyph {
+.varin-monaco-breakpoint-glyph,
+.varin-monaco-current-debug-frame-glyph,
+.varin-monaco-test-failure-glyph {
   position: relative;
 }
 
-.piarium-monaco-breakpoint-glyph::before {
+.varin-monaco-breakpoint-glyph::before {
   position: absolute;
   inset: 5px;
   border-radius: 999px;
@@ -1781,7 +1781,7 @@ html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   content: '';
 }
 
-.piarium-monaco-current-debug-frame-glyph::before {
+.varin-monaco-current-debug-frame-glyph::before {
   position: absolute;
   top: 4px;
   left: 4px;
@@ -1793,11 +1793,11 @@ html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   content: '';
 }
 
-.piarium-monaco-current-debug-frame-line {
+.varin-monaco-current-debug-frame-line {
   background: color-mix(in srgb, var(--status-warning) 12%, transparent);
 }
 
-.piarium-monaco-test-failure-glyph::before {
+.varin-monaco-test-failure-glyph::before {
   position: absolute;
   inset: 6px;
   border: 2px solid var(--status-error);
@@ -1805,6 +1805,6 @@ html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   content: '';
 }
 
-.piarium-monaco-test-failure-line {
+.varin-monaco-test-failure-line {
   background: color-mix(in srgb, var(--status-error) 8%, transparent);
 }

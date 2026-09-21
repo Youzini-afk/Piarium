@@ -1,56 +1,56 @@
 import type {
   JsonObject,
-  PiariumApplicationSurface,
-  PiariumExtensionManifest,
-  PiariumExtensionStaticContribution,
-} from "@piarium/extension-contract";
+  VarinApplicationSurface,
+  VarinExtensionManifest,
+  VarinExtensionStaticContribution,
+} from "@varin/extension-contract";
 import {
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
-  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
-  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
-  PIARIUM_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION_ID,
-  PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  PIARIUM_CORE_SERVICE_VERSION,
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
-  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_SLOTS,
-} from "@piarium/extension-contract";
+  VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+  VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
+  VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
+  VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
+  VARIN_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID,
+  VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION_ID,
+  VARIN_TRANSITION_SCENE_DATA_CONTRACT,
+  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  VARIN_CORE_SERVICE_VERSION,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
+  VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+  VARIN_WORKBENCH_SLOTS,
+} from "@varin/extension-contract";
 
-export interface PiariumBuiltinExtensionDefinition {
+export interface VarinBuiltinExtensionDefinition {
   enabledByDefault: boolean;
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
 }
 
-export interface PiariumBuiltinPluginAdapterData {
+export interface VarinBuiltinPluginAdapterData {
   adapterId: string;
   contract: "pi-plugin-settings-adapter/v1";
   icon: string;
   packageNames: string[];
 }
 
-export const PIARIUM_BUILTIN_EXTENSION_VERSION = "0.1.0";
-export const PIARIUM_BUILTIN_EXTENSION_PREFIX = "piarium.builtin.";
-export const PIARIUM_INTEGRATION_ENTRYPOINT_ID = "main";
-export const PIARIUM_INTEGRATION_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
-export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "piarium.builtin.typescript-language";
-export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.piarium.1";
-export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "piarium.builtin.language-servers";
-export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
-export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "piarium.builtin.recovery";
-export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
+export const VARIN_BUILTIN_EXTENSION_VERSION = "0.1.0";
+export const VARIN_BUILTIN_EXTENSION_PREFIX = "varin.builtin.";
+export const VARIN_INTEGRATION_ENTRYPOINT_ID = "main";
+export const VARIN_INTEGRATION_SURFACES: VarinApplicationSurface[] = ["web", "desktop", "mobile"];
+export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "varin.builtin.typescript-language";
+export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.varin.1";
+export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "varin.builtin.language-servers";
+export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
+export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "varin.builtin.recovery";
+export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
-export interface PiariumBundledLanguageServer {
+export interface VarinBundledLanguageServer {
   extensionId: string;
   id: string;
   name: string;
@@ -61,52 +61,52 @@ export interface PiariumBundledLanguageServer {
  * Browser-safe catalog of language providers shipped in the desktop artifact.
  * The ids are provider ids used by workspace.language status and registration.
  */
-export const PIARIUM_BUNDLED_LANGUAGE_SERVERS: readonly PiariumBundledLanguageServer[] = [
+export const VARIN_BUNDLED_LANGUAGE_SERVERS: readonly VarinBundledLanguageServer[] = [
   {
-    extensionId: PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-    id: "piarium.typescript-language",
+    extensionId: VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+    id: "varin.typescript-language",
     name: "TypeScript and JavaScript",
     languageIds: ["javascript", "javascriptreact", "typescript", "typescriptreact"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.python-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.python-language",
     name: "Python (Pyright)",
     languageIds: ["python"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.html-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.html-language",
     name: "HTML",
     languageIds: ["html"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.css-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.css-language",
     name: "CSS, SCSS, and LESS",
     languageIds: ["css", "scss", "less"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.json-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.json-language",
     name: "JSON and JSONC",
     languageIds: ["json", "jsonc"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.yaml-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.yaml-language",
     name: "YAML",
     languageIds: ["yaml"],
   },
   {
-    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    id: "piarium.bash-language",
+    extensionId: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: "varin.bash-language",
     name: "Bash",
     languageIds: ["shellscript"],
   },
 ] as const;
 
-export const PIARIUM_BUNDLED_LANGUAGE_SERVER_PROVIDER_IDS = PIARIUM_BUNDLED_LANGUAGE_SERVERS.map(
+export const VARIN_BUNDLED_LANGUAGE_SERVER_PROVIDER_IDS = VARIN_BUNDLED_LANGUAGE_SERVERS.map(
   ({ id }) => id,
 );
 
@@ -120,7 +120,7 @@ const pageContribution = (input: {
   slug: string;
   title: string;
   titleKey: string;
-}): PiariumExtensionStaticContribution => ({
+}): VarinExtensionStaticContribution => ({
   contractVersion: 1,
   data: {
     group: input.group,
@@ -132,11 +132,11 @@ const pageContribution = (input: {
     title: input.title,
     titleKey: input.titleKey,
   },
-  entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+  entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
   id: input.id,
   kind: "settings-page",
   placement: { order: input.order, slot: `settings.nav.${input.group}` },
-  supports: PIARIUM_INTEGRATION_SURFACES,
+  supports: VARIN_INTEGRATION_SURFACES,
 });
 
 const pluginAdapterContribution = (
@@ -144,39 +144,39 @@ const pluginAdapterContribution = (
   adapterId: string,
   icon: string,
   packageNames: string[],
-): PiariumExtensionStaticContribution => ({
+): VarinExtensionStaticContribution => ({
   contractVersion: 1,
   data: {
     adapterId,
     contract: "pi-plugin-settings-adapter/v1",
     icon,
     packageNames,
-      } satisfies PiariumBuiltinPluginAdapterData & JsonObject,
-  entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+      } satisfies VarinBuiltinPluginAdapterData & JsonObject,
+  entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
   id: `${extensionId}.adapter`,
   kind: "panel",
   placement: { slot: "pi.plugin-settings.adapters" },
-  supports: PIARIUM_INTEGRATION_SURFACES,
+  supports: VARIN_INTEGRATION_SURFACES,
 });
 
 const definition = (input: {
-  contributions: PiariumExtensionStaticContribution[];
+  contributions: VarinExtensionStaticContribution[];
   displayName: string;
   id: string;
   piPackages?: string[];
-  provides?: PiariumExtensionManifest['provides'];
-  supports?: PiariumApplicationSurface[];
-}): PiariumBuiltinExtensionDefinition => {
-  const supports = input.supports ?? PIARIUM_INTEGRATION_SURFACES;
+  provides?: VarinExtensionManifest['provides'];
+  supports?: VarinApplicationSurface[];
+}): VarinBuiltinExtensionDefinition => {
+  const supports = input.supports ?? VARIN_INTEGRATION_SURFACES;
   return {
     enabledByDefault: true,
     manifest: {
       contributions: input.contributions,
       displayName: input.displayName,
-      engines: { piarium: "*" },
+      engines: { varin: "*" },
       entrypoints: {
         surfaces: [{
-          id: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+          id: VARIN_INTEGRATION_ENTRYPOINT_ID,
           mode: "declarative",
           supports,
         }],
@@ -185,19 +185,19 @@ const definition = (input: {
       ...(input.piPackages ? { integrates: { piPackages: input.piPackages } } : {}),
       ...(input.provides ? { provides: input.provides } : {}),
       schemaVersion: 1,
-      version: PIARIUM_BUILTIN_EXTENSION_VERSION,
+      version: VARIN_BUILTIN_EXTENSION_VERSION,
     },
   };
 };
 
-export const PIARIUM_BUILTIN_AGENTS_EXTENSION = definition({
-  id: "piarium.builtin.pi-agents",
+export const VARIN_BUILTIN_AGENTS_EXTENSION = definition({
+  id: "varin.builtin.pi-agents",
   displayName: "Pi Agents Workbench",
   piPackages: ["pi-subagents", "@cortexkit/pi-magic-context"],
   contributions: [pageContribution({
     group: "pi",
     icon: "robot-2",
-    id: "piarium.builtin.pi-agents.page.agents",
+    id: "varin.builtin.pi-agents.page.agents",
     keywords: ["agent", "agents", "subagent", "subagents", "roles", "workflow"],
     kind: "split",
     order: 41,
@@ -207,14 +207,14 @@ export const PIARIUM_BUILTIN_AGENTS_EXTENSION = definition({
   })],
 });
 
-export const PIARIUM_BUILTIN_FLEET_EXTENSION = definition({
-  id: "piarium.builtin.pi-fleet",
+export const VARIN_BUILTIN_FLEET_EXTENSION = definition({
+  id: "varin.builtin.pi-fleet",
   displayName: "Pi Fleet Workbench",
   piPackages: ["pi-subagents", "pi-background-tasks"],
   contributions: [pageContribution({
     group: "pi",
     icon: "pulse",
-    id: "piarium.builtin.pi-fleet.page.fleet",
+    id: "varin.builtin.pi-fleet.page.fleet",
     keywords: ["fleet", "subagent", "delegation", "tasks", "running", "background", "eventbus", "logs"],
     kind: "single",
     order: 42,
@@ -224,14 +224,14 @@ export const PIARIUM_BUILTIN_FLEET_EXTENSION = definition({
   })],
 });
 
-export const PIARIUM_BUILTIN_MCP_EXTENSION = definition({
-  id: "piarium.builtin.pi-mcp",
+export const VARIN_BUILTIN_MCP_EXTENSION = definition({
+  id: "varin.builtin.pi-mcp",
   displayName: "Pi MCP Workbench",
   piPackages: ["pi-mcp-adapter"],
   contributions: [pageContribution({
     group: "pi",
     icon: "mcp",
-    id: "piarium.builtin.pi-mcp.page.mcp",
+    id: "varin.builtin.pi-mcp.page.mcp",
     keywords: ["mcp", "model context protocol", "pi-mcp-adapter", "servers", "tools", "oauth"],
     kind: "split",
     order: 46,
@@ -241,13 +241,13 @@ export const PIARIUM_BUILTIN_MCP_EXTENSION = definition({
   })],
 });
 
-export const PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION = definition({
-  id: "piarium.builtin.pi-plugin-settings",
+export const VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION = definition({
+  id: "varin.builtin.pi-plugin-settings",
   displayName: "Pi Plugin Settings",
   contributions: [pageContribution({
     group: "pi",
     icon: "settings-3",
-    id: "piarium.builtin.pi-plugin-settings.page.plugin-settings",
+    id: "varin.builtin.pi-plugin-settings.page.plugin-settings",
     keywords: ["pi", "plugin", "settings", "configuration", "json", "jsonc"],
     kind: "split",
     order: 48,
@@ -257,29 +257,29 @@ export const PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION = definition({
   })],
 });
 
-export const PIARIUM_BUILTIN_RECOVERY_EXTENSION = definition({
-  id: "piarium.builtin.pi-recovery",
-  displayName: "Piarium Recovery",
+export const VARIN_BUILTIN_RECOVERY_EXTENSION = definition({
+  id: "varin.builtin.pi-recovery",
+  displayName: "Varin Recovery",
   piPackages: [],
   contributions: [{
     contractVersion: 1,
     data: { contract: "pi-settings-panel/v1", panelId: "recovery" },
-    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-    id: "piarium.builtin.pi-recovery.panel.recovery",
+    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
+    id: "varin.builtin.pi-recovery.panel.recovery",
     kind: "panel",
     placement: { order: 40, slot: "settings.sessions.panels" },
-    supports: PIARIUM_INTEGRATION_SURFACES,
+    supports: VARIN_INTEGRATION_SURFACES,
   }],
 });
 
-export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
-  id: "piarium.builtin.pi-harness",
+export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
+  id: "varin.builtin.pi-harness",
   displayName: "Agent Harness",
   contributions: [
     pageContribution({
       group: "harness",
       icon: "terminal",
-      id: "piarium.builtin.pi-harness.page.tools",
+      id: "varin.builtin.pi-harness.page.tools",
       keywords: ["harness", "agent", "tools", "shell", "bash", "output", "process"],
       kind: "single",
       order: 0,
@@ -290,7 +290,7 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "shield-check",
-      id: "piarium.builtin.pi-harness.page.permissions",
+      id: "varin.builtin.pi-harness.page.permissions",
       keywords: ["harness", "permissions", "approval", "rules", "policy"],
       kind: "single",
       order: 1,
@@ -301,7 +301,7 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "brain-ai-3",
-      id: "piarium.builtin.pi-harness.page.models",
+      id: "varin.builtin.pi-harness.page.models",
       keywords: ["harness", "models", "slots", "review", "delegation"],
       kind: "single",
       order: 2,
@@ -312,7 +312,7 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "chat-history",
-      id: "piarium.builtin.pi-harness.page.context",
+      id: "varin.builtin.pi-harness.page.context",
       keywords: ["harness", "context", "compaction", "preparation", "long session", "knowledge", "memory", "recall"],
       kind: "single",
       order: 3,
@@ -323,7 +323,7 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "search-eye",
-      id: "piarium.builtin.pi-harness.page.retrieval",
+      id: "varin.builtin.pi-harness.page.retrieval",
       keywords: ["harness", "retrieval", "embedding", "rerank", "code", "search"],
       kind: "single",
       order: 4,
@@ -334,7 +334,7 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
     pageContribution({
       group: "harness",
       icon: "global",
-      id: "piarium.builtin.pi-harness.page.web",
+      id: "varin.builtin.pi-harness.page.web",
       keywords: ["harness", "web", "search", "brave", "exa", "tavily", "jina", "searxng", "domains", "browser"],
       kind: "single",
       order: 5,
@@ -346,33 +346,33 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
 });
 
 const AGENT_FEATURE_TARGETS = [
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
 ];
 
-export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION = definition({
-  id: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+export const VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION = definition({
+  id: VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   displayName: "Agent Workspace",
   contributions: [{
     contractVersion: 1,
     data: {
-      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: {
         web: {
           replacementTargets: [
             ...AGENT_FEATURE_TARGETS,
-            PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+            VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
           ],
           slots: [],
         },
         desktop: {
           replacementTargets: [
             ...AGENT_FEATURE_TARGETS,
-            PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+            VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
           ],
           slots: [],
         },
@@ -382,39 +382,39 @@ export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION = definition({
         },
       },
     },
-    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-    id: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
+    id: VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
     kind: "shell",
-    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
-    supports: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    supports: VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
   }],
 });
 
 const IDE_FEATURE_TARGETS = [
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
 ];
 
 const IDE_STRUCTURE_TARGETS = [
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.activity,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.panel,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.status,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.activity,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.primarySidebar,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.status,
 ];
 
 const IDE_SLOTS = [
-  PIARIUM_WORKBENCH_SLOTS.activityItems,
-  PIARIUM_WORKBENCH_SLOTS.primarySidebarViews,
-  PIARIUM_WORKBENCH_SLOTS.editorActions,
-  PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews,
-  PIARIUM_WORKBENCH_SLOTS.panelViews,
-  PIARIUM_WORKBENCH_SLOTS.statusItems,
+  VARIN_WORKBENCH_SLOTS.activityItems,
+  VARIN_WORKBENCH_SLOTS.primarySidebarViews,
+  VARIN_WORKBENCH_SLOTS.editorActions,
+  VARIN_WORKBENCH_SLOTS.secondarySidebarViews,
+  VARIN_WORKBENCH_SLOTS.panelViews,
+  VARIN_WORKBENCH_SLOTS.statusItems,
 ];
 
 const ideSeams = () => ({
@@ -422,97 +422,97 @@ const ideSeams = () => ({
   slots: IDE_SLOTS,
 });
 
-export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
-  id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+export const VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
+  id: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   displayName: "IDE Workbench",
-  supports: PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+  supports: VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
   provides: {
     services: [{
-      id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+      id: VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
       multiple: true,
-      version: PIARIUM_CORE_SERVICE_VERSION,
+      version: VARIN_CORE_SERVICE_VERSION,
     }],
   },
   contributions: [{
     contractVersion: 1,
     data: {
-      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: Object.fromEntries(
-        PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => [surface, ideSeams()]),
+        VARIN_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => [surface, ideSeams()]),
       ),
     },
-    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-    id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
+    id: VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
     kind: "shell",
-    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
-    supports: PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    supports: VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
   }],
 });
 
 const RESEARCH_SHELL_TARGETS = [
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
 ];
 
-export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION = definition({
-  id: PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
+export const VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION = definition({
+  id: VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
   displayName: "Research Workbench",
-  supports: PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
+  supports: VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
   contributions: [{
     contractVersion: 1,
     data: {
-      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: Object.fromEntries(
-        PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => [surface, {
+        VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => [surface, {
           replacementTargets: RESEARCH_SHELL_TARGETS,
           slots: [],
         }]),
       ),
     },
-    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-    id: PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
+    id: VARIN_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
     kind: "shell",
-    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
-    supports: PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
+    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    supports: VARIN_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
   }],
 });
 
-export const PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION = definition({
-  id: PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION_ID,
-  displayName: "Piarium Transition Scene",
-  supports: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+export const VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION = definition({
+  id: VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION_ID,
+  displayName: "Varin Transition Scene",
+  supports: VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
   contributions: [{
     contractVersion: 1,
     data: {
-      contract: PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
+      contract: VARIN_TRANSITION_SCENE_DATA_CONTRACT,
       durations: {
-        [PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE]: {
+        [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE]: {
           covering: { quick: 1_040, reduced: 260, standard: 1_900 },
           revealing: { quick: 1_040, reduced: 260, standard: 1_900 },
         },
       },
       fallback: true,
-      scenes: [PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE],
+      scenes: [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE],
     },
-    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-    id: PIARIUM_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID,
+    entrypoint: VARIN_INTEGRATION_ENTRYPOINT_ID,
+    id: VARIN_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID,
     kind: "transition-scene",
-    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition },
-    supports: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+    replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition },
+    supports: VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
   }],
 });
 
-export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: PiariumBuiltinExtensionDefinition = {
+export const VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
     capabilities: { host: ["workspace.language"] },
     displayName: "TypeScript and JavaScript Language Service",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       host: {
         activation: ["workspace-match"],
@@ -520,18 +520,18 @@ export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: PiariumBuiltinExtens
         mode: "brokered",
       },
     },
-    id: PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+    id: VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
     schemaVersion: 1,
-    version: PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION,
+    version: VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION,
   },
 };
 
-export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION: PiariumBuiltinExtensionDefinition = {
+export const VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
     capabilities: { host: ["workspace.language"] },
     displayName: "Built-in Language Servers",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       host: {
         activation: ["workspace-match"],
@@ -539,18 +539,18 @@ export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION: PiariumBuiltinExtension
         mode: "brokered",
       },
     },
-    id: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    id: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     schemaVersion: 1,
-    version: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION,
+    version: VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION,
   },
 };
 
-export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: PiariumBuiltinExtensionDefinition = {
+export const VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
     capabilities: { host: ["workspace.recovery-primitives"] },
-    displayName: "Piarium Workspace Recovery",
-    engines: { piarium: "*" },
+    displayName: "Varin Workspace Recovery",
+    engines: { varin: "*" },
     entrypoints: {
       host: {
         activation: ["service-request"],
@@ -558,17 +558,17 @@ export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: PiariumBuiltinExtensi
         mode: "brokered",
       },
     },
-    id: PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+    id: VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
     provides: {
       services: [{
-        id: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+        id: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
         multiple: true,
-        version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+        version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
       }],
     },
     schemaVersion: 1,
     storage: { schemaVersion: 1 },
-    version: PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION,
+    version: VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION,
   },
 };
 
@@ -578,8 +578,8 @@ const pluginAdapter = (
   adapterId: string,
   icon: string,
   packageNames: string[],
-): PiariumBuiltinExtensionDefinition => {
-  const id = `piarium.builtin.plugin-adapter.${suffix}`;
+): VarinBuiltinExtensionDefinition => {
+  const id = `varin.builtin.plugin-adapter.${suffix}`;
   return definition({
     id,
     displayName,
@@ -588,7 +588,7 @@ const pluginAdapter = (
   });
 };
 
-export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
+export const VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("mcp", "pi-mcp-adapter Settings Adapter", "mcp", "server", ["pi-mcp-adapter"]),
   pluginAdapter("subagents", "pi-subagents Settings Adapter", "subagents", "robot-2", ["pi-subagents"]),
   pluginAdapter("magic-context", "Magic Context Settings Adapter", "magic-context", "brain", ["@cortexkit/pi-magic-context"]),
@@ -602,23 +602,23 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("rtk", "RTK Optimizer Settings Adapter", "rtk", "terminal-box", ["pi-rtk-optimizer"]),
 ] as const;
 
-export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExtensionDefinition[] = [
-  PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION,
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
-  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
-  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,
-  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,
-  PIARIUM_BUILTIN_AGENTS_EXTENSION,
-  PIARIUM_BUILTIN_FLEET_EXTENSION,
-  PIARIUM_BUILTIN_MCP_EXTENSION,
-  PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
-  PIARIUM_BUILTIN_RECOVERY_EXTENSION,
-  PIARIUM_BUILTIN_HARNESS_EXTENSION,
-  ...PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
+export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtensionDefinition[] = [
+  VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION,
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
+  VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
+  VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
+  VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION,
+  VARIN_BUILTIN_AGENTS_EXTENSION,
+  VARIN_BUILTIN_FLEET_EXTENSION,
+  VARIN_BUILTIN_MCP_EXTENSION,
+  VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
+  VARIN_BUILTIN_RECOVERY_EXTENSION,
+  VARIN_BUILTIN_HARNESS_EXTENSION,
+  ...VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
 ];
 
-export const piariumBuiltinDefinition = (extensionId: string): PiariumBuiltinExtensionDefinition | undefined => (
-  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.find((definition) => definition.manifest.id === extensionId)
+export const varinBuiltinDefinition = (extensionId: string): VarinBuiltinExtensionDefinition | undefined => (
+  VARIN_BUILTIN_EXTENSION_DEFINITIONS.find((definition) => definition.manifest.id === extensionId)
 );

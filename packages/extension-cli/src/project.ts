@@ -1,11 +1,11 @@
 import { access, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
-  PIARIUM_EXTENSION_MANIFEST_FILE,
-  checkPiariumContributionCompatibility,
-  parsePiariumExtensionManifest,
-  type PiariumExtensionManifest,
-} from "@piarium/extension-contract";
+  VARIN_EXTENSION_MANIFEST_FILE,
+  checkVarinContributionCompatibility,
+  parseVarinExtensionManifest,
+  type VarinExtensionManifest,
+} from "@varin/extension-contract";
 import type { CheckResult, ExtensionBuildEntrypointConfig, ExtensionPackageMetadata, LoadedExtensionProject } from "./types.js";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -45,8 +45,8 @@ const readPackage = async (path: string): Promise<ExtensionPackageMetadata> => {
   return value as ExtensionPackageMetadata;
 };
 
-const readManifest = async (path: string): Promise<PiariumExtensionManifest> => (
-  parsePiariumExtensionManifest(await readJson(path, PIARIUM_EXTENSION_MANIFEST_FILE))
+const readManifest = async (path: string): Promise<VarinExtensionManifest> => (
+  parseVarinExtensionManifest(await readJson(path, VARIN_EXTENSION_MANIFEST_FILE))
 );
 
 export const loadProject = async (directory = "."): Promise<LoadedExtensionProject> => {
@@ -58,19 +58,19 @@ export const loadProject = async (directory = "."): Promise<LoadedExtensionProje
     if (isMissing(error)) throw new Error(`Project directory does not exist: ${normalizedDirectory}`);
     throw error;
   }
-  const manifestPath = join(normalizedDirectory, PIARIUM_EXTENSION_MANIFEST_FILE);
+  const manifestPath = join(normalizedDirectory, VARIN_EXTENSION_MANIFEST_FILE);
   const packageJsonPath = join(normalizedDirectory, "package.json");
   const [manifest, packageJson] = await Promise.all([readManifest(manifestPath), readPackage(packageJsonPath)]);
   if (typeof packageJson.version !== "string" || packageJson.version.trim() === "") {
-    throw new Error("package.json must declare a non-empty version; it must match piarium.extension.json version");
+    throw new Error("package.json must declare a non-empty version; it must match varin.extension.json version");
   }
   if (packageJson.version !== manifest.version) {
-    throw new Error(`Version mismatch: package.json is ${packageJson.version}, but ${PIARIUM_EXTENSION_MANIFEST_FILE} is ${manifest.version}. Update one version so they match.`);
+    throw new Error(`Version mismatch: package.json is ${packageJson.version}, but ${VARIN_EXTENSION_MANIFEST_FILE} is ${manifest.version}. Update one version so they match.`);
   }
   return { directory: normalizedDirectory, manifest, manifestPath, packageJson, packageJsonPath };
 };
 
-const referencedEntrypoints = (manifest: PiariumExtensionManifest): Array<{
+const referencedEntrypoints = (manifest: VarinExtensionManifest): Array<{
   file: string;
   id: string;
   kind: "host" | "surface";
@@ -97,7 +97,7 @@ export const entrypointSourceConfig = (
   project: LoadedExtensionProject,
   id: string,
 ): ExtensionBuildEntrypointConfig | undefined => {
-  const value = project.packageJson.piarium?.build?.entrypoints?.[id];
+  const value = project.packageJson.varin?.build?.entrypoints?.[id];
   if (typeof value === "string") return { source: value };
   if (value && typeof value.source === "string") return value;
   return undefined;
@@ -128,7 +128,7 @@ export const checkProject = async (directory = "."): Promise<CheckResult> => {
   const incompatibleContributions = (project.manifest.contributions ?? [])
     .map((contribution) => ({
       contributionId: contribution.id,
-      result: checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion),
+      result: checkVarinContributionCompatibility(contribution.kind, contribution.contractVersion),
     }))
     .filter((entry): entry is { contributionId: string; result: Extract<typeof entry.result, { status: "unsupported-contract-version" }> } => (
       entry.result.status === "unsupported-contract-version"

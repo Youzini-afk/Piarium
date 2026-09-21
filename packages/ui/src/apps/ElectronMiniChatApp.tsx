@@ -10,7 +10,7 @@ import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -18,7 +18,7 @@ import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
 import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
-const MINI_CHAT_PRESENCE_CHANNEL = 'piarium:mini-chat-presence';
+const MINI_CHAT_PRESENCE_CHANNEL = 'varin:mini-chat-presence';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -110,8 +110,8 @@ const MiniChatBootstrap: React.FC<{
           onUnavailable(true);
         });
     };
-    window.addEventListener('piarium:open-session', onOpenSession);
-    return () => window.removeEventListener('piarium:open-session', onOpenSession);
+    window.addEventListener('varin:open-session', onOpenSession);
+    return () => window.removeEventListener('varin:open-session', onOpenSession);
   }, [onReady, onUnavailable, openSession, setDirectory]);
 
   React.useEffect(() => {

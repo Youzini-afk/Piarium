@@ -1,11 +1,11 @@
 ---
 title: 安装
-description: 从源码或 Docker 为桌面或 Web 安装 Piarium。
+description: 从源码或 Docker 为桌面或 Web 安装 Varin。
 ---
 
 # 安装
 
-Piarium 目前是 pre-1.0。今天支持的运行方式只有**从源码**和**使用 Docker**。打包的 npm 和 GitHub Release 下载尚未发布。
+Varin 目前是 pre-1.0。今天支持的运行方式只有**从源码**和**使用 Docker**。打包的 npm 和 GitHub Release 下载尚未发布。
 
 有两个主要产品界面：
 
@@ -24,13 +24,13 @@ Piarium 目前是 pre-1.0。今天支持的运行方式只有**从源码**和**�
 ## 从源码（Web）
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-打开终端中打印的 Vite URL。Piarium 会同时启动 UI 和受信任的 API/运行时服务。
+打开终端中打印的 Vite URL。Varin 会同时启动 UI 和受信任的 API/运行时服务。
 
 ## 从源码（桌面）
 
@@ -51,17 +51,17 @@ bun run electron:dev:bundled
 在 Linux Docker 主机上：
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-打开 `http://127.0.0.1:3000` 并使用生成的密码。任何面向互联网的部署前面都应放置 TLS 反向代理或已批准的隧道。生产环境请将 `PIARIUM_IMAGE` 固定到已测试的 digest，而不是 `:latest`。
+打开 `http://127.0.0.1:3000` 并使用生成的密码。任何面向互联网的部署前面都应放置 TLS 反向代理或已批准的隧道。生产环境请将 `VARIN_IMAGE` 固定到已测试的 digest，而不是 `:latest`。
 
-Compose 默认拉取精简镜像 `ghcr.io/youzini-afk/piarium-slim:latest`（用来跑服务：Bun、Node、Git、SSH、cloudflared）。如果智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
+Compose 默认拉取精简镜像 `ghcr.io/youzini-afk/varin-slim:latest`（用来跑服务：Bun、Node、Git、SSH、cloudflared）。如果智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
@@ -69,4 +69,4 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ## CLI 一行安装（尚未发布）
 
-`scripts/install.sh` 和 `npx @piarium/web` 面向 `@piarium/web` npm 包。该包尚未上架公共 registry，因此在发布之前 curl 安装程序会失败。在此之前请使用源码或 Docker。
+`scripts/install.sh` 和 `npx @varin/web` 面向 `@varin/web` npm 包。该包尚未上架公共 registry，因此在发布之前 curl 安装程序会失败。在此之前请使用源码或 Docker。

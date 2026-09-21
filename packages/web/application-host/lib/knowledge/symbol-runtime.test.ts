@@ -8,7 +8,7 @@ import { createSymbolGraphRuntime } from "./symbol-runtime.js";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import type { DocumentMutationObservation } from "../documents/authority.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-symbol-runtime");
+const TEST_DIR = join(tmpdir(), "varin-symbol-runtime");
 
 describe("symbol graph runtime", () => {
   let store: KnowledgeStore;

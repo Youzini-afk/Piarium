@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
+import type { PiConfigScope, RuntimeContextTarget } from '@varin/protocol';
 import {
   SettingsControlGroup,
   SettingsFieldRow,
@@ -62,7 +62,7 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
     || controller.saving
     || controller.rawError !== null
     || trustBlocked;
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   const fieldProps = {
     disabled,
     draft: controller.draft,
@@ -72,38 +72,38 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
   };
   const fieldLabel = React.useCallback((field: string): string => {
     const labels: Record<string, string> = {
-      applyPatch: t('settings.piarium.pluginSettings.codexCompat.field.applyPatch'),
-      applyPatchDebug: t('settings.piarium.pluginSettings.codexCompat.field.applyPatchDebug'),
-      autoCompactAtPercent: t('settings.piarium.pluginSettings.codexCompat.field.autoCompactAtPercent'),
-      fastMode: t('settings.piarium.pluginSettings.codexCompat.field.fastMode'),
-      imageDetail: t('settings.piarium.pluginSettings.codexCompat.field.imageDetail'),
-      imageGeneration: t('settings.piarium.pluginSettings.codexCompat.field.imageGeneration'),
-      reasoningMode: t('settings.piarium.pluginSettings.codexCompat.field.reasoningMode'),
-      reasoningSummary: t('settings.piarium.pluginSettings.codexCompat.field.reasoningSummary'),
-      responsesLite: t('settings.piarium.pluginSettings.codexCompat.field.responsesLite'),
-      textVerbosity: t('settings.piarium.pluginSettings.codexCompat.field.textVerbosity'),
-      toolBackground: t('settings.piarium.pluginSettings.codexCompat.field.toolBackground'),
-      webRun: t('settings.piarium.pluginSettings.codexCompat.field.webRun'),
-      webSearch: t('settings.piarium.pluginSettings.codexCompat.field.webSearch'),
+      applyPatch: t('settings.varin.pluginSettings.codexCompat.field.applyPatch'),
+      applyPatchDebug: t('settings.varin.pluginSettings.codexCompat.field.applyPatchDebug'),
+      autoCompactAtPercent: t('settings.varin.pluginSettings.codexCompat.field.autoCompactAtPercent'),
+      fastMode: t('settings.varin.pluginSettings.codexCompat.field.fastMode'),
+      imageDetail: t('settings.varin.pluginSettings.codexCompat.field.imageDetail'),
+      imageGeneration: t('settings.varin.pluginSettings.codexCompat.field.imageGeneration'),
+      reasoningMode: t('settings.varin.pluginSettings.codexCompat.field.reasoningMode'),
+      reasoningSummary: t('settings.varin.pluginSettings.codexCompat.field.reasoningSummary'),
+      responsesLite: t('settings.varin.pluginSettings.codexCompat.field.responsesLite'),
+      textVerbosity: t('settings.varin.pluginSettings.codexCompat.field.textVerbosity'),
+      toolBackground: t('settings.varin.pluginSettings.codexCompat.field.toolBackground'),
+      webRun: t('settings.varin.pluginSettings.codexCompat.field.webRun'),
+      webSearch: t('settings.varin.pluginSettings.codexCompat.field.webSearch'),
     };
     return labels[field] ?? field;
   }, [t]);
   const issueMessage = React.useCallback((value: OpenAICodexCompatDraftIssue): string => {
     const field = fieldLabel(value.field);
     if (value.code === 'invalid-number') {
-      return t('settings.piarium.pluginSettings.validation.invalidNumber', { field });
+      return t('settings.varin.pluginSettings.validation.invalidNumber', { field });
     }
     if (value.code === 'invalid-boolean') {
-      return t('settings.piarium.pluginSettings.validation.invalidBoolean', { field });
+      return t('settings.varin.pluginSettings.validation.invalidBoolean', { field });
     }
-    return t('settings.piarium.pluginSettings.validation.invalidValue', { field });
+    return t('settings.varin.pluginSettings.validation.invalidValue', { field });
   }, [fieldLabel, t]);
 
   return (
     <div className="space-y-7">
       <SettingsFieldRow
-        label={t('settings.piarium.pluginSettings.scope.label')}
-        info={t('settings.piarium.pluginSettings.scope.description')}
+        label={t('settings.varin.pluginSettings.scope.label')}
+        info={t('settings.varin.pluginSettings.scope.description')}
         controlClassName="w-full max-w-[24rem]"
       >
         <ScopeSelector
@@ -115,44 +115,44 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
       <PluginConfigSource controller={controller} />
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.codexCompat.section.requests')}
+        title={t('settings.varin.pluginSettings.codexCompat.section.requests')}
         contentClassName="space-y-4"
       >
-        <PluginOptionalBooleanField {...fieldProps} path={['fastMode']} label={t('settings.piarium.pluginSettings.codexCompat.field.fastMode')} />
-        <PluginOptionalBooleanField {...fieldProps} path={['responsesLite']} label={t('settings.piarium.pluginSettings.codexCompat.field.responsesLite')} />
-        <PluginOptionalSelectField {...fieldProps} path={['textVerbosity']} label={t('settings.piarium.pluginSettings.codexCompat.field.textVerbosity')} options={[
-          { value: 'low', label: t('settings.piarium.pluginSettings.subagents.thinking.low') },
-          { value: 'medium', label: t('settings.piarium.pluginSettings.subagents.thinking.medium') },
-          { value: 'high', label: t('settings.piarium.pluginSettings.subagents.thinking.high') },
+        <PluginOptionalBooleanField {...fieldProps} path={['fastMode']} label={t('settings.varin.pluginSettings.codexCompat.field.fastMode')} />
+        <PluginOptionalBooleanField {...fieldProps} path={['responsesLite']} label={t('settings.varin.pluginSettings.codexCompat.field.responsesLite')} />
+        <PluginOptionalSelectField {...fieldProps} path={['textVerbosity']} label={t('settings.varin.pluginSettings.codexCompat.field.textVerbosity')} options={[
+          { value: 'low', label: t('settings.varin.pluginSettings.subagents.thinking.low') },
+          { value: 'medium', label: t('settings.varin.pluginSettings.subagents.thinking.medium') },
+          { value: 'high', label: t('settings.varin.pluginSettings.subagents.thinking.high') },
         ]} />
-        <PluginOptionalSelectField {...fieldProps} path={['reasoningSummary']} label={t('settings.piarium.pluginSettings.codexCompat.field.reasoningSummary')} options={[
-          { value: 'auto', label: t('settings.piarium.pluginSettings.codexCompat.value.auto') },
-          { value: 'concise', label: t('settings.piarium.pluginSettings.codexCompat.value.concise') },
-          { value: 'detailed', label: t('settings.piarium.pluginSettings.codexCompat.value.detailed') },
-          { value: 'off', label: t('settings.piarium.pluginSettings.subagents.thinking.off') },
+        <PluginOptionalSelectField {...fieldProps} path={['reasoningSummary']} label={t('settings.varin.pluginSettings.codexCompat.field.reasoningSummary')} options={[
+          { value: 'auto', label: t('settings.varin.pluginSettings.codexCompat.value.auto') },
+          { value: 'concise', label: t('settings.varin.pluginSettings.codexCompat.value.concise') },
+          { value: 'detailed', label: t('settings.varin.pluginSettings.codexCompat.value.detailed') },
+          { value: 'off', label: t('settings.varin.pluginSettings.subagents.thinking.off') },
         ]} />
-        <PluginOptionalSelectField {...fieldProps} path={['reasoningMode']} label={t('settings.piarium.pluginSettings.codexCompat.field.reasoningMode')} options={[
-          { value: 'standard', label: t('settings.piarium.pluginSettings.codexCompat.value.standard') },
+        <PluginOptionalSelectField {...fieldProps} path={['reasoningMode']} label={t('settings.varin.pluginSettings.codexCompat.field.reasoningMode')} options={[
+          { value: 'standard', label: t('settings.varin.pluginSettings.codexCompat.value.standard') },
           { value: 'pro', label: 'Pro' },
         ]} />
       </SettingsControlGroup>
 
       <SettingsControlGroup
         className={GROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.codexCompat.section.compaction')}
+        title={t('settings.varin.pluginSettings.codexCompat.section.compaction')}
         contentClassName="space-y-4"
       >
         <PluginOptionalNumberField
           {...fieldProps}
           path={['autoCompactAtPercent']}
-          label={t('settings.piarium.pluginSettings.codexCompat.field.autoCompactAtPercent')}
+          label={t('settings.varin.pluginSettings.codexCompat.field.autoCompactAtPercent')}
           min={0}
           max={100}
           step={0.1}
           fallbackValue={80}
           preserveTypedPrecision
-          emptyLabel={t('settings.piarium.pluginSettings.codexCompat.value.piLifecycle')}
-          emptyActionLabel={t('settings.piarium.pluginSettings.codexCompat.value.piLifecycle')}
+          emptyLabel={t('settings.varin.pluginSettings.codexCompat.value.piLifecycle')}
+          emptyActionLabel={t('settings.varin.pluginSettings.codexCompat.value.piLifecycle')}
           emptyValue={null}
           unit="%"
         />
@@ -160,29 +160,29 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
 
       <SettingsControlGroup
         className={GROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.codexCompat.section.tools')}
+        title={t('settings.varin.pluginSettings.codexCompat.section.tools')}
         contentClassName="space-y-4"
       >
         <PluginOptionalBooleanField {...fieldProps} path={['applyPatch']} label="apply_patch" />
-        <PluginOptionalBooleanField {...fieldProps} path={['applyPatchDebug']} label={t('settings.piarium.pluginSettings.codexCompat.field.applyPatchDebug')} />
-        <PluginOptionalSelectField {...fieldProps} path={['toolBackground']} label={t('settings.piarium.pluginSettings.codexCompat.field.toolBackground')} options={[
-          { value: 'subtle', label: t('settings.piarium.pluginSettings.codexCompat.value.subtle') },
-          { value: 'status', label: t('settings.piarium.pluginSettings.codexCompat.value.status') },
-          { value: 'none', label: t('settings.piarium.pluginSettings.codexCompat.value.none') },
+        <PluginOptionalBooleanField {...fieldProps} path={['applyPatchDebug']} label={t('settings.varin.pluginSettings.codexCompat.field.applyPatchDebug')} />
+        <PluginOptionalSelectField {...fieldProps} path={['toolBackground']} label={t('settings.varin.pluginSettings.codexCompat.field.toolBackground')} options={[
+          { value: 'subtle', label: t('settings.varin.pluginSettings.codexCompat.value.subtle') },
+          { value: 'status', label: t('settings.varin.pluginSettings.codexCompat.value.status') },
+          { value: 'none', label: t('settings.varin.pluginSettings.codexCompat.value.none') },
         ]} />
-        <PluginOptionalBooleanField {...fieldProps} path={['imageGeneration']} label={t('settings.piarium.pluginSettings.codexCompat.field.imageGeneration')} />
-        <PluginOptionalSelectField {...fieldProps} path={['imageDetail']} label={t('settings.piarium.pluginSettings.codexCompat.field.imageDetail')} options={[
-          { value: 'auto', label: t('settings.piarium.pluginSettings.codexCompat.value.auto') },
-          { value: 'low', label: t('settings.piarium.pluginSettings.subagents.thinking.low') },
-          { value: 'high', label: t('settings.piarium.pluginSettings.subagents.thinking.high') },
-          { value: 'original', label: t('settings.piarium.pluginSettings.codexCompat.value.original') },
+        <PluginOptionalBooleanField {...fieldProps} path={['imageGeneration']} label={t('settings.varin.pluginSettings.codexCompat.field.imageGeneration')} />
+        <PluginOptionalSelectField {...fieldProps} path={['imageDetail']} label={t('settings.varin.pluginSettings.codexCompat.field.imageDetail')} options={[
+          { value: 'auto', label: t('settings.varin.pluginSettings.codexCompat.value.auto') },
+          { value: 'low', label: t('settings.varin.pluginSettings.subagents.thinking.low') },
+          { value: 'high', label: t('settings.varin.pluginSettings.subagents.thinking.high') },
+          { value: 'original', label: t('settings.varin.pluginSettings.codexCompat.value.original') },
         ]} />
         <PluginOptionalBooleanField {...fieldProps} path={['webRun']} label="web.run" />
-        <PluginOptionalSelectField {...fieldProps} path={['webSearch']} label={t('settings.piarium.pluginSettings.codexCompat.field.webSearch')} options={[
-          { value: 'disabled', label: t('settings.piarium.pluginSettings.field.disabled') },
-          { value: 'cached', label: t('settings.piarium.pluginSettings.codexCompat.value.cached') },
-          { value: 'indexed', label: t('settings.piarium.pluginSettings.codexCompat.value.indexed') },
-          { value: 'live', label: t('settings.piarium.pluginSettings.codexCompat.value.live') },
+        <PluginOptionalSelectField {...fieldProps} path={['webSearch']} label={t('settings.varin.pluginSettings.codexCompat.field.webSearch')} options={[
+          { value: 'disabled', label: t('settings.varin.pluginSettings.field.disabled') },
+          { value: 'cached', label: t('settings.varin.pluginSettings.codexCompat.value.cached') },
+          { value: 'indexed', label: t('settings.varin.pluginSettings.codexCompat.value.indexed') },
+          { value: 'live', label: t('settings.varin.pluginSettings.codexCompat.value.live') },
         ]} />
       </SettingsControlGroup>
 

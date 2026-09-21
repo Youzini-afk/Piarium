@@ -106,10 +106,10 @@ export function importerParentURL(packageDir: string, packageName: string): stri
     && basename(dirname(packageDir)) === scope
     && basename(dirname(dirname(packageDir))) === "node_modules"
   ) {
-    return pathToFileURL(join(dirname(dirname(packageDir)), "piarium-sdk-importer.mjs")).href;
+    return pathToFileURL(join(dirname(dirname(packageDir)), "varin-sdk-importer.mjs")).href;
   }
   if (!scope && basename(dirname(packageDir)) === "node_modules") {
-    return pathToFileURL(join(dirname(packageDir), "piarium-sdk-importer.mjs")).href;
+    return pathToFileURL(join(dirname(packageDir), "varin-sdk-importer.mjs")).href;
   }
   return undefined;
 }

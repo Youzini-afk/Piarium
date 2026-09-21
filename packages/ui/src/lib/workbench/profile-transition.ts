@@ -7,12 +7,12 @@
  */
 
 import {
-  PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
-  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  piariumTransitionSceneDuration,
-  type PiariumTransitionSceneAnimatedPhase,
-  type PiariumTransitionSceneFrameV1,
-} from '@piarium/extension-contract';
+  VARIN_TRANSITION_SCENE_CONTRACT_VERSION,
+  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  varinTransitionSceneDuration,
+  type VarinTransitionSceneAnimatedPhase,
+  type VarinTransitionSceneFrameV1,
+} from '@varin/extension-contract';
 import type { WorkbenchTransitionSceneCapture } from '@/lib/extensions/workbench-transition-scene';
 
 export type WorkbenchProfileTransitionDirection = 'forward' | 'backward';
@@ -43,8 +43,8 @@ export interface WorkbenchProfileTransitionState {
 }
 
 export interface WorkbenchTransitionSceneController {
-  complete(transitionId: number, phase: PiariumTransitionSceneAnimatedPhase): void;
-  getSnapshot(): PiariumTransitionSceneFrameV1;
+  complete(transitionId: number, phase: VarinTransitionSceneAnimatedPhase): void;
+  getSnapshot(): VarinTransitionSceneFrameV1;
   subscribe(listener: () => void): () => void;
 }
 
@@ -128,14 +128,14 @@ const settleIdle = (): void => {
 
 const phaseDuration = (
   scene: WorkbenchTransitionSceneCapture | null,
-  phase: PiariumTransitionSceneAnimatedPhase,
+  phase: VarinTransitionSceneAnimatedPhase,
   tempo: WorkbenchProfileTransitionTempo,
   reducedMotion: boolean,
 ): number => scene
-  ? piariumTransitionSceneDuration(scene.data, {
+  ? varinTransitionSceneDuration(scene.data, {
       phase,
       reducedMotion,
-      scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+      scene: VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
       tempo,
     })
   : 0;
@@ -196,7 +196,7 @@ export const beginWorkbenchProfileTransition = (input: {
  */
 export const armWorkbenchProfileTransitionPhase = (
   id: number,
-  phase: PiariumTransitionSceneAnimatedPhase,
+  phase: VarinTransitionSceneAnimatedPhase,
 ): void => {
   // A retiring transaction is still reported as `revealing`, and its clock has already run. Re-arming it
   // would start a second timeline over the terminal frame the scene is being retired against.
@@ -302,7 +302,7 @@ export const revealWorkbenchProfileTransition = async (id: number): Promise<void
  * needs a guess about how long a paint takes.
  */
 export const registerWorkbenchProfileTransitionSceneHost = (): (() => void) => {
-  const token = Symbol('piarium.workbench.transition.host');
+  const token = Symbol('varin.workbench.transition.host');
   sceneHosts.add(token);
   return () => {
     sceneHosts.delete(token);
@@ -356,17 +356,17 @@ export const subscribeWorkbenchProfileTransition = (listener: Listener): (() => 
 
 export const getWorkbenchProfileTransitionSnapshot = (): WorkbenchProfileTransitionState => state;
 
-const frameFrom = (current: WorkbenchProfileTransitionState): PiariumTransitionSceneFrameV1 => {
+const frameFrom = (current: WorkbenchProfileTransitionState): VarinTransitionSceneFrameV1 => {
   if (current.phase === 'idle' || !current.toProfileId) {
     throw new Error('Cannot create a Transition Scene frame for an idle transition');
   }
   return {
-    contractVersion: PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
+    contractVersion: VARIN_TRANSITION_SCENE_CONTRACT_VERSION,
     direction: current.direction,
     fromProfileId: current.fromProfileId,
     phase: current.phase,
     reducedMotion: current.reducedMotion,
-    scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+    scene: VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
     tempo: current.tempo,
     toProfileId: current.toProfileId,
     transitionId: current.id,
@@ -395,13 +395,13 @@ export const createWorkbenchTransitionSceneController = (
   const adopt = (next: WorkbenchProfileTransitionState): boolean => {
     observedState = next;
     const candidate = frameFrom(next);
-    const unchanged = (Object.keys(candidate) as Array<keyof PiariumTransitionSceneFrameV1>)
+    const unchanged = (Object.keys(candidate) as Array<keyof VarinTransitionSceneFrameV1>)
       .every((key) => candidate[key] === frame[key]);
     if (unchanged) return false;
     frame = candidate;
     return true;
   };
-  const readFrame = (): PiariumTransitionSceneFrameV1 => {
+  const readFrame = (): VarinTransitionSceneFrameV1 => {
     if (state.id === id && state.phase !== 'idle' && state !== observedState) adopt(state);
     return frame;
   };

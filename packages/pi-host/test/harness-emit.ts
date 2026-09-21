@@ -1,4 +1,4 @@
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import type { SessionHost } from "../src/session-host.js";
 
 export type HarnessEmit = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;

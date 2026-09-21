@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type ShellExecResult } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type ShellExecResult } from "@varin/protocol";
 
 const BashParams = Type.Object({
   command: Type.String(),

@@ -3,9 +3,9 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type {
   JsonObject,
   JsonValue,
-  PiariumExtensionStorageOpenRequest,
-  PiariumExtensionStorageSnapshot,
-} from "@piarium/extension-contract";
+  VarinExtensionStorageOpenRequest,
+  VarinExtensionStorageSnapshot,
+} from "@varin/extension-contract";
 import type { BrokeredHostTransport } from "./broker-supervisor.js";
 
 interface NativeHostExtension {
@@ -23,10 +23,10 @@ interface NativeHostContext {
   };
   signal: AbortSignal;
   storage: {
-    readonly snapshot: PiariumExtensionStorageSnapshot;
-    open(request: PiariumExtensionStorageOpenRequest): Promise<NativeStorageDocumentClient>;
-    refresh(): Promise<PiariumExtensionStorageSnapshot>;
-    update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
+    readonly snapshot: VarinExtensionStorageSnapshot;
+    open(request: VarinExtensionStorageOpenRequest): Promise<NativeStorageDocumentClient>;
+    refresh(): Promise<VarinExtensionStorageSnapshot>;
+    update(data: JsonObject, expectedRevision?: number): Promise<VarinExtensionStorageSnapshot>;
   };
 }
 
@@ -46,16 +46,16 @@ const packageAssetPath = (packageRoot: string, logicalPath: string): string => {
 };
 
 interface NativeStorageDocumentClient {
-  readonly snapshot: PiariumExtensionStorageSnapshot;
-  refresh(): Promise<PiariumExtensionStorageSnapshot>;
-  update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
+  readonly snapshot: VarinExtensionStorageSnapshot;
+  refresh(): Promise<VarinExtensionStorageSnapshot>;
+  update(data: JsonObject, expectedRevision?: number): Promise<VarinExtensionStorageSnapshot>;
 }
 
 interface NativeStorageClientState {
-  snapshot: PiariumExtensionStorageSnapshot;
+  snapshot: VarinExtensionStorageSnapshot;
 }
 
-const storageKey = (address: Pick<PiariumExtensionStorageOpenRequest, "key" | "scope">): string => (
+const storageKey = (address: Pick<VarinExtensionStorageOpenRequest, "key" | "scope">): string => (
   `${address.scope}\0${address.key}`
 );
 
@@ -83,7 +83,7 @@ const resolveExtension = (moduleValue: unknown): NativeHostExtension => {
     if (typeof module.migrate === "function") extension.migrate = module.migrate as NonNullable<NativeHostExtension["migrate"]>;
     return extension;
   }
-  throw new Error("Trusted-native Piarium Host module must export activate or a default extension definition");
+  throw new Error("Trusted-native Varin Host module must export activate or a default extension definition");
 };
 
 export class NativeHostTransport implements BrokeredHostTransport {
@@ -126,8 +126,8 @@ export class NativeHostTransport implements BrokeredHostTransport {
         const stagedHandlers = new Map<string, Record<string, (...args: JsonValue[]) => unknown>>();
         const provisions: unknown[] = [];
         const createStorageClient = (
-          request: PiariumExtensionStorageOpenRequest,
-          initialSnapshot: PiariumExtensionStorageSnapshot,
+          request: VarinExtensionStorageOpenRequest,
+          initialSnapshot: VarinExtensionStorageSnapshot,
         ): NativeStorageDocumentClient => {
           const state: NativeStorageClientState = { snapshot: initialSnapshot };
           const key = storageKey(request);
@@ -141,7 +141,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
                 "storage.refresh",
                 request,
                 this.#controller?.signal ?? new AbortController().signal,
-              ) as unknown as PiariumExtensionStorageSnapshot;
+              ) as unknown as VarinExtensionStorageSnapshot;
               return state.snapshot;
             },
             update: async (data, expectedRevision = state.snapshot.document.revision) => {
@@ -149,14 +149,14 @@ export class NativeHostTransport implements BrokeredHostTransport {
                 "storage.update",
                 { data, expectedRevision, key: request.key, scope: request.scope },
                 this.#controller?.signal ?? new AbortController().signal,
-              ) as unknown as PiariumExtensionStorageSnapshot;
+              ) as unknown as VarinExtensionStorageSnapshot;
               return state.snapshot;
             },
           };
         };
         const defaultStorage = createStorageClient(
           { key: "state", scope: "application" },
-          params.storage as PiariumExtensionStorageSnapshot,
+          params.storage as VarinExtensionStorageSnapshot,
         );
         const packageRoot = String(params.packageRoot ?? "");
         const context: NativeHostContext = {
@@ -205,7 +205,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
                 "storage.open",
                 request,
                 this.#controller?.signal ?? new AbortController().signal,
-              ) as unknown as PiariumExtensionStorageSnapshot,
+              ) as unknown as VarinExtensionStorageSnapshot,
             ),
             refresh: () => defaultStorage.refresh(),
             update: (data, expectedRevision) => defaultStorage.update(data, expectedRevision),
@@ -229,8 +229,8 @@ export class NativeHostTransport implements BrokeredHostTransport {
       }
       case "storage.sync":
         for (const snapshot of Array.isArray(params.storages)
-          ? params.storages as PiariumExtensionStorageSnapshot[]
-          : params.storage ? [params.storage as PiariumExtensionStorageSnapshot] : []) {
+          ? params.storages as VarinExtensionStorageSnapshot[]
+          : params.storage ? [params.storage as VarinExtensionStorageSnapshot] : []) {
           for (const state of this.#storages.get(storageKey(snapshot.address)) ?? []) state.snapshot = snapshot;
         }
         return null;

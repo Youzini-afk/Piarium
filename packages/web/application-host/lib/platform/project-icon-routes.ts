@@ -19,7 +19,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
   fsPromises: unknown;
   path: typeof path;
   persistSettings(input: Settings): Promise<Settings>;
-  piariumDataDir: string;
+  varinDataDir: string;
   readSettingsFromDisk(): Promise<Settings>;
   sanitizeProjects(input: unknown): NormalizedProject[] | undefined;
 }): void => {
@@ -27,7 +27,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
     fsPromises: rawFsPromises,
     path,
     crypto,
-    piariumDataDir,
+    varinDataDir,
     sanitizeProjects,
     readSettingsFromDisk,
     persistSettings,
@@ -35,7 +35,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
   } = dependencies;
   const fsPromises = rawFsPromises as typeof import('node:fs/promises');
 
-  const projectIconsDirPath = path.join(piariumDataDir, 'project-icons');
+  const projectIconsDirPath = path.join(varinDataDir, 'project-icons');
   const projectIconMimeToExtension: Record<IconMime, string> = {
     'image/png': 'png',
     'image/jpeg': 'jpg',
@@ -185,7 +185,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
       return svgMarkup;
     }
 
-    const overrideStyle = `<style data-piarium-theme-icon="1">:root{color:${color}!important;}</style>`;
+    const overrideStyle = `<style data-varin-theme-icon="1">:root{color:${color}!important;}</style>`;
     return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
   };
 

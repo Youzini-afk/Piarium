@@ -1,4 +1,4 @@
-import type { SurfaceContribution } from '@piarium/extension-surface';
+import type { SurfaceContribution } from '@varin/extension-surface';
 
 export interface WorkbenchShellRenderStagingHandle {
   dispose(): Promise<void>;

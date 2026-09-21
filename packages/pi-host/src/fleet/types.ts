@@ -4,7 +4,7 @@ import type {
   PiFleetEntry,
   PiFleetLogsData,
   PiFleetProviderSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export type ExtensionEventBus = ExtensionAPI["events"];
 

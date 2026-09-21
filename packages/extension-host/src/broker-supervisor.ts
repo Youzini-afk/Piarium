@@ -1,22 +1,22 @@
 import { fork, type ChildProcess } from "node:child_process";
 import {
-  parsePiariumExtensionServiceInvocationRequest,
-  parsePiariumExtensionStorageOpenRequest,
+  parseVarinExtensionServiceInvocationRequest,
+  parseVarinExtensionStorageOpenRequest,
   type JsonObject,
   type JsonValue,
-  type PiariumExtensionActualState,
-  type PiariumExtensionCapabilityGrant,
-  type PiariumExtensionCatalogEntry,
-  type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionCandidatePreparationResult,
-  type PiariumExtensionManifest,
-  type PiariumExtensionServiceProvision,
-  type PiariumExtensionServiceInvocationRequest,
-  type PiariumExtensionServiceProviderSnapshot,
-  type PiariumExtensionServiceRequirement,
-  type PiariumExtensionStorageSnapshot,
-  type PiariumExtensionStorageAddress,
-} from "@piarium/extension-contract";
+  type VarinExtensionActualState,
+  type VarinExtensionCapabilityGrant,
+  type VarinExtensionCatalogEntry,
+  type VarinExtensionCatalogSnapshot,
+  type VarinExtensionCandidatePreparationResult,
+  type VarinExtensionManifest,
+  type VarinExtensionServiceProvision,
+  type VarinExtensionServiceInvocationRequest,
+  type VarinExtensionServiceProviderSnapshot,
+  type VarinExtensionServiceRequirement,
+  type VarinExtensionStorageSnapshot,
+  type VarinExtensionStorageAddress,
+} from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
@@ -61,7 +61,7 @@ export interface BrokeredHostTransport {
 }
 
 export interface BrokeredHostTransportOptions {
-  grants: PiariumExtensionCapabilityGrant[];
+  grants: VarinExtensionCapabilityGrant[];
   onCrash(error: Error): void;
   owner: HostServiceOwnerIdentity;
 }
@@ -74,8 +74,8 @@ interface BrokeredHostInstance {
   artifactIntegrity: string;
   broker: BrokeredHostTransport;
   desiredRevision: number;
-  grants: PiariumExtensionCapabilityGrant[];
-  manifest: PiariumExtensionManifest;
+  grants: VarinExtensionCapabilityGrant[];
+  manifest: VarinExtensionManifest;
   owner: HostServiceOwnerIdentity;
   provisions: HostServiceProvision[];
   slot: "candidate" | "selected";
@@ -83,10 +83,10 @@ interface BrokeredHostInstance {
 }
 
 interface BrokerStorageSession {
-  address: PiariumExtensionStorageAddress;
+  address: VarinExtensionStorageAddress;
   phase: "activating" | "active" | "disposed" | "draining";
   schemaVersion: number;
-  snapshot: PiariumExtensionStorageSnapshot;
+  snapshot: VarinExtensionStorageSnapshot;
   transaction: ExtensionStorageMigrationTransaction | null;
 }
 
@@ -103,12 +103,12 @@ export interface BrokeredHostSupervisorOptions {
   services: HostServiceRegistry;
   storage: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
-  invokeService?(request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue>;
+  invokeService?(request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue>;
 }
 
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
 const ownerStorageKey = (owner: HostServiceOwnerIdentity): string => `${owner.extensionId}\0${owner.entrypointId}\0${owner.generation}`;
-const storageAddressKey = (address: Pick<PiariumExtensionStorageAddress, "key" | "scope">): string => (
+const storageAddressKey = (address: Pick<VarinExtensionStorageAddress, "key" | "scope">): string => (
   `${address.scope}\0${address.key}`
 );
 
@@ -126,10 +126,10 @@ const diagnosticState = (
   hostId: string,
   desiredRevision: number,
   generation: number,
-  status: PiariumExtensionActualState["status"],
+  status: VarinExtensionActualState["status"],
   code?: string,
   message?: string,
-): PiariumExtensionActualState => ({
+): VarinExtensionActualState => ({
   desiredRevision,
   diagnostics: code && message ? [{ code, message, severity: "error", timestamp: new Date().toISOString() }] : [],
   entrypointId: "host",
@@ -273,7 +273,7 @@ export class BrokeredHostSupervisor {
   readonly #packages: ExtensionPackageManager;
   readonly #onStateChange: () => void;
   readonly #services: HostServiceRegistry;
-  readonly #invokeService: (request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal) => Promise<JsonValue>;
+  readonly #invokeService: (request: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal) => Promise<JsonValue>;
   readonly #staged = new Map<string, BrokeredHostInstance>();
   readonly #nativeRestartRequired = new Set<string>();
   readonly #storage: ExtensionStorageStore;
@@ -297,15 +297,15 @@ export class BrokeredHostSupervisor {
     }));
   }
 
-  reconcile(snapshot?: PiariumExtensionCatalogSnapshot): Promise<void> {
+  reconcile(snapshot?: VarinExtensionCatalogSnapshot): Promise<void> {
     return this.#enqueue(async () => this.#reconcile(snapshot ?? await this.#catalog.snapshot()));
   }
 
-  prepareCandidate(extensionId: string, integrity: string): Promise<PiariumExtensionCandidatePreparationResult> {
+  prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
     return this.#enqueue(() => this.#prepareCandidate(extensionId, integrity));
   }
 
-  selectCandidate(extensionId: string, integrity: string, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  selectCandidate(extensionId: string, integrity: string, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     return this.#enqueue(() => this.#selectCandidate(extensionId, integrity, expectedRevision));
   }
 
@@ -348,8 +348,8 @@ export class BrokeredHostSupervisor {
     });
   }
 
-  activateForService(requestValue: PiariumExtensionServiceInvocationRequest | unknown): Promise<void> {
-    const request = parsePiariumExtensionServiceInvocationRequest(requestValue);
+  activateForService(requestValue: VarinExtensionServiceInvocationRequest | unknown): Promise<void> {
+    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
     return this.#enqueue(async () => {
       const snapshot = await this.#catalog.snapshot();
       const providers = snapshot.extensions.filter((entry) => (
@@ -370,10 +370,10 @@ export class BrokeredHostSupervisor {
   }
 
   invokeStagedService(
-    requestValue: PiariumExtensionServiceInvocationRequest | unknown,
+    requestValue: VarinExtensionServiceInvocationRequest | unknown,
     signal?: AbortSignal,
   ): Promise<JsonValue> {
-    const request = parsePiariumExtensionServiceInvocationRequest(requestValue);
+    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
     if (!request.providerId) throw new Error("Candidate Host service invocation requires providerId");
     for (const instance of this.#staged.values()) {
       const provision = instance.provisions.find((value) => (
@@ -403,7 +403,7 @@ export class BrokeredHostSupervisor {
     return result;
   }
 
-  async #prepareCandidate(extensionId: string, integrity: string): Promise<PiariumExtensionCandidatePreparationResult> {
+  async #prepareCandidate(extensionId: string, integrity: string): Promise<VarinExtensionCandidatePreparationResult> {
     const snapshot = await this.#catalog.snapshot();
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
@@ -451,7 +451,7 @@ export class BrokeredHostSupervisor {
     extensionId: string,
     integrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     let staged = this.#staged.get(extensionId);
     if (!staged) {
       const snapshot = await this.#catalog.snapshot();
@@ -468,7 +468,7 @@ export class BrokeredHostSupervisor {
     const previous = this.#active.get(extensionId);
     const replacement = this.#services.prepareOwnerReplacement(staged.owner, staged.provisions);
     let storageCommitted = false;
-    let selected: PiariumExtensionCatalogSnapshot;
+    let selected: VarinExtensionCatalogSnapshot;
     if (previous) this.#setStoragePhase(previous, "draining");
     try {
       await this.#commitInstanceStorage(staged);
@@ -495,7 +495,7 @@ export class BrokeredHostSupervisor {
     return selected;
   }
 
-  async #reconcile(snapshot: PiariumExtensionCatalogSnapshot): Promise<void> {
+  async #reconcile(snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
     if (!snapshot.authoritative) return;
     const enabled = new Map(snapshot.extensions.filter((entry) => entry.desired.enabled).map((entry) => [entry.manifest.id, entry]));
     for (const extensionId of [...this.#active.keys()]) {
@@ -570,8 +570,8 @@ export class BrokeredHostSupervisor {
   }
 
   async #ensureSelectedActive(
-    entry: PiariumExtensionCatalogEntry,
-    snapshot: PiariumExtensionCatalogSnapshot,
+    entry: VarinExtensionCatalogEntry,
+    snapshot: VarinExtensionCatalogSnapshot,
     stack: string[],
   ): Promise<void> {
     const active = this.#active.get(entry.manifest.id);
@@ -668,7 +668,7 @@ export class BrokeredHostSupervisor {
     }
   }
 
-  #providerEntries(requirement: PiariumExtensionServiceRequirement, snapshot: PiariumExtensionCatalogSnapshot): PiariumExtensionCatalogEntry[] {
+  #providerEntries(requirement: VarinExtensionServiceRequirement, snapshot: VarinExtensionCatalogSnapshot): VarinExtensionCatalogEntry[] {
     const providers = snapshot.extensions.filter((entry) => (
       entry.desired.enabled
       && Boolean(entry.manifest.entrypoints?.host)
@@ -680,15 +680,15 @@ export class BrokeredHostSupervisor {
   }
 
   async #prepareInstance(
-    entry: PiariumExtensionCatalogEntry,
+    entry: VarinExtensionCatalogEntry,
     selection: {
-      capabilityGrants: PiariumExtensionCatalogEntry["capabilityGrants"];
+      capabilityGrants: VarinExtensionCatalogEntry["capabilityGrants"];
       integrity: string;
-      manifest: PiariumExtensionManifest;
+      manifest: VarinExtensionManifest;
       slot: "candidate" | "selected";
       version: string;
     },
-    snapshot: PiariumExtensionCatalogSnapshot,
+    snapshot: VarinExtensionCatalogSnapshot,
   ): Promise<BrokeredHostInstance> {
     const artifact = await this.#packages.resolveBrokeredHostEntrypoint(entry.manifest.id, selection.slot, selection.integrity);
     const generation = (this.#generations.get(entry.manifest.id) ?? 0) + 1;
@@ -773,7 +773,7 @@ export class BrokeredHostSupervisor {
     owner: HostServiceOwnerIdentity,
     broker: BrokeredHostTransport,
     raw: unknown,
-    manifest: PiariumExtensionManifest,
+    manifest: VarinExtensionManifest,
   ): HostServiceProvision[] {
     const values = Array.isArray(raw) ? raw : [];
     const declared = new Map((manifest.provides?.services ?? []).map((service) => [serviceKey(service.id, service.version), service]));
@@ -796,16 +796,16 @@ export class BrokeredHostSupervisor {
     });
   }
 
-  #providerId(owner: HostServiceOwnerIdentity, descriptor: PiariumExtensionServiceProvision): string {
+  #providerId(owner: HostServiceOwnerIdentity, descriptor: VarinExtensionServiceProvision): string {
     return `${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${serviceKey(descriptor.id, descriptor.version)}`;
   }
 
-  #providerKey(owner: HostServiceOwnerIdentity, descriptor: PiariumExtensionServiceProvision): string {
+  #providerKey(owner: HostServiceOwnerIdentity, descriptor: VarinExtensionServiceProvision): string {
     return `${owner.extensionId}:${owner.entrypointId}:${serviceKey(descriptor.id, descriptor.version)}`;
   }
 
-  #candidatePreparation(instance: BrokeredHostInstance): PiariumExtensionCandidatePreparationResult {
-    const providers = instance.provisions.map<PiariumExtensionServiceProviderSnapshot>((provision) => ({
+  #candidatePreparation(instance: BrokeredHostInstance): VarinExtensionCandidatePreparationResult {
+    const providers = instance.provisions.map<VarinExtensionServiceProviderSnapshot>((provision) => ({
       descriptor: { ...provision.descriptor },
       entrypointId: instance.owner.entrypointId,
       extensionId: instance.owner.extensionId,
@@ -822,7 +822,7 @@ export class BrokeredHostSupervisor {
     };
   }
 
-  async #deactivateWithDependents(extensionId: string, snapshot: PiariumExtensionCatalogSnapshot): Promise<void> {
+  async #deactivateWithDependents(extensionId: string, snapshot: VarinExtensionCatalogSnapshot): Promise<void> {
     const instance = this.#active.get(extensionId);
     if (!instance) return;
     const provided = new Set(instance.provisions.map((provision) => serviceKey(provision.descriptor.id, provision.descriptor.version)));
@@ -914,7 +914,7 @@ export class BrokeredHostSupervisor {
 
   async #handleChildRequest(
     owner: HostServiceOwnerIdentity,
-    grants: PiariumExtensionCapabilityGrant[],
+    grants: VarinExtensionCapabilityGrant[],
     method: string,
     paramsValue: unknown,
     signal: AbortSignal,
@@ -931,22 +931,22 @@ export class BrokeredHostSupervisor {
       );
     }
     if (method === "storage.open") {
-      const request = parsePiariumExtensionStorageOpenRequest(params);
+      const request = parseVarinExtensionStorageOpenRequest(params);
       const session = await this.#openStorageSession(owner, request);
       return asJsonValue(session.snapshot);
     }
     if (method === "storage.refresh") {
-      const request = parsePiariumExtensionStorageOpenRequest(params);
+      const request = parseVarinExtensionStorageOpenRequest(params);
       const session = await this.#openStorageSession(owner, request);
       if (session.phase !== "active") return asJsonValue(session.snapshot);
       session.snapshot = await this.#storage.read(session.address);
       return asJsonValue(session.snapshot);
     }
     if (method === "storage.update") {
-      if (params.extensionId !== undefined) throw new Error("Extension storage namespace is assigned by the Piarium Host");
+      if (params.extensionId !== undefined) throw new Error("Extension storage namespace is assigned by the Varin Host");
       const request = params.scope === undefined && params.key === undefined
         ? { key: "state", scope: "application" as const }
-        : parsePiariumExtensionStorageOpenRequest({ key: params.key, scope: params.scope });
+        : parseVarinExtensionStorageOpenRequest({ key: params.key, scope: params.scope });
       const session = await this.#openStorageSession(owner, request);
       if (session.phase === "disposed" || session.phase === "draining") {
         throw new Error("Brokered Host storage owner is inactive");
@@ -989,7 +989,7 @@ export class BrokeredHostSupervisor {
 
   async #openStorageSession(
     owner: HostServiceOwnerIdentity,
-    requestValue: { key: string; schemaVersion?: number; scope: PiariumExtensionStorageAddress["scope"] },
+    requestValue: { key: string; schemaVersion?: number; scope: VarinExtensionStorageAddress["scope"] },
   ): Promise<BrokerStorageSession> {
     const storages = this.#storageSessions.get(ownerStorageKey(owner));
     if (!storages) throw new Error("Brokered Host storage owner is inactive");
@@ -1003,7 +1003,7 @@ export class BrokeredHostSupervisor {
     }
     const phase = storages.values().next().value?.phase as BrokerStorageSession["phase"] | undefined;
     if (!phase || phase === "disposed" || phase === "draining") throw new Error("Brokered Host storage owner is inactive");
-    const address: PiariumExtensionStorageAddress = {
+    const address: VarinExtensionStorageAddress = {
       extensionId: owner.extensionId,
       key: requestValue.key,
       scope: requestValue.scope,
@@ -1025,7 +1025,7 @@ export class BrokeredHostSupervisor {
     if (sessions.length === 0) return;
     const transactions = sessions.map((session) => session.transaction as ExtensionStorageMigrationTransaction);
     const snapshots = await this.#storage.commitPrepared(transactions);
-    sessions.forEach((session, index) => { session.snapshot = snapshots[index] as PiariumExtensionStorageSnapshot; });
+    sessions.forEach((session, index) => { session.snapshot = snapshots[index] as VarinExtensionStorageSnapshot; });
     try {
       await this.#syncInstanceStorage(instance);
     } catch (error) {
@@ -1070,7 +1070,7 @@ export class BrokeredHostSupervisor {
     });
   }
 
-  async #reportActual(extensionId: string, state: PiariumExtensionActualState): Promise<void> {
+  async #reportActual(extensionId: string, state: VarinExtensionActualState): Promise<void> {
     await this.#catalog.reportActualState(extensionId, state);
     this.#onStateChange();
   }

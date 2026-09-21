@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { ProjectEntry } from '@piarium/application-client';
-import type { SessionSnapshot, SessionSummary } from '@piarium/protocol';
+import type { ProjectEntry } from '@varin/application-client';
+import type { SessionSnapshot, SessionSummary } from '@varin/protocol';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';

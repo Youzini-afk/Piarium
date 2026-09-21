@@ -8,11 +8,11 @@ import type {
   RuntimeMethodParams,
   RuntimeMethodResult,
   RuntimeWorkerRole,
-} from '@piarium/protocol';
-import type { PiRuntimeClient } from '@piarium/runtime-client';
+} from '@varin/protocol';
+import type { PiRuntimeClient } from '@varin/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
 export interface PiProjectTrustPrompt extends ProjectTrustRequest {
   role: RuntimeWorkerRole;

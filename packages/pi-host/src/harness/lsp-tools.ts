@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HarnessMethod, LspNavigationResult } from "@piarium/protocol";
+import type { HarnessMethod, LspNavigationResult } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const PositionParams = Type.Object({

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { languageIdForPath } from "@piarium/protocol";
+import { languageIdForPath } from "@varin/protocol";
 import type { KernelComputeService } from "../kernel/compute-service.js";
 import type { KernelComputeResult } from "../kernel/compute-runner.js";
 import { STRUCTURE_PARSE_BUDGET_MS } from "./constants.js";

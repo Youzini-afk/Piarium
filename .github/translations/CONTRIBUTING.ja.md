@@ -1,8 +1,8 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | 日本語
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | 日本語
 
-# Piarium への貢献
+# Varin への貢献
 
-Piarium の改善にご協力いただきありがとうございます。Pi のランタイム境界、デスクトップおよびリモートの
+Varin の改善にご協力いただきありがとうございます。Pi のランタイム境界、デスクトップおよびリモートの
 サーフェス、拡張機能の統合、ドキュメント、テスト、アクセシビリティ、プラットフォーム対応など、幅広い
 領域での貢献を歓迎します。
 
@@ -22,7 +22,7 @@ Piarium の改善にご協力いただきありがとうございます。Pi の
 ## 始める前に
 
 - [行動規範](CODE_OF_CONDUCT.ja.md)を読んでください。
-- 再現可能なバグ、機能提案、焦点の定まった技術的な議論には [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) を使用してください。
+- 再現可能なバグ、機能提案、焦点の定まった技術的な議論には [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) を使用してください。
 - 脆弱性は [SECURITY.md](../SECURITY.md) に記載された非公開の手順で送ってください。issue、ディスカッション、pull request、ログ、スクリーンショットに悪用の詳細を公開しないでください。
 - 重複する変更を始める前に、既存の issue と pull request を検索してください。
 - 大規模な製品変更またはアーキテクチャ変更では、完全な実装に取りかかる前に、ユーザーにとっての成果と
@@ -30,17 +30,17 @@ Piarium の改善にご協力いただきありがとうございます。Pi の
 
 ## 貢献に影響するプロジェクト原則
 
-Piarium は複数のコーディングエージェント CLI をまとめる汎用ラッパーではありません。Pi ネイティブな
+Varin は複数のコーディングエージェント CLI をまとめる汎用ラッパーではありません。Pi ネイティブな
 ドメインを 1 つ持ち、現在のプレリリース用ランタイム契約も 1 つだけ持ちます。
 
 1. **Pi を権威あるものとして扱う。** セッション、モデル、認証、設定、パッケージ、拡張機能ランタイムを
-   管理するのは Pi です。JSON で安全に扱える Piarium の契約を投影し、Pi の状態を並列のアプリケーション
+   管理するのは Pi です。JSON で安全に扱える Varin の契約を投影し、Pi の状態を並列のアプリケーション
    スキーマに複製しないでください。
 2. **プラグインの所有権を維持する。** 拡張機能は、公開されたコマンド、イベント、設定、機能ブリッジを
    通じて統合してください。GUI を構築するためだけに、非公開データベースを解析したり、プラグインの
    マイグレーションを複製したりしないでください。
 3. **互換性の堆積を避ける。** 1.0 未満の開発中は、すべての製品サーフェスが同時に変化します。置き換えが
-   受け入れられたら、古い OpenCode の経路と、置き換えられた Piarium の経路を削除してください。実際に
+   受け入れられたら、古い OpenCode の経路と、置き換えられた Varin の経路を削除してください。実際に
    永続データまたは外部クライアントの必要性がない限り、プロトコル v13/v14 型の互換性シムを蓄積しないで
    ください。
 4. **信頼境界で権限を適用する。** レンダラーとリモートクライアントが自ら権限を付与することはできません。
@@ -67,14 +67,14 @@ Piarium は複数のコーディングエージェント CLI をまとめる汎�
 ### クローンとインストール
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run check:pi
 ```
 
 `bun.lock` が権威あるファイルです。依存関係の変更で必要にならない限り、パッケージマネージャーを変更したり
-lockfile を再生成したりしないでください。ライフサイクルスクリプトの変更は慎重に確認してください。Piarium
+lockfile を再生成したりしないでください。ライフサイクルスクリプトの変更は慎重に確認してください。Varin
 では、必要なインストールスクリプトだけを意図的に許可しています。
 
 ## 一般的な開発サーフェス
@@ -230,7 +230,7 @@ pull request は、レビュー担当者が調査を再現しなくても結果�
 
 ## ライセンス
 
-貢献を提出することにより、Piarium の
+貢献を提出することにより、Varin の
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）の下で配布されること、および
 インポートされたサードパーティ素材が [サードパーティ通知](../../THIRD_PARTY_NOTICES.md) によって求められる
 通知を保持することに同意するものとします。

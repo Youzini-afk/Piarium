@@ -2,9 +2,9 @@ import React from 'react';
 import type {
   LanguageSupportLanguageRow,
   LanguageSupportStatus,
-  PiariumLanguageProviderStatus,
-} from '@piarium/application-client';
-import { LanguageSupportError } from '@piarium/application-client';
+  VarinLanguageProviderStatus,
+} from '@varin/application-client';
+import { LanguageSupportError } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
@@ -40,7 +40,7 @@ const StatusValue: React.FC<{ tone: ReturnType<typeof grammarStatusTone>; label:
 
 const LanguageRow: React.FC<{
   busy: boolean;
-  languageServerStatus?: PiariumLanguageProviderStatus;
+  languageServerStatus?: VarinLanguageProviderStatus;
   preparing: boolean;
   onPrepare(): void;
   onCancelPreparation(): void;
@@ -135,7 +135,7 @@ export const LanguageSupportPage: React.FC = () => {
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : null;
   const [status, setStatus] = React.useState<LanguageSupportStatus | null>(null);
   const [lspByLanguage, setLspByLanguage] = React.useState<
-    Partial<Record<string, PiariumLanguageProviderStatus>>
+    Partial<Record<string, VarinLanguageProviderStatus>>
   >({});
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [preparingIds, setPreparingIds] = React.useState<ReadonlySet<string>>(new Set());

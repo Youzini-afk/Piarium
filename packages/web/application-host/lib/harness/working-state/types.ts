@@ -1,4 +1,4 @@
-import type { ThreadDiffStats } from "@piarium/protocol";
+import type { ThreadDiffStats } from "@varin/protocol";
 import type {
   RecoveryState,
   RegularFileState,
@@ -184,7 +184,7 @@ export interface WorkingStateRootStore {
     operationId: string,
     signal?: AbortSignal,
   ): Promise<import("./materializer.js").MaterializeResult>;
-  measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement>;
+  measurePin(pin: WorkingStatePin): Promise<import("@varin/protocol").ThreadSpaceMeasurement>;
   directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
   captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string>;
@@ -374,7 +374,7 @@ export interface IntegrationApplyResult {
   conflictPaths: string[];
   /** Draft-derived paths that require reconciliation with the originating editor surface. */
   surfaceTargetPaths?: string[];
-  preview?: import("@piarium/protocol").ThreadIntegrationPreview;
+  preview?: import("@varin/protocol").ThreadIntegrationPreview;
   compensatedPaths?: string[];
   needsAttentionPaths?: string[];
   diffStats: ThreadDiffStats;

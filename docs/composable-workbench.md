@@ -1,4 +1,4 @@
-# Piarium 可组合工作台与 IDE 架构
+# Varin 可组合工作台与 IDE 架构
 
 Status: current architecture and ownership contract; D-297 selection boundary implemented in 7A (D-298)
 
@@ -8,12 +8,12 @@ current surface contract.
 
 Last updated: 2026-09-19
 
-这份文档规定 Piarium 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
+这份文档规定 Varin 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。实现进度与历史阶段不在这里保存；当前行为以代码、契约测试和模块文档为准。
 
 正文为中文。英文读者可先看 [architecture.md](architecture.md) 第 4 节的工作台概述。
 跨 Shell 动画、首帧启动投影和不规定页面元素的 Motion 边界见
-[piarium-motion-platform.md](piarium-motion-platform.md)。
+[varin-motion-platform.md](varin-motion-platform.md)。
 desktop/web 官方文件编辑器的新目标、Monaco 与移动 CodeMirror 的分工以及语言智能实施顺序见
 [unified-file-editor-platform.md](unified-file-editor-platform.md)。该文档取代本文原先的
 CodeMirror-only 引擎决定，但不改变已经交付的 Document Registry、Editor Workbench Kernel、
@@ -21,12 +21,12 @@ Profile 或 Host ownership。
 
 ## 1. 目标
 
-Piarium 是一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前已交付两套官方工作形态：
+Varin 是一套可由 Varin 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前已交付两套官方工作形态：
 
 - **Agent Workspace**：会话、任务、Fleet、上下文与恢复工作流居中；
 - **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板。
 
-二者不是 Piarium Core 中的两个硬编码 mode，也不是两套应用。它们是普通的第一方 Piarium 扩展和 Workbench Profile。用户可以：
+二者不是 Varin Core 中的两个硬编码 mode，也不是两套应用。它们是普通的第一方 Varin 扩展和 Workbench Profile。用户可以：
 
 - 选择 Agent、IDE 或自建 Profile；
 - 替换完整 `workbench.shell`；
@@ -34,7 +34,7 @@ Piarium 是一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的�
 - 混合使用官方与社区贡献，例如 IDE 中央编辑器、社区 Explorer、官方 Agent 右栏；
 - 动态启用、停用和更新这些扩展，而不刷新文档、不重启 Pi Runtime、不丢失共享工作状态。
 
-Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent；后者扩展 Piarium 产品、Surface 与 Application Host。不得把这套架构实现成 Pi 插件配置的另一种表现层。
+Pi Packages 与 Varin Extensions 继续是两个系统。前者扩展 Pi Agent；后者扩展 Varin 产品、Surface 与 Application Host。不得把这套架构实现成 Pi 插件配置的另一种表现层。
 
 ## 2. 已确定的产品决策
 
@@ -42,24 +42,24 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 
 | 主题 | 决定 |
 | --- | --- |
-| 产品模型 | Profile + Piarium 扩展组合，不增加全局 `ideMode` 或 `agentMode` |
-| 官方形态 | Agent Workspace、IDE Workbench、Research Workbench 都是第一方 Piarium 扩展 |
+| 产品模型 | Profile + Varin 扩展组合，不增加全局 `ideMode` 或 `agentMode` |
+| 官方形态 | Agent Workspace、IDE Workbench、Research Workbench 都是第一方 Varin 扩展 |
 | 默认形态与选择 | `default` 是 Agent Workspace 的稳定 ID；所选工作台按 `user → active` 解析，导航项目/会话不自动换 Shell |
-| IDE Profile ID | `piarium.ide` |
+| IDE Profile ID | `varin.ide` |
 | 编辑器引擎 | desktop/web 官方文件编辑统一使用 Monaco；mobile/embedded 使用 CodeMirror adapter；不 fork Code OSS，不维护 Agent/IDE 两套文件能力 |
 | 核心状态 | 文档、会话、终端、Git、Profile、Runtime 身份由共享内核拥有，Shell 只负责表现和布局 |
-| 扩展自由度 | 完整 Shell 可自绘 DOM、Canvas、WebGL、WebAssembly 或使用任意框架；不强制 Piarium 组件库 |
+| 扩展自由度 | 完整 Shell 可自绘 DOM、Canvas、WebGL、WebAssembly 或使用任意框架；不强制 Varin 组件库 |
 | Profile 与启停 | 选择 Profile 不暗中启停扩展；“应用扩展集”和“选择布局”保持可观察、可分别失败的明确动作 |
 | 动态切换 | 同一 Surface 内热切换；新 Shell 就绪前保留旧 Shell，失败时不提交选择 |
 | 故障恢复 | Recovery Shell 由 Core 固定提供；它只负责恢复扩展/Profile，不是第三套日常工作区 |
 | 移动端 | 官方移动端继续以 Agent Profile 为主；完整官方 IDE 初始只声明 desktop/web 支持 |
-| Pi 插件 | Pi Packages、Plugin Settings 及其原生数据权威不并入 Piarium 扩展生命周期 |
+| Pi 插件 | Pi Packages、Plugin Settings 及其原生数据权威不并入 Varin 扩展生命周期 |
 | 发布 | 代码交付与 GitHub Release、npm tag、公共 SDK 发布是分别授权的动作 |
 
 ### 2.1 工作台 UIUX 与 Agent 工作侧重独立（D-297 / D-298）
 
 科研工作台与未来办公工作台扩展完整 UIUX；入口设在现有 Agent/IDE 切换区域，复用 Workbench Profile、
-Shell contribution 和 [Motion 平台](piarium-motion-platform.md) 的切换动画。它们不属于项目选择菜单，
+Shell contribution 和 [Motion 平台](varin-motion-platform.md) 的切换动画。它们不属于项目选择菜单，
 也不另建“研究中心”会话库。IDE 仍是完整开发环境，科研任务可以在其中继续；工作台之间共享资源与执行事实。
 
 Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活能力、工具组织、上下文和协作方式。
@@ -75,7 +75,7 @@ Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活
 保留原工作台，返回 Agent 时恢复。在 IDE 中选另一工作台只修改返回目标。Surface 按 Host 持久保存这一返回偏好，
 不另存或抢占当前 Shell 权威；实际切换仍由 Profile 事务与 Motion 完成。对话工作侧重维持独立控件。
 
-7A 已交付这些选择语义以及 `piarium.research` 基础 Shell。科研 Shell 复用共享窗口、导航、权限和资源框架，
+7A 已交付这些选择语义以及 `varin.research` 基础 Shell。科研 Shell 复用共享窗口、导航、权限和资源框架，
 中央显示真实研究主线、结果和可展开的分支/材料；后续实验与综合视图在 7B–7E 接入。交付顺序见
 [plan 7A](agent-harness-plan.md#711-分阶段交付)，产品行为以
 [科研集群设计第 10 节](research-cluster-design.md#10-产品入口工作台与工作侧重) 为准。办公只复用这一边界，不是科研实施前置。
@@ -84,9 +84,9 @@ Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活
 
 当前仓库以一套共享内核承载多种工作台形态：
 
-- `@piarium/extension-contract` 定义 manifest、Profile、replacement、slot、context key 和服务契约；
-- `@piarium/extension-surface`、`extension-loader` 和 SDK 负责 owner/generation、候选激活、原子切换与清理；
-- `piarium.builtin.agent-workspace` 与 `piarium.builtin.ide-workbench` 是普通 built-in Shell contribution；
+- `@varin/extension-contract` 定义 manifest、Profile、replacement、slot、context key 和服务契约；
+- `@varin/extension-surface`、`extension-loader` 和 SDK 负责 owner/generation、候选激活、原子切换与清理；
+- `varin.builtin.agent-workspace` 与 `varin.builtin.ide-workbench` 是普通 built-in Shell contribution；
 - Agent Shell 的 `MainLayout.tsx` 是第一方内部组合，不是 Core fallback；IDE 的六个结构区域是真实 replacement host；
 - Application Host 的 revisioned Documents authority、客户端 Document Registry 和 Editor Workbench Kernel 是唯一共享文档路径；
 - desktop/Web 官方编辑器使用 Monaco，mobile/embedded 使用 CodeMirror adapter；
@@ -97,7 +97,7 @@ Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活
 
 ## 4. 最终 ownership
 
-### 4.1 Piarium Core / Application Host
+### 4.1 Varin Core / Application Host
 
 Core 与 Application Host 是以下状态的唯一权威：
 
@@ -122,7 +122,7 @@ Shared Workbench Kernel 位于共享 UI 与其 Application Host services 中，�
 
 Kernel 不决定 Shell 长什么样，也不拥有扩展私有配置。
 
-### 4.3 Shell 与普通 Piarium 扩展
+### 4.3 Shell 与普通 Varin 扩展
 
 Shell 与扩展拥有：
 
@@ -144,23 +144,23 @@ Shell 与扩展拥有：
 所有新状态和异步操作必须携带足够身份，不能只用 path 或 session ID：
 
 ```ts
-interface PiariumWorkspaceIdentity {
+interface VarinWorkspaceIdentity {
   applicationHostId: string;
   workspaceId: string;
 }
 
-interface PiariumConnectionOwner {
+interface VarinConnectionOwner {
   applicationHostId: string;
   connectionGeneration: number;
 }
 
-interface PiariumSurfaceIdentity {
+interface VarinSurfaceIdentity {
   applicationHostId: string;
   surface: 'desktop' | 'web' | 'mobile';
   surfaceInstanceId: string;
 }
 
-interface PiariumResourceReference {
+interface VarinResourceReference {
   workspaceId: string;
   uri: string;          // workspace-scoped opaque URI
   relativePath: string; // display and user intent, not host authority
@@ -183,7 +183,7 @@ interface PiariumResourceReference {
 
 ### 6.1 常量归属
 
-当前 `WORKBENCH_REPLACEMENT_TARGETS` 只存在于 UI 私有模块。公共扩展无法可靠引用。把稳定 target/slot 常量移到 `@piarium/extension-contract`，UI 只 import，不保留另一份字符串表。
+当前 `WORKBENCH_REPLACEMENT_TARGETS` 只存在于 UI 私有模块。公共扩展无法可靠引用。把稳定 target/slot 常量移到 `@varin/extension-contract`，UI 只 import，不保留另一份字符串表。
 
 必须保留并公开现有 targets：
 
@@ -241,7 +241,7 @@ Manifest schema、parser、JSON schema、CLI check/build/test 和 SDK 类型必�
 ### 6.3 Profile 语义
 
 - `default` 是官方 Agent Workspace 的 Workbench Profile 稳定 ID，不新增 alias。持久化 `label` 是稳定 fallback；官方 Surface 通过第一方 locale metadata 显示本地化名称；
-- `piarium.ide` 与可用的 IDE 扩展、contributions 同时维护；
+- `varin.ide` 与可用的 IDE 扩展、contributions 同时维护；
 - Profile selection 是 user/application 级选择；workspace 只参与布局，不覆盖 Shell，详见 2.1；
 - `extensionIds` 是显式 desired-set 模板，只有用户执行 Apply set 才改变 enablement；
 - 选择 Profile 时若其 Shell extension 未启用，显示“启用并切换”和“只检查配置”动作，不能静默启用；
@@ -270,15 +270,15 @@ persisted selection 不能在新 Shell 尚未证明可 mount 时先提交。Surf
 
 | Service ID | Owner / routing |
 | --- | --- |
-| `piarium.documents` v1 | Core/Application Host 单一 provider，Surface 得到 resource-scoped capability |
-| `piarium.commands` v1 | Surface Core registry，owner-scoped handlers |
-| `piarium.context-keys` v1 | Surface Core registry，extension keys namespaced |
-| `piarium.workbench.layout` v1 | 当前 Shell selected provider，profile-scoped storage |
-| `piarium.workbench.editors` v1 | Shared Kernel registry，允许多个 editor providers |
-| `piarium.workspace.search` v1 | Application Host，可由显式 provider routing 替换 |
-| `piarium.language` v1 | Host multi-provider，按 workspace/language routing |
-| `piarium.debug` v1 | Host multi-provider，按 workspace/debug type routing |
-| `piarium.tests` v1 | Host multi-provider，按 workspace/provider routing |
+| `varin.documents` v1 | Core/Application Host 单一 provider，Surface 得到 resource-scoped capability |
+| `varin.commands` v1 | Surface Core registry，owner-scoped handlers |
+| `varin.context-keys` v1 | Surface Core registry，extension keys namespaced |
+| `varin.workbench.layout` v1 | 当前 Shell selected provider，profile-scoped storage |
+| `varin.workbench.editors` v1 | Shared Kernel registry，允许多个 editor providers |
+| `varin.workspace.search` v1 | Application Host，可由显式 provider routing 替换 |
+| `varin.language` v1 | Host multi-provider，按 workspace/language routing |
+| `varin.debug` v1 | Host multi-provider，按 workspace/debug type routing |
+| `varin.tests` v1 | Host multi-provider，按 workspace/provider routing |
 
 Core services 不通过 renderer global 暴露。官方 UI 使用 `RuntimeAPIs`/registry hooks；managed、isolated 和 Host extensions 使用 SDK capability/service clients。服务缺失、歧义、版本不兼容和 provider failure 是明确状态，不投影成空结果。
 
@@ -297,13 +297,13 @@ Core services 不通过 renderer global 暴露。官方 UI 使用 `RuntimeAPIs`/
 
 ### 7.2 DTO 核心语义
 
-具体 spelling 以 `@piarium/application-client` 为准，语义必须完整：
+具体 spelling 以 `@varin/application-client` 为准，语义必须完整：
 
 ```ts
-type PiariumDocumentReadResult =
+type VarinDocumentReadResult =
   | {
       status: 'ready';
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;       // opaque Host revision
       content: string;
       encoding: string;
@@ -313,25 +313,25 @@ type PiariumDocumentReadResult =
     }
   | {
       status: 'missing';
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
     }
   | {
       status: 'binary';
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;
       byteLength: number;
       mime?: string;
     }
   | {
       status: 'unsupported-encoding';
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;
       byteLength: number;
       candidates?: string[];
     };
 
-interface PiariumDocumentWriteRequest {
-  resource: PiariumResourceReference;
+interface VarinDocumentWriteRequest {
+  resource: VarinResourceReference;
   content: string;
   encoding: string;
   bom: boolean;
@@ -339,9 +339,9 @@ interface PiariumDocumentWriteRequest {
   operationId: string;
 }
 
-type PiariumDocumentWriteResult =
+type VarinDocumentWriteResult =
   | { status: 'written'; revision: string; byteLength: number; modifiedAt?: string }
-  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> };
+  | { status: 'conflict'; current: Omit<VarinDocumentReadResult, 'content'> };
 ```
 
 网络、权限、主机和磁盘失败应 reject/返回明确 failed result，使调用者保留旧状态；不得映射为 `missing`、空字符串或 conflict。
@@ -350,16 +350,16 @@ Host 不得用 replacement characters 猜测无法可靠解码的文本。`conte
 
 `DocumentsAPI` 同时提供 revision-checked `move` 和 `delete`。源文件使用 expected revision；目标已存在、源已改变、源缺失是不同结果。用户在 conflict UI 选择“以我的版本覆盖”时，先读取并展示当前 disk candidate，再使用它的最新 revision 写入；不得增加一个绕过 revision 的普通 `force: true` 保存路径。
 
-Revision 算法由 Host 私有实现，必须能检测常见的相同 mtime/不同内容变化。Host 串行化 Piarium 对同一 resource 的 mutation，在写入边界再次校验 expected revision，并使用同目录临时文件 + atomic replace。不得向 UI 暴露 revision 的组成，也不得声称普通文件系统可以提供不存在的跨进程强事务保证。
+Revision 算法由 Host 私有实现，必须能检测常见的相同 mtime/不同内容变化。Host 串行化 Varin 对同一 resource 的 mutation，在写入边界再次校验 expected revision，并使用同目录临时文件 + atomic replace。不得向 UI 暴露 revision 的组成，也不得声称普通文件系统可以提供不存在的跨进程强事务保证。
 
 ### 7.3 Watch contract
 
 Application Host 为 workspace 提供有序文件事件：
 
 ```ts
-type PiariumWorkspaceFileEvent =
-  | { kind: 'created' | 'changed' | 'deleted'; sequence: number; resource: PiariumResourceReference; revision?: string }
-  | { kind: 'moved'; sequence: number; from: PiariumResourceReference; resource: PiariumResourceReference; revision?: string }
+type VarinWorkspaceFileEvent =
+  | { kind: 'created' | 'changed' | 'deleted'; sequence: number; resource: VarinResourceReference; revision?: string }
+  | { kind: 'moved'; sequence: number; from: VarinResourceReference; resource: VarinResourceReference; revision?: string }
   | { kind: 'reset'; sequence: number; reason: 'overflow' | 'reconnected' | 'authority-changed' };
 ```
 
@@ -418,7 +418,7 @@ Record 至少包含：
 
 未保存正文属于敏感项目数据。Recovery journal：
 
-- 由 Application Host 写到 `PIARIUM_DATA_DIR` 下的 Piarium 文档恢复 namespace；
+- 由 Application Host 写到 `VARIN_DATA_DIR` 下的 Varin 文档恢复 namespace；
 - keyed by application host + authenticated user/profile + workspace + recovery session + resource；
 - client 在页面重载/窗口恢复范围内保留 recovery session ID；Host 可列出同一用户/workspace 的 orphan journals，让新 Surface 显式接管或丢弃；
 - 使用 revisioned/serialized writes；
@@ -491,15 +491,15 @@ Record 至少包含：
 Agent 和 IDE Shell 各自维护 layout schema，不由 Core 强迫第三方采用。官方 IDE 的 v1 layout 至少表达：
 
 ```ts
-type PiariumIdeLayoutNode =
+type VarinIdeLayoutNode =
   | { id: string; kind: 'split'; axis: 'horizontal' | 'vertical'; children: string[]; weights: number[] }
   | { id: string; kind: 'stack'; viewIds: string[]; activeViewId?: string }
   | { id: string; kind: 'editor-area' };
 
-interface PiariumIdeLayoutDocument {
+interface VarinIdeLayoutDocument {
   schemaVersion: 1;
   rootId: string;
-  nodes: Record<string, PiariumIdeLayoutNode>;
+  nodes: Record<string, VarinIdeLayoutNode>;
   floating: Array<{ viewId: string; x: number; y: number; width: number; height: number }>;
   activityVisible: boolean;
   statusVisible: boolean;
@@ -547,7 +547,7 @@ interface PiariumIdeLayoutDocument {
 
 ### 11.2 Language service
 
-versioned Host service `piarium.language` 由多 provider 路由选择具体实现。职责：
+versioned Host service `varin.language` 由多 provider 路由选择具体实现。职责：
 
 - workspace/language/provider generation 维度启动和停止 LSP；
 - JSON-RPC transport、restart、diagnostics 和 progress；
@@ -568,8 +568,8 @@ Electron 复用同进程 Web/Application Host。远程 Web 在服务器工作区
 Active editor、selection、Problems、Git diff 都可以形成显式 Agent attachment：
 
 ```ts
-interface PiariumEditorContextAttachment {
-  resource: PiariumResourceReference;
+interface VarinEditorContextAttachment {
+  resource: VarinResourceReference;
   documentRevision: string | null;
   localEditRevision: number;
   source: 'saved' | 'unsaved-buffer';
@@ -595,7 +595,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 - tool diff、timeline changed files 和 editor diff 可以互相导航；
 - Patch review 支持逐文件/逐 hunk 接受、拒绝或手工合并，但最终写入仍走 DocumentsAPI revision precondition。
 
-选中的 `piarium.workspace-recovery@5` Host 服务拥有受影响文件日志和联合恢复；Document conflict
+选中的 `varin.workspace-recovery@5` Host 服务拥有受影响文件日志和联合恢复；Document conflict
 不复制其日志，也不读取可选 `pi-workspace-history` 包的私有状态。
 
 ## 13. Runtime 与 Surface 行为矩阵
@@ -605,7 +605,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 | Web 本地/远程 | Web Application Host | 完整 | 完整 | 文件、终端、Git、LSP/DAP 均在服务器 |
 | Electron | 复用 Web Host | 完整 | 完整 | 只有窗口/菜单/对话框等原生能力走 Electron IPC |
 | Hosted mobile | 复用远端 Web Host | 完整移动布局 | 官方 IDE 初始不声明支持 | 远端 Host |
-| Capacitor | 连接 Piarium server | 完整移动布局 | 稳定 unsupported | 不直接访问设备项目文件 |
+| Capacitor | 连接 Varin server | 完整移动布局 | 稳定 unsupported | 不直接访问设备项目文件 |
 | Headless | Host contract only | 无 Surface | 无 Surface | Documents/search/language provider 可供协议测试 |
 
 每个新增 Runtime API 在共享接口中明确以上行为。Electron 不因为“桌面 IDE”而获得一个并行文件后端。

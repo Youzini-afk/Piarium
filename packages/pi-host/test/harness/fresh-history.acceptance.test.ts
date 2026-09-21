@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { SessionHost } from "../../src/session-host.js";
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
@@ -18,7 +18,7 @@ import { createThreadHistoryService } from "../../../web/application-host/lib/ha
 /** Real Pi requests consume a fresh input and read the preceding native transcript. */
 describe("fresh continuation and same-Thread history", () => {
   it("reads original tool text through history(run), never parent or sibling history", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-fresh-history-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-fresh-history-"));
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
     await writeFile(join(workspace, "evidence.txt"), "ORIGINAL_RAW_TOOL_DETAIL_739\nsecond exact line", "utf8");

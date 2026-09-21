@@ -15,7 +15,7 @@ Rust kernel. Renderers never spawn language servers.
 - `fixture-server.js` / `typescript-server.js`: test servers, not production providers
 - `managed-servers.js`: on-demand native Go (`gopls`), Rust (`rust-analyzer`), C/C++ (`clangd`), and independent Markdown (`marksman`) preparation
 - the distribution TypeScript/JavaScript provider and the Python/HTML/CSS/JSON/YAML/Bash providers are
-  brokered Piarium extensions in `@piarium/extension-builtins`. Their self-contained program assets are
+  brokered Varin extensions in `@varin/extension-builtins`. Their self-contained program assets are
   materialized on `workspace-match` activation; actual language processes still start on demand.
 - `managed-servers.ts` prepares larger native tools in the Host's private data directory. Preparation
   processes use an explicitly scoped Rust process service for that tooling directory; LSP processes

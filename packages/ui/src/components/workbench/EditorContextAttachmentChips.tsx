@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import {
   getEditorContextAttachmentsRevision,
   listEditorContextAttachments,

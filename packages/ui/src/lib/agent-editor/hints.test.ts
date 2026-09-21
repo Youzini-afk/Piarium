@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import {
   listAgentFileChangeHints,
   recordHintsFromToolCall,

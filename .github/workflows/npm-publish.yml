@@ -12,7 +12,7 @@ permissions:
 # All five packages share one exact version stream. Serializing tags prevents an older run from
 # moving npm's latest tag after a newer release, and a publish already in progress is never cancelled.
 concurrency:
-  group: piarium-npm-publish
+  group: varin-npm-publish
   cancel-in-progress: false
 
 jobs:
@@ -57,14 +57,14 @@ jobs:
         run: bun run release:npm:build
 
       - name: Pack and smoke exact artifacts
-        run: bun run release:npm:package "$GITHUB_REF_NAME" "$RUNNER_TEMP/piarium-npm-release"
+        run: bun run release:npm:package "$GITHUB_REF_NAME" "$RUNNER_TEMP/varin-npm-release"
 
       - name: Preserve exact publish artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: piarium-npm-${{ github.sha }}
+          name: varin-npm-${{ github.sha }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/piarium-npm-release
+          path: ${{ runner.temp }}/varin-npm-release
 
       - name: Publish with npm Trusted Publishing
-        run: bun run release:npm:publish "$GITHUB_REF_NAME" "$RUNNER_TEMP/piarium-npm-release"
+        run: bun run release:npm:publish "$GITHUB_REF_NAME" "$RUNNER_TEMP/varin-npm-release"

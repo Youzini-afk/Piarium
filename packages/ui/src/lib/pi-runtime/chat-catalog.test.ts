@@ -3,7 +3,7 @@ import type {
   PiCommandDescriptor,
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { buildPiChatCatalog } from './chat-catalog';
 
 const command = (

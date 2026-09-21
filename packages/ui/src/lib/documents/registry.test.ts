@@ -2,18 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { vi } from 'vitest';
 import type {
   DocumentsAPI,
-  PiariumAgentInputSnapshotCaptureRequest,
-  PiariumDocumentReadResult,
-  PiariumDocumentRecoveryJournalSummary,
-  PiariumDocumentSurfaceOperationCompletion,
-  PiariumDocumentSurfaceOperationPayload,
-  PiariumDocumentWatchEvent,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinAgentInputSnapshotCaptureRequest,
+  VarinDocumentReadResult,
+  VarinDocumentRecoveryJournalSummary,
+  VarinDocumentSurfaceOperationCompletion,
+  VarinDocumentSurfaceOperationPayload,
+  VarinDocumentWatchEvent,
+  VarinResourceReference,
+} from '@varin/application-client';
 import { DocumentRegistry } from './registry';
 import { documentKey } from './types';
 
-const resource = (resourceId = 'note.txt'): PiariumResourceReference => ({
+const resource = (resourceId = 'note.txt'): VarinResourceReference => ({
   workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   resourceId,
 });
@@ -34,13 +34,13 @@ const createMemoryDocuments = () => {
   const files = new Map<string, { content: string; revision: string }>();
   const journals = new Map<string, {
     journalId: string;
-    resource: PiariumResourceReference;
+    resource: VarinResourceReference;
     content: string;
     epoch: number;
     revision: number;
     baseRevision: string | null;
   }>();
-  const listeners = new Set<(event: PiariumDocumentWatchEvent) => void>();
+  const listeners = new Set<(event: VarinDocumentWatchEvent) => void>();
   const dirtyPublications: DirtyPublication[] = [];
   const dirtyPublicationWaiters = new Set<{
     predicate: (publication: DirtyPublication) => boolean;
@@ -56,14 +56,14 @@ const createMemoryDocuments = () => {
   const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
   let resolveBarrierAcknowledgement: () => void = () => undefined;
   const barrierAcknowledged = new Promise<void>((resolve) => { resolveBarrierAcknowledgement = resolve; });
-  const surfaceCompletions: PiariumDocumentSurfaceOperationCompletion[] = [];
-  let surfaceOperation: PiariumDocumentSurfaceOperationPayload | null = null;
+  const surfaceCompletions: VarinDocumentSurfaceOperationCompletion[] = [];
+  let surfaceOperation: VarinDocumentSurfaceOperationPayload | null = null;
   let revisionSeq = 1;
   let workspaceEpoch = 1;
   let watchSequence = 0;
-  const keyOf = (ref: PiariumResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
+  const keyOf = (ref: VarinResourceReference) => `${ref.workspaceId}\0${ref.resourceId}`;
   const nextRevision = () => `d1_${revisionSeq++}`;
-  const emit = (event: PiariumDocumentWatchEvent) => {
+  const emit = (event: VarinDocumentWatchEvent) => {
     for (const listener of listeners) listener(event);
   };
 
@@ -104,7 +104,7 @@ const createMemoryDocuments = () => {
         encoding: 'utf-8',
         bom: false,
         byteLength: file.content.length,
-      } satisfies PiariumDocumentReadResult;
+      } satisfies VarinDocumentReadResult;
     },
     write: async (request) => {
       const key = keyOf(request.resource);
@@ -143,7 +143,7 @@ const createMemoryDocuments = () => {
       epoch: entry.epoch,
       updatedAt: '2026-08-20T00:00:00.000Z',
       byteLength: entry.content.length,
-    })) satisfies PiariumDocumentRecoveryJournalSummary[],
+    })) satisfies VarinDocumentRecoveryJournalSummary[],
     readRecoveryJournal: async (journalId) => {
       const entry = journals.get(journalId);
       if (!entry) return { status: 'missing', journalId };
@@ -240,7 +240,7 @@ const createMemoryDocuments = () => {
     files,
     journals,
     surfaceCompletions,
-    setSurfaceOperation: (operation: PiariumDocumentSurfaceOperationPayload) => { surfaceOperation = operation; },
+    setSurfaceOperation: (operation: VarinDocumentSurfaceOperationPayload) => { surfaceOperation = operation; },
     emit,
     setEpoch: (epoch: number) => { workspaceEpoch = epoch; },
     waitForDirtyPublication,
@@ -282,7 +282,7 @@ describe('DocumentRegistry', () => {
   test('captures serialized CRLF editor content with UTF-8 BOM metadata', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource('crlf-bom.txt');
-    const captures: PiariumAgentInputSnapshotCaptureRequest[] = [];
+    const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
     const surface: DocumentsAPI = {
       ...api,
       read: async (ref) => ({
@@ -656,7 +656,7 @@ describe('DocumentRegistry', () => {
     const identity = resource();
     await api.write({ token: mutationToken(), resource: identity, content: 'v1', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     let generation = 1;
-    let finishRead: ((value: PiariumDocumentReadResult) => void) | undefined;
+    let finishRead: ((value: VarinDocumentReadResult) => void) | undefined;
     const gated: DocumentsAPI = {
       ...api,
       read: () => new Promise((resolve) => {
@@ -1132,7 +1132,7 @@ describe('DocumentRegistry', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const operationId = 'surface-group-operation';
-    const makeTarget = async (identity: PiariumResourceReference, nextText?: string) => {
+    const makeTarget = async (identity: VarinResourceReference, nextText?: string) => {
       const record = registry.get(identity)!;
       return {
         resource: identity,
@@ -1152,7 +1152,7 @@ describe('DocumentRegistry', () => {
     ];
     const dispatch = async (
       action: 'apply' | 'undo',
-      targets: PiariumDocumentSurfaceOperationPayload['targets'],
+      targets: VarinDocumentSurfaceOperationPayload['targets'],
     ) => {
       const previous = memory.surfaceCompletions.length;
       memory.setSurfaceOperation({ action, operationId, requestId: `${action}-group`, workspaceId: first.workspaceId, targets });

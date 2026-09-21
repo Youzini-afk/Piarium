@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import {
   loadKnowledgeCatalog,
@@ -124,7 +124,7 @@ export const KnowledgeSettings: React.FC = () => {
   React.useEffect(() => {
     resetContext();
     void refresh();
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type !== 'harness-knowledge-changed') return;
       if (event.scope !== scope) return;
       if (scope === 'workspace' && event.workspaceId && workspaceId && event.workspaceId !== workspaceId) return;

@@ -192,11 +192,11 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       applyInstalledApps(detail);
     };
 
-    window.addEventListener('piarium:settings-synced', settingsHandler);
-    window.addEventListener('piarium:app-ready', appReadyHandler);
-    window.addEventListener('piarium:installed-apps-updated', updateHandler);
+    window.addEventListener('varin:settings-synced', settingsHandler);
+    window.addEventListener('varin:app-ready', appReadyHandler);
+    window.addEventListener('varin:installed-apps-updated', updateHandler);
 
-    const appReady = (window as unknown as { __piariumAppReady?: boolean }).__piariumAppReady;
+    const appReady = (window as unknown as { __varinAppReady?: boolean }).__varinAppReady;
     if (appReady) {
       void loadInstalledApps();
     }

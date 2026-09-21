@@ -76,7 +76,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                 onClick={() => select({ kind: 'new' })}
               >
                 <Icon name="add" className="size-4" />
-                <span className="sr-only">{t('settings.piarium.mcp.structured.addServer')}</span>
+                <span className="sr-only">{t('settings.varin.mcp.structured.addServer')}</span>
               </Button>
               <Button
                 type="button"
@@ -87,7 +87,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                 onClick={() => select({ kind: 'settings' })}
               >
                 <Icon name="settings-3" className="size-4" />
-                <span className="sr-only">{t('settings.piarium.mcp.config.title')}</span>
+                <span className="sr-only">{t('settings.varin.mcp.config.title')}</span>
               </Button>
             </div>
           </div>
@@ -98,8 +98,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
         const live = runtimeStatus?.servers.find((candidate) => candidate.name === server.name);
         const status = live?.status ?? (server.disabled ? 'disabled' : undefined);
         const label = status
-          ? t(`settings.piarium.mcp.runtime.status.${status === 'needs-auth' ? 'needsAuth' : status === 'not-connected' ? 'notConnected' : status}` as never)
-          : t(`settings.piarium.mcp.structured.transport.${server.transport.kind === 'stdio'
+          ? t(`settings.varin.mcp.runtime.status.${status === 'needs-auth' ? 'needsAuth' : status === 'not-connected' ? 'notConnected' : status}` as never)
+          : t(`settings.varin.mcp.structured.transport.${server.transport.kind === 'stdio'
             ? 'localCommand'
             : server.transport.kind === 'socket'
               ? 'localSocket'
@@ -128,7 +128,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
             ? <Icon name="loader-4" className="mx-auto size-5 animate-spin" />
             : catalogState.error
               ?? catalogState.snapshot?.provider.issue
-              ?? t('settings.piarium.mcp.runtime.noStatus')}
+              ?? t('settings.varin.mcp.runtime.noStatus')}
         </div>
       )}
     </SettingsSidebarLayout>

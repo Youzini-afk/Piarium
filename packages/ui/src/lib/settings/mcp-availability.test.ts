@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PackageDescriptor } from '@piarium/protocol';
+import type { PackageDescriptor } from '@varin/protocol';
 import { isPiMcpAdapterInstalled } from './mcp-availability';
 
 const entry = (input: Partial<PackageDescriptor>): PackageDescriptor => ({
@@ -23,8 +23,8 @@ describe('MCP settings package availability', () => {
     expect(isPiMcpAdapterInstalled([
       entry({
         installed: true,
-        name: '@piarium/pi-mcp-adapter',
-        source: 'npm:@piarium/pi-mcp-adapter@2.29.0-piarium.1',
+        name: '@varin/pi-mcp-adapter',
+        source: 'npm:@varin/pi-mcp-adapter@2.29.0-varin.1',
       }),
     ])).toBe(true);
     expect(isPiMcpAdapterInstalled([

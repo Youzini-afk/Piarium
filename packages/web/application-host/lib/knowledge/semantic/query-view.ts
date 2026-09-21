@@ -4,7 +4,7 @@
  * immediately.
  */
 
-import type { AgentInputContext } from "@piarium/protocol";
+import type { AgentInputContext } from "@varin/protocol";
 import type { SemanticQueryOverlay } from "./runtime.js";
 
 export type SemanticQueryView = {

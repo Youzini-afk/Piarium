@@ -2,7 +2,7 @@ import React from 'react';
 import type {
   PiAssistantMessage,
   PiSessionEntry,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   aggregateAssistantUsage,
   assistantMessagesForTurn,

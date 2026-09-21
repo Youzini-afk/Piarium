@@ -306,7 +306,7 @@ export interface ThreadWorktree {
   /** Durable directory-apply/branch-CAS handoff. Never discarded on ambiguous failure. */
   baselineUpdate?: ThreadBaselineUpdate;
   /**
-   * Piarium-managed directory that owns `path` and every switch/snapshot
+   * Varin-managed directory that owns `path` and every switch/snapshot
    * sibling. Destructive and Git-mutating operations reject records without
    * this persistent ownership root or whose canonical path escapes it.
    */

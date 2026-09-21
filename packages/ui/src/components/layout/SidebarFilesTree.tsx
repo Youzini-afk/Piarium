@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 import { toast } from '@/components/ui';
 import {
@@ -342,7 +342,7 @@ const FileRow: React.FC<FileRowProps> = ({
   const handleDragStart = React.useCallback((e: React.DragEvent) => {
     const path = getRelativePath(root, node.path);
     if (!path || path === '.') return;
-    e.dataTransfer.setData('application/x-piarium-file-path', path);
+    e.dataTransfer.setData('application/x-varin-file-path', path);
     e.dataTransfer.effectAllowed = 'copy';
   }, [node.path, root]);
 
@@ -1224,7 +1224,7 @@ export const SidebarFilesTree: React.FC<{
                     onDragStart={(e) => {
                       const path = node.relativePath || getRelativePath(root ?? '', node.path);
                       if (!path || path === '.') return;
-                      e.dataTransfer.setData('application/x-piarium-file-path', path);
+                      e.dataTransfer.setData('application/x-varin-file-path', path);
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
                     className={cn(

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary, ThreadWorktree } from "@piarium/protocol";
+import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary, ThreadWorktree } from "@varin/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime as createRootThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
@@ -178,7 +178,7 @@ describe("thread runtime", () => {
       readBlocks: async (sessionId) => blocksBySession.get(sessionId) ?? null,
       worktrees: {
         prepare: prepareWorktree,
-        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
         merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
       },
@@ -1506,7 +1506,7 @@ describe("thread runtime", () => {
       stalledAfterMs: () => stalledAfterMs,
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
-        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
@@ -1587,7 +1587,7 @@ describe("thread runtime", () => {
       sessions: sessionAdapter,
       worktrees: {
         prepare: prepareWorktree,
-        snapshot: async (wt) => ({ ...wt, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (wt) => ({ ...wt, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
         merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 2, deletions: 0 } }),
       },
@@ -3846,7 +3846,7 @@ describe("thread runtime", () => {
     await deleting.dispose();
   });
 
-  const reportFor = (sessionId: string): import("@piarium/protocol").ThreadReport => ({
+  const reportFor = (sessionId: string): import("@varin/protocol").ThreadReport => ({
     blocksSnapshot: {},
     changedFiles: ["a.ts"],
     conclusion: "Implemented the seam",

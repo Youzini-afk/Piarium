@@ -1,5 +1,5 @@
 import React from 'react';
-import type { HarnessModelRole } from '@piarium/protocol';
+import type { HarnessModelRole } from '@varin/protocol';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';

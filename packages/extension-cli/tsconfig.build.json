@@ -7,10 +7,10 @@
     "noEmit": false,
     "outDir": "dist",
     "paths": {
-      "@piarium/extension-contract": ["packages/extension-contract/dist/index.d.ts"],
-      "@piarium/extension-sdk": ["packages/extension-sdk/dist/index.d.ts"],
-      "@piarium/extension-sdk/testing": ["packages/extension-sdk/dist/testing.d.ts"],
-      "@piarium/extension-surface": ["packages/extension-surface/dist/index.d.ts"]
+      "@varin/extension-contract": ["packages/extension-contract/dist/index.d.ts"],
+      "@varin/extension-sdk": ["packages/extension-sdk/dist/index.d.ts"],
+      "@varin/extension-sdk/testing": ["packages/extension-sdk/dist/testing.d.ts"],
+      "@varin/extension-surface": ["packages/extension-surface/dist/index.d.ts"]
     },
     "rootDir": "src",
     "sourceMap": true

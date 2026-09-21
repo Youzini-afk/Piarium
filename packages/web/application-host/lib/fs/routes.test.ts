@@ -140,7 +140,7 @@ const registerExec = ({ spawn }: { spawn: unknown }): RouteHandler => {
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/exec');
 };
@@ -164,7 +164,7 @@ const registerWrite = (fsPromises: object, options: {
     resolveProjectDirectory: async () => ({ directory: options.workspaceRoot || '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
     ...(options.documents ? { documents: options.documents } : {}),
   });
   return getRoute('POST', '/api/fs/write');
@@ -185,7 +185,7 @@ const registerRead = (fsPromises: object): RouteHandler => {
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/read');
 };
@@ -205,7 +205,7 @@ const registerRaw = (fsPromises: object): RouteHandler => {
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/raw');
 };
@@ -225,7 +225,7 @@ const registerMkdir = (fsPromises: object): RouteHandler => {
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/mkdir');
 };
@@ -250,7 +250,7 @@ const registerReveal = ({ fsPromises, spawn, platform = 'linux' }: {
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/reveal');
 };
@@ -267,7 +267,7 @@ const registerList = (fsPromises: object, spawn: unknown = vi.fn()): RouteHandle
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
     resolveGitBinaryForSpawn: () => 'git',
-    piariumUserConfigRoot: '/home/user/.config',
+    varinUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/list');
 };
@@ -655,11 +655,11 @@ describe('fs reveal', () => {
 
 describe('fs exec git-read cache', () => {
   beforeEach(() => {
-    delete process.env.PIARIUM_GIT_READ_CACHE_TTL_MS;
+    delete process.env.VARIN_GIT_READ_CACHE_TTL_MS;
   });
 
   afterEach(() => {
-    delete process.env.PIARIUM_GIT_READ_CACHE_TTL_MS;
+    delete process.env.VARIN_GIT_READ_CACHE_TTL_MS;
   });
 
   it('rejects background command execution', async () => {
@@ -768,7 +768,7 @@ describe('fs exec git-read cache', () => {
   });
 
   it('disables caching when TTL is 0', async () => {
-    process.env.PIARIUM_GIT_READ_CACHE_TTL_MS = '0';
+    process.env.VARIN_GIT_READ_CACHE_TTL_MS = '0';
     const command = 'git rev-parse --absolute-git-dir';
     const { spawn, calls } = createSpawn({ stdoutByCommand: { [command]: '/repo/.git\n' } });
     const handler = registerExec({ spawn });

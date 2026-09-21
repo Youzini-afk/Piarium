@@ -1,5 +1,5 @@
-import type { MobileLayoutPreference } from '@piarium/ui/lib/mobileLayoutPreference';
-import type { HostedSurface } from '@piarium/ui/lib/runtimeSurface';
+import type { MobileLayoutPreference } from '@varin/ui/lib/mobileLayoutPreference';
+import type { HostedSurface } from '@varin/ui/lib/runtimeSurface';
 
 export type HostedSurfaceDetectionInput = {
   search: string;

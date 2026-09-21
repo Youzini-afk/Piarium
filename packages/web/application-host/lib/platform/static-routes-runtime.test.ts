@@ -22,7 +22,7 @@ const createRuntime = () => createStaticRoutesRuntime({
 const createStaticRuntime = (distPath: string) => createStaticRoutesRuntime({
   fs,
   path,
-  process: { env: { PIARIUM_DIST_DIR: distPath } },
+  process: { env: { VARIN_DIST_DIR: distPath } },
   __dirname: '/server',
   express,
   listRecentSessions: async () => [],
@@ -33,11 +33,11 @@ const createStaticRuntime = (distPath: string) => createStaticRoutesRuntime({
 
 describe('static routes runtime', () => {
   it('caches fingerprinted assets immutably while entry documents keep revalidating', async () => {
-    const distPath = await mkdtemp(path.join(tmpdir(), 'piarium-static-routes-'));
+    const distPath = await mkdtemp(path.join(tmpdir(), 'varin-static-routes-'));
     try {
       await mkdir(path.join(distPath, 'assets'), { recursive: true });
       await Promise.all([
-        writeFile(path.join(distPath, 'index.html'), '<!doctype html><title>Piarium</title>'),
+        writeFile(path.join(distPath, 'index.html'), '<!doctype html><title>Varin</title>'),
         writeFile(path.join(distPath, 'sw.js'), 'self.skipWaiting();'),
         writeFile(path.join(distPath, 'assets', 'main-AbCdEf12.js'), 'console.log("hashed");'),
         writeFile(path.join(distPath, 'assets', 'runtime.js'), 'console.log("unversioned");'),
@@ -68,9 +68,9 @@ describe('static routes runtime', () => {
     const response = await request(app).get('/sessions/abc').set('Accept', 'text/html');
 
     expect(response.status).toBe(200);
-    expect(response.text).toContain('Piarium is running in headless mode');
-    expect(response.text).toContain('Open it from the Piarium desktop or mobile app');
-    expect(response.text).toContain('piarium connect-url --help');
+    expect(response.text).toContain('Varin is running in headless mode');
+    expect(response.text).toContain('Open it from the Varin desktop or mobile app');
+    expect(response.text).toContain('varin connect-url --help');
     expect(response.text).toContain('Copy command');
   });
 
@@ -84,7 +84,7 @@ describe('static routes runtime', () => {
     expect(response.body).toEqual({
       ok: true,
       mode: 'api-only',
-      message: 'Piarium is running in API-only mode',
+      message: 'Varin is running in API-only mode',
     });
   });
 
@@ -96,8 +96,8 @@ describe('static routes runtime', () => {
     const auth = await request(app).get('/auth/session');
     const health = await request(app).get('/health');
 
-    expect(api.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Piarium is running in API-only mode' });
-    expect(auth.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Piarium is running in API-only mode' });
-    expect(health.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Piarium is running in API-only mode' });
+    expect(api.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Varin is running in API-only mode' });
+    expect(auth.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Varin is running in API-only mode' });
+    expect(health.body).not.toEqual({ ok: true, mode: 'api-only', message: 'Varin is running in API-only mode' });
   });
 });

@@ -6,7 +6,7 @@
  * cannot expose its light default between compositor owners.
  */
 
-export const WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE = 'data-piarium-workbench-handoff';
+export const WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE = 'data-varin-workbench-handoff';
 
 interface PaintHandoffRoot {
   getAttribute(name: string): string | null;

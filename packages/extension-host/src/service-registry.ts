@@ -1,13 +1,13 @@
 import {
-  isPiariumExtensionId,
-  parsePiariumExtensionServiceInvocationRequest,
+  isVarinExtensionId,
+  parseVarinExtensionServiceInvocationRequest,
   type JsonValue,
-  type PiariumExtensionServiceCatalogSnapshot,
-  type PiariumExtensionServiceInvocationRequest,
-  type PiariumExtensionServiceProviderSnapshot,
-  type PiariumExtensionServiceProvision,
-  type PiariumExtensionServiceRequirement,
-} from "@piarium/extension-contract";
+  type VarinExtensionServiceCatalogSnapshot,
+  type VarinExtensionServiceInvocationRequest,
+  type VarinExtensionServiceProviderSnapshot,
+  type VarinExtensionServiceProvision,
+  type VarinExtensionServiceRequirement,
+} from "@varin/extension-contract";
 
 export interface HostServiceOwnerIdentity {
   entrypointId: string;
@@ -27,12 +27,12 @@ export type HostServiceHandler = (
 ) => JsonValue | Promise<JsonValue>;
 
 export interface HostServiceProvision {
-  descriptor: PiariumExtensionServiceProvision;
+  descriptor: VarinExtensionServiceProvision;
   handler: HostServiceHandler;
 }
 
 interface ActiveProvider {
-  descriptor: PiariumExtensionServiceProvision;
+  descriptor: VarinExtensionServiceProvision;
   handler: HostServiceHandler;
   inFlight: number;
   onDrained: Array<() => void>;
@@ -46,8 +46,8 @@ const ownerKey = (owner: HostServiceOwnerIdentity): string => `${owner.extension
 const exactOwnerKey = (owner: HostServiceOwnerIdentity): string => `${ownerKey(owner)}\0${owner.generation}`;
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
 
-const validateDescriptor = (descriptor: PiariumExtensionServiceProvision): PiariumExtensionServiceProvision => {
-  if (!isPiariumExtensionId(descriptor.id)) throw new Error(`Invalid Host service ID: ${descriptor.id}`);
+const validateDescriptor = (descriptor: VarinExtensionServiceProvision): VarinExtensionServiceProvision => {
+  if (!isVarinExtensionId(descriptor.id)) throw new Error(`Invalid Host service ID: ${descriptor.id}`);
   if (!Number.isSafeInteger(descriptor.version) || descriptor.version <= 0) throw new Error(`Invalid Host service version: ${descriptor.id}`);
   if (descriptor.multiple !== undefined && typeof descriptor.multiple !== "boolean") throw new Error(`Invalid Host service multiplicity: ${descriptor.id}`);
   return {
@@ -80,10 +80,10 @@ export class HostServiceRegistry {
     this.hostId = hostId;
   }
 
-  getSnapshot = (): PiariumExtensionServiceCatalogSnapshot => ({
+  getSnapshot = (): VarinExtensionServiceCatalogSnapshot => ({
     hostId: this.hostId,
     providers: [...this.#providers.values()]
-      .map<PiariumExtensionServiceProviderSnapshot>((provider) => ({
+      .map<VarinExtensionServiceProviderSnapshot>((provider) => ({
         descriptor: { ...provider.descriptor },
         entrypointId: provider.owner.entrypointId,
         extensionId: provider.owner.extensionId,
@@ -168,7 +168,7 @@ export class HostServiceRegistry {
   }
 
   #normalizeProvisions(provisions: readonly HostServiceProvision[]): Array<{
-    descriptor: PiariumExtensionServiceProvision;
+    descriptor: VarinExtensionServiceProvision;
     handler: HostServiceHandler;
   }> {
     const normalized = provisions.map((provision) => ({
@@ -186,7 +186,7 @@ export class HostServiceRegistry {
 
   #validateReplacement(
     owner: HostServiceOwnerIdentity,
-    provisions: readonly { descriptor: PiariumExtensionServiceProvision }[],
+    provisions: readonly { descriptor: VarinExtensionServiceProvision }[],
   ): void {
     const otherProviders = [...this.#providers.values()].filter((provider) => (
       ownerKey(provider.owner) !== ownerKey(owner) && provider.status === "active"
@@ -202,7 +202,7 @@ export class HostServiceRegistry {
 
   #createProvider(
     owner: HostServiceOwnerIdentity,
-    provision: { descriptor: PiariumExtensionServiceProvision; handler: HostServiceHandler },
+    provision: { descriptor: VarinExtensionServiceProvision; handler: HostServiceHandler },
   ): ActiveProvider {
     const providerId = `${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${serviceKey(provision.descriptor.id, provision.descriptor.version)}`;
     const providerKey = `${owner.extensionId}:${owner.entrypointId}:${serviceKey(provision.descriptor.id, provision.descriptor.version)}`;
@@ -253,7 +253,7 @@ export class HostServiceRegistry {
   }
 
   setSelection(id: string, version: number, providerId: string | null): void {
-    if (!isPiariumExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
+    if (!isVarinExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
       throw new Error(`Invalid Host service selection: ${id}@${version}`);
     }
     const key = serviceKey(id, version);
@@ -268,7 +268,7 @@ export class HostServiceRegistry {
     this.#publish();
   }
 
-  providersFor(requirement: PiariumExtensionServiceRequirement): PiariumExtensionServiceProviderSnapshot[] {
+  providersFor(requirement: VarinExtensionServiceRequirement): VarinExtensionServiceProviderSnapshot[] {
     const matches = this.getSnapshot().providers.filter((provider) => (
       provider.status === "active"
       && provider.descriptor.id === requirement.id
@@ -282,8 +282,8 @@ export class HostServiceRegistry {
     return matches.length === 1 ? matches : [];
   }
 
-  async invoke(requestValue: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
-    const request = parsePiariumExtensionServiceInvocationRequest(requestValue);
+  async invoke(requestValue: VarinExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+    const request = parseVarinExtensionServiceInvocationRequest(requestValue);
     const matches = [...this.#providers.values()].filter((provider) => (
       provider.status === "active"
       && provider.descriptor.id === request.serviceId

@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 const scratch = async (): Promise<string> => {
-  const dir = await fsp.mkdtemp(path.join(tmpdir(), "piarium-reflink-"));
+  const dir = await fsp.mkdtemp(path.join(tmpdir(), "varin-reflink-"));
   cleanup.push(dir);
   return dir;
 };

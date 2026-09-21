@@ -1,11 +1,11 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumContextValue,
-  PiariumExtensionActualState,
-  PiariumExtensionServiceProvision,
-  PiariumExtensionServiceRequirement,
-  PiariumExtensionStaticContribution,
-} from "@piarium/extension-contract";
+  VarinApplicationSurface,
+  VarinContextValue,
+  VarinExtensionActualState,
+  VarinExtensionServiceProvision,
+  VarinExtensionServiceRequirement,
+  VarinExtensionStaticContribution,
+} from "@varin/extension-contract";
 
 export interface SurfaceOwnerIdentity {
   desiredRevision: number;
@@ -18,26 +18,26 @@ export interface SurfaceOwnerIdentity {
 }
 
 export interface SurfaceContribution<TImplementation = unknown> {
-  descriptor: PiariumExtensionStaticContribution;
+  descriptor: VarinExtensionStaticContribution;
   implementation: TImplementation;
   owner: SurfaceOwnerIdentity;
 }
 
 export interface SurfaceService<TImplementation = unknown> {
-  descriptor: PiariumExtensionServiceProvision;
+  descriptor: VarinExtensionServiceProvision;
   implementation: TImplementation;
   owner: SurfaceOwnerIdentity;
 }
 
 export interface SurfaceExternalService<TImplementation = unknown> {
-  descriptor: PiariumExtensionServiceProvision;
+  descriptor: VarinExtensionServiceProvision;
   /** Cleanup owned by the consumer activation scope, for Surface-local service instances. */
   dispose?: SurfaceDisposer;
   implementation: TImplementation;
   providerId: string;
 }
 
-export interface SurfaceActualState extends PiariumExtensionActualState {
+export interface SurfaceActualState extends VarinExtensionActualState {
   extensionId: string;
   extensionVersion: string;
 }
@@ -65,19 +65,19 @@ export interface SurfaceActivationOptions {
   externalServices?: readonly SurfaceExternalService[];
   grantedCapabilities?: Iterable<string>;
   owner: SurfaceOwnerIdentity;
-  requirements?: PiariumExtensionServiceRequirement[];
+  requirements?: VarinExtensionServiceRequirement[];
   /** Provider IDs already resolved by the owning Host/profile for selected bindings. */
   serviceSelections?: Readonly<Record<string, string>>;
 }
 
 export interface SurfaceActivationContext {
   contribute<TImplementation>(
-    descriptor: PiariumExtensionStaticContribution,
+    descriptor: VarinExtensionStaticContribution,
     implementation: TImplementation,
   ): void;
   onDispose(disposer: SurfaceDisposer): void;
   provide<TImplementation>(
-    descriptor: PiariumExtensionServiceProvision,
+    descriptor: VarinExtensionServiceProvision,
     implementation: TImplementation,
   ): void;
   readonly signal: AbortSignal;
@@ -101,7 +101,7 @@ export interface SurfaceOwnerHandle {
 }
 
 export interface SurfaceExtensionRuntimeOptions {
-  surface: PiariumApplicationSurface;
+  surface: VarinApplicationSurface;
   /**
    * Optional provider for evaluating `when` context expressions on
    * contributions. When provided, contributions whose `when` expression
@@ -118,7 +118,7 @@ export interface SurfaceExtensionRuntimeOptions {
  * creates owner-scoped writers that namespace keys and fence by generation.
  */
 export interface SurfaceContextProvider {
-  getContext(): ReadonlyMap<string, PiariumContextValue>;
+  getContext(): ReadonlyMap<string, VarinContextValue>;
   subscribe(keys: readonly string[], listener: () => void): () => void;
   /**
    * Create an owner-scoped context writer lease. Writes remain private to the
@@ -157,7 +157,7 @@ export interface SurfaceContextWriter {
    * Returns true if the write was accepted, false if the writer's
    * generation is stale.
    */
-  set(key: string, value: PiariumContextValue): boolean;
+  set(key: string, value: VarinContextValue): boolean;
   /**
    * Delete a context key value. Returns true if the key was removed.
    */

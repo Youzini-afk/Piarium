@@ -5,7 +5,7 @@ import type {
   PiResourceKind,
   PiResourceScope,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   copyPiResource,
   createPiResource,
@@ -15,7 +15,7 @@ import {
   updatePiResource,
 } from '@/lib/pi-runtime/resources';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 interface PiResourcePaneState {
   catalog: PiResourceCatalogSnapshot | null;

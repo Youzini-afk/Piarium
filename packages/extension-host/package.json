@@ -1,10 +1,10 @@
 {
-  "name": "@piarium/extension-host",
+  "name": "@varin/extension-host",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Trusted application-host catalog and persistence for Piarium extensions.",
+  "description": "Trusted application-host catalog and persistence for Varin extensions.",
   "files": [
     "broker",
     "dist"
@@ -26,8 +26,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-builtins": "workspace:*",
-    "@piarium/extension-contract": "workspace:*",
+    "@varin/extension-builtins": "workspace:*",
+    "@varin/extension-contract": "workspace:*",
     "esbuild": "^0.28.1",
     "tar": "^7.5.22"
   },

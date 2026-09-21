@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 const makeRuntime = async (options: TestRuntimeOptions = {}) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-pairing-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-pairing-test-'));
   roots.push(dir);
   const createdClients: Array<{ id: string } & Record<string, unknown>> = [];
   const remoteClientAuthRuntime = options.remoteClientAuthRuntime || {

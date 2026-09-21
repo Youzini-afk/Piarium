@@ -1,28 +1,28 @@
 import {
-  assertPiariumApplicationVersion,
-  assertPiariumExtensionManifestCompatibility,
-  parsePiariumExtensionAssetRequest,
-  parsePiariumExtensionCandidateSelectionRequest,
-  parsePiariumExtensionManagedEntrypointRequest,
-  type PiariumExtensionActualState,
-  type PiariumExtensionAssetPayload,
-  type PiariumExtensionAssetRequest,
-  type PiariumExtensionCandidateSelectionRequest,
-  type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionInstallationRecord,
-  type PiariumExtensionManagedEntrypointPayload,
-  type PiariumExtensionManagedEntrypointRequest,
-  type PiariumExtensionLocalSourceReloadRequest,
-  type PiariumExtensionLocalSourceReloadResult,
-  type PiariumExtensionManifest,
-  type PiariumExtensionPackageSource,
-} from "@piarium/extension-contract";
+  assertVarinApplicationVersion,
+  assertVarinExtensionManifestCompatibility,
+  parseVarinExtensionAssetRequest,
+  parseVarinExtensionCandidateSelectionRequest,
+  parseVarinExtensionManagedEntrypointRequest,
+  type VarinExtensionActualState,
+  type VarinExtensionAssetPayload,
+  type VarinExtensionAssetRequest,
+  type VarinExtensionCandidateSelectionRequest,
+  type VarinExtensionCatalogSnapshot,
+  type VarinExtensionInstallationRecord,
+  type VarinExtensionManagedEntrypointPayload,
+  type VarinExtensionManagedEntrypointRequest,
+  type VarinExtensionLocalSourceReloadRequest,
+  type VarinExtensionLocalSourceReloadResult,
+  type VarinExtensionManifest,
+  type VarinExtensionPackageSource,
+} from "@varin/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import {
-  PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
-  PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
-} from "@piarium/extension-builtins/host";
-import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
+  VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
+  VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS,
+} from "@varin/extension-builtins/host";
+import type { VarinBuiltinExtensionDefinition } from "@varin/extension-builtins";
 import { ExtensionArtifactStore } from "./artifact-store.js";
 import type { BrokeredHostEntrypointArtifact } from "./artifact-store.js";
 import { ExtensionCatalogRevisionConflictError } from "./errors.js";
@@ -31,36 +31,36 @@ export interface ExtensionPackageManagerOptions {
   artifacts?: ExtensionArtifactStore;
   catalog: ApplicationExtensionCatalog;
   dataDir: string;
-  piariumVersion: string;
+  varinVersion: string;
 }
 
 export class ExtensionPackageManager {
   readonly artifacts: ExtensionArtifactStore;
   readonly catalog: ApplicationExtensionCatalog;
-  readonly piariumVersion: string;
+  readonly varinVersion: string;
   readonly #verifiedBuiltinArtifacts = new Set<string>();
 
   constructor(options: ExtensionPackageManagerOptions) {
     this.catalog = options.catalog;
-    this.piariumVersion = options.piariumVersion;
-    assertPiariumApplicationVersion(this.piariumVersion);
+    this.varinVersion = options.varinVersion;
+    assertVarinApplicationVersion(this.varinVersion);
     this.artifacts = options.artifacts ?? new ExtensionArtifactStore({
-      builtinRoots: PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
+      builtinRoots: VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS,
       dataDir: options.dataDir,
-      piariumVersion: options.piariumVersion,
+      varinVersion: options.varinVersion,
     });
-    if (this.artifacts.piariumVersion !== this.piariumVersion) {
-      throw new Error("Extension artifact store targets another Piarium application version");
+    if (this.artifacts.varinVersion !== this.varinVersion) {
+      throw new Error("Extension artifact store targets another Varin application version");
     }
   }
 
   async installOrStage(
-    source: PiariumExtensionPackageSource,
+    source: VarinExtensionPackageSource,
     expectedRevision: number,
     signal?: AbortSignal,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const candidate = await this.artifacts.prepare(source, signal);
-    assertPiariumExtensionManifestCompatibility(candidate.manifest, this.piariumVersion);
+    assertVarinExtensionManifestCompatibility(candidate.manifest, this.varinVersion);
     const current = await this.catalog.store.read();
     if (current.document.revision !== expectedRevision) {
       // Use the catalog mutation to raise the normal revision-conflict error and keep one failure envelope.
@@ -68,13 +68,13 @@ export class ExtensionPackageManager {
     }
     const installed = current.document.extensions[candidate.manifest.id];
     if (installed?.source.kind === "builtin" && candidate.source.kind !== "builtin") {
-      throw new Error(`Built-in Piarium extensions are managed by the distribution: ${candidate.manifest.id}`);
+      throw new Error(`Built-in Varin extensions are managed by the distribution: ${candidate.manifest.id}`);
     }
     if (installed) return this.catalog.stageCandidate(candidate, expectedRevision);
     const now = new Date().toISOString();
     const requestsCapabilities = (candidate.manifest.capabilities?.host?.length ?? 0) > 0
       || (candidate.manifest.capabilities?.surface?.length ?? 0) > 0;
-    const record: PiariumExtensionInstallationRecord = {
+    const record: VarinExtensionInstallationRecord = {
       capabilityGrants: [],
       desired: { enabled: !requestsCapabilities, revision: 1, updatedAt: now },
       installedAt: now,
@@ -90,9 +90,9 @@ export class ExtensionPackageManager {
   }
 
   async reconcileBuiltinArtifacts(
-    definitions: readonly PiariumBuiltinExtensionDefinition[],
-    snapshot: PiariumExtensionCatalogSnapshot,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+    definitions: readonly VarinBuiltinExtensionDefinition[],
+    snapshot: VarinExtensionCatalogSnapshot,
+  ): Promise<VarinExtensionCatalogSnapshot> {
     let current = snapshot;
     for (const definition of definitions) {
       if (!definition.manifest.entrypoints?.host) continue;
@@ -100,7 +100,7 @@ export class ExtensionPackageManager {
       const existing = catalogState.document.extensions[definition.manifest.id];
       const distributionFingerprint = await this.artifacts.builtinDistributionFingerprint(
         definition.manifest.id,
-        PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
+        VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
       );
       const verificationKey = existing?.integrity && distributionFingerprint
         ? `${definition.manifest.id}\0${existing.integrity}\0${distributionFingerprint}`
@@ -116,7 +116,7 @@ export class ExtensionPackageManager {
             artifactIntegrity: existing.integrity,
             artifactRoot: existing.resolvedPath,
             distributionFingerprint,
-            fingerprintFile: PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
+            fingerprintFile: VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE,
             manifest: existing.manifest,
           }))
       ) {
@@ -124,7 +124,7 @@ export class ExtensionPackageManager {
         continue;
       }
       const prepared = await this.artifacts.prepare({
-        display: "Piarium",
+        display: "Varin",
         kind: "builtin",
         specifier: definition.manifest.id,
       });
@@ -139,25 +139,25 @@ export class ExtensionPackageManager {
   }
 
   async reloadLocalSource(
-    request: PiariumExtensionLocalSourceReloadRequest,
+    request: VarinExtensionLocalSourceReloadRequest,
     signal?: AbortSignal,
-  ): Promise<PiariumExtensionLocalSourceReloadResult> {
+  ): Promise<VarinExtensionLocalSourceReloadResult> {
     const current = await this.catalog.store.read();
     if (!current.authoritative) throw new Error("Cannot reload a local source from a stale extension catalog");
     if (current.document.revision !== request.expectedRevision) {
       throw new ExtensionCatalogRevisionConflictError(request.expectedRevision, current.document.revision);
     }
     const record = current.document.extensions[request.extensionId];
-    if (!record) throw new Error(`Piarium extension is not installed: ${request.extensionId}`);
+    if (!record) throw new Error(`Varin extension is not installed: ${request.extensionId}`);
     if (record.source.kind !== "local") {
-      throw new Error(`Piarium extension is not installed from a local source: ${request.extensionId}`);
+      throw new Error(`Varin extension is not installed from a local source: ${request.extensionId}`);
     }
 
     const candidate = await this.artifacts.prepare(structuredClone(record.source), signal);
-    assertPiariumExtensionManifestCompatibility(candidate.manifest, this.piariumVersion);
+    assertVarinExtensionManifestCompatibility(candidate.manifest, this.varinVersion);
     if (candidate.manifest.id !== request.extensionId) {
       throw new Error(
-        `Local Piarium extension source now declares ${candidate.manifest.id}; expected ${request.extensionId}`,
+        `Local Varin extension source now declares ${candidate.manifest.id}; expected ${request.extensionId}`,
       );
     }
 
@@ -167,9 +167,9 @@ export class ExtensionPackageManager {
       throw new ExtensionCatalogRevisionConflictError(request.expectedRevision, latest.revision);
     }
     const selected = latest.extensions.find((entry) => entry.manifest.id === request.extensionId);
-    if (!selected) throw new Error(`Piarium extension is not installed: ${request.extensionId}`);
+    if (!selected) throw new Error(`Varin extension is not installed: ${request.extensionId}`);
     if (selected.source.kind !== "local") {
-      throw new Error(`Piarium extension is not installed from a local source: ${request.extensionId}`);
+      throw new Error(`Varin extension is not installed from a local source: ${request.extensionId}`);
     }
     if (selected.integrity === candidate.integrity) return { outcome: "unchanged", snapshot: latest };
 
@@ -177,21 +177,21 @@ export class ExtensionPackageManager {
     return { candidateIntegrity: candidate.integrity, outcome: "staged", snapshot };
   }
 
-  selectCandidate(requestValue: PiariumExtensionCandidateSelectionRequest | unknown): Promise<PiariumExtensionCatalogSnapshot> {
-    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+  selectCandidate(requestValue: VarinExtensionCandidateSelectionRequest | unknown): Promise<VarinExtensionCatalogSnapshot> {
+    const request = parseVarinExtensionCandidateSelectionRequest(requestValue);
     return this.catalog.selectCandidate(request.extensionId, request.candidateIntegrity, request.expectedRevision);
   }
 
-  async readAsset(requestValue: PiariumExtensionAssetRequest | unknown): Promise<PiariumExtensionAssetPayload> {
-    const request = parsePiariumExtensionAssetRequest(requestValue);
+  async readAsset(requestValue: VarinExtensionAssetRequest | unknown): Promise<VarinExtensionAssetPayload> {
+    const request = parseVarinExtensionAssetRequest(requestValue);
     const artifact = await this.#artifact(request.extensionId, request.slot, request.integrity);
     return this.artifacts.readAsset(artifact.resolvedPath, request.integrity, request.path, artifact.manifest);
   }
 
   async readManagedEntrypoint(
-    requestValue: PiariumExtensionManagedEntrypointRequest | unknown,
-  ): Promise<PiariumExtensionManagedEntrypointPayload> {
-    const request = parsePiariumExtensionManagedEntrypointRequest(requestValue);
+    requestValue: VarinExtensionManagedEntrypointRequest | unknown,
+  ): Promise<VarinExtensionManagedEntrypointPayload> {
+    const request = parseVarinExtensionManagedEntrypointRequest(requestValue);
     const artifact = await this.#artifact(request.extensionId, request.slot, request.integrity);
     return this.artifacts.readManagedEntrypoint(
       artifact.resolvedPath,
@@ -201,7 +201,7 @@ export class ExtensionPackageManager {
     );
   }
 
-  reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void> {
+  reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void> {
     return this.catalog.reportActualState(extensionId, state);
   }
 
@@ -218,13 +218,13 @@ export class ExtensionPackageManager {
     extensionId: string,
     slot: "candidate" | "selected",
     integrity: string,
-  ): Promise<{ manifest: PiariumExtensionManifest; resolvedPath: string }> {
+  ): Promise<{ manifest: VarinExtensionManifest; resolvedPath: string }> {
     const read = await this.catalog.store.read();
     const record = read.document.extensions[extensionId];
-    if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+    if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
     const artifact = slot === "candidate" ? record.candidate : record;
     if (!artifact?.resolvedPath || artifact.integrity !== integrity) {
-      throw new Error(`Piarium extension ${slot} artifact is no longer current: ${extensionId}`);
+      throw new Error(`Varin extension ${slot} artifact is no longer current: ${extensionId}`);
     }
     return { manifest: artifact.manifest, resolvedPath: artifact.resolvedPath };
   }

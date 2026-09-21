@@ -38,7 +38,7 @@ export const createMobilePushRuntime = (deps: MobilePushDependencies) => {
     fetchImpl = fetch,
     deviceStore,
     expoPushEndpoint = EXPO_PUSH_ENDPOINT,
-    expoAccessToken = process.env.EXPO_ACCESS_TOKEN || process.env.PIARIUM_EXPO_ACCESS_TOKEN || '',
+    expoAccessToken = process.env.EXPO_ACCESS_TOKEN || process.env.VARIN_EXPO_ACCESS_TOKEN || '',
   } = deps;
 
   const sendExpoMessages = async (messages: ExpoMessage[]): Promise<{ failed: number; sent: number }> => {
@@ -110,8 +110,8 @@ export const createMobilePushRuntime = (deps: MobilePushDependencies) => {
       deviceId: target.id,
       to: target.pushToken,
       sound: 'default',
-      title: normalizeString(payloadRecord.title) || 'Piarium',
-      body: normalizeString(payloadRecord.body) || 'Piarium has an update.',
+      title: normalizeString(payloadRecord.title) || 'Varin',
+      body: normalizeString(payloadRecord.body) || 'Varin has an update.',
       data: payloadRecord.data && typeof payloadRecord.data === 'object' && !Array.isArray(payloadRecord.data)
         ? payloadRecord.data as Record<string, unknown>
         : {},
@@ -129,7 +129,7 @@ export const createMobilePushRuntime = (deps: MobilePushDependencies) => {
       deviceId: target.id,
       to: target.pushToken,
       sound: 'default',
-      title: 'Piarium test notification',
+      title: 'Varin test notification',
       body: 'Mobile push is connected.',
       data: { type: 'test', url: '/' },
     }]);

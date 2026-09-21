@@ -69,7 +69,7 @@ const startProxyServerWithAuthController = async ({ apiBaseUrl, uiAuthController
   return { origin, runtime };
 };
 
-const startSseUpstream = async ({ path = '/api/piarium/events' }: { path?: string } = {}) => {
+const startSseUpstream = async ({ path = '/api/varin/events' }: { path?: string } = {}) => {
   const requests: Array<{ headers: IncomingHttpHeaders; url: string | undefined }> = [];
   const server = http.createServer((req, res) => {
     requests.push({ url: req.url, headers: req.headers });
@@ -103,20 +103,20 @@ afterEach(async () => {
 
 describe('realtime proxy URL builders', () => {
   it('builds local SSE proxy URLs with target URL encoded as query data', () => {
-    const url = new URL(buildRealtimeProxySseUrl('http://127.0.0.1:57123', 'https://remote.example/api/piarium/events?x=1'));
+    const url = new URL(buildRealtimeProxySseUrl('http://127.0.0.1:57123', 'https://remote.example/api/varin/events?x=1'));
 
     expect(url.origin).toBe('http://127.0.0.1:57123');
-    expect(url.pathname).toBe('/api/piarium/realtime-proxy/sse');
-    expect(url.searchParams.get('url')).toBe('https://remote.example/api/piarium/events?x=1');
+    expect(url.pathname).toBe('/api/varin/realtime-proxy/sse');
+    expect(url.searchParams.get('url')).toBe('https://remote.example/api/varin/events?x=1');
   });
 
   it('builds local WebSocket proxy URLs with ws protocol', () => {
-    const url = new URL(buildRealtimeProxyWsUrl('https://127.0.0.1:57123', 'wss://remote.example/api/piarium/runtime/ws'));
+    const url = new URL(buildRealtimeProxyWsUrl('https://127.0.0.1:57123', 'wss://remote.example/api/varin/runtime/ws'));
 
     expect(url.protocol).toBe('wss:');
     expect(url.host).toBe('127.0.0.1:57123');
-    expect(url.pathname).toBe('/api/piarium/realtime-proxy/ws');
-    expect(url.searchParams.get('url')).toBe('wss://remote.example/api/piarium/runtime/ws');
+    expect(url.pathname).toBe('/api/varin/realtime-proxy/ws');
+    expect(url.searchParams.get('url')).toBe('wss://remote.example/api/varin/runtime/ws');
   });
 });
 
@@ -126,11 +126,11 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/events`), {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/events`), {
         headers: {
           Accept: 'text/event-stream',
           'Last-Event-ID': 'evt-42',
-          Origin: 'piarium-ui://app',
+          Origin: 'varin-ui://app',
         },
       });
 
@@ -150,8 +150,8 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin, authToken: null });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/events`), {
-        headers: { Origin: 'piarium-ui://app' },
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/events`), {
+        headers: { Origin: 'varin-ui://app' },
       });
 
       expect(response.status).toBe(401);
@@ -166,7 +166,7 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin, originAllowed: false });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/events`), {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/events`), {
         headers: { Origin: 'https://evil.example' },
       });
 
@@ -182,8 +182,8 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: 'https://different.example' });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/events`), {
-        headers: { Origin: 'piarium-ui://app' },
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/events`), {
+        headers: { Origin: 'varin-ui://app' },
       });
 
       expect(response.status).toBe(404);
@@ -194,14 +194,14 @@ describe('realtime proxy', () => {
   });
 
   it('streams runtime-manager SSE through the same allowlist as other runtime events', async () => {
-    const upstream = await startSseUpstream({ path: '/api/piarium/runtime-manager/events' });
+    const upstream = await startSseUpstream({ path: '/api/varin/runtime-manager/events' });
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
 
     try {
-      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/runtime-manager/events`), {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/varin/runtime-manager/events`), {
         headers: {
           Accept: 'text/event-stream',
-          Origin: 'piarium-ui://app',
+          Origin: 'varin-ui://app',
         },
       });
 
@@ -219,7 +219,7 @@ describe('realtime proxy', () => {
 
     try {
       const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/config/settings`), {
-        headers: { Origin: 'piarium-ui://app' },
+        headers: { Origin: 'varin-ui://app' },
       });
 
       expect(response.status).toBe(404);
@@ -243,9 +243,9 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
 
     try {
-      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/piarium/runtime/ws?lastEventId=evt-1`;
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/varin/runtime/ws?lastEventId=evt-1`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
-        headers: { Origin: 'piarium-ui://app' },
+        headers: { Origin: 'varin-ui://app' },
       });
       await new Promise((resolve, reject) => {
         client.once('open', resolve);
@@ -258,7 +258,7 @@ describe('realtime proxy', () => {
       });
 
       expect(message).toBe('echo:ping');
-      expect(upstreamRequest.current?.url).toBe('/api/piarium/runtime/ws?lastEventId=evt-1');
+      expect(upstreamRequest.current?.url).toBe('/api/varin/runtime/ws?lastEventId=evt-1');
       expect(upstreamRequest.current?.headers['x-proxy-auth']).toBe('secret');
       client.close();
       upstreamWs.close();
@@ -278,9 +278,9 @@ describe('realtime proxy', () => {
     const { origin, runtime } = await startProxyServerWithAuthController({ apiBaseUrl: upstreamOrigin, uiAuthController });
 
     try {
-      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/piarium/runtime/ws`;
+      const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/varin/runtime/ws`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
-        headers: { Origin: 'piarium-ui://app' },
+        headers: { Origin: 'varin-ui://app' },
       });
       const message = await new Promise<string>((resolve, reject) => {
         client.once('message', (data) => resolve(data.toString()));

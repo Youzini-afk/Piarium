@@ -1,16 +1,16 @@
-import type { SessionSnapshot } from '@piarium/protocol';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { SessionSnapshot } from '@varin/protocol';
+import type { ProjectEntry } from '@varin/application-client';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import {
   getWorktreeSetupCommands,
   getWorktreeSetupWaitEnabled,
-  type PiariumProjectRef,
+  type VarinProjectRef,
 } from '@/lib/project-config';
 import {
-  checkPiariumGitRepository,
-  createPiariumWorktree,
-  removePiariumWorktree,
-} from '@/lib/piariumWorktrees';
+  checkVarinGitRepository,
+  createVarinWorktree,
+  removeVarinWorktree,
+} from '@/lib/varinWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -25,20 +25,20 @@ export interface PiWorktreeSessionResult {
 export interface PiWorktreeSessionRuntime {
   checkIsGitRepository(directory: string): Promise<boolean>;
   createSession(target: { directory: string; projectId: string }): Promise<SessionSnapshot>;
-  createWorktree(project: PiariumProjectRef, preferredName: string): Promise<WorktreeMetadata>;
+  createWorktree(project: VarinProjectRef, preferredName: string): Promise<WorktreeMetadata>;
   generateBranchName(): string;
   getActiveProject(): ProjectEntry | null;
-  removeWorktree(project: PiariumProjectRef, worktree: WorktreeMetadata): Promise<void>;
-  shouldWaitForBootstrap(project: PiariumProjectRef): Promise<boolean>;
+  removeWorktree(project: VarinProjectRef, worktree: WorktreeMetadata): Promise<void>;
+  shouldWaitForBootstrap(project: VarinProjectRef): Promise<boolean>;
   waitForBootstrap(directory: string): Promise<void>;
 }
 
 const defaultRuntime: PiWorktreeSessionRuntime = {
-  checkIsGitRepository: checkPiariumGitRepository,
+  checkIsGitRepository: checkVarinGitRepository,
   createSession: (target) => createPiSessionFromNavigation(target),
   createWorktree: async (project, preferredName) => {
     const setupCommands = await getWorktreeSetupCommands(project);
-    return createPiariumWorktree(project, {
+    return createVarinWorktree(project, {
       mode: 'new',
       preferredName,
       branchName: preferredName,
@@ -48,7 +48,7 @@ const defaultRuntime: PiWorktreeSessionRuntime = {
   },
   generateBranchName,
   getActiveProject: () => useProjectsStore.getState().getActiveProject() ?? null,
-  removeWorktree: (project, worktree) => removePiariumWorktree(project, worktree, { deleteLocalBranch: true }),
+  removeWorktree: (project, worktree) => removeVarinWorktree(project, worktree, { deleteLocalBranch: true }),
   shouldWaitForBootstrap: getWorktreeSetupWaitEnabled,
   waitForBootstrap: waitForWorktreeBootstrap,
 };
@@ -60,7 +60,7 @@ export const createPiWorktreeSessionWithRuntime = async (
 ): Promise<PiWorktreeSessionResult> => {
   const activeProject = runtime.getActiveProject();
   if (!activeProject?.path) throw new Error('Select a project before creating a worktree session');
-  const project: PiariumProjectRef = { id: activeProject.id, path: activeProject.path };
+  const project: VarinProjectRef = { id: activeProject.id, path: activeProject.path };
   if (!await runtime.checkIsGitRepository(project.path)) throw new Error('Worktree sessions require a Git repository');
   const preferredName = runtime.generateBranchName().trim();
   if (!preferredName) throw new Error('Could not generate a worktree branch name');

@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { RecallSearchResult } from "@piarium/protocol";
+import type { RecallSearchResult } from "@varin/protocol";
 
 const RecallParams = Type.Object({
   query: Type.String(),

@@ -4,7 +4,7 @@ import path from 'path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-model-settings-'));
-process.env.PIARIUM_DATA_DIR = TEMP_DATA_DIR;
+process.env.VARIN_DATA_DIR = TEMP_DATA_DIR;
 
 const { readWalkthroughModelOverride } = await import('./model-settings.js');
 

@@ -9,15 +9,15 @@ const appPath = path.resolve(process.argv[2] ?? '');
 const appArguments = process.argv.slice(3);
 const smokeEnvironment = { ...process.env };
 for (const variable of [
-  'PIARIUM_PI_SOURCE',
-  'PIARIUM_PI_CUSTOM_ROOT',
-  'PIARIUM_PI_CUSTOM_NODE',
-  'PIARIUM_PI_PACKAGE_ROOT',
-  'PIARIUM_AGENT_DIR',
-  'PIARIUM_RUNTIME_SOURCE',
-  'PIARIUM_SKIP_LOCAL_SERVER',
-  'PIARIUM_SMOKE_PROFILE_SOURCE',
-  'PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK',
+  'VARIN_PI_SOURCE',
+  'VARIN_PI_CUSTOM_ROOT',
+  'VARIN_PI_CUSTOM_NODE',
+  'VARIN_PI_PACKAGE_ROOT',
+  'VARIN_AGENT_DIR',
+  'VARIN_RUNTIME_SOURCE',
+  'VARIN_SKIP_LOCAL_SERVER',
+  'VARIN_SMOKE_PROFILE_SOURCE',
+  'VARIN_SMOKE_LOCAL_SEMANTIC_PACK',
   'ELECTRON_RUN_AS_NODE',
   'NODE_PATH',
 ]) {
@@ -25,7 +25,7 @@ for (const variable of [
 }
 
 if (!process.argv[2] || !existsSync(appPath)) {
-  throw new Error(`Missing packaged Piarium executable at ${appPath}`);
+  throw new Error(`Missing packaged Varin executable at ${appPath}`);
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -153,7 +153,7 @@ const waitForRenderer = async (userDataDir) => {
     target = targets.find((candidate) => (
       candidate?.type === 'page'
       && typeof candidate.url === 'string'
-      && candidate.url.startsWith('piarium-ui://app')
+      && candidate.url.startsWith('varin-ui://app')
       && typeof candidate.webSocketDebuggerUrl === 'string'
     ));
   }
@@ -165,14 +165,14 @@ const waitForRenderer = async (userDataDir) => {
     let continuedFromBundledWelcome = false;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => ({
-        apiBaseUrl: typeof window.__PIARIUM_API_BASE_URL__ === 'string' ? window.__PIARIUM_API_BASE_URL__ : '',
+        apiBaseUrl: typeof window.__VARIN_API_BASE_URL__ === 'string' ? window.__VARIN_API_BASE_URL__ : '',
         bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
-        diagnostics: window.__piariumStartupDiagnostics ?? null,
+        diagnostics: window.__varinStartupDiagnostics ?? null,
         href: window.location.href,
-        localOrigin: typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string' ? window.__PIARIUM_LOCAL_ORIGIN__ : '',
+        localOrigin: typeof window.__VARIN_LOCAL_ORIGIN__ === 'string' ? window.__VARIN_LOCAL_ORIGIN__ : '',
         localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
         mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
-        ready: window.__piariumAppReady === true,
+        ready: window.__varinAppReady === true,
       }))()`);
       if (evaluation?.exceptionDetails) {
         throw new Error(`Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`);
@@ -231,7 +231,7 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
   });
 });
 
-const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-desktop-smoke-'));
+const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-desktop-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
 const agentDir = path.join(smokeRoot, 'pi-agent');
 const workspaceRoot = path.join(smokeRoot, 'workspace');
@@ -239,9 +239,9 @@ await fsp.mkdir(workspaceRoot);
 await fsp.mkdir(agentDir);
 const logPaths = [
   path.join(userDataDir, 'logs', 'main.log'),
-  ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Piarium', 'main.log')] : []),
+  ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Varin', 'main.log')] : []),
   ...(process.platform === 'linux' ? [
-    path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Piarium', 'logs', 'main.log'),
+    path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Varin', 'logs', 'main.log'),
   ] : []),
 ];
 const child = spawn(appPath, [
@@ -255,9 +255,9 @@ const child = spawn(appPath, [
   env: {
     ...smokeEnvironment,
     PI_CODING_AGENT_DIR: agentDir,
-    PIARIUM_STARTUP_PERF: '1',
-    PIARIUM_DATA_DIR: userDataDir,
-    PIARIUM_WORKSPACE_ROOT: workspaceRoot,
+    VARIN_STARTUP_PERF: '1',
+    VARIN_DATA_DIR: userDataDir,
+    VARIN_WORKSPACE_ROOT: workspaceRoot,
   },
   stdio: 'ignore',
 });
@@ -278,7 +278,7 @@ try {
   if (spawnError) throw spawnError;
   const renderer = await waitForRenderer(userDataDir);
   if (child.exitCode !== null) {
-    throw new Error(`Packaged Piarium exited before startup completed (code ${child.exitCode}).`);
+    throw new Error(`Packaged Varin exited before startup completed (code ${child.exitCode}).`);
   }
   const runtimeValue = renderer.state?.localOrigin || renderer.state?.apiBaseUrl;
   let runtimeUrl;
@@ -306,13 +306,13 @@ try {
     throw new Error(`Packaged renderer did not start the bundled Pi runtime: ${JSON.stringify(runtimeSnapshot)}`);
   }
 
-  const recoveryResponse = await fetch(`${baseUrl}/api/piarium/extensions/v1/services/invoke`, {
+  const recoveryResponse = await fetch(`${baseUrl}/api/varin/extensions/v1/services/invoke`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       args: [],
       method: 'listStorageWorkspaces',
-      serviceId: 'piarium.workspace-recovery',
+      serviceId: 'varin.workspace-recovery',
       version: 5,
     }),
     signal: AbortSignal.timeout(20_000),

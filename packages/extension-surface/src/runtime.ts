@@ -1,17 +1,17 @@
 import {
-  parsePiariumExtensionManifest,
-  checkPiariumContributionCompatibility,
-  isPiariumExtensionId,
-  isPiariumContributionCompatible,
-  evaluatePiariumContextExpression,
-  collectPiariumContextExpressionKeys,
-  type PiariumApplicationSurface,
-  type PiariumExtensionActualState,
-  type PiariumExtensionDiagnostic,
-  type PiariumExtensionServiceProvision,
-  type PiariumExtensionServiceRequirement,
-  type PiariumExtensionStaticContribution,
-} from "@piarium/extension-contract";
+  parseVarinExtensionManifest,
+  checkVarinContributionCompatibility,
+  isVarinExtensionId,
+  isVarinContributionCompatible,
+  evaluateVarinContextExpression,
+  collectVarinContextExpressionKeys,
+  type VarinApplicationSurface,
+  type VarinExtensionActualState,
+  type VarinExtensionDiagnostic,
+  type VarinExtensionServiceProvision,
+  type VarinExtensionServiceRequirement,
+  type VarinExtensionStaticContribution,
+} from "@varin/extension-contract";
 import { SurfaceActivationStaleError, SurfaceRegistryConflictError } from "./errors.js";
 import { SurfaceOwnerScope } from "./owner-scope.js";
 import type {
@@ -35,10 +35,10 @@ import type {
 interface ActiveOwner {
   contributions: SurfaceContribution[];
   contextLease: SurfaceContextWriterLease | null;
-  diagnostics: PiariumExtensionDiagnostic[];
+  diagnostics: VarinExtensionDiagnostic[];
   externalServices: SurfaceExternalService[];
   owner: SurfaceOwnerIdentity;
-  requirements: PiariumExtensionServiceRequirement[];
+  requirements: VarinExtensionServiceRequirement[];
   scope: SurfaceOwnerScope;
   serviceSelections: Readonly<Record<string, string>>;
   services: SurfaceService[];
@@ -46,7 +46,7 @@ interface ActiveOwner {
 
 interface ServiceConsumer {
   externalServices: readonly SurfaceExternalService[];
-  requirements: readonly PiariumExtensionServiceRequirement[];
+  requirements: readonly VarinExtensionServiceRequirement[];
   serviceSelections: Readonly<Record<string, string>>;
 }
 
@@ -70,7 +70,7 @@ function compareRequest(left: RequestVersion, right: RequestVersion): number {
   return left.desiredRevision - right.desiredRevision || left.generation - right.generation;
 }
 
-function diagnostic(owner: SurfaceOwnerIdentity, code: string, message: string): PiariumExtensionDiagnostic {
+function diagnostic(owner: SurfaceOwnerIdentity, code: string, message: string): VarinExtensionDiagnostic {
   return {
     code,
     extensionId: owner.extensionId,
@@ -83,8 +83,8 @@ function diagnostic(owner: SurfaceOwnerIdentity, code: string, message: string):
 
 function actual(
   owner: SurfaceOwnerIdentity,
-  status: PiariumExtensionActualState["status"],
-  diagnostics: PiariumExtensionDiagnostic[] = [],
+  status: VarinExtensionActualState["status"],
+  diagnostics: VarinExtensionDiagnostic[] = [],
 ): SurfaceActualState {
   return {
     desiredRevision: owner.desiredRevision,
@@ -102,13 +102,13 @@ function actual(
 }
 
 function validateOwner(owner: SurfaceOwnerIdentity): void {
-  parsePiariumExtensionManifest({
+  parseVarinExtensionManifest({
     schemaVersion: 1,
     id: owner.extensionId,
     version: owner.extensionVersion,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
   });
-  if (!isPiariumExtensionId(owner.entrypointId)) throw new Error(`Invalid Surface owner entrypoint ID: ${owner.entrypointId}`);
+  if (!isVarinExtensionId(owner.entrypointId)) throw new Error(`Invalid Surface owner entrypoint ID: ${owner.entrypointId}`);
   if (!owner.realmId.trim()) throw new Error("Surface owner realmId is required");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(owner.hostId)) {
     throw new Error("Surface owner hostId must be an application-host UUID");
@@ -119,13 +119,13 @@ function validateOwner(owner: SurfaceOwnerIdentity): void {
 
 function normalizeRequirements(
   owner: SurfaceOwnerIdentity,
-  requirements: PiariumExtensionServiceRequirement[],
-): PiariumExtensionServiceRequirement[] {
-  const parsed = parsePiariumExtensionManifest({
+  requirements: VarinExtensionServiceRequirement[],
+): VarinExtensionServiceRequirement[] {
+  const parsed = parseVarinExtensionManifest({
     schemaVersion: 1,
     id: owner.extensionId,
     version: owner.extensionVersion,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     requires: { services: requirements },
   });
   return parsed.requires?.services ?? [];
@@ -133,13 +133,13 @@ function normalizeRequirements(
 
 function normalizeContribution(
   owner: SurfaceOwnerIdentity,
-  descriptor: PiariumExtensionStaticContribution,
-): PiariumExtensionStaticContribution {
-  const parsed = parsePiariumExtensionManifest({
+  descriptor: VarinExtensionStaticContribution,
+): VarinExtensionStaticContribution {
+  const parsed = parseVarinExtensionManifest({
     schemaVersion: 1,
     id: owner.extensionId,
     version: owner.extensionVersion,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{
         id: owner.entrypointId,
@@ -158,8 +158,8 @@ function normalizeContribution(
   return normalized;
 }
 
-function validateService(descriptor: PiariumExtensionServiceProvision): PiariumExtensionServiceProvision {
-  if (!isPiariumExtensionId(descriptor.id)) throw new Error(`Invalid Surface service ID: ${descriptor.id}`);
+function validateService(descriptor: VarinExtensionServiceProvision): VarinExtensionServiceProvision {
+  if (!isVarinExtensionId(descriptor.id)) throw new Error(`Invalid Surface service ID: ${descriptor.id}`);
   if (!Number.isSafeInteger(descriptor.version) || descriptor.version <= 0) throw new Error(`Invalid Surface service version: ${descriptor.id}`);
   if (descriptor.multiple !== undefined && typeof descriptor.multiple !== "boolean") throw new Error(`Invalid Surface service multiplicity: ${descriptor.id}`);
   return { id: descriptor.id, version: descriptor.version, ...(descriptor.multiple !== undefined ? { multiple: descriptor.multiple } : {}) };
@@ -190,12 +190,12 @@ function selectVisibleContributions(
     // Exclude contributions whose contract version is not compatible with
     // the current runtime. They remain in the registry (catalog retains
     // the record) but are not visible or activatable.
-    if (!isPiariumContributionCompatible(contribution.descriptor.kind, contribution.descriptor.contractVersion)) continue;
+    if (!isVarinContributionCompatible(contribution.descriptor.kind, contribution.descriptor.contractVersion)) continue;
     // Evaluate `when` context expression if present and a context provider
     // is available. When false, the contribution is hidden but its
     // registration and replacement selection are preserved.
     if (contribution.descriptor.when && context) {
-      if (!evaluatePiariumContextExpression(contribution.descriptor.when, context)) continue;
+      if (!evaluateVarinContextExpression(contribution.descriptor.when, context)) continue;
     }
     const target = contribution.descriptor.replacement?.target;
     if (!target) additive.push(contribution);
@@ -263,7 +263,7 @@ function orderContributions(
 }
 
 export class SurfaceExtensionRuntime {
-  readonly surface: PiariumApplicationSurface;
+  readonly surface: VarinApplicationSurface;
   readonly #activeOwners = new Map<string, ActiveOwner>();
   readonly #actual = new Map<string, SurfaceActualState>();
   readonly #latestRequests = new Map<string, RequestVersion>();
@@ -347,7 +347,7 @@ export class SurfaceExtensionRuntime {
           const key = ownerKey(owner);
           const scope = new SurfaceOwnerScope();
           const stagedContributions: SurfaceContribution[] = [];
-          const stagedDiagnostics: PiariumExtensionDiagnostic[] = [];
+          const stagedDiagnostics: VarinExtensionDiagnostic[] = [];
           const stagedServices: SurfaceService[] = [];
           const granted = new Set(request.options.grantedCapabilities ?? []);
           const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
@@ -372,7 +372,7 @@ export class SurfaceExtensionRuntime {
             signal: scope.signal,
             contribute: (descriptor, implementation) => {
               const normalized = normalizeContribution(owner, descriptor);
-              const compatibility = checkPiariumContributionCompatibility(
+              const compatibility = checkVarinContributionCompatibility(
                 normalized.kind,
                 normalized.contractVersion,
               );
@@ -532,10 +532,10 @@ export class SurfaceExtensionRuntime {
   }
 
   setReplacementSelection(target: string, contributionId: string | null): void {
-    if (!isPiariumExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
+    if (!isVarinExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
     if (contributionId === null) this.#replacementSelections.delete(target);
     else {
-      if (!isPiariumExtensionId(contributionId)) throw new Error(`Invalid replacement contribution ID: ${contributionId}`);
+      if (!isVarinExtensionId(contributionId)) throw new Error(`Invalid replacement contribution ID: ${contributionId}`);
       this.#replacementSelections.set(target, contributionId);
     }
     this.#publish();
@@ -551,7 +551,7 @@ export class SurfaceExtensionRuntime {
   ): void {
     const next = new Map<string, SurfaceLayoutReference>();
     for (const reference of references) {
-      if (!isPiariumExtensionId(reference.contributionId)) {
+      if (!isVarinExtensionId(reference.contributionId)) {
         throw new Error(`Invalid Surface layout contribution ID: ${reference.contributionId}`);
       }
       if (next.has(reference.contributionId)) {
@@ -579,8 +579,8 @@ export class SurfaceExtensionRuntime {
     }
     const nextSelections = new Map<string, string>();
     for (const [target, contributionId] of Object.entries(replacementSelections)) {
-      if (!isPiariumExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
-      if (!isPiariumExtensionId(contributionId)) throw new Error(`Invalid replacement contribution ID: ${contributionId}`);
+      if (!isVarinExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
+      if (!isVarinExtensionId(contributionId)) throw new Error(`Invalid replacement contribution ID: ${contributionId}`);
       nextSelections.set(target, contributionId);
     }
     this.#layoutReferences.clear();
@@ -591,7 +591,7 @@ export class SurfaceExtensionRuntime {
   }
 
   setServiceSelection(id: string, version: number, providerId: string | null): void {
-    if (!isPiariumExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
+    if (!isVarinExtensionId(id) || !Number.isSafeInteger(version) || version <= 0) {
       throw new Error(`Invalid Surface service selection: ${id}@${version}`);
     }
     const key = `${id}@${version}`;
@@ -672,7 +672,7 @@ export class SurfaceExtensionRuntime {
     this.#actual.set(key, actual(requestedOwner, "deactivating"));
     this.#activeOwners.delete(key);
     this.#publish();
-    let diagnostics: PiariumExtensionDiagnostic[] = [];
+    let diagnostics: VarinExtensionDiagnostic[] = [];
     try {
       await active.scope.dispose("Surface extension disabled");
     } catch (error) {
@@ -845,7 +845,7 @@ export class SurfaceExtensionRuntime {
     const keys = new Set<string>();
     for (const contribution of contributions) {
       if (contribution.descriptor.when) {
-        for (const key of collectPiariumContextExpressionKeys(contribution.descriptor.when)) keys.add(key);
+        for (const key of collectVarinContextExpressionKeys(contribution.descriptor.when)) keys.add(key);
       }
     }
     // Only resubscribe if the key set actually changed

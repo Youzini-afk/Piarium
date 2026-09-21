@@ -8,11 +8,11 @@ factory only when `loadMonacoRuntime()` is called.
   through public 0.56 entrypoints.
   It rejects non-editor worker labels so Monaco's TS/JS/JSON/CSS/HTML language services cannot become
   a second language authority beside the Application Host.
-- `theme.ts` projects Piarium semantic theme tokens into Monaco. It owns no theme preference.
+- `theme.ts` projects Varin semantic theme tokens into Monaco. It owns no theme preference.
 - `editor-options.ts` projects the active Workbench Profile and validated user settings. `default`
-  uses `agent-compact`; `piarium.ide` uses `ide-full`; user settings override either without replacing
+  uses `agent-compact`; `varin.ide` uses `ide-full`; user settings override either without replacing
   the model.
-- `editor-command-service.ts` tracks the focused view and projects one command table into Piarium
+- `editor-command-service.ts` tracks the focused view and projects one command table into Varin
   commands, workbench menus/context keys, toolbar actions, and user shortcut overrides. It exposes no
   raw editor/model handle.
 - `model-registry.ts` projects one Document Registry record into one Monaco model. Workbench tabs own

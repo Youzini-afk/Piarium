@@ -7,9 +7,9 @@ import type {
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 export const getPiConfigDocument = async (
   target: RuntimeContextTarget,

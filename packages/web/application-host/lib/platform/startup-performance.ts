@@ -17,7 +17,7 @@ const nonNegativeInteger = (value: unknown): number | undefined => (
 );
 
 const isStartupPerformanceEnabled = () => (
-  ENABLED_VALUES.has(String(process.env.PIARIUM_STARTUP_PERF ?? '').toLowerCase())
+  ENABLED_VALUES.has(String(process.env.VARIN_STARTUP_PERF ?? '').toLowerCase())
 );
 
 export interface StartupPerformanceDetails extends Record<string, unknown> {

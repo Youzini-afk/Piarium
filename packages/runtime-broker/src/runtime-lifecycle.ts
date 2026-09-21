@@ -9,7 +9,7 @@ import type {
   SessionWorkspaceBinding,
   WorkFocusId,
   WorkFocusExecutionRole,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { PiRuntimeNotReadyError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
 import {

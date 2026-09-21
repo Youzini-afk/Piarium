@@ -63,7 +63,7 @@ describe('terminal shell resolver', () => {
 
   it('uses environment overrides before platform defaults for auto', async () => {
     const { resolver } = createResolver({
-      env: { PIARIUM_TERMINAL_SHELL: '/custom/zsh', SHELL: '/bin/bash' },
+      env: { VARIN_TERMINAL_SHELL: '/custom/zsh', SHELL: '/bin/bash' },
       executables: ['/custom/zsh', '/bin/bash'],
     });
 

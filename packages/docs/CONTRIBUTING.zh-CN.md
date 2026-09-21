@@ -2,7 +2,7 @@
 
 # 文档编写指南
 
-本包是 Piarium 公开文档的源码。**先写英文，再补译本。**
+本包是 Varin 公开文档的源码。**先写英文，再补译本。**
 
 ## 语气与风格
 
@@ -13,16 +13,16 @@
 
 ### 写给谁
 
-- 假定读者有好奇心，而不是已经懂内部实现。他们知道自己想做什么，不知道 Piarium 里面怎么跑。
+- 假定读者有好奇心，而不是已经懂内部实现。他们知道自己想做什么，不知道 Varin 里面怎么跑。
 - 一页只做一件事。如果一页在回答两个不相关的问题，就拆开。
 
 ### 写短
 
-- 先写任务，再写背景。第一句就说明这一页是干什么的（「用 `piarium tunnel` 把正在运行的
-  Piarium 暴露出去。」）。
+- 先写任务，再写背景。第一句就说明这一页是干什么的（「用 `varin tunnel` 把正在运行的
+  Varin 暴露出去。」）。
 - 删掉不会改变读者下一步动作的内容。
 - 普通页面应在一两屏内读完。像「反向代理」这样的长参考页是例外——它们会在第一句说清楚
-  （「如果你在……后面运行 Piarium，请使用本页。」）。
+  （「如果你在……后面运行 Varin，请使用本页。」）。
 
 ### 步骤
 
@@ -31,16 +31,16 @@
 - 流程结束时告诉读者成功长什么样，好确认自己做对了。
 
 ```mdx
-3. 运行 `piarium --ui-password be-creative-here`。
+3. 运行 `varin --ui-password be-creative-here`。
 4. 打开打印出的 URL（通常是 `http://localhost:3000`）。
 
-你应该看到 Piarium 会话列表。如果看到了，说明服务已在运行。
+你应该看到 Varin 会话列表。如果看到了，说明服务已在运行。
 ```
 
 ### 用白话
 
 - 术语第一次出现时，用括号、日常说法解释：
-  - 好：启动一条隧道（指向本机 Piarium 的公开链接）
+  - 好：启动一条隧道（指向本机 Varin 的公开链接）
   - 差：启动一条隧道——读者还不知道那是什么
 - 能用常见词就不用内部词。「应用」「版本」「页面」优于「surface」「instance」「route」。
   内部词避不开时，解释一次。
@@ -76,7 +76,7 @@
    ```mdx
    ---
    title: Remote access
-   description: Access Piarium from outside the local network.
+   description: Access Varin from outside the local network.
    ---
    ```
 
@@ -168,7 +168,7 @@ import desktopDark from "./images/desktop-dark.png";
 
 ## 本地化
 
-文档翻译成与 Piarium 应用相同的语言。**英文是源语言，放在 `content/docs/` 根目录。**
+文档翻译成与 Varin 应用相同的语言。**英文是源语言，放在 `content/docs/` 根目录。**
 其他语言在各自的 locale 目录里镜像同一组文件名。
 
 ### 支持的语种
@@ -218,7 +218,7 @@ content/docs/
 ```mdx
 ---
 title: Install
-description: Install Piarium for desktop, web, or VS Code.
+description: Install Varin for desktop, web, or VS Code.
 ---
 ```
 
@@ -265,7 +265,7 @@ description: Install Piarium for desktop, web, or VS Code.
 
 ### 不要翻译这些
 
-- 品牌和产品名：Piarium、Pi、VS Code、PWA、GitHub、Discord、macOS、SSH。只有在写第三方
+- 品牌和产品名：Varin、Pi、VS Code、PWA、GitHub、Discord、macOS、SSH。只有在写第三方
   配额产品时才保留 `OpenCode Go`。不要重新引入 OpenChamber 或 OpenCode 服务器。
 - 代码块、shell 命令、文件路径、flag 和配置键
 - 页面文件名和侧边栏 `link`（各语种保持相同）

@@ -43,7 +43,7 @@ const canonicalGitPath = (value: string): string => normalizeGitPath(
 
 /** Create a temp dir and register it for afterEach cleanup. */
 const createTempDir = (): string => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-git-service-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-git-service-'));
   tempDirs.push(dir);
   return dir;
 };
@@ -430,9 +430,9 @@ describe('integrateWorktreeCommits writer lifecycle', () => {
   it('acquires the repository writer before creating the temporary worktree', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -490,13 +490,13 @@ describe('integrateWorktreeCommits writer lifecycle', () => {
         scope: path.resolve(repo),
         options: { mode: 'process', purpose: 'git-integrate-run' },
       });
-      expect(registration.worktrees).not.toContain('piarium-integrate-');
+      expect(registration.worktrees).not.toContain('varin-integrate-');
       expect(writer.markMutated).toHaveBeenCalledTimes(1);
       expect(writer.close).toHaveBeenCalledTimes(1);
       expect(runGit(repo, ['show', 'main:feature.txt'])).toBe('feature\n');
     } finally {
-      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+      else process.env.VARIN_DATA_DIR = previousVarinDataDir;
     }
   });
 });
@@ -522,12 +522,12 @@ describe('createWorktree', () => {
     });
   });
 
-  it('uses Piarium-owned storage and branch names by default', async () => {
+  it('uses Varin-owned storage and branch names by default', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -543,7 +543,7 @@ describe('createWorktree', () => {
         worktreeName: 'native-default',
       });
 
-      expect(created.branch).toBe('piarium/native-default');
+      expect(created.branch).toBe('varin/native-default');
       expect(created.path).toBe(path.join(
         dataHome,
         'worktrees',
@@ -560,19 +560,19 @@ describe('createWorktree', () => {
 
       await expect(removeWorktree(repo, { directory: created.path })).resolves.toBe(true);
     } finally {
-      if (previousPiariumDataDir === undefined) {
-        delete process.env.PIARIUM_DATA_DIR;
+      if (previousVarinDataDir === undefined) {
+        delete process.env.VARIN_DATA_DIR;
       } else {
-        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+        process.env.VARIN_DATA_DIR = previousVarinDataDir;
       }
     }
   });
 
   it('runs post-checkout after populating the managed worktree', async () => {
     if (!canRunGit()) return;
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -592,7 +592,7 @@ describe('createWorktree', () => {
       const created = await createWorktree(repo, {
         mode: 'new',
         worktreeName: 'hook-test',
-        branchName: 'piarium/hook-test',
+        branchName: 'varin/hook-test',
         returnAfterDirectoryCreated: true,
       });
 
@@ -603,19 +603,19 @@ describe('createWorktree', () => {
         { timeout: 5_000 },
       ).toBe('ready');
     } finally {
-      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+      else process.env.VARIN_DATA_DIR = previousVarinDataDir;
     }
   });
 
   it('reports directory, Git, and setup bootstrap phases', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
     const setupMarker = path.join(dataHome, 'setup-started');
     const setupScript = path.join(dataHome, 'setup-phase.cjs');
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     fs.writeFileSync(
       setupScript,
@@ -671,10 +671,10 @@ describe('createWorktree', () => {
         error: null,
       });
     } finally {
-      if (previousPiariumDataDir === undefined) {
-        delete process.env.PIARIUM_DATA_DIR;
+      if (previousVarinDataDir === undefined) {
+        delete process.env.VARIN_DATA_DIR;
       } else {
-        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+        process.env.VARIN_DATA_DIR = previousVarinDataDir;
       }
     }
   });
@@ -682,12 +682,12 @@ describe('createWorktree', () => {
   it('waits for active bootstrap work before removing a worktree', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
     const setupStarted = path.join(dataHome, 'remove-race-started');
     const setupCompleted = path.join(dataHome, 'remove-race-completed');
     const setupScript = path.join(dataHome, 'remove-race.cjs');
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     fs.writeFileSync(
       setupScript,
@@ -728,10 +728,10 @@ describe('createWorktree', () => {
         phase: 'setup-ready',
       });
     } finally {
-      if (previousPiariumDataDir === undefined) {
-        delete process.env.PIARIUM_DATA_DIR;
+      if (previousVarinDataDir === undefined) {
+        delete process.env.VARIN_DATA_DIR;
       } else {
-        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+        process.env.VARIN_DATA_DIR = previousVarinDataDir;
       }
     }
   });
@@ -739,12 +739,12 @@ describe('createWorktree', () => {
   it('hands the create writer to background bootstrap before returning and releases it exactly once', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
     const setupStarted = path.join(dataHome, 'writer-setup-started');
     const setupFinished = path.join(dataHome, 'writer-setup-finished');
     const setupScript = path.join(dataHome, 'writer-setup.cjs');
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
     fs.writeFileSync(
       setupScript,
       `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
@@ -806,20 +806,20 @@ describe('createWorktree', () => {
 
       await removeWorktree(repo, { directory: created.path });
     } finally {
-      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+      else process.env.VARIN_DATA_DIR = previousVarinDataDir;
     }
   });
 
   it('keeps the create writer through bootstrap on the normal create path', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
     const setupStarted = path.join(dataHome, 'sync-writer-setup-started');
     const setupFinished = path.join(dataHome, 'sync-writer-setup-finished');
     const setupScript = path.join(dataHome, 'sync-writer-setup.cjs');
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
     fs.writeFileSync(
       setupScript,
       `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
@@ -859,17 +859,17 @@ describe('createWorktree', () => {
 
       await removeWorktree(repo, { directory: created.path });
     } finally {
-      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+      else process.env.VARIN_DATA_DIR = previousVarinDataDir;
     }
   });
 
   it('keeps the create writer active until failed background attach cleanup finishes', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -929,8 +929,8 @@ describe('createWorktree', () => {
         phase: 'directory-created',
       });
     } finally {
-      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+      else process.env.VARIN_DATA_DIR = previousVarinDataDir;
     }
   });
 
@@ -960,9 +960,9 @@ describe('createWorktree', () => {
   it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -1002,10 +1002,10 @@ describe('createWorktree', () => {
       expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
       expect(fs.existsSync(path.join(dataHome, 'opencode'))).toBe(false);
     } finally {
-      if (previousPiariumDataDir === undefined) {
-        delete process.env.PIARIUM_DATA_DIR;
+      if (previousVarinDataDir === undefined) {
+        delete process.env.VARIN_DATA_DIR;
       } else {
-        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+        process.env.VARIN_DATA_DIR = previousVarinDataDir;
       }
     }
   });
@@ -1019,9 +1019,9 @@ describe('removeWorktree', () => {
   it('forgets unmanaged orphan worktree entries without deleting files', async () => {
     if (!canRunGit()) return;
 
-    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const previousVarinDataDir = process.env.VARIN_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.PIARIUM_DATA_DIR = dataHome;
+    process.env.VARIN_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -1042,10 +1042,10 @@ describe('removeWorktree', () => {
       })).resolves.toBe(true);
       expect(fs.existsSync(canary)).toBe(true);
     } finally {
-      if (previousPiariumDataDir === undefined) {
-        delete process.env.PIARIUM_DATA_DIR;
+      if (previousVarinDataDir === undefined) {
+        delete process.env.VARIN_DATA_DIR;
       } else {
-        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+        process.env.VARIN_DATA_DIR = previousVarinDataDir;
       }
     }
   });

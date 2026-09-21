@@ -7,11 +7,11 @@ import semver from "semver";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { parsePiariumExtensionManifest, PiariumExtensionContractError } from "../src/index.js";
+import { parseVarinExtensionManifest, VarinExtensionContractError } from "../src/index.js";
 import { manifestFixtures } from "./manifest-fixtures.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(__dirname, "..", "schema", "piarium.extension.schema.json");
+const schemaPath = join(__dirname, "..", "schema", "varin.extension.schema.json");
 const schema = JSON.parse(await readFile(schemaPath, "utf8")) as object;
 
 // Register a real semver-range format validator instead of the always-true stub.
@@ -36,10 +36,10 @@ const schemaValid = (manifest: unknown): boolean => {
 
 const runtimeValid = (manifest: unknown): boolean => {
   try {
-    parsePiariumExtensionManifest(manifest);
+    parseVarinExtensionManifest(manifest);
     return true;
   } catch (error) {
-    if (error instanceof PiariumExtensionContractError) return false;
+    if (error instanceof VarinExtensionContractError) return false;
     throw error;
   }
 };
@@ -76,11 +76,11 @@ test("schema and runtime agree on every manifest fixture", () => {
 
 test("semver-range format uses real semver.validRange validation", () => {
   // Valid ranges
-  assert.equal(schemaValid({ ...minimalManifest(), engines: { piarium: ">=0.2.0" } }), true);
-  assert.equal(schemaValid({ ...minimalManifest(), engines: { piarium: "^1.0.0" } }), true);
-  assert.equal(schemaValid({ ...minimalManifest(), engines: { piarium: "*" } }), true);
+  assert.equal(schemaValid({ ...minimalManifest(), engines: { varin: ">=0.2.0" } }), true);
+  assert.equal(schemaValid({ ...minimalManifest(), engines: { varin: "^1.0.0" } }), true);
+  assert.equal(schemaValid({ ...minimalManifest(), engines: { varin: "*" } }), true);
   // Invalid range
-  assert.equal(schemaValid({ ...minimalManifest(), engines: { piarium: "not-a-range" } }), false);
+  assert.equal(schemaValid({ ...minimalManifest(), engines: { varin: "not-a-range" } }), false);
 });
 
 test("runtime-only rules have schemaValid: true and runtimeValid: false", () => {
@@ -126,7 +126,7 @@ test("editor, shell, and transition rules are scoped to their supported contract
       schemaVersion: 1,
       id: `dev.example.future-${contribution.id}`,
       version: "1.0.0",
-      engines: { piarium: ">=0.2.0" },
+      engines: { varin: ">=0.2.0" },
       contributions: [{
         ...contribution,
         id: `dev.example.future-${contribution.id}.view`,
@@ -143,7 +143,7 @@ const minimalManifest = () => ({
   schemaVersion: 1,
   id: "dev.example.minimal",
   version: "1.0.0",
-  engines: { piarium: ">=0.2.0" },
+  engines: { varin: ">=0.2.0" },
   contributions: [{
     id: "dev.example.minimal.view",
     kind: "view" as const,

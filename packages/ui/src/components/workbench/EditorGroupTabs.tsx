@@ -21,9 +21,9 @@ import { workspacePathFromResourceId } from '@/lib/documents/path';
 import type { EditorGroupLeaf } from '@/lib/workbench/editors/types';
 import { ScrollingFileName } from '@/components/workbench/FilesExplorer';
 import {
-  PIARIUM_WORKBENCH_SLOTS,
-  type PiariumWorkbenchEditorActionsSlotProps,
-} from '@piarium/extension-contract';
+  VARIN_WORKBENCH_SLOTS,
+  type VarinWorkbenchEditorActionsSlotProps,
+} from '@varin/extension-contract';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 type EditorGroupTabsProps = {
@@ -140,7 +140,7 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
                   <div
                     draggable
                     onDragStart={(event) => {
-                      event.dataTransfer.setData('text/piarium-tab', tab.tabId);
+                      event.dataTransfer.setData('text/varin-tab', tab.tabId);
                       event.dataTransfer.effectAllowed = 'move';
                     }}
                     onDragOver={(event) => {
@@ -149,7 +149,7 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
                     }}
                     onDrop={(event) => {
                       event.preventDefault();
-                      const moved = event.dataTransfer.getData('text/piarium-tab');
+                      const moved = event.dataTransfer.getData('text/varin-tab');
                       if (moved && onMoveToGroup) onMoveToGroup(moved, group.groupId);
                     }}
                     title={path}
@@ -210,12 +210,12 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
         <div className="flex shrink-0 items-center gap-1 px-1">
           <WorkbenchContributionSlot
             kind="view"
-            slot={PIARIUM_WORKBENCH_SLOTS.editorActions}
+            slot={VARIN_WORKBENCH_SLOTS.editorActions}
             props={{
               workspaceId,
               groupId: group.groupId,
               ...(activeTab ? { resourceId: activeTab.resourceId, viewId: activeTab.viewId } : {}),
-            } satisfies PiariumWorkbenchEditorActionsSlotProps}
+            } satisfies VarinWorkbenchEditorActionsSlotProps}
           />
         </div>
       ) : null}

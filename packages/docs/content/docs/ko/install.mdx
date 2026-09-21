@@ -1,11 +1,11 @@
 ---
 title: 설치
-description: 소스 또는 Docker로 데스크톱과 웹용 Piarium를 설치하세요.
+description: 소스 또는 Docker로 데스크톱과 웹용 Varin를 설치하세요.
 ---
 
 # 설치
 
-Piarium는 pre-1.0입니다. 오늘 지원되는 실행 방법은 **소스에서**와 **Docker로**뿐입니다. 패키지된 npm과 GitHub Release 다운로드는 아직 게시되지 않았습니다.
+Varin는 pre-1.0입니다. 오늘 지원되는 실행 방법은 **소스에서**와 **Docker로**뿐입니다. 패키지된 npm과 GitHub Release 다운로드는 아직 게시되지 않았습니다.
 
 주요 제품 화면은 두 가지입니다:
 
@@ -24,13 +24,13 @@ Piarium는 pre-1.0입니다. 오늘 지원되는 실행 방법은 **소스에서
 ## 소스에서 (웹)
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-터미널에 출력된 Vite URL을 여세요. Piarium는 UI와 신뢰할 수 있는 API/런타임 서비스를 함께 시작합니다.
+터미널에 출력된 Vite URL을 여세요. Varin는 UI와 신뢰할 수 있는 API/런타임 서비스를 함께 시작합니다.
 
 ## 소스에서 (데스크톱)
 
@@ -51,17 +51,17 @@ Windows 설치 프로그램은 `bun run electron:build:win`으로 로컬에서 �
 Linux Docker 호스트에서:
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-`http://127.0.0.1:3000`을 열고 생성된 비밀번호를 사용하세요. 인터넷에 노출되는 배포 앞에는 TLS 리버스 프록시 또는 승인된 터널을 두세요. 프로덕션에서는 `PIARIUM_IMAGE`를 `:latest`가 아니라 검증된 digest로 고정하세요.
+`http://127.0.0.1:3000`을 열고 생성된 비밀번호를 사용하세요. 인터넷에 노출되는 배포 앞에는 TLS 리버스 프록시 또는 승인된 터널을 두세요. 프로덕션에서는 `VARIN_IMAGE`를 `:latest`가 아니라 검증된 digest로 고정하세요.
 
-Compose는 기본적으로 슬림 이미지 `ghcr.io/youzini-afk/piarium-slim:latest`를 사용합니다(서버 실행에 필요한 Bun, Node, Git, SSH, cloudflared). 컨테이너 안에서 Python, Java, Go, Rust를 컴파일해야 하면 툴벨트 오버레이를 겹치세요:
+Compose는 기본적으로 슬림 이미지 `ghcr.io/youzini-afk/varin-slim:latest`를 사용합니다(서버 실행에 필요한 Bun, Node, Git, SSH, cloudflared). 컨테이너 안에서 Python, Java, Go, Rust를 컴파일해야 하면 툴벨트 오버레이를 겹치세요:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
@@ -69,4 +69,4 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ## CLI 한 줄 설치 (미게시)
 
-`scripts/install.sh`와 `npx @piarium/web`은 `@piarium/web` npm 패키지를 대상으로 합니다. 그 패키지는 아직 공개 레지스트리에 없으므로, 릴리스가 게시되기 전까지 curl 설치 프로그램은 실패합니다. 그때까지는 소스 또는 Docker를 사용하세요.
+`scripts/install.sh`와 `npx @varin/web`은 `@varin/web` npm 패키지를 대상으로 합니다. 그 패키지는 아직 공개 레지스트리에 없으므로, 릴리스가 게시되기 전까지 curl 설치 프로그램은 실패합니다. 그때까지는 소스 또는 Docker를 사용하세요.

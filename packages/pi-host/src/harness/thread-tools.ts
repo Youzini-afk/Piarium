@@ -15,8 +15,8 @@ import type {
   ThreadMergeResult,
   ThreadUpdateResult,
   ThreadKillResult,
-} from "@piarium/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt } from "@piarium/protocol";
+} from "@varin/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt } from "@varin/protocol";
 
 /**
  * Build an error result for a thread tool failure.

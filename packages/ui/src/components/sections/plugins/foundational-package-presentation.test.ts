@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FoundationalPiPackageStatusEntry } from '@piarium/protocol';
+import type { FoundationalPiPackageStatusEntry } from '@varin/protocol';
 import {
   foundationalRestoreSucceeded,
   hasFoundationalPackageRestoreAction,

@@ -105,7 +105,7 @@ describe('git routes index mutations', () => {
   });
 
   it('clones a project through the Git service with the selected identity', async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-git-route-clone-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-git-route-clone-'));
     const destination = path.join(root, 'demo');
     const normalizedDestination = destination.replace(/\\/g, '/');
     const identity = {
@@ -282,7 +282,7 @@ describe('git routes index mutations', () => {
   });
 
   it('does not create a clone destination parent before maintenance admission', async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-git-route-maintenance-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-git-route-maintenance-'));
     const parent = path.join(root, 'not-created');
     const error = Object.assign(new Error('Workspace is in maintenance mode'), {
       code: 'maintenance',
@@ -356,7 +356,7 @@ describe('git routes index mutations', () => {
     const created = {
       head: '',
       name: 'feature',
-      branch: 'piarium/feature',
+      branch: 'varin/feature',
       path: '/worktrees/feature',
       directoryCreated: true,
       bootstrapStatus: { status: 'pending', phase: 'directory-created', error: null },

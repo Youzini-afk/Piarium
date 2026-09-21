@@ -1,4 +1,4 @@
-import type { AgentInputContext } from '@piarium/protocol';
+import type { AgentInputContext } from '@varin/protocol';
 import { getDocumentRegistry } from '@/lib/documents/session';
 
 export const captureSurfaceAgentInputContext = async (

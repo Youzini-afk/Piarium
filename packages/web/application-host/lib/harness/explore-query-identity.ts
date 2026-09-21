@@ -1,4 +1,4 @@
-import type { HarnessActorContext, HarnessActorIdentity } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessActorIdentity } from "@varin/protocol";
 
 /** Actor fields a short-lived explore query is allowed to continue under. */
 export interface ExploreQueryActor {

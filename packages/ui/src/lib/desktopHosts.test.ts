@@ -6,7 +6,7 @@ const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, 
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __PIARIUM_DESKTOP__: {
+      __VARIN_DESKTOP__: {
         invoke: handler,
       },
     },

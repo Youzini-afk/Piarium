@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
+import { VARIN_PROTOCOL_VERSION } from "@varin/protocol";
 
 const HOST_ENTRY = fileURLToPath(new URL("../dist/host-bootstrap.js", import.meta.url));
 
@@ -127,7 +127,7 @@ async function runHostSession(args, work) {
 }
 
 test("compiled host handshakes and shuts down over stdio", async () => {
-  const agentDir = await mkdtemp(join(tmpdir(), "piarium-dist-host-"));
+  const agentDir = await mkdtemp(join(tmpdir(), "varin-dist-host-"));
   try {
     await runHostSession(["--agent-dir", agentDir], async ({ child, exited, stderr, waitFor }) => {
       await waitFor(
@@ -143,9 +143,9 @@ test("compiled host handshakes and shuts down over stdio", async () => {
             clientName: "dist-smoke-test",
             clientVersion: "0.0.0",
             mode: "test",
-            protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+            protocolVersions: [VARIN_PROTOCOL_VERSION],
           },
-          v: PIARIUM_PROTOCOL_VERSION,
+          v: VARIN_PROTOCOL_VERSION,
         })}\n`,
       );
       const handshake = await waitFor(
@@ -153,7 +153,7 @@ test("compiled host handshakes and shuts down over stdio", async () => {
         "Compiled host did not answer the handshake",
       );
       assert.equal(handshake.ok, true);
-      assert.equal(handshake.result.protocolVersion, PIARIUM_PROTOCOL_VERSION);
+      assert.equal(handshake.result.protocolVersion, VARIN_PROTOCOL_VERSION);
 
       child.stdin.write(
         `${JSON.stringify({
@@ -161,7 +161,7 @@ test("compiled host handshakes and shuts down over stdio", async () => {
           kind: "request",
           method: "host.shutdown",
           params: {},
-          v: PIARIUM_PROTOCOL_VERSION,
+          v: VARIN_PROTOCOL_VERSION,
         })}\n`,
       );
       const shutdown = await waitFor(
@@ -179,7 +179,7 @@ test("compiled host handshakes and shuts down over stdio", async () => {
 });
 
 test("external Pi package root starts the host and creates a session", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-external-host-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-external-host-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   try {
@@ -210,9 +210,9 @@ test("external Pi package root starts the host and creates a session", async () 
               clientName: "external-runtime-test",
               clientVersion: "0.0.0",
               mode: "test",
-              protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+              protocolVersions: [VARIN_PROTOCOL_VERSION],
             },
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           })}\n`,
         );
         const handshake = await waitFor(
@@ -231,7 +231,7 @@ test("external Pi package root starts the host and creates a session", async () 
             kind: "request",
             method: "session.create",
             params: { cwd },
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           })}\n`,
         );
         const created = await waitFor(
@@ -247,7 +247,7 @@ test("external Pi package root starts the host and creates a session", async () 
             kind: "request",
             method: "host.shutdown",
             params: {},
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           })}\n`,
         );
         await waitFor(
@@ -262,7 +262,7 @@ test("external Pi package root starts the host and creates a session", async () 
 });
 
 test("external load failure names the missing Pi SDK module", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-external-missing-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-external-missing-"));
   try {
     const packageRoot = await materializeIncompletePiFixture(root);
     const child = spawn(

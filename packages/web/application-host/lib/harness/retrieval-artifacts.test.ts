@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@piarium/protocol";
+import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@varin/protocol";
 import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
 import { createRetrievalArtifactAccess, hashRetrievalText } from "./retrieval-artifacts.js";

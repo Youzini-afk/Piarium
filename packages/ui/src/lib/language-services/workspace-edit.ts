@@ -1,4 +1,4 @@
-import type { PiariumLanguageWorkspaceEdit } from '@piarium/application-client';
+import type { VarinLanguageWorkspaceEdit } from '@varin/application-client';
 import type {
   DocumentWorkspaceEditInput,
   DocumentWorkspaceResourceOperation,
@@ -8,7 +8,7 @@ import type {
 export const toDocumentWorkspaceEditInput = (
   workspaceId: string,
   origin: string,
-  edit: PiariumLanguageWorkspaceEdit,
+  edit: VarinLanguageWorkspaceEdit,
 ): DocumentWorkspaceEditInput => {
   const textEdits: DocumentWorkspaceTextDocumentEdit[] = [];
   const resourceOperations: DocumentWorkspaceResourceOperation[] = [];

@@ -184,7 +184,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'open_diagnostics',
     defaultCombo: 'mod+shift+o',
-    label: 'Show Piarium diagnostics',
+    label: 'Show Varin diagnostics',
     description: 'Inspect the active Pi runtime, packages, resources, and project context',
   },
   {

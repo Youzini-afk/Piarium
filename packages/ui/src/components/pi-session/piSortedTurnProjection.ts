@@ -3,7 +3,7 @@ import type {
   PiTextContent,
   PiThinkingContent,
   PiToolCall,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import type { PiTimelineEntry } from './piTimelineProjection';
 
 export const PI_SORTED_LIVE_ASSISTANT_ID = 'live-assistant';

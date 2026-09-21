@@ -11,7 +11,7 @@ import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-h
 const roots: string[] = [];
 
 const harness = async () => {
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-branch-view-"));
+  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-branch-view-"));
   roots.push(parent);
   const workspace = path.join(parent, "workspace");
   const root = path.join(parent, "recovery");

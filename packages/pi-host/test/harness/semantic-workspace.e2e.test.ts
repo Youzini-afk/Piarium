@@ -20,7 +20,7 @@ import type {
   ExploreSearchResult,
   HostEvent,
   HostEventData,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
@@ -92,7 +92,7 @@ async function createSemanticHarness(options: {
   malformedEmbedding?: boolean;
   inferenceFailure?: boolean;
 } = {}): Promise<SemanticHarness> {
-  const root = await mkdtemp(join(tmpdir(), "piarium-semantic-workspace-e2e-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-semantic-workspace-e2e-"));
   const parentRoot = join(root, "owner");
   const childRoot = join(root, "materialized-child");
   const dataDir = join(root, "host-data");

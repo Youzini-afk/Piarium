@@ -10,7 +10,7 @@ import type {
   FollowUpUpdateResult,
   HarnessMethod,
   HarnessServiceMap,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 /**
  * Follow-up tool (D-307 / Stage W): register a durable wait + continuation on

@@ -1,30 +1,30 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumExtensionHostStateSnapshot,
-  PiariumWorkbenchResolvedProfile,
-} from '@piarium/extension-contract';
-import { inspectPiariumWorkbenchShell, resolvePiariumWorkbenchProfile } from '@piarium/extension-contract';
-import type { SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+  VarinApplicationSurface,
+  VarinExtensionHostStateSnapshot,
+  VarinWorkbenchResolvedProfile,
+} from '@varin/extension-contract';
+import { inspectVarinWorkbenchShell, resolveVarinWorkbenchProfile } from '@varin/extension-contract';
+import type { SurfaceRegistrySnapshot } from '@varin/extension-surface';
 
 type WorkbenchShellView = 'loading' | 'ready' | 'recovery';
 
 export const resolveWorkbenchShellView = (
-  snapshot: PiariumExtensionHostStateSnapshot | null | undefined,
-  surface: PiariumApplicationSurface,
+  snapshot: VarinExtensionHostStateSnapshot | null | undefined,
+  surface: VarinApplicationSurface,
   workspaceId?: string,
   surfaceSnapshot?: SurfaceRegistrySnapshot,
-): { resolved: PiariumWorkbenchResolvedProfile | null; view: WorkbenchShellView } => {
+): { resolved: VarinWorkbenchResolvedProfile | null; view: WorkbenchShellView } => {
   const workbench = snapshot?.workbench;
   if (!snapshot || !workbench?.authoritative) {
     return { resolved: null, view: 'loading' };
   }
-  let resolved = resolvePiariumWorkbenchProfile(workbench.document, snapshot.catalog, {
+  let resolved = resolveVarinWorkbenchProfile(workbench.document, snapshot.catalog, {
     surface,
     userId: 'default',
     ...(workspaceId ? { workspaceId } : {}),
   });
   if (surfaceSnapshot) {
-    const inspected = inspectPiariumWorkbenchShell(
+    const inspected = inspectVarinWorkbenchShell(
       resolved.layout.replacementSelections,
       snapshot.catalog.extensions,
       surface,

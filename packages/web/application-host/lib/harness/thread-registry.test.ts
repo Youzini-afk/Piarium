@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type { ThreadMessageRecord, ThreadPendingContinuation } from "@piarium/protocol";
+import type { ThreadMessageRecord, ThreadPendingContinuation } from "@varin/protocol";
 import {
   THREAD_REGISTRY_SCHEMA_VERSION,
   ThreadRegistryError,
@@ -194,7 +194,7 @@ describe("thread registry", () => {
     await registry.setWorktree(WORKSPACE, thread.id, {
       path: "D:/worktrees/thread-1",
       base: "base-commit",
-      branch: "piarium/thread-1",
+      branch: "varin/thread-1",
       resultCommit: "result-commit",
       preparationStage: "ready",
     });
@@ -203,7 +203,7 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toEqual({
       path: "D:/worktrees/thread-1",
       base: "base-commit",
-      branch: "piarium/thread-1",
+      branch: "varin/thread-1",
       resultCommit: "result-commit",
       preparationStage: "ready",
     });

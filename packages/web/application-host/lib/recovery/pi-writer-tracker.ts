@@ -1,4 +1,4 @@
-import { PiRuntimeBrokerError } from '@piarium/runtime-broker';
+import { PiRuntimeBrokerError } from '@varin/runtime-broker';
 
 interface AdmissionFailure {
   code?: string | undefined;

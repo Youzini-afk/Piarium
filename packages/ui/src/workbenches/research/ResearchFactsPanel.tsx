@@ -1,8 +1,8 @@
 import React from 'react';
-import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, ResourceMachineView } from '@piarium/protocol';
+import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, ResourceMachineView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
 import {
   cancelResearchAttempt,
@@ -467,7 +467,7 @@ export const ResearchFactsPanel: React.FC = () => {
     setCollectedArtifacts({});
     if (!sessionId || !workspaceId) return () => invalidateReload();
     void reload();
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'stream-ready') {
         void reload();
         return;

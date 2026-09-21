@@ -1,33 +1,33 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { FileSearchResult } from '@piarium/application-client';
-import { getRuntimeKey } from '@piarium/application-client';
+import type { FileSearchResult } from '@varin/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
 const DEFAULT_SEARCH_LIMIT = 60;
 
 interface FileSearchCacheEntry {
-  files: PiariumFileSearchHit[];
+  files: VarinFileSearchHit[];
   timestamp: number;
 }
 
 interface FileSearchStoreState {
   cache: Record<string, FileSearchCacheEntry>;
   cacheKeys: string[];
-  inFlight: Record<string, Promise<PiariumFileSearchHit[]>>;
+  inFlight: Record<string, Promise<VarinFileSearchHit[]>>;
   searchFiles: (
     directory: string,
     query: string,
     limit?: number,
     options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
-  ) => Promise<PiariumFileSearchHit[]>;
+  ) => Promise<VarinFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
   resetForRuntimeSwitch: () => void;
 }
 
-export interface PiariumFileSearchHit {
+export interface VarinFileSearchHit {
   extension?: string;
   name: string;
   path: string;
@@ -46,7 +46,7 @@ const toRelativePath = (directory: string, result: FileSearchResult): string => 
     : path;
 };
 
-const toFileHit = (directory: string, result: FileSearchResult): PiariumFileSearchHit => {
+const toFileHit = (directory: string, result: FileSearchResult): VarinFileSearchHit => {
   const path = normalizePath(result.path);
   const relativePath = toRelativePath(directory, result);
   const name = path.split('/').filter(Boolean).pop() || relativePath || path;
@@ -63,10 +63,10 @@ const toDirectoryHits = (
   results: FileSearchResult[],
   query: string,
   limit: number,
-): PiariumFileSearchHit[] => {
+): VarinFileSearchHit[] => {
   const root = normalizePath(directory);
   const normalizedQuery = query.toLocaleLowerCase();
-  const hits = new Map<string, PiariumFileSearchHit>();
+  const hits = new Map<string, VarinFileSearchHit>();
   for (const result of results) {
     const segments = toRelativePath(directory, result).split('/').filter(Boolean);
     segments.pop();

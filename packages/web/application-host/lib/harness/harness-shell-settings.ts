@@ -1,4 +1,4 @@
-import { mergeHarnessSettings, type HarnessSettings, type PiSettingsSnapshot } from "@piarium/protocol";
+import { mergeHarnessSettings, type HarnessSettings, type PiSettingsSnapshot } from "@varin/protocol";
 
 export type HarnessShellSetting = HarnessSettings["shell"];
 

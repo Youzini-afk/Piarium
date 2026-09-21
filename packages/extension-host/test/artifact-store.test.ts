@@ -15,15 +15,15 @@ import {
   resolveNpmLaunchTarget,
 } from "../src/index.js";
 import {
-  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-  PIARIUM_BUILTIN_EXTENSION_PREFIX,
-  type PiariumBuiltinExtensionDefinition,
-} from "@piarium/extension-builtins";
-import { PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE } from "@piarium/extension-builtins/host";
+  VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+  VARIN_BUILTIN_EXTENSION_PREFIX,
+  type VarinBuiltinExtensionDefinition,
+} from "@varin/extension-builtins";
+import { VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE } from "@varin/extension-builtins/host";
 
 const exec = promisify(execFile);
 const temporaryDirectories: string[] = [];
-const PIARIUM_VERSION = "1.2.3";
+const VARIN_VERSION = "1.2.3";
 
 const temporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
@@ -36,14 +36,14 @@ const writeExtension = async (
   id: string,
   version: string,
   mode: "isolated" | "managed" | "native" = "managed",
-  piariumRange = "*",
+  varinRange = "*",
 ): Promise<void> => {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(directory, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id,
     version,
-    engines: { piarium: piariumRange },
+    engines: { varin: varinRange },
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", mode, supports: ["web", "desktop", "mobile"] }],
     },
@@ -77,7 +77,7 @@ test.after(async () => {
 });
 
 test("resolves npm from PATH when the embedding executable is Bun or Electron", async () => {
-  const runtime = await temporaryDirectory("piarium-npm-runtime-");
+  const runtime = await temporaryDirectory("varin-npm-runtime-");
   const nodePath = join(runtime, "node.exe");
   const npmCli = join(runtime, "node_modules", "npm", "bin", "npm-cli.js");
   await mkdir(join(runtime, "node_modules", "npm", "bin"), { recursive: true });
@@ -98,8 +98,8 @@ test("resolves npm from PATH when the embedding executable is Bun or Electron", 
 });
 
 test("resolves local sources in place without copying the working tree", async () => {
-  const source = await temporaryDirectory("piarium-local-resolver-source-");
-  const materializationRoot = await temporaryDirectory("piarium-local-resolver-materialization-");
+  const source = await temporaryDirectory("varin-local-resolver-source-");
+  const materializationRoot = await temporaryDirectory("varin-local-resolver-materialization-");
   const destination = join(materializationRoot, "source");
   await writeExtension(source, "dev.example.in-place", "1.0.0");
 
@@ -113,10 +113,10 @@ test("resolves local sources in place without copying the working tree", async (
 });
 
 test("resolves built-in sources in place without copying the distribution", async () => {
-  const source = await temporaryDirectory("piarium-builtin-resolver-source-");
-  const materializationRoot = await temporaryDirectory("piarium-builtin-resolver-materialization-");
+  const source = await temporaryDirectory("varin-builtin-resolver-source-");
+  const materializationRoot = await temporaryDirectory("varin-builtin-resolver-materialization-");
   const destination = join(materializationRoot, "source");
-  const id = "piarium.builtin.in-place";
+  const id = "varin.builtin.in-place";
   await writeExtension(source, id, "1.0.0");
 
   const resolved = await new BuiltinExtensionPackageSourceResolver(new Map([[id, source]])).materialize(
@@ -129,8 +129,8 @@ test("resolves built-in sources in place without copying the distribution", asyn
 });
 
 test("refuses to install missing local dependencies without modifying the working tree", async () => {
-  const dataDir = await temporaryDirectory("piarium-local-dependencies-data-");
-  const source = await temporaryDirectory("piarium-local-dependencies-source-");
+  const dataDir = await temporaryDirectory("varin-local-dependencies-data-");
+  const source = await temporaryDirectory("varin-local-dependencies-source-");
   await writeExtension(source, "dev.example.dependencies", "1.0.0");
   await writeFile(join(source, "package.json"), JSON.stringify({
     dependencies: { "fixture-dependency": "1.0.0" },
@@ -139,7 +139,7 @@ test("refuses to install missing local dependencies without modifying the workin
   }), "utf8");
   const before = await snapshotDirectory(source);
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
 
   await assert.rejects(
     packages.installOrStage({ kind: "local", specifier: source, display: "Dependencies" }, 0),
@@ -152,9 +152,9 @@ test("refuses to install missing local dependencies without modifying the workin
 });
 
 test("refuses to install missing built-in dependencies into the read-only distribution", async () => {
-  const dataDir = await temporaryDirectory("piarium-builtin-dependencies-data-");
-  const source = await temporaryDirectory("piarium-builtin-dependencies-source-");
-  const id = "piarium.builtin.dependencies";
+  const dataDir = await temporaryDirectory("varin-builtin-dependencies-data-");
+  const source = await temporaryDirectory("varin-builtin-dependencies-source-");
+  const id = "varin.builtin.dependencies";
   await writeExtension(source, id, "1.0.0");
   await writeFile(join(source, "package.json"), JSON.stringify({
     dependencies: { "fixture-dependency": "1.0.0" },
@@ -166,9 +166,9 @@ test("refuses to install missing built-in dependencies into the read-only distri
   const artifacts = new ExtensionArtifactStore({
     builtinRoots: new Map([[id, source]]),
     dataDir,
-    piariumVersion: PIARIUM_VERSION,
+    varinVersion: VARIN_VERSION,
   });
-  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, varinVersion: VARIN_VERSION });
 
   await assert.rejects(
     packages.installOrStage({ kind: "builtin", specifier: id, display: "Built-in dependencies" }, 0),
@@ -181,11 +181,11 @@ test("refuses to install missing built-in dependencies into the read-only distri
 });
 
 test("builds isolated Surface artifacts as self-contained realm scripts", async () => {
-  const dataDir = await temporaryDirectory("piarium-isolated-artifact-data-");
-  const source = await temporaryDirectory("piarium-isolated-artifact-source-");
+  const dataDir = await temporaryDirectory("varin-isolated-artifact-data-");
+  const source = await temporaryDirectory("varin-isolated-artifact-source-");
   await writeExtension(source, "dev.example.isolated", "1.0.0", "isolated");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Isolated" }, 0);
   const selected = installed.extensions[0];
   const payload = await packages.readManagedEntrypoint({
@@ -195,19 +195,19 @@ test("builds isolated Surface artifacts as self-contained realm scripts", async 
     slot: "selected",
   });
   assert.match(payload.module.path, /module\.js$/);
-  assert.match(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), /PiariumIsolatedModule/);
+  assert.match(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), /VarinIsolatedModule/);
   assert.equal(payload.styles.length, 1);
 });
 
 test("materializes a published CommonJS isolated module into one usable realm bundle", async () => {
-  const dataDir = await temporaryDirectory("piarium-isolated-cjs-data-");
-  const source = await temporaryDirectory("piarium-isolated-cjs-source-");
+  const dataDir = await temporaryDirectory("varin-isolated-cjs-data-");
+  const source = await temporaryDirectory("varin-isolated-cjs-source-");
   await writeExtension(source, "dev.example.isolated-cjs", "1.0.0", "isolated");
-  await writeFile(join(source, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(source, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.isolated-cjs",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.cjs", mode: "isolated", supports: ["web"] }],
     },
@@ -220,7 +220,7 @@ test("materializes a published CommonJS isolated module into one usable realm bu
     "};",
   ].join("\n"), "utf8");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Isolated CJS" }, 0);
   const selected = installed.extensions[0];
   const payload = await packages.readManagedEntrypoint({
@@ -231,16 +231,16 @@ test("materializes a published CommonJS isolated module into one usable realm bu
   });
   const realm: Record<string, unknown> = {};
   runInNewContext(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), realm);
-  const module = realm.PiariumIsolatedModule as { activate?: unknown; default?: { activate?: unknown } };
+  const module = realm.VarinIsolatedModule as { activate?: unknown; default?: { activate?: unknown } };
   assert.equal(typeof (module.default ?? module).activate, "function");
 });
 
 test("installs immutable local artifacts and stages an update without selecting it", async () => {
-  const dataDir = await temporaryDirectory("piarium-artifact-data-");
-  const source = await temporaryDirectory("piarium-artifact-source-");
+  const dataDir = await temporaryDirectory("varin-artifact-data-");
+  const source = await temporaryDirectory("varin-artifact-source-");
   await writeExtension(source, "dev.example.local", "1.0.0");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const beforeInstall = await snapshotDirectory(source);
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Local" }, 0);
   assert.deepEqual(await snapshotDirectory(source), beforeInstall);
@@ -287,14 +287,14 @@ test("installs immutable local artifacts and stages an update without selecting 
 });
 
 test("local reload stages added capabilities for review without selecting the candidate", async () => {
-  const dataDir = await temporaryDirectory("piarium-local-capability-data-");
-  const source = await temporaryDirectory("piarium-local-capability-source-");
+  const dataDir = await temporaryDirectory("varin-local-capability-data-");
+  const source = await temporaryDirectory("varin-local-capability-source-");
   const id = "dev.example.local-capability";
   await writeExtension(source, id, "1.0.0");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Capability reload" }, 0);
-  const manifestPath = join(source, "piarium.extension.json");
+  const manifestPath = join(source, "varin.extension.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
   manifest.version = "2.0.0";
   manifest.capabilities = { surface: ["desktop.clipboard"] };
@@ -310,25 +310,25 @@ test("local reload stages added capabilities for review without selecting the ca
 });
 
 test("rejects incompatible first installs and candidates without changing the selected version", async () => {
-  const dataDir = await temporaryDirectory("piarium-engine-data-");
-  const incompatibleFirst = await temporaryDirectory("piarium-engine-first-");
+  const dataDir = await temporaryDirectory("varin-engine-data-");
+  const incompatibleFirst = await temporaryDirectory("varin-engine-first-");
   await writeExtension(incompatibleFirst, "dev.example.incompatible-first", "1.0.0", "managed", ">=2.0.0");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   await assert.rejects(
     packages.installOrStage({ kind: "local", specifier: incompatibleFirst, display: "Incompatible first" }, 0),
-    /requires Piarium >=2\.0\.0; current version is 1\.2\.3/,
+    /requires Varin >=2\.0\.0; current version is 1\.2\.3/,
   );
   assert.deepEqual((await catalog.snapshot()).extensions, []);
 
-  const source = await temporaryDirectory("piarium-engine-candidate-");
+  const source = await temporaryDirectory("varin-engine-candidate-");
   await writeExtension(source, "dev.example.engine", "1.0.0", "managed", ">=1.2.3 <1.3.0");
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Compatible" }, 0);
   assert.equal(installed.extensions[0]?.selectedVersion, "1.0.0");
   await writeExtension(source, "dev.example.engine", "2.0.0", "managed", ">=1.2.4 <2.0.0");
   await assert.rejects(
     packages.installOrStage({ kind: "local", specifier: source, display: "Incompatible candidate" }, installed.revision),
-    /requires Piarium >=1\.2\.4 <2\.0\.0; current version is 1\.2\.3/,
+    /requires Varin >=1\.2\.4 <2\.0\.0; current version is 1\.2\.3/,
   );
   const after = await catalog.snapshot();
   assert.equal(after.extensions[0]?.selectedVersion, "1.0.0");
@@ -336,11 +336,11 @@ test("rejects incompatible first installs and candidates without changing the se
 });
 
 test("authenticates the complete artifact index and rejects corrupt cache reuse", async () => {
-  const dataDir = await temporaryDirectory("piarium-index-auth-data-");
-  const source = await temporaryDirectory("piarium-index-auth-source-");
+  const dataDir = await temporaryDirectory("varin-index-auth-data-");
+  const source = await temporaryDirectory("varin-index-auth-source-");
   const id = "dev.example.index-auth";
   await writeExtension(source, id, "1.0.0");
-  const manifestPath = join(source, "piarium.extension.json");
+  const manifestPath = join(source, "varin.extension.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
   manifest.entrypoints = {
     host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" },
@@ -350,7 +350,7 @@ test("authenticates the complete artifact index and rejects corrupt cache reuse"
   await writeFile(join(source, "host.cjs"), "module.exports = { activate() {} };", "utf8");
 
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Index auth" }, 0);
   const integrity = installed.extensions[0]?.integrity;
   assert.ok(integrity);
@@ -418,42 +418,42 @@ test("authenticates the complete artifact index and rejects corrupt cache reuse"
 });
 
 test("refreshes a built-in Host artifact when its distribution fingerprint changes at the same version", async () => {
-  const dataDir = await temporaryDirectory("piarium-builtin-fingerprint-data-");
-  const source = await temporaryDirectory("piarium-builtin-fingerprint-source-");
-  const id = "piarium.builtin.fingerprint-fixture";
-  const manifest: PiariumBuiltinExtensionDefinition["manifest"] = {
+  const dataDir = await temporaryDirectory("varin-builtin-fingerprint-data-");
+  const source = await temporaryDirectory("varin-builtin-fingerprint-source-");
+  const id = "varin.builtin.fingerprint-fixture";
+  const manifest: VarinBuiltinExtensionDefinition["manifest"] = {
     schemaVersion: 1,
     id,
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
-    provides: { services: [{ id: "piarium.fixture", version: 1 }] },
+    provides: { services: [{ id: "varin.fixture", version: 1 }] },
   };
-  const definition: PiariumBuiltinExtensionDefinition = {
+  const definition: VarinBuiltinExtensionDefinition = {
     enabledByDefault: true,
     manifest,
   };
-  await writeFile(join(source, "piarium.extension.json"), JSON.stringify(manifest), "utf8");
+  await writeFile(join(source, "varin.extension.json"), JSON.stringify(manifest), "utf8");
   await writeFile(join(source, "package.json"), JSON.stringify({ name: id, private: true, version: manifest.version }), "utf8");
   await writeFile(join(source, "host.cjs"), "module.exports={activate(){return 'v1';}};", "utf8");
-  await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"1".repeat(64)}\n`, "utf8");
+  await writeFile(join(source, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"1".repeat(64)}\n`, "utf8");
 
   const catalog = new ApplicationExtensionCatalog({ dataDir });
   const before = await snapshotDirectory(source);
-  const reconciled = await catalog.reconcileBuiltins([definition], PIARIUM_BUILTIN_EXTENSION_PREFIX);
+  const reconciled = await catalog.reconcileBuiltins([definition], VARIN_BUILTIN_EXTENSION_PREFIX);
   const artifacts = new ExtensionArtifactStore({
     builtinRoots: new Map([[id, source]]),
     dataDir,
-    piariumVersion: PIARIUM_VERSION,
+    varinVersion: VARIN_VERSION,
   });
-  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, varinVersion: VARIN_VERSION });
   const first = await packages.reconcileBuiltinArtifacts([definition], reconciled);
   const firstEntry = first.extensions.find((entry) => entry.manifest.id === id);
   assert.ok(firstEntry?.integrity);
   assert.deepEqual(await snapshotDirectory(source), before);
 
   await writeFile(join(source, "host.cjs"), "module.exports={activate(){return 'v2';}};", "utf8");
-  await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"2".repeat(64)}\n`, "utf8");
+  await writeFile(join(source, VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"2".repeat(64)}\n`, "utf8");
   const beforeRefresh = await snapshotDirectory(source);
   const second = await packages.reconcileBuiltinArtifacts([definition], first);
   const secondEntry = second.extensions.find((entry) => entry.manifest.id === id);
@@ -471,38 +471,38 @@ test("refreshes a built-in Host artifact when its distribution fingerprint chang
 });
 
 test("a first install that requests capabilities remains disabled for explicit review", async () => {
-  const dataDir = await temporaryDirectory("piarium-capability-install-data-");
-  const source = await temporaryDirectory("piarium-capability-install-source-");
+  const dataDir = await temporaryDirectory("varin-capability-install-data-");
+  const source = await temporaryDirectory("varin-capability-install-source-");
   await writeExtension(source, "dev.example.capability-install", "1.0.0");
-  await writeFile(join(source, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(source, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.capability-install",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     capabilities: { surface: ["desktop.clipboard"] },
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
     },
   }), "utf8");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Capability" }, 0);
   assert.equal(installed.extensions[0]?.desired.enabled, false);
   assert.deepEqual(installed.extensions[0]?.capabilityGrants, []);
 });
 
 test("external sources cannot replace a distribution-owned built-in record", async () => {
-  const dataDir = await temporaryDirectory("piarium-builtin-ownership-data-");
-  const source = await temporaryDirectory("piarium-builtin-ownership-source-");
-  const builtinId = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS[0]?.manifest.id;
+  const dataDir = await temporaryDirectory("varin-builtin-ownership-data-");
+  const source = await temporaryDirectory("varin-builtin-ownership-source-");
+  const builtinId = VARIN_BUILTIN_EXTENSION_DEFINITIONS[0]?.manifest.id;
   assert.ok(builtinId);
   await writeExtension(source, builtinId, "99.0.0");
   const catalog = new ApplicationExtensionCatalog({ dataDir });
   const builtins = await catalog.reconcileBuiltins(
-    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+    VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+    VARIN_BUILTIN_EXTENSION_PREFIX,
   );
-  const packages = new ExtensionPackageManager({ catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+  const packages = new ExtensionPackageManager({ catalog, dataDir, varinVersion: VARIN_VERSION });
   await assert.rejects(
     packages.installOrStage({ kind: "local", specifier: source, display: "External replacement" }, builtins.revision),
     /managed by the distribution/,
@@ -512,31 +512,31 @@ test("external sources cannot replace a distribution-owned built-in record", asy
 });
 
 test("materializes npm and Git sources through argument-safe source resolvers", async () => {
-  const npmSource = await temporaryDirectory("piarium-npm-source-");
+  const npmSource = await temporaryDirectory("varin-npm-source-");
   await writeExtension(npmSource, "dev.example.npm", "1.0.0");
-  const npmData = await temporaryDirectory("piarium-npm-data-");
+  const npmData = await temporaryDirectory("varin-npm-data-");
   const npmCatalog = new ApplicationExtensionCatalog({ dataDir: npmData });
   const npmPackages = new ExtensionPackageManager({
     catalog: npmCatalog,
     dataDir: npmData,
-    piariumVersion: PIARIUM_VERSION,
+    varinVersion: VARIN_VERSION,
   });
   const npmInstalled = await npmPackages.installOrStage({ kind: "npm", specifier: npmSource, display: "npm fixture" }, 0);
   assert.equal(npmInstalled.extensions[0]?.manifest.id, "dev.example.npm");
 
-  const gitSource = await temporaryDirectory("piarium-git-source-");
+  const gitSource = await temporaryDirectory("varin-git-source-");
   await writeExtension(gitSource, "dev.example.git", "1.0.0");
   await exec("git", ["init"], { cwd: gitSource });
-  await exec("git", ["config", "user.email", "piarium@example.invalid"], { cwd: gitSource });
-  await exec("git", ["config", "user.name", "Piarium Test"], { cwd: gitSource });
+  await exec("git", ["config", "user.email", "varin@example.invalid"], { cwd: gitSource });
+  await exec("git", ["config", "user.name", "Varin Test"], { cwd: gitSource });
   await exec("git", ["add", "."], { cwd: gitSource });
   await exec("git", ["commit", "-m", "fixture"], { cwd: gitSource });
-  const gitData = await temporaryDirectory("piarium-git-data-");
+  const gitData = await temporaryDirectory("varin-git-data-");
   const gitCatalog = new ApplicationExtensionCatalog({ dataDir: gitData });
   const gitPackages = new ExtensionPackageManager({
     catalog: gitCatalog,
     dataDir: gitData,
-    piariumVersion: PIARIUM_VERSION,
+    varinVersion: VARIN_VERSION,
   });
   const gitInstalled = await gitPackages.installOrStage({ kind: "git", specifier: gitSource, display: "Git fixture" }, 0);
   assert.equal(gitInstalled.extensions[0]?.manifest.id, "dev.example.git");

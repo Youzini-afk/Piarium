@@ -38,7 +38,7 @@ export const useReviewFlowStore = create<ReviewFlowState>()(
       })),
     }),
     {
-      name: 'piarium-review-flow-links',
+      name: 'varin-review-flow-links',
       storage: createDeferredSafeJSONStorage(),
       partialize: (state) => ({ linksByOriginal: state.linksByOriginal }),
     },

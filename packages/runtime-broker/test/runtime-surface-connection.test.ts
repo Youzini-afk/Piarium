@@ -5,9 +5,9 @@ import {
   createRuntimeRequest,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type RuntimeWireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   PiRuntimeSurfaceConnection,
   type PiRuntimeBroker,
@@ -27,7 +27,7 @@ const handshakeResult = {
     settings: true,
   },
   hostVersion: "0.1.0",
-  protocolVersion: PIARIUM_PROTOCOL_VERSION,
+  protocolVersion: VARIN_PROTOCOL_VERSION,
   runtime: {
     agentDir: "C:/agent",
     nodePath: "node",
@@ -105,7 +105,7 @@ const handshake = async (harness: ReturnType<typeof createHarness>, id = "handsh
     clientName: "surface-connection-test",
     clientVersion: "0.1.0",
     mode: "test",
-    protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+    protocolVersions: [VARIN_PROTOCOL_VERSION],
   }));
   return harness.next();
 };
@@ -123,7 +123,7 @@ test("surface connection gates requests behind a successful handshake", async ()
       id: "list-before",
       kind: "response",
       ok: false,
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     });
     assert.equal((await handshake(harness)).kind, "response");
     assert.equal(harness.connection.handshakeComplete, true);
@@ -133,7 +133,7 @@ test("surface connection gates requests behind a successful handshake", async ()
       kind: "response",
       ok: true,
       result: [],
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     });
   } finally {
     harness.connection.close();
@@ -173,7 +173,7 @@ test("surface connection projects routed host events only after handshake", asyn
         sessionId: "session-1",
         workerId: "worker-1",
       },
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     });
   } finally {
     harness.connection.close();
@@ -211,7 +211,7 @@ test("surface connection reports a session worker exit to every connected surfac
         sessionId: "session-crashed",
         workerId: "worker-crashed",
       },
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     });
   } finally {
     harness.connection.close();

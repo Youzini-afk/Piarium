@@ -109,7 +109,7 @@
       ],
       "suggestedChecks": [
         "bunx vitest run packages/web/application-host/lib/harness/context-routes.test.ts packages/web/application-host/lib/harness/thread-routes.test.ts",
-        "bunx vitest run packages/ui/src/components/pi-session/harnessBlockPresentation.test.ts packages/ui/src/lib/piariumEvents.test.ts"
+        "bunx vitest run packages/ui/src/components/pi-session/harnessBlockPresentation.test.ts packages/ui/src/lib/varinEvents.test.ts"
       ]
     }
   ]

@@ -99,7 +99,7 @@ export function getDesktopRecoveryConfig(
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
         title: 'Incompatible Server',
-        description: `The server at "${host || 'unknown'}" is not running Piarium. Verify the address points to a Piarium server.`,
+        description: `The server at "${host || 'unknown'}" is not running Varin. Verify the address points to a Varin server.`,
         titleKey: 'onboarding.desktopRecovery.incompatibleServer.title',
         descriptionKey: 'onboarding.desktopRecovery.incompatibleServer.description',
         descriptionParams: host ? { host } : undefined,
@@ -118,7 +118,7 @@ export function getDesktopRecoveryConfig(
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
         title: 'Server Update Required',
-        description: `The Piarium server at "${host || 'unknown'}" is not compatible with this app version. Update Piarium on the server, then try again.`,
+        description: `The Varin server at "${host || 'unknown'}" is not compatible with this app version. Update Varin on the server, then try again.`,
         titleKey: 'onboarding.desktopRecovery.remoteIncompatible.title',
         descriptionKey: 'onboarding.desktopRecovery.remoteIncompatible.description',
         descriptionParams: host ? { host } : undefined,

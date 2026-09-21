@@ -2,7 +2,7 @@ import type {
   PiAssistantMessage,
   PiSessionEntry,
   PiUsage,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export type PiUsageMetricKey =
   | 'input'

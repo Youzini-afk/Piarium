@@ -2,23 +2,23 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { PiFollowUpsStrip } from './PiFollowUpsStrip';
-import type { PiariumEvent } from '@/lib/piariumEvents';
+import type { VarinEvent } from '@/lib/varinEvents';
 
 const mocks = vi.hoisted(() => ({
-  listeners: new Set<(event: PiariumEvent) => void>(),
+  listeners: new Set<(event: VarinEvent) => void>(),
   toastErrors: [] as string[],
   translate: (key: string, params?: Record<string, unknown>) => (
     params ? `${key}:${JSON.stringify(params)}` : key
   ),
 }));
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/toast', () => ({ toast: { error: (message: string) => mocks.toastErrors.push(message) } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/lib/piariumEvents', () => ({
-  subscribePiariumEvents: (listener: (event: PiariumEvent) => void) => {
+vi.mock('@/lib/varinEvents', () => ({
+  subscribeVarinEvents: (listener: (event: VarinEvent) => void) => {
     mocks.listeners.add(listener);
     return () => { mocks.listeners.delete(listener); };
   },

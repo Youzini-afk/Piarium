@@ -1,35 +1,34 @@
 English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.github/readme/README.zh-TW.md) | [Français](.github/readme/README.fr.md) | [日本語](.github/readme/README.ja.md)
 
-# Piarium
+# Varin
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="packages/web/public/logo-dark-512x512.svg" />
-    <img src="packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <img src="packages/web/public/logo-light-512x512.svg" alt="Varin" width="128" />
   </picture>
 </p>
 
-[![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
-[![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
+[![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
+[![Docker Images](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-**A Pi-native, recomposable workspace and governed agent harness for coding agents: built for
-local work and usable across desktop, web, and mobile clients.**
+**An independent Agent workspace and full harness for coding, research, and other project work:
+usable across desktop, web, and mobile clients.**
 
-Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a complete product.
-Pi stays the agent kernel — model and provider stack, session tree, package manager, and extension
-model — while Piarium owns everything around it: the tool environment, working state, recovery,
-retrieval, context policy, and task governance, plus the workbench surfaces the agent runs inside.
+It includes a bundled [Pi](https://github.com/earendil-works/pi) runtime, whose model and provider stack,
+session tree, package manager, and extension model remain Pi-owned. Varin owns the surrounding tool
+environment, working state, recovery, retrieval, context policy, task governance, and workbench surfaces.
 It uses Pi's public SDK directly rather than scraping a terminal UI.
 
-Its interface is not a fixed shell. Piarium ships two first-party working shapes — an **Agent
+Its interface is not a fixed shell. Varin ships two first-party working shapes — an **Agent
 Workspace** centered on sessions, tasks, and context, and an **IDE Workbench** centered on editors,
 search, Git, diagnostics, and debugging with the agent as a dockable panel — and both are ordinary
-Piarium extensions selected by a Workbench Profile, so you can replace either one or any individual
+Varin extensions selected by a Workbench Profile, so you can replace either one or any individual
 part of it.
 
 > [!IMPORTANT]
-> Piarium is pre-1.0 and under active development. Product surfaces and the private runtime protocol
+> Varin is pre-1.0 and under active development. Product surfaces and the private runtime protocol
 > currently advance together, so older builds are not guaranteed to interoperate with newer ones.
 > Back up important workspaces and pin a tested image digest for persistent deployments.
 
@@ -42,14 +41,14 @@ The screenshots below come from an isolated `demo-workspace` with anonymous samp
 Sessions and projects stay visible while the main canvas keeps the active agent, context tools, and
 composer in one focused workspace.
 
-![Piarium Agent Workspace](.github/readme/assets/agent-workspace.png)
+![Varin Agent Workspace](.github/readme/assets/agent-workspace.png)
 
 ### IDE Workbench
 
 The IDE profile combines workspace navigation and editor infrastructure with a docked, fully capable
 Pi agent instead of treating chat as a separate application.
 
-![Piarium IDE Workbench](.github/readme/assets/ide-workbench.png)
+![Varin IDE Workbench](.github/readme/assets/ide-workbench.png)
 
 ### Mobile workspace
 
@@ -57,10 +56,10 @@ The responsive workspace keeps the same project, agent controls, context surface
 phone-sized screen.
 
 <p align="center">
-  <img src=".github/readme/assets/mobile-workspace.png" alt="Piarium mobile workspace" width="390" />
+  <img src=".github/readme/assets/mobile-workspace.png" alt="Varin mobile workspace" width="390" />
 </p>
 
-## What Piarium provides
+## What Varin provides
 
 ### A governed agent harness
 
@@ -124,44 +123,45 @@ phone-sized screen.
 
 ## Maintained extension integrations
 
-Piarium does not fork Pi extensions or copy their private state. Maintained adapters consume each
+Varin does not fork Pi extensions or copy their private state. Maintained adapters consume each
 extension's public commands, events, settings files, and capability contracts — including subagent
 fleets, context managers, workspace history, MCP servers, web access, memory systems, background
 tasks, and LSP/tooling configuration — so package updates can continue to advance independently.
 
 See [maintained extension integration](docs/extension-compatibility.md) for the per-extension
-command, event, and native-configuration contract, and which files stay plugin-owned. Piarium does
+command, event, and native-configuration contract, and which files stay plugin-owned. Varin does
 not certify plugin versions against Pi releases.
 
-## Build Piarium extensions
+## Build Varin extensions
 
-Piarium application extensions and Pi packages are separate product objects: the former extend the
-Piarium workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The public
-npm toolchain requires neither a Piarium source checkout nor imports from the product's private UI:
+Varin application extensions and Pi packages are separate product objects: the former extend the
+Varin workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The planned
+npm toolchain requires neither a Varin source checkout nor imports from the product's private UI; the
+`@varin/*` packages are not published yet:
 
-- `@piarium/extension-contract`: manifest, contribution, service, routing, and discovery contracts plus JSON Schema;
-- `@piarium/extension-sdk`: framework-neutral Surface, isolated-realm, and Host authoring APIs;
-- `@piarium/extension-react`: optional React 19 adapter;
-- `@piarium/extension-surface`: lower-level lifecycle and registries for advanced tests or alternate hosts;
-- `@piarium/extension-cli`: project initialization, validation, building, and conformance testing.
+- `@varin/extension-contract`: manifest, contribution, service, routing, and discovery contracts plus JSON Schema;
+- `@varin/extension-sdk`: framework-neutral Surface, isolated-realm, and Host authoring APIs;
+- `@varin/extension-react`: optional React 19 adapter;
+- `@varin/extension-surface`: lower-level lifecycle and registries for advanced tests or alternate hosts;
+- `@varin/extension-cli`: project initialization, validation, building, and conformance testing.
 
-Create a complete extension project:
+After the packages are published, create a complete extension project with:
 
 ```sh
-npx @piarium/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
+npx @varin/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
 cd my-extension
 npm install
-npx piarium-extension build
-npx piarium-extension test
+npx varin-extension build
+npx varin-extension test
 ```
 
-See the [Piarium extension authoring guide](docs/piarium-extension-authoring.md) for the complete
+See the [Varin extension authoring guide](docs/varin-extension-authoring.md) for the complete
 manifest, capability, lifecycle, storage, publishing, and testing contracts.
 
 ## Download Desktop
 
-Windows x64/ARM64, Linux x64/ARM64, and macOS Intel/Apple Silicon desktop packages are published
-through [GitHub Releases](https://github.com/Youzini-afk/Piarium/releases).
+Current Varin desktop packages are not published yet. The [GitHub Releases](https://github.com/Youzini-afk/Varin/releases)
+page retains historical assets; use the source or Docker instructions below until a Varin package is released.
 
 ## Get started from source
 
@@ -177,8 +177,8 @@ The Rust system kernel is a required runtime component, not an optional accelera
 development runs it through Cargo when no staged binary is present; `bun run kernel:build` produces
 the manifest-verified release executable that packaged layouts require.
 
-Piarium ships a bundled Pi runtime and discovers user-level Pi installations through the Runtime
-Manager, which can select, install, or upgrade Pi without downgrading it. Piarium becomes ready only
+Varin ships a bundled Pi runtime and discovers user-level Pi installations through the Runtime
+Manager, which can select, install, or upgrade Pi without downgrading it. Varin becomes ready only
 after a real Host handshake and does not need to restart after activation. Electron contains the
 Node runtime needed to run the application, while Pi remains an independently managed tool. Native
 x64/ARM64 desktop packages for Windows, Linux, and macOS are validated on matching runners for
@@ -189,13 +189,13 @@ execution.
 ### Run the Web development surface
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-Open the Vite URL printed in the terminal. Piarium selects available development ports and starts
+Open the Vite URL printed in the terminal. Varin selects available development ports and starts
 the trusted API/runtime service alongside the UI.
 
 ### Run the desktop application
@@ -225,21 +225,21 @@ code-signing credentials the installer is intentionally unsigned. See the
 
 ## Run the cloud image
 
-The Compose file uses the slim image `ghcr.io/youzini-afk/piarium-slim:latest` by default. On a Linux
+The Compose file uses the slim image `ghcr.io/youzini-afk/varin-slim:latest` by default. On a Linux
 Docker host:
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
 Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
 tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/REVERSE_PROXY.md)
-for the required forwarding rules. For production, set `PIARIUM_IMAGE` to a tested immutable digest
+for the required forwarding rules. For production, set `VARIN_IMAGE` to a tested immutable digest
 instead of relying on a floating tag.
 
 If the agent needs to compile Python, Java, Go, or Rust inside the container, apply the toolbelt
@@ -257,18 +257,18 @@ complete persistent-path, environment, container, and SSH rollback contract is d
 
 ```mermaid
 flowchart LR
-    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@piarium/application-client"]
+    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@varin/application-client"]
     S --> D["Documents, search, language, and run APIs"]
     C --> T["Authenticated HTTP/WebSocket or editor transport"]
-    T --> A["Application host (@piarium/web)"]
+    T --> A["Application host (@varin/web)"]
     D --> A
-    A --> K["piarium-kernel: private Rust system kernel"]
-    A --> B["@piarium/runtime-broker"]
-    B --> H["Isolated @piarium/pi-host workers"]
+    A --> K["varin-kernel: private Rust system kernel"]
+    A --> B["@varin/runtime-broker"]
+    B --> H["Isolated @varin/pi-host workers"]
     H --> P["Pi SDK + trusted Pi packages"]
 ```
 
-The application host is the single trusted backend. Each host owns a private `piarium-kernel` child
+The application host is the single trusted backend. Each host owns a private `varin-kernel` child
 process that is the production authority for durable and machine-adjacent resources: immutable
 working-state roots, content objects and GC, recovery metadata, canonical file resources and
 materialization, PTY and pipe process trees, and fixed-view file and structure computation. The host
@@ -284,7 +284,7 @@ boundary; SDK callbacks, credential objects, and extension implementation detail
 Electron runs that same host in its main process rather than adding a parallel desktop backend; only
 native capability such as windows, menus, and dialogs crosses the Electron preload boundary.
 
-Third-party Pi packages are executable code with the user's operating-system permissions. Piarium
+Third-party Pi packages are executable code with the user's operating-system permissions. Varin
 shows observed capabilities and gates project-local executable resources, but it does not claim to
 turn trusted extensions into a complete sandbox. Read the [security policy](.github/SECURITY.md) and
 [security model](docs/security.md) before exposing a remote instance or installing unfamiliar code.
@@ -298,7 +298,7 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/ui` | Shared Pi-native React UI, stores, settings, and extension surfaces |
 | `packages/web` | Browser/remote frontend, trusted Application Host, and cloud CLI |
 | `packages/electron` | Native desktop shell, privileged boundary, packaging, SSH, and updates |
-| `packages/mobile` | Capacitor iOS/Android shell connected to a Piarium server |
+| `packages/mobile` | Capacitor iOS/Android shell connected to a Varin server |
 | `packages/protocol` | Versioned, JSON-safe worker and surface protocol |
 | `packages/runtime-client` | Browser-safe runtime request/event client |
 | `packages/runtime-broker` | Catalog/session worker ownership, routing, and shutdown |
@@ -309,7 +309,7 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/extension-sdk`, `-react`, `-cli` | Public authoring SDK, React adapter, and author tooling |
 | `packages/extension-host` | Trusted application-host catalog, artifacts, storage, and services |
 | `packages/extension-loader` | Authenticated managed Surface module loader and isolated realms |
-| `packages/extension-builtins` | Manifests for Piarium's built-in extensions, including both shells |
+| `packages/extension-builtins` | Manifests for Varin's built-in extensions, including both shells |
 | `packages/docs` | User-facing documentation site source |
 | `docs` | Architecture, harness, kernel, workbench, migration, recovery, cloud, and security contracts |
 | `scripts` | Development, kernel build/measurement, release, cloud, deployment, and validation tooling |
@@ -353,7 +353,7 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the reposi
 - [Rust system kernel design](docs/rust-kernel-design.md) and [audit record](docs/rust-kernel-audit.md)
 - [Composable workbench and IDE contract](docs/composable-workbench.md) (Chinese)
 - [Unified file editor platform](docs/unified-file-editor-platform.md)
-- [Piarium extension platform](docs/piarium-extension-platform.md)
+- [Varin extension platform](docs/varin-extension-platform.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
 - [Plugin GUI and ownership design](docs/plugin-gui-design.md)
 - [Recovery model](docs/recovery.md)
@@ -364,8 +364,8 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the reposi
 
 ## Lineage and license
 
-Piarium is a Pi-native refactor of the maintainer's OpenChamber fork.
+Varin is a Pi-native refactor of the maintainer's OpenChamber fork.
 
-Piarium as a combined work is distributed under the
+Varin as a combined work is distributed under the
 [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
 users over a network must make their corresponding source available as required by the license.

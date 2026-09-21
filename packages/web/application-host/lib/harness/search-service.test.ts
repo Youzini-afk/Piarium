@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHarnessSearchService, type HarnessSearchDeps } from "./search-service.js";
 import type { WorkspaceContentSearchOptions, WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
-import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorContext } from "@varin/protocol";
 import type { WorkingBranchQuerySnapshot } from "./working-state/working-branch-query.js";
 
 function makeHit(

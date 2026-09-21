@@ -1,10 +1,10 @@
-# Piarium agent harness
+# Varin agent harness
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
 Last updated: 2026-09-21
 
-正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
+正文为中文。English readers: this document specifies the Varin-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
 Section 4 of [architecture.md](architecture.md) gives the process model this document extends.
 
@@ -20,17 +20,17 @@ D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run �
 D-292 的全仓工程阶段 Q：[测试与 CI 体系重整](testing-ci-design.md) 与 D-296 的旧伴侧插件清理已完成。
 D-297 明确 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研执行与协作已推进至 D-305，实际交付见 status。
 D-312 接受快速决策模型与渐进检索设计，尚未实施，顺序见 plan 阶段 F。
-D-313 接受 [Varin 全面更名](varin-rebrand-design.md)，阶段 B 在 F 之前实施：自有产品/代码/配置/发行身份
-一次切换，不留旧名兼容；Pi 的实际依赖与原生数据保留。本次只有设计，当前正文名称尚未整体切换。
+D-313 的 [Varin 全面更名](varin-rebrand-design.md) 已落地：自有产品/代码/配置/发行配置与 GitHub 仓库
+一次切换，不留旧名兼容；Pi 的实际依赖与原生数据保留。首次新品牌发行边界见 status，下一实施阶段为 F。
 
 ## 1. 决定
 
-Piarium 不再只是 Pi 的图形外围。产品由两部分组成：**工作台**（已交付：文档权威、编辑器内核、
+Varin 不再只是 Pi 的图形外围。产品由两部分组成：**工作台**（已交付：文档权威、编辑器内核、
 恢复、多端、可组合 Shell）和 **harness**（本文档）。Pi 继续作为 **agent 内核**：模型/provider 栈、
 会话树、包管理、扩展模型、内置工具的默认实现。这是发行版模型——内核来自上游，userland 由
-Piarium 拥有、调优、默认提供，且每一块都可以被用户替换。
+Varin 拥有、调优、默认提供，且每一块都可以被用户替换。
 
-决定 harness 质量的四件事——工具环境、检索、上下文管理、验证——全部收回到 Piarium 拥有的代码
+决定 harness 质量的四件事——工具环境、检索、上下文管理、验证——全部收回到 Varin 拥有的代码
 里。D-282 已完成 D-252 定义的 Rust 系统内核阶段：文件/资源/持久事务、物化、受管进程/PTY 与文件/结构计算由
 Application Host 的私有 Rust 子进程接管，TS 保留产品和 Agent 策略，Pi 继续内置。完整边界和实际性能证据见
 [rust-kernel-design.md](rust-kernel-design.md) 与 status；不从实现语言外推未测平台或统一提速倍数。
@@ -41,7 +41,7 @@ Application Host 的私有 Rust 子进程接管，TS 保留产品和 Agent 策�
   为运行时内核。
 - 不在"谁的模型更聪明"上竞争。harness 放大模型能力，不替代它。
 - 不为第三方 Pi 扩展的上下文注入行为提供归因、节流或代管。第三方扩展在本契约之外；本契约只约束
-  Piarium 拥有的组件。
+  Varin 拥有的组件。
 - 按已确定的领域用途建设共享接缝，不预建没有消费者的完整框架；不以第二个 profile 是否已经上线决定能否实施接口。
 - 不把插件配置页、Pi 包管理或恢复权威并入 harness。它们保持
   [architecture.md](architecture.md) 记录的归属。
@@ -52,7 +52,7 @@ Application Host 的私有 Rust 子进程接管，TS 保留产品和 Agent 策�
 微压缩与 `<system-reminder>` 尾部附着；Cognition 的 Fast Context 检索子 agent（专用小模型、并行
 工具调用、轮数上限、窄工具集）、Devin Fusion 的压缩时刻换模型、"写单线程、其他 agent 只贡献智力"
 的多 agent 原则、Devbox Blueprint 的环境确定性；Manus 团队围绕 KV 缓存的上下文工程原则；Aider
-repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采纳经过验证的形状，并利用自己独有
+repo map 的符号引用图 PageRank。Varin 不复制它们的实现，只采纳经过验证的形状，并利用自己独有
 的资产：host 拥有的 LSP、Document Registry、终端子系统、恢复日志，以及 TriviumDB 嵌入式知识层。
 
 ### 1.3 交付政策：正式实施，完成即默认提供（D-078）
@@ -62,7 +62,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 持续改进，发现具体错误修对应路径，不把局部问题扩张成整项能力禁用。
 
 执行者可以为正式目标调整持久格式、数据 authority、协议与默认值，并更新全部消费者。当前没有用户兼容需求，
-旧 Piarium 内部格式可直接清除重建；不做旧格式升级导入、双读双写或旧后端 fallback，替换完成即删除旧实现（D-253）。
+旧 Varin 内部格式可直接清除重建；不做旧格式升级导入、双读双写或旧后端 fallback，替换完成即删除旧实现（D-253）。
 工作区/Git、原生 Pi 数据及外部配置照常保全，不以“再加一个消费者”或完整通用框架作为前置。
 
 默认提供与用户选择分开：已有显式关闭、模型槽位、凭据、持久知识审阅和权限策略保持有效。缺真实服务、缺配置、版本冲突或压缩
@@ -75,13 +75,13 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 
 | 主题 | 决定 |
 | --- | --- |
-| 产品边界 | Piarium = 工作台 + harness；Pi = agent 内核；其他 agent 是能力协商的 bring-your-own runtime |
+| 产品边界 | Varin = 工作台 + harness；Pi = agent 内核；其他 agent 是能力协商的 bring-your-own runtime |
 | 系统内核 | 阶段 R 已由 D-282 完成：Rust 系统内核 + TS Application Host/产品与 Agent 编排 + 内置 Node/Pi worker；每类系统资源只有一个生产权威，不保留双写、shadow 或旧后端 fallback |
 | harness 形态 | 通用内核 + 领域 profile；不是每个领域一套 harness |
 | profile 作用域 | Workbench Profile 属于 surface 展示；Agent Profile 属于执行配置。工具与 system 在同一执行配置世代内冻结；同一持久 Pi session 可经用户操作进入新 Run/配置世代，切工作台布局不改变执行配置（D-063/D-072） |
 | 工具注入 | 与 Pi 内置工具**同名覆盖**，不并列；覆盖发生在 pi-host 进程内 |
 | 重活归属 | Host 服务保持统一入口；工作状态/磁盘恢复/物化、PTY/受管进程、文件与结构计算位于私有 Rust 内核。TS 保留知识库 adapter、LSP 协议/视图、结果呈现与策略；pi-host 保留模型调用、薄工具和钩子 |
-| worker→host 通道 | 类型化协议请求（`@piarium/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
+| worker→host 通道 | 类型化协议请求（`@varin/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
 | 检索分层 | 精确匹配用 grep；快速发现和原文获取用 explore；开放事实追踪用 retrieval。文件/结构/索引操作归 Host，较长语义判断归 agent，持久记忆检索归知识库；三种工具不要求逐级失败后才可使用（D-173） |
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
 | embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程且用户已安装本地组件时代码语义走 MiniLM，否则语义来源不可用，词法与结构/图检索继续（D-288）；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
@@ -111,11 +111,11 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | harness 的 UI 投影 | 后台 shell 成为可附着的终端 tab；输出句柄在工具卡片内可展开全文；Zone 2 默认折叠、可查看；压缩边界在时间线可见；线程在父会话侧栏成列、点开即完整聊天、可从父对话任意位置"从这里开一条线"（第 9.3.8 节） |
 | 检索 | explore 由 Host 持有同一次查询，算法执行搜索/读取，向量提供语义候选，LLM 通过 models.explore 生成分组搜索计划、成组选段并指出具体补查；这些是当前交付项，不等待扩散模型。完整自主调查仍归 retrieval。来源机会、当前原文与必需范围贯穿最终呈现（D-173–D-175） |
 | 未保存内容 | 用户输入自动固化发起窗口的 dirty buffers，无显式开启/绑定操作；来源引用由内部协议传播，其他窗口仅打开或聚焦不抢占。Host 读取不可变快照，surface 保持可变缓冲所有权；`explore`、`grep`、同名 `read`/`find`/`ls` 与 thread 基线已消费同一引用，语言服务按视图隔离后消费同一引用（第 6.1 / 6.4 节，D-071/D-082/D-085/D-086/D-087） |
-| 结构来源 | 语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"，两者在 Application Host 长期共存、不替代。结构来源是带修订绑定的可插拔 provider，接口先行，首个实现是 agent 视图 `documentSymbol`，第二个是 web-tree-sitter；语法包 = 语法 wasm + Piarium 查询，随版本锁定 ABI，常用语言捆绑（首刀 TS/TSX）、其余按需下载，目标覆盖大部分常用语言；语言 ≥ 3 时才做设置页（第 6.1 / 6.2 节，D-091） |
+| 结构来源 | 语言服务器回答"这个名字指什么"，tree-sitter 回答"这段文字的形状是什么"，两者在 Application Host 长期共存、不替代。结构来源是带修订绑定的可插拔 provider，接口先行，首个实现是 agent 视图 `documentSymbol`，第二个是 web-tree-sitter；语法包 = 语法 wasm + Varin 查询，随版本锁定 ABI，常用语言捆绑（首刀 TS/TSX）、其余按需下载，目标覆盖大部分常用语言；语言 ≥ 3 时才做设置页（第 6.1 / 6.2 节，D-091） |
 | 检查角色 | `check` 有读取与执行能力，测试/构建可能写缓存和生成物；不称只读 agent，不规定 bash 只能执行无写入命令，不强制一律使用独立副本（D-071） |
 | 模型家族适配 | 一份基础 + 极薄 overlay；先做 Anthropic 与 OpenAI 两档，其他 provider 走通用 |
 | Pi 上游 | 不贡献回上游；Pi 更新后重新适配。能 wrap 的 wrap（`read` / `edit` / `write` / `grep` 装饰 Pi 实现），只有 `bash` 重写 |
-| 权限 | Piarium 原生 `tool_call` 门是唯一交互式权限权威，覆盖 Harness、Pi 内置、MCP、Pi 包与嵌套线程工具；Host 只验身份/能力/规范路径，不弹窗。未知/证据不完整的第三方动作必须询问，不能靠工具名或 annotation 自授予；会话授权绑定规范化 source/action/workspace/resource 范围（9.1.2，D-283） |
+| 权限 | Varin 原生 `tool_call` 门是唯一交互式权限权威，覆盖 Harness、Pi 内置、MCP、Pi 包与嵌套线程工具；Host 只验身份/能力/规范路径，不弹窗。未知/证据不完整的第三方动作必须询问，不能靠工具名或 annotation 自授予；会话授权绑定规范化 source/action/workspace/resource 范围（9.1.2，D-283） |
 | 知识库保留 | 可配置；默认按时间自动清理原始 `event` 与已结束会话的 `block`，`knowledge` 不按时间过期；删除会话级联删除其 event 与 block |
 | 用户级记忆 | 存在但轻：独立 `user.tdb`，只放 `knowledge`，不放 event / block；写入需经审阅；在 Settings 中可见、可编辑、可审计 |
 
@@ -155,11 +155,11 @@ harness 拆成层之后，大部分层在所有领域里不变，少数层变，
 Application Host（packages/web/application-host）
   TS：产品策略、公开服务、Thread/Run、Documents/Registry 协调、LSP、知识/模型 adapter
       |
-      | 私有生成协议（piarium.kernel.v1）
+      | 私有生成协议（varin.kernel.v1）
       v
   Rust kernel：WorkingState/Recovery、文件/物化、PTY/受管进程、文件/结构计算
       ^
-      | 类型化 worker→host 请求（@piarium/protocol，requestId 关联）
+      | 类型化 worker→host 请求（@varin/protocol，requestId 关联）
       v
 pi-host session worker（packages/pi-host）
   harness-tools.ts + 进程内 ExtensionFactory → Pi SDK（用户级或内置安装）
@@ -207,7 +207,7 @@ TS 保留 Thread/Run 与模型策略、公开 API、知识领域、语言协议�
 Document Registry 继续拥有未保存缓冲。混合操作在内核记录同一 operationId 的逐目标阶段，经 TS Documents adapter
 调用真实 Registry 的修订检查与 grouped undo，不隐式保存、不建第二缓冲权威。Thread/Pi/知识的跨域清理按持久操作与幂等回执协调。
 
-真实链路是 `Application Host → 私有 KernelClient → piarium-kernel 子进程 → framed protocol → kernel SQLite/object store`；
+真实链路是 `Application Host → 私有 KernelClient → varin-kernel 子进程 → framed protocol → kernel SQLite/object store`；
 Electron/Web/serve/云从自己的发行目录使用 manifest-verified executable，kernel 不监听公共端口。
 R1–R5 已分别接管 immutable root/trie、blob/branch/revision/CAS/pin/Recovery/GC、文件资源与物化、PTY/pipe、固定视图搜索和
 tree-sitter 结构计算。所有生产消费者走 root/path/domain/file/process/compute API；旧 TS writer 只保留为明确测试 helper，发行树会
@@ -244,7 +244,7 @@ research 与 knowledge-work profile 再评估）。
 ### 5.1 贯穿所有工具的原则
 
 1. **同名覆盖，不并列。** 模型不应有两种方式做同一件事。
-2. **两份输出。** `content` 文本为模型的下一步决策而写；`details` 为 Piarium 工具卡片渲染而写。两者不互相
+2. **两份输出。** `content` 文本为模型的下一步决策而写；`details` 为 Varin 工具卡片渲染而写。两者不互相
    妥协。
 3. **输出句柄。** 超过阈值（默认可见 32 KiB，首尾各半；`bash` 默认尾部加权，因为退出信息在末尾）的输出由
    host 存全文，模型看到预览与 `[省略 N 字节 — get_output("out_x", offset, length)]`。句柄是会话作用域，
@@ -296,7 +296,7 @@ research 与 knowledge-work profile 再评估）。
 注册与工具准入按 actor 的 worker 代际协调：首个请求等待本代配置，关闭或换代后的迟到结果不能复活会话。设置不可读与配置非法
 都明确 unavailable，不当成 auto；首次注册保留已经捕获的输入快照。PowerShell 用 ConPTY 可用的交互启动与自身命令包装（D-205）。
 此外 Windows 原生工具随时可从 bash 内调用（`powershell.exe -c ...`、`cmd //c ...`），harness 不
-禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Piarium 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
+禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Varin 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
 
 当前公开工具参数包括 `command`、`waitMs?`、可选受管 `target` 与目标 `cwd`；普通本机调用沿用会话目录。
@@ -310,7 +310,7 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
 执行模型由 host 的 shell 监督器拥有，对照三家的实际做法选择：
 
 - **PTY，不是管道。** Codex 的 `unified_exec` 是 PTY；Claude Code 是持久管道 shell，因此"不能原生处理 vim、sudo 这类
-  TTY 交互提示"。Piarium 选 PTY，复用 host 现有终端运行时：后台 shell 天然就是用户可附着、可输入的终端 tab（第 2 节
+  TTY 交互提示"。Varin 选 PTY，复用 host 现有终端运行时：后台 shell 天然就是用户可附着、可输入的终端 tab（第 2 节
   已定的 UI 投影），程序的行为与在终端中一致。给模型的文本剥去 ANSI 与控制序列（host 已有 replay-safe 字节逻辑），
   终端 tab 显示原始字节。后台命令使用 terminal runtime 的同一会话身份（D-206）：监督器经
   `createTerminalSession` / `attachTerminalSession` 创建与附着，HTTP 不能指定 owner/spawn。`sh_N` 由全局 terminal runtime
@@ -425,7 +425,7 @@ apply 与 undo 共用同一个真实 `operationId`，一次 batch 只能整组�
 
 **编辑格式跟模型家族走。** Codex 系模型按 `apply_patch` 语法训练（`*** Begin Patch` / `*** Update File:` /
 `@@` hunk / `*** End Patch`，一次可改多文件，仅相对路径）；Claude 系按 str_replace 训练。Devin CLI 两者并存，
-Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，因此提供 `apply_patch` 工具，由 profile 按会话模型
+Cursor 为每个前沿模型单独调工具。Varin 支持任意 provider，因此提供 `apply_patch` 工具，由 profile 按会话模型
 家族启用其一或两者；两者共用同一 mutation boundary 与诊断附加，恢复日志按 patch 中声明的路径逐文件记录。
 
 ### 5.5 `get_output`、`write_to_process`、`kill_shell`、`diagnostics`
@@ -484,10 +484,10 @@ web 能力由 Harness 原生提供，搜索与模型账户无关（D-289）。�
 **参考 `pi-web-access`（0.24）的能力清单，原生地做得更好。** 它有：多搜索 provider 路由（自动 / 指定 / 并发 / 全
 provider / 有序回退）、完整 provider 与凭据体系（含可执行凭据源、API 网关）、Curator（独立本地 HTTP server 做结果
 整理与 summary-review，带 bind 与远程暴露警告）、Chromium cookie opt-in、内容控制（摘要与内联长度、GitHub / 视频 /
-图片 / PDF 开关与限制、认证抓取 profile）、SSRF 策略与例外、域名策略、持久化结果浏览。Piarium 有 host 与工作台，因此：
+图片 / PDF 开关与限制、认证抓取 profile）、SSRF 策略与例外、域名策略、持久化结果浏览。Varin 有 host 与工作台，因此：
 Curator 变成工作台的"来源"面板（可审阅、钉住、删除，走已有认证通道，不再有独立 server 与 token-in-URL 风险）；
 凭据进 Pi AuthStorage 或系统钥匙串，绝不落明文 JSON；持久化结果进知识库（URL、抓取时间、提取文本；压缩时丢正文
-留 URL）；认证抓取用 Electron 的**独立 Piarium 浏览器 profile**，不碰用户日常浏览器的 cookie；GitHub 走 `@octokit`
+留 URL）；认证抓取用 Electron 的**独立 Varin 浏览器 profile**，不碰用户日常浏览器的 cookie；GitHub 走 `@octokit`
 （host 已有依赖）取 issue / PR / 文件而非抓 HTML；有序回退与并发查询原生实现、配置在 Settings；对话框与后续消息变成
 工具结果与 Zone 2。视频转录与图片描述 v1 不做。
 
@@ -497,7 +497,7 @@ Curator 变成工作台的"来源"面板（可审阅、钉住、删除，走已�
 Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（第 8.5 节）才由阅读子 agent 回答、主上下文只收
 回答；未配置则忽略 `prompt`、返回提取内容并注明"reader unavailable: no reader model configured"——**永不回退到主
 模型**。
-**JS 渲染是 Piarium 的独有能力**：桌面端用 Electron 的 Chromium 离屏渲染（隐藏窗口，不带用户 cookie 除非显式开启）；
+**JS 渲染是 Varin 的独有能力**：桌面端用 Electron 的 Chromium 离屏渲染（隐藏窗口，不带用户 cookie 除非显式开启）；
 Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空壳 SPA（极小 body + 脚本标签）时明说，永不把
 空页面当成功。
 
@@ -599,12 +599,12 @@ harness"页有独立开关，关掉后的行为明确，不留半开状态：
 | 知识库 | 不写入 event / block；`recall` / `related` 不注册；已有 `.tdb` 保留不删 |
 | 子 agent 团队 / 单个角色 | `dispatch` 不注册或该角色从团队移除，主 agent 自己做；槽位未配置的角色本就不存在 |
 | `explore` 与模型选择 | 工具本身有独立开关；models.explore 服务局部语义决策，清空时无该模型调用并保留算法/向量材料。嵌入/重排绑定分别见第 8.5 节 |
-| Piarium 权限门 | 不提供关闭整个交互权限门的独立开关；用户通过 mode/rules 控制策略，`bypass` 是明确的用户选择。会话记忆授权可用 `/piarium-permissions` 撤销 |
+| Varin 权限门 | 不提供关闭整个交互权限门的独立开关；用户通过 mode/rules 控制策略，`bypass` 是明确的用户选择。会话记忆授权可用 `/varin-permissions` 撤销 |
 
 规则：
 
 - **不按包存在自动让位。** 同名第三方工具不会仅因 package 安装/启用就改变会话工具集或权限 owner；用户要替换原生
-  `webfetch` / `websearch` 等能力时显式关闭对应原生工具。权限确认始终由 Piarium 原生 gate 统一拥有，第三方工具本身仍经过该门。
+  `webfetch` / `websearch` 等能力时显式关闭对应原生工具。权限确认始终由 Varin 原生 gate 统一拥有，第三方工具本身仍经过该门。
 - 设置**按字段决定所有权**（D-031），不是整份设置一条规则；工作区级只在项目已 trusted 时生效（复用 Pi 的 project trust）：
 
   | 字段 | 所有权与合并 |
@@ -653,7 +653,7 @@ set/reset 保留真实字段所有权与 revision，普通修改沿已有授权�
 可用词法与语义；工具选择不要求前一路失败。工作区之外的范围与来源继续随 `knowledge-work-in-files` 消费者实施。
 
 3.15 负责查询与呈现，3.16 负责嵌入后端、索引与覆盖层；按真实依赖推进。AFT 的批推理与增量复用提供参考，其符号开头摘要
-有正文盲区；Piarium 的全文切块也只有在有效编码、及时发布并被查询正确使用时才有价值。两者都不能仅凭表示形状宣称召回更好。
+有正文盲区；Varin 的全文切块也只有在有效编码、及时发布并被查询正确使用时才有价值。两者都不能仅凭表示形状宣称召回更好。
 
 ### 6.1 第一层：文件里有什么
 
@@ -968,12 +968,12 @@ agent 本回合的固定正文**：正文由最后一个写者决定，版本号
 ## 7. 知识库（优先保留 TriviumDB）
 
 TriviumDB 是当前实现选择，不是不可替换的产品前提（D-071）。遇到具体问题先向用户交付版本、重现与影响，由用户联系作者处理；
-当前不迁移 SQLite，也不建设第二个可写知识权威。上层使用 Piarium 领域操作，不暴露占位向量或 TQL 绕路。
+当前不迁移 SQLite，也不建设第二个可写知识权威。上层使用 Varin 领域操作，不暴露占位向量或 TQL 绕路。
 
 ### 7.1 归属与位置
 
 Application Host 内一个 `knowledge` 服务，通过 napi 进程内加载 `triviumdb`，无服务、无端口。**权威知识存储**每 host 每
-workspace 一个文件：`PIARIUM_DATA_DIR/knowledge/{hostId}/{workspaceId}.tdb`，与
+workspace 一个文件：`VARIN_DATA_DIR/knowledge/{hostId}/{workspaceId}.tdb`，与
 `document-recovery/{hostId}/...` 同构，遵守"另一个 host 不继承同路径选择"的既有不变量。Application Host 是
 唯一写者；session worker 与子 agent 只读（TriviumDB 的共享只读 Reader 模型）。
 
@@ -988,7 +988,7 @@ TriviumDB，仍由 Host 唯一写。用户换嵌入模型或维度时作废并�
 `documentId` 对文件范围是相对路径，对将来的连接器范围是连接器给的稳定标识——不把"文件路径"焊进块身份或父单元身份。
 已交付（D-167）：路径构造与查询签名只接受范围键；`workspaceScope` 是 `workspaceId` → `scopeId` 的唯一处。
 
-"桌面 + `piarium serve` 同机同目录"的两个 host 问题已决定：`serve` 启动时检测到桌面 host 在运行则**复用它**，不起
+"桌面 + `varin serve` 同机同目录"的两个 host 问题已决定：`serve` 启动时检测到桌面 host 在运行则**复用它**，不起
 第二个——一个用户、一台机器、一个 host，知识库与恢复日志都不必面对同一工作区的两份。
 
 ### 7.2 基础 schema
@@ -1019,7 +1019,7 @@ symbol`、`symbol → calls | references | imports → symbol`、`event → fixe
 `event` 与 `block`，与恢复日志的 scoped deletion 同一语义。清理在 host 空闲时段执行，以 TriviumDB 事务进行，不影响
 Reader。
 
-用户级记忆存在但刻意轻：独立文件 `PIARIUM_DATA_DIR/knowledge/{hostId}/user.tdb`，只有 `knowledge` 一种节点，不存
+用户级记忆存在但刻意轻：独立文件 `VARIN_DATA_DIR/knowledge/{hostId}/user.tdb`，只有 `knowledge` 一种节点，不存
 event、block 或文件内容。`recall` 先查工作区库再查用户库，用户库命中在结果中标明来源。
 
 ### 7.2.2 持久知识的治理：提议、审阅、取代
@@ -1085,13 +1085,13 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
 ### 7.5 已知约束与要求
 
 当前钉住 **0.8.6**（D-141）。下面按「已在该版本核实」与「历史记录」区分；向作者报告数据库本身的类型处理、检索语义和能力边界，
-不要求数据库适配 Piarium 的领域模型。block 修订、分支归属及代码分词策略由 Piarium 自己负责。
+不要求数据库适配 Varin 的领域模型。block 修订、分支归属及代码分词策略由 Varin 自己负责。
 
 - **0.8.6 已核实**：D-019 的 TQL 字符串字面量错误与 D-020 的全零向量空结果都已修复（原句复现通过）；`indexedLookup` /
   `substringLookup` 提供不经 TQL 解析器的索引查找，索引持久且事后创建会回填。符号图的查询据此改走原生索引，不再在 JS 里维护
   一套并行的内存表。三条必须知道的约束：`maxResults` 是失败即错的行预算（默认 10,000、上限 1,000,000），不是 LIMIT；
   n-gram 子串查询要求 ≥3 个字符；**默认开启的解析 payload LRU 缓存把每次 `getPayload` 变成 O(库大小)**（50K 节点时 60 µs
-  对 0.8.5 的 1.7 µs），Piarium 以 `payloadCacheMb: 0` 关掉它——这是数据库侧的缺陷，已向作者报告。`flush()` 仍随库大小
+  对 0.8.5 的 1.7 µs），Varin 以 `payloadCacheMb: 0` 关掉它——这是数据库侧的缺陷，已向作者报告。`flush()` 仍随库大小
   线性增长（两版一致），D-140 的派生数据去抖 flush 保留。
 
 - **embedding 后端与存储分别负责**（D-173/D-190/D-196/D-198）。TriviumDB 存向量不产向量。代码语义与知识召回的远程路径都是
@@ -1114,8 +1114,8 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
   `allNodeIds()` + `getPayload()` 在 JS 层过滤。**0.8.6 已修**。符号图查询已改走 `indexedLookup` / `substringLookup`；
   块、知识、事件那几处 JS 过滤仍在（单会话数百节点，成本可忽略），不再是「等修复」而是「可换但没必要急」（D-141）。
 - **分词职责**：现有记录描述 tokenizer 为 ASCII 字母数字段 + CJK 2-gram、camelCase 不拆分，本轮未复核最新上游。
-  数据库可说明 Unicode、可配置分词或预分词输入等通用能力；camelCase/snake_case/路径的代码分析策略由 Piarium 拥有并版本化，
-  不要求数据库为了 Piarium 内置一套代码语言分析器。当前 searchSymbols 是 JS 字符串计分，不声称已走 AC/BM25 排序。
+  数据库可说明 Unicode、可配置分词或预分词输入等通用能力；camelCase/snake_case/路径的代码分析策略由 Varin 拥有并版本化，
+  不要求数据库为了 Varin 内置一套代码语言分析器。当前 searchSymbols 是 JS 字符串计分，不声称已走 AC/BM25 排序。
 - **native 模块**：系统存储与 PTY 已由打包在 `resources/kernel` 的 Rust executable 接管，不再发行或重建
   `better-sqlite3` / `node-pty` / `bun-pty`。Electron 仍核对 TriviumDB 与 `sherpa-onnx-node` 的目标平台预编译，
   并在打包前、after-pack 与 unpacked smoke 中核对 kernel manifest、架构和摘要（D-282）。
@@ -1198,7 +1198,7 @@ S1/S2 从未成为持久历史中的消息，后续直接在增长后的真实�
 不能宣称临时附页自身免费或一定缓存命中。检查实际 provider 序列化的角色、文本块和缓存断点，缓存是否命中仍取决于
 provider 配置与有效期。快照是完整当前视图，不能只发变化行却让上一请求的基线消失。
 
-固定协作说明位于稳定系统提示：尾部表是 Piarium 提供的现场资料，允许按需查看线程、发送消息和等待回复，无需逐行回应；
+固定协作说明位于稳定系统提示：尾部表是 Varin 提供的现场资料，允许按需查看线程、发送消息和等待回复，无需逐行回应；
 由 Agent 结合当前任务决定是否沟通，不强制每次联系别人。动态环境事实与现状表默认映射为 `user` 内容，显式标注 Host 来源、
 观察/快照类型及摘录来源。内部继续区分真实用户消息、环境观察、团队快照和定向消息；API 的 `user` 不授予来源额外权限。
 不把其他 Agent 原话提升到 `system/developer`，不伪装成本 Agent 的 `assistant` 输出或无对应调用的 `tool` 结果。
@@ -1328,7 +1328,7 @@ thinking/effort、tool choice、序列化与 cache 参数按 provider 真实能�
 参见 [Claude Code 的摘要缓存形状](https://code.claude.com/docs/en/prompt-caching#compacting-the-conversation) 与
 [缓存失效条件](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)。缓存冷时缺少旧计算可复用，不是免费整理时机。
 
-provider 原生压缩可作为同一职责的另一种实现，当前主线先交付可读摘要。每次压缩只有一个实现拥有，不让 provider 与 Piarium
+provider 原生压缩可作为同一职责的另一种实现，当前主线先交付可读摘要。每次压缩只有一个实现拥有，不让 provider 与 Varin
 各压一遍。原生不透明项不得转述成第二份摘要；例如 OpenAI 独立 compact 返回的完整窗口须按其契约继续使用，不能只取其中
 一个项。参见 [OpenAI compaction](https://developers.openai.com/api/docs/guides/compaction)。
 
@@ -1494,7 +1494,7 @@ suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只
 
 ### 8.6 度量
 
-Piarium 已按轮聚合 token 用量并显示 cache-read / cache-write（0.9.8）。harness 增加会话级计数器：缓存命中率、
+Varin 已按轮聚合 token 用量并显示 cache-read / cache-write（0.9.8）。harness 增加会话级计数器：缓存命中率、
 工具错误次数、近三步同工具同参数的重复次数、工具输出 UTF-8 字节。这四项随 `SessionStats` 进入现有 Context 侧栏；runtime
 不发布字段时整段不显示，不把“无能力”渲染成四个 0。普通会话已有 Token、缓存、费用和上下文容量展示保留；不再按辅助模型槽位
 展示调用次数、Token 与成本（D-080）。操作计数器用于定位重复调用、错误和输出噪声，不能判断任务是否做对。
@@ -1549,13 +1549,13 @@ Zone 1 只增不改。它确定、便宜，直接捕获第 4.2 节那一类缺�
 OS 隔离与工具权限保护不同对象。仅隔离 shell 进程树，不能约束仍在普通 worker 内执行的文件工具或第三方扩展。
 macOS/Linux 可作为后续平台候选；用户已决定不建设 Windows 沙箱（D-071），它不是当前 Windows 交付阻塞。
 这不是没有技术路线：[OpenAI 公开实现](https://openai.com/index/building-codex-windows-sandbox/)使用专用用户、受限 token、ACL 与防火墙，
-也需要管理员安装和兼容性维护。当前 Piarium 继续准确说明实际的工具权限、Host 身份/路径授权及其未覆盖的同用户进程访问。
+也需要管理员安装和兼容性维护。当前 Varin 继续准确说明实际的工具权限、Host 身份/路径授权及其未覆盖的同用户进程访问。
 
-### 9.1.2 权限管理：Piarium 原生唯一交互门（D-283）
+### 9.1.2 权限管理：Varin 原生唯一交互门（D-283）
 
-Piarium 内置 pi-host `tool_call` extension 是当前唯一的用户确认权威。它覆盖 Harness override、Pi built-in、MCP、普通 Pi package
+Varin 内置 pi-host `tool_call` extension 是当前唯一的用户确认权威。它覆盖 Harness override、Pi built-in、MCP、普通 Pi package
 以及嵌套 Thread 会话里实际注册的工具，不再把未知工具 pass-through 给第二套权限系统。来源身份取自 Pi 活跃 registry 的
-`getAllTools().sourceInfo`：只有 Piarium SDK Harness override 才按 `HARNESS_TOOL_META` 分类；MCP/package/unknown 缺明确副作用证据时
+`getAllTools().sourceInfo`：只有 Varin SDK Harness override 才按 `HARNESS_TOOL_META` 分类；MCP/package/unknown 缺明确副作用证据时
 动作归为 unknown 并询问，不能因为工具恰好叫 `read`、声明 annotation 或说明文字像只读就自动获得权限。
 
 权限对象包含实际 cwd、source/action、候选路径、网络 origin 与 thread scope。路径在提示前通过 Host `permission.inspect` 走与其他
@@ -1566,21 +1566,21 @@ Harness 服务相同的 actor/capability/workspace canonical path authority；Ho
 `normal` / `accept-edits` / `bypass` / `smart` 和用户规则都在同一个 gate 内解析；trusted workspace 仍只能收紧规则。Smart 只有在用户
 配置 `models.permissionJudge` 时处理普通、完整、非高风险 ask；模型失败回到 ask，不借主模型。"Allow for this session" 的 key 包含
 工具来源、动作、owning/execution workspace、cwd、Host canonical resource IDs、网络目标和 thread scope；未知/高风险/不完整证据不能
-记忆。用户可通过 `/piarium-permissions` 查看/撤销该会话记忆授权。每次 allow/deny/remember 通过 `permission.audit` 投影
+记忆。用户可通过 `/varin-permissions` 查看/撤销该会话记忆授权。每次 allow/deny/remember 通过 `permission.audit` 投影
 credential/body-free 目标，不新建 permission 数据库，也不把审计正文放进模型上下文。
 
-`@gotgenes/pi-permission-system` 的 foundational provision、session service yield、Piarium Plugin Settings/Composer/quick mode/status bridge
+`@gotgenes/pi-permission-system` 的 foundational provision、session service yield、Varin Plugin Settings/Composer/quick mode/status bridge
 已删除；D-044 只保留为历史共存记录。用户仍可通过 Pi 的普通 package surface 自行安装第三方扩展，但第三方 `tool_call` 仍经过
-Piarium 原生门，不能替换或绕过它。
+Varin 原生门，不能替换或绕过它。
 
 **三层，不寻找唯一安全边界**（D-035）：
 
-1. **Pi `tool_call` 门**：Piarium 原生 gate 做 allow / ask / deny 与确认 UI，并对 worker 内直接执行的内置/扩展工具统一生效。
+1. **Pi `tool_call` 门**：Varin 原生 gate 做 allow / ask / deny 与确认 UI，并对 worker 内直接执行的内置/扩展工具统一生效。
    `ask` 走现有 `ui.select`（Allow once / Allow for this session scope / Deny）；取消/关闭视为 deny。它不能成为 OS 隔离，但能在工具
    入口阻断 `edit` / `write` / `apply_patch`、MCP/package mutation 与进程工具。
 2. **Host 服务授权**：不弹窗、不重算用户策略，只验证 `ActorContext`、RunManifest 里的静态能力集、workspace / path 包含，
    覆盖一切经 host 中介的能力（`shell.*` / `output.*` / `search.*` / `document.readSource` / `thread.*` / `fs.lock` / `lsp.*`）。能力按会话实际冻结的
-   `activeTools` 推导：只有没有任何 `bash` 工具时才不含 `process.shell`；关闭 Piarium 的同名覆盖若会回退到 Pi 内置 bash，
+   `activeTools` 推导：只有没有任何 `bash` 工具时才不含 `process.shell`；关闭 Varin 的同名覆盖若会回退到 Pi 内置 bash，
    仍然具有 process 能力。缺少该能力时绕过工具直接到达的 `shell.exec` 必须被拒——这不是第二套用户策略，是防止
    绕过工具入口。按风险类别授权：`read`（document / search / output / lsp）、`process`（shell）、`control`（thread send / kill /
    merge）、`write`（未来经 host 中介的文档写入）。
@@ -1840,7 +1840,7 @@ authority/session/worker generation/Run 与 binding generation。Git 输入身�
 启动及显式释放按实际记录对账；缺失或损坏的节点/对象不能被解释为空集。没有新增保留天数、自动删除线程或全仓扫描。
 
 正常的存储位置转移须同时复制新格式对象及引用，不能仅复制 hash。固定 Git resultCommit 可以作为正常导入来源；
-这些能力不要求维护旧 Piarium 库升级路径。当前内部格式替换按 D-253 直接重建并删除旧写入权威，Git 保留基线/物化/导出职责。
+这些能力不要求维护旧 Varin 库升级路径。当前内部格式替换按 D-253 直接重建并删除旧写入权威，Git 保留基线/物化/导出职责。
 
 **集成选定结果。** merge 默认选择已发布的最新结果，并把选定 revision 写入操作；调用方可指定旧结果。Git 过渡实现使用
 base → resultCommit，patch、新文件正文、类型与 mode 全从该 commit 读取，不能在 snapshot 之后再复制 live worktree。
@@ -2001,7 +2001,7 @@ retrieval 默认 task，保留不携父 blocks 和专门事实协议的选择；
   不终止已有线程来腾配额。没有定标时不默认设置 8 GiB/10% 硬拒绝，也不把未知所需空间当 0；运行中的实际空间不足按 I/O 失败
   明确记录（ENOSPC）。线程面板展示 Host 占用、保留原因和立即回收，不设无依据的 80% 统一阈值（D-202）。
   统计覆盖该工作区全部父会话；首次物化与恢复在短临界区预留已知新增需求，慢 setup/会话调用不持工作区锁。未知量不遮住已知超额，也不因此统一拒绝任务（D-204）。
-- **启动对账与历史清理。** 对受管记录和目录对账，修复 Git 元数据；能确认属于 Piarium 且已保存的无使用者目录正常回收，归属
+- **启动对账与历史清理。** 对受管记录和目录对账，修复 Git 元数据；能确认属于 Varin 且已保存的无使用者目录正常回收，归属
   不明的目录展示而不猜测删除。历史对象与分支按引用及用户保留配置清理，不以固定 30 天删除仍可继续的结果。分支名虽小，其
   引用会保留内容对象，须计入历史占用；对账和回收不依赖某个 idle 定时器。
 - **用户释放旧结果。** 线程卡片按需加载版本、引用大小与保留原因；确认冻结的版本选择后由 Host 重核并释放（D-239）。
@@ -2128,7 +2128,7 @@ D-298 已接通独立入口、项目默认/对话覆盖和基础科研 UIUX；D-
 
 ### 10.2 `code`（v1）
 
-本文档第 5–9 节即其规格。工作区形态：仓库；验证器：编辑后诊断、可选测试门、review 传感器；权限由 Piarium 原生
+本文档第 5–9 节即其规格。工作区形态：仓库；验证器：编辑后诊断、可选测试门、review 传感器；权限由 Varin 原生
 `tool_call` gate 统一管理，并叠加 Host 的非交互 actor/capability/path enforcement（第 9.1.2 节）。
 
 ### 10.3 `research` 工作侧重（第二个）
@@ -2209,7 +2209,7 @@ T4、完整 RunManifest、知识数据库迁移或沙箱不作为共同前置。
    worker 丢失恢复、host 观察的活性与循环检测、`dispatch` / `threads` / `wait` / `send` / `read_thread` / `kill`、角色目录
    与独立模型槽位、原生工作分支与按需物化、集成与回收、事件驱动等待、观察游标、线程侧栏与讨论线。D-285/D-287 已接通普通
    派发、task/inherit/continue/fresh、定向消息、分段成果与共享执行调度；自动 review 默认关闭，仅在用户显式启用后运行。
-3b. **权限纵切（D-283，已完成）**：Host 静态授权与 scope、Piarium 原生唯一 `tool_call` 门、规范化权限对象、session grant / audit、Settings 与 Smart；旧 permission-system 双轨已删除。
+3b. **权限纵切（D-283，已完成）**：Host 静态授权与 scope、Varin 原生唯一 `tool_call` 门、规范化权限对象、session grant / audit、Settings 与 Smart；旧 permission-system 双轨已删除。
 R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 已接管工作状态/恢复、磁盘/物化、进程/终端、文件/结构计算，
    并完成数据保留、取消/崩溃恢复、性能定标与发行矩阵接线。TS/Pi 保留上层职责；外部 runtime 和领域扩展沿此边界继续。
 4. **默认 runtime**：内置钉住的 Pi。
@@ -2219,7 +2219,7 @@ R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 �
 ### 12.2 历史决定与实施选择
 
 历史决定（后续修订以当前正文为准）：2026-09-02 的 edit v1 使用直接写盘 + reconcile，后续按 5.4/9.2.5b 实施版本化视图；
-`piarium serve` 检测到桌面 host 在运行时复用它而不起第二个（第 7.1 节）；子 agent worktree 由父 agent 的 `merge` 工具
+`varin serve` 检测到桌面 host 在运行时复用它而不起第二个（第 7.1 节）；子 agent worktree 由父 agent 的 `merge` 工具
 合并、Git 面板可选审阅（第 9.2.5b 节）；`event` 默认保留 30 天（第 7.2.1 节）。
 
 2026-09-04 的决定（D-030–D-038，其中默认和回放政策已由 D-078 修订）：Pi 0.84.3 消费 `session_before_compact` 返回的
@@ -2250,7 +2250,7 @@ R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 �
 ## 13. 与其他文档的关系
 
 - [architecture.md](architecture.md)：本文档扩展其第 4 节进程模型（新增 host 服务与 worker→host 请求族）与第 7
-  节（harness 是 Piarium 拥有的进程内扩展，不是 Pi 包适配器）。
+  节（harness 是 Varin 拥有的进程内扩展，不是 Pi 包适配器）。
 - [rust-kernel-design.md](rust-kernel-design.md)：阶段 R 的最终资源归属、私有协议、存储与恢复、物化/进程/检索计算及发行性能契约。
 - [composable-workbench.md](composable-workbench.md)：profile 对象在此扩展为同时承载 harness 绑定。
 - [native-workspace-recovery-design.md](native-workspace-recovery-design.md)：`bash` 的 `process` writer 注册与

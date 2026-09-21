@@ -211,7 +211,7 @@ Host 提供按用途解析绑定的快速决策服务。检索编排放在现有
 - [函数调用示例](https://docs.typesafe.ai/cookbooks/function_calling)：从已有函数及参数候选选择动作。
 - [模型规格](https://docs.typesafe.ai/models)：当前协议、模态、容量与语言支持；实施时重新核对，不把数值固化到通用合同。
 - [Jev 1.13 已知边界](https://docs.typesafe.ai/model-jaggedness/jev-1.13)：不生成自由文本，复杂间接关系及无关上下文会影响判断。
-- [发布说明](https://typesafe.ai/blog/introducing-system-one-models-and-jev)：逐步链接选择示例与供应商报告的速度；不是 Piarium 实测。
+- [发布说明](https://typesafe.ai/blog/introducing-system-one-models-and-jev)：逐步链接选择示例与供应商报告的速度；不是 Varin 实测。
 - [Cognition SWE-grep](https://cognition.com/blog/swe-grep)：多轮并行检索、快速工具与专门训练共同形成体验。
 
 据此作出的产品推断是：现有索引与真实代码关系可以为快速决策提供动态行动候选，降低逐步探索的语义判断成本。

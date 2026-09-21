@@ -1,23 +1,23 @@
 # Shared runtime API boundary
 
 Shared UI code can run in Web, Electron-through-Web, hosted mobile, or a Capacitor client.
-`@piarium/application-client` owns the framework-neutral `RuntimeAPIs` contract
+`@varin/application-client` owns the framework-neutral `RuntimeAPIs` contract
 and typed failure shapes; each surface supplies the implementations that actually apply to it.
 
 The former `src/lib/api/*` and `src/lib/runtime-*` forwarding modules have been removed. UI and Web
-code import from `@piarium/application-client` directly.
+code import from `@varin/application-client` directly.
 
 ## Choosing an owner
 
 | Capability | Owning path |
 | --- | --- |
-| Pi sessions, models, providers, packages, commands, recovery, and Pi config | Piarium protocol through the runtime client, broker, and host |
-| Piarium capability used by shared React UI | `RuntimeAPIs` from `@piarium/application-client`, implemented explicitly by applicable surfaces |
+| Pi sessions, models, providers, packages, commands, recovery, and Pi config | Varin protocol through the runtime client, broker, and host |
+| Varin capability used by shared React UI | `RuntimeAPIs` from `@varin/application-client`, implemented explicitly by applicable surfaces |
 | Web/application-host service | An authenticated `/api/...` route consumed through `runtimeFetch` |
 | Browser-owned asset, iframe, download, SSE, or WebSocket | The runtime URL/auth resolver and its owning transport |
 | Intentional third-party service | Direct `fetch` with an explicit external-origin and credential contract |
 
-`@piarium/application-client` is the shared interface. Web composition lives under `packages/web/src/api`.
+`@varin/application-client` is the shared interface. Web composition lives under `packages/web/src/api`.
 Electron normally reuses the Web host; inherently native behavior stays behind
 its preload/main boundary.
 
@@ -32,8 +32,8 @@ HTTP authentication. A browser element that must own a URL—an iframe, download
 asset, SSE connection, or WebSocket—uses `getRuntimeUrlResolver()` and the matching transport helper.
 Building a browser URL and passing it back into `runtimeFetch` mixes these two ownership models.
 
-Browser URLs cannot attach the normal authorization header. Piarium therefore mints short-lived scoped
-`piarium_url_token` values through the runtime auth helper. Long-lived bearer tokens never belong in a
+Browser URLs cannot attach the normal authorization header. Varin therefore mints short-lived scoped
+`varin_url_token` values through the runtime auth helper. Long-lived bearer tokens never belong in a
 URL, and callers do not append the scoped token manually. The application host admits only explicit
 browser-readable and realtime paths; see
 [the UI auth module](../../../../web/server/lib/ui-auth/DOCUMENTATION.md) and
@@ -45,7 +45,7 @@ switch rather than reused across hosts.
 
 ## Runtime switching and parity
 
-`@piarium/application-client` changes endpoint/auth ownership and drives established reset/rebind hooks.
+`@varin/application-client` changes endpoint/auth ownership and drives established reset/rebind hooks.
 Asynchronous work captures the runtime or owner generation it belongs to; a completion from the prior
 host cannot commit into the new one. Caches whose IDs or paths can collide include runtime identity.
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue, PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
+import type { JsonValue, PiConfigScope, RuntimeContextTarget } from '@varin/protocol';
 import {
   SettingsControlGroup,
   SettingsFieldRow,
@@ -68,14 +68,14 @@ const AftIssueNote: React.FC<{ issues: readonly AftDraftIssue[] }> = ({ issues }
       {issues.map((issue) => (
         <p key={`${issue.code}:${issue.field}`}>
           {issue.code === 'ignored-project'
-            ? t('settings.piarium.pluginSettings.aft.diagnostic.ignoredProject', { field: issue.field })
+            ? t('settings.varin.pluginSettings.aft.diagnostic.ignoredProject', { field: issue.field })
             : issue.code === 'unknown-field'
-              ? t('settings.piarium.pluginSettings.aft.diagnostic.unknownField', { field: issue.field })
+              ? t('settings.varin.pluginSettings.aft.diagnostic.unknownField', { field: issue.field })
               : issue.code === 'invalid-boolean'
-                ? t('settings.piarium.pluginSettings.validation.invalidBoolean', { field: issue.field })
+                ? t('settings.varin.pluginSettings.validation.invalidBoolean', { field: issue.field })
                 : issue.code === 'invalid-number'
-                  ? t('settings.piarium.pluginSettings.validation.invalidNumber', { field: issue.field })
-                  : t('settings.piarium.pluginSettings.validation.invalidValue', { field: issue.field })}
+                  ? t('settings.varin.pluginSettings.validation.invalidNumber', { field: issue.field })
+                  : t('settings.varin.pluginSettings.validation.invalidValue', { field: issue.field })}
         </p>
       ))}
     </div>
@@ -84,51 +84,51 @@ const AftIssueNote: React.FC<{ issues: readonly AftDraftIssue[] }> = ({ issues }
 
 const CoreQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   const keyedOptions = (values: readonly string[]) => values.map((value) => ({
     value,
-    label: t(`settings.piarium.pluginSettings.aft.value.${value}` as never),
+    label: t(`settings.varin.pluginSettings.aft.value.${value}` as never),
   }));
   return (
     <SettingsControlGroup
-      title={t('settings.piarium.pluginSettings.aft.section.core')}
+      title={t('settings.varin.pluginSettings.aft.section.core')}
       contentClassName="space-y-4"
     >
-      <PluginOptionalBooleanField {...fields} path={['enabled']} label={t('settings.piarium.pluginSettings.aft.field.enabled')} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['tool_surface']} label={t('settings.piarium.pluginSettings.aft.field.toolSurface')} options={keyedOptions(AFT_TOOL_SURFACES)} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['edit_mode']} label={t('settings.piarium.pluginSettings.aft.field.editMode')} options={keyedOptions(AFT_EDIT_MODES)} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['format_on_edit']} label={t('settings.piarium.pluginSettings.aft.field.formatOnEdit')} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['validate_on_edit']} label={t('settings.piarium.pluginSettings.aft.field.validateOnEdit')} options={keyedOptions(AFT_VALIDATION_MODES)} unsetLabel={notSet} />
-      <PluginOptionalSelectField {...fields} path={['configure_warnings_delivery']} label={t('settings.piarium.pluginSettings.aft.field.warningDelivery')} options={keyedOptions(AFT_WARNING_DELIVERY)} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['enabled']} label={t('settings.varin.pluginSettings.aft.field.enabled')} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['tool_surface']} label={t('settings.varin.pluginSettings.aft.field.toolSurface')} options={keyedOptions(AFT_TOOL_SURFACES)} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['edit_mode']} label={t('settings.varin.pluginSettings.aft.field.editMode')} options={keyedOptions(AFT_EDIT_MODES)} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['format_on_edit']} label={t('settings.varin.pluginSettings.aft.field.formatOnEdit')} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['validate_on_edit']} label={t('settings.varin.pluginSettings.aft.field.validateOnEdit')} options={keyedOptions(AFT_VALIDATION_MODES)} unsetLabel={notSet} />
+      <PluginOptionalSelectField {...fields} path={['configure_warnings_delivery']} label={t('settings.varin.pluginSettings.aft.field.warningDelivery')} options={keyedOptions(AFT_WARNING_DELIVERY)} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
 
 const FeatureQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   const bashMode = aftBashDraftMode(fields.draft);
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.aft.section.features')} contentClassName="space-y-4">
-      <PluginOptionalBooleanField {...fields} path={['search_index']} label={t('settings.piarium.pluginSettings.aft.field.searchIndex')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['semantic_search']} label={t('settings.piarium.pluginSettings.aft.field.semanticSearch')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['callgraph_store']} label={t('settings.piarium.pluginSettings.aft.field.callgraphStore')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['inspect', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.inspectEnabled')} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['inspect', 'diagnostics_timeout_ms']} label={t('settings.piarium.pluginSettings.aft.field.inspectDiagnosticsTimeout')} min={10_000} max={600_000} step={1_000} unit="ms" unsetLabel={notSet} />
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.aft.section.features')} contentClassName="space-y-4">
+      <PluginOptionalBooleanField {...fields} path={['search_index']} label={t('settings.varin.pluginSettings.aft.field.searchIndex')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['semantic_search']} label={t('settings.varin.pluginSettings.aft.field.semanticSearch')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['callgraph_store']} label={t('settings.varin.pluginSettings.aft.field.callgraphStore')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['inspect', 'enabled']} label={t('settings.varin.pluginSettings.aft.field.inspectEnabled')} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['inspect', 'diagnostics_timeout_ms']} label={t('settings.varin.pluginSettings.aft.field.inspectDiagnosticsTimeout')} min={10_000} max={600_000} step={1_000} unit="ms" unsetLabel={notSet} />
       <PluginOptionalSelectField
         {...fields}
         path={['bash']}
-        label={t('settings.piarium.pluginSettings.aft.field.bash')}
+        label={t('settings.varin.pluginSettings.aft.field.bash')}
         options={[
-          { value: true, label: t('settings.piarium.pluginSettings.field.enabled') },
-          { value: false, label: t('settings.piarium.pluginSettings.field.disabled') },
+          { value: true, label: t('settings.varin.pluginSettings.field.enabled') },
+          { value: false, label: t('settings.varin.pluginSettings.field.disabled') },
         ]}
         preserveUnsupportedUntilSelection
-        unsupportedLabel={t('settings.piarium.pluginSettings.aft.value.custom')}
+        unsupportedLabel={t('settings.varin.pluginSettings.aft.value.custom')}
         unsetLabel={notSet}
       />
       {bashMode === 'custom' ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.aft.bashCustomNote')}</PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.varin.pluginSettings.aft.bashCustomNote')}</PluginRuntimeNote>
       ) : null}
     </SettingsControlGroup>
   );
@@ -136,26 +136,26 @@ const FeatureQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) => {
 
 const LspQuickSettings: React.FC<{ fields: AftFields; userScope: boolean }> = ({ fields, userScope }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.aft.section.lsp')} contentClassName="space-y-4">
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.aft.section.lsp')} contentClassName="space-y-4">
       <PluginOptionalSelectField
         {...fields}
         path={['lsp', 'python']}
-        label={t('settings.piarium.pluginSettings.aft.field.lspPython')}
+        label={t('settings.varin.pluginSettings.aft.field.lspPython')}
         options={AFT_PYTHON_LSP.map((value) => ({
           value,
           label: value === 'auto'
-            ? t('settings.piarium.pluginSettings.aft.value.auto')
+            ? t('settings.varin.pluginSettings.aft.value.auto')
             : value === 'pyright' ? 'Pyright' : 'ty',
         }))}
         unsetLabel={notSet}
       />
-      <PluginOptionalBooleanField {...fields} path={['lsp', 'diagnostics_on_edit']} label={t('settings.piarium.pluginSettings.aft.field.diagnosticsOnEdit')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['lsp', 'diagnostics_on_edit']} label={t('settings.varin.pluginSettings.aft.field.diagnosticsOnEdit')} unsetLabel={notSet} />
       {userScope ? (
         <>
-          <PluginOptionalBooleanField {...fields} path={['lsp', 'auto_install']} label={t('settings.piarium.pluginSettings.aft.field.autoInstall')} unsetLabel={notSet} />
-          <PluginOptionalNumberField {...fields} path={['lsp', 'grace_days']} label={t('settings.piarium.pluginSettings.aft.field.graceDays')} min={1} step={1} unsetLabel={notSet} />
+          <PluginOptionalBooleanField {...fields} path={['lsp', 'auto_install']} label={t('settings.varin.pluginSettings.aft.field.autoInstall')} unsetLabel={notSet} />
+          <PluginOptionalNumberField {...fields} path={['lsp', 'grace_days']} label={t('settings.varin.pluginSettings.aft.field.graceDays')} min={1} step={1} unsetLabel={notSet} />
         </>
       ) : null}
     </SettingsControlGroup>
@@ -164,40 +164,40 @@ const LspQuickSettings: React.FC<{ fields: AftFields; userScope: boolean }> = ({
 
 const SemanticQuickSettings: React.FC<{ fields: AftFields; userScope: boolean }> = ({ fields, userScope }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.aft.section.semantic')} contentClassName="space-y-4">
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.aft.section.semantic')} contentClassName="space-y-4">
       {userScope ? (
         <PluginOptionalSelectField
           {...fields}
           path={['semantic', 'backend']}
-          label={t('settings.piarium.pluginSettings.aft.field.semanticBackend')}
+          label={t('settings.varin.pluginSettings.aft.field.semanticBackend')}
           options={AFT_SEMANTIC_BACKENDS.map((value) => ({ value, label: value }))}
           unsetLabel={notSet}
         />
       ) : null}
-      <PluginStringField {...fields} path={['semantic', 'model']} label={t('settings.piarium.pluginSettings.aft.field.semanticModel')} />
-      <PluginOptionalNumberField {...fields} path={['semantic', 'timeout_ms']} label={t('settings.piarium.pluginSettings.aft.field.semanticTimeout')} min={1} step={1} unit="ms" unsetLabel={notSet} />
+      <PluginStringField {...fields} path={['semantic', 'model']} label={t('settings.varin.pluginSettings.aft.field.semanticModel')} />
+      <PluginOptionalNumberField {...fields} path={['semantic', 'timeout_ms']} label={t('settings.varin.pluginSettings.aft.field.semanticTimeout')} min={1} step={1} unit="ms" unsetLabel={notSet} />
       {userScope ? (
-        <PluginOptionalNumberField {...fields} path={['semantic', 'query_timeout_ms']} label={t('settings.piarium.pluginSettings.aft.field.semanticQueryTimeout')} min={1} step={1} unit="ms" unsetLabel={notSet} />
+        <PluginOptionalNumberField {...fields} path={['semantic', 'query_timeout_ms']} label={t('settings.varin.pluginSettings.aft.field.semanticQueryTimeout')} min={1} step={1} unit="ms" unsetLabel={notSet} />
       ) : null}
-      <PluginOptionalNumberField {...fields} path={['semantic', 'max_batch_size']} label={t('settings.piarium.pluginSettings.aft.field.semanticMaxBatch')} min={1} step={1} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['semantic', 'max_files']} label={t('settings.piarium.pluginSettings.aft.field.semanticMaxFiles')} min={1} step={1} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['semantic', 'max_batch_size']} label={t('settings.varin.pluginSettings.aft.field.semanticMaxBatch')} min={1} step={1} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['semantic', 'max_files']} label={t('settings.varin.pluginSettings.aft.field.semanticMaxFiles')} min={1} step={1} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
 
 const UserSafetyQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) => {
   const { t } = useI18n();
-  const notSet = t('settings.piarium.pluginSettings.field.notSet');
+  const notSet = t('settings.varin.pluginSettings.field.notSet');
   return (
-    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.piarium.pluginSettings.aft.section.safety')} contentClassName="space-y-4">
-      <PluginOptionalBooleanField {...fields} path={['restrict_to_project_root']} label={t('settings.piarium.pluginSettings.aft.field.restrictRoot')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['backup', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.backupEnabled')} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['backup', 'max_depth']} label={t('settings.piarium.pluginSettings.aft.field.backupDepth')} min={1} step={1} unsetLabel={notSet} />
-      <PluginOptionalNumberField {...fields} path={['backup', 'max_file_size']} label={t('settings.piarium.pluginSettings.aft.field.backupSize')} min={1} step={1} unit="B" unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['sandbox', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.sandboxEnabled')} unsetLabel={notSet} />
-      <PluginOptionalBooleanField {...fields} path={['gh_shim', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.ghShimEnabled')} unsetLabel={notSet} />
+    <SettingsControlGroup className={GROUP_CLASS} title={t('settings.varin.pluginSettings.aft.section.safety')} contentClassName="space-y-4">
+      <PluginOptionalBooleanField {...fields} path={['restrict_to_project_root']} label={t('settings.varin.pluginSettings.aft.field.restrictRoot')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['backup', 'enabled']} label={t('settings.varin.pluginSettings.aft.field.backupEnabled')} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['backup', 'max_depth']} label={t('settings.varin.pluginSettings.aft.field.backupDepth')} min={1} step={1} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['backup', 'max_file_size']} label={t('settings.varin.pluginSettings.aft.field.backupSize')} min={1} step={1} unit="B" unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['sandbox', 'enabled']} label={t('settings.varin.pluginSettings.aft.field.sandboxEnabled')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['gh_shim', 'enabled']} label={t('settings.varin.pluginSettings.aft.field.ghShimEnabled')} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };
@@ -227,7 +227,7 @@ export const AftSettings: React.FC<AftSettingsProps> = ({ runtimeTarget, targetK
 
   return (
     <div className="space-y-7">
-      <SettingsFieldRow label={t('settings.piarium.pluginSettings.scope.label')} info={t('settings.piarium.pluginSettings.scope.description')} controlClassName="w-full max-w-[24rem]">
+      <SettingsFieldRow label={t('settings.varin.pluginSettings.scope.label')} info={t('settings.varin.pluginSettings.scope.description')} controlClassName="w-full max-w-[24rem]">
         <ScopeSelector
           value={scope}
           onChange={setScope}
@@ -237,11 +237,11 @@ export const AftSettings: React.FC<AftSettingsProps> = ({ runtimeTarget, targetK
       <PluginConfigSource controller={controller} />
       <PluginRuntimeNote>
         {scope === 'project'
-          ? t('settings.piarium.pluginSettings.aft.authority.project')
-          : t('settings.piarium.pluginSettings.aft.authority.user')}
+          ? t('settings.varin.pluginSettings.aft.authority.project')
+          : t('settings.varin.pluginSettings.aft.authority.user')}
       </PluginRuntimeNote>
       {scope === 'project' ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.aft.projectScopeNote')}</PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.varin.pluginSettings.aft.projectScopeNote')}</PluginRuntimeNote>
       ) : null}
       <AftIssueNote issues={issues} />
       <CoreQuickSettings fields={fields} />
@@ -256,7 +256,7 @@ export const AftSettings: React.FC<AftSettingsProps> = ({ runtimeTarget, targetK
         blockedMessage={trustBlocked
           ? undefined
           : validationBlocked
-            ? t('settings.piarium.pluginSettings.aft.validation.fixBeforeSave')
+            ? t('settings.varin.pluginSettings.aft.validation.fixBeforeSave')
             : undefined}
       />
       <AftRuntimePanel runtimeTarget={runtimeTarget} targetKey={targetKey} />

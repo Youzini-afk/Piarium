@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessActorContext } from "@piarium/protocol";
+import type { HarnessActorContext } from "@varin/protocol";
 import { openWorkspaceKnowledge } from "../knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../knowledge/context-runtime.js";
 import { createKnowledgeSuggestService, createRecallSearchService } from "./harness-services.js";
@@ -18,7 +18,7 @@ describe("thread knowledge owning workspace", () => {
   });
 
   it("routes recall, suggestions, and Zone 2 knowledge to the owning store after snapshot binds execution first", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-knowledge-owning-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-knowledge-owning-"));
     cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
     const owningStore = await openWorkspaceKnowledge({
       dataDir,

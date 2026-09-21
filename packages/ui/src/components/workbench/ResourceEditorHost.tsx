@@ -1,7 +1,7 @@
 import React from 'react';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import type { SurfaceContribution } from '@piarium/extension-surface';
+import type { SurfaceContribution } from '@varin/extension-surface';
 
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -24,7 +24,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
-import { getRuntimeUrlResolver } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
 import { isDrawioFile, isImageFile, isPdfFile, isSvgFile } from '@/lib/toolHelpers';
 import { useI18n } from '@/lib/i18n';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
@@ -52,7 +52,7 @@ import {
 } from '@/lib/extensions/workbench-registry';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { useDeviceInfo } from '@/lib/device';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
 
 type ResourceEditorHostProps = {

@@ -1,5 +1,5 @@
 import type { Express, NextFunction, Request, RequestHandler, Response } from "express";
-import type { PiariumAuthenticatedClient } from "../client-auth/request-context.js";
+import type { VarinAuthenticatedClient } from "../client-auth/request-context.js";
 import type { ManagedRemoteExecutionService } from "./managed-remote-service.js";
 import { requestBodyChunks } from "./managed-remote-service.js";
 
@@ -13,7 +13,7 @@ export interface ManagedRemoteRoutesOptions {
   ) => Promise<{
     type: string;
     clientId?: string | null;
-    client?: PiariumAuthenticatedClient | null;
+    client?: VarinAuthenticatedClient | null;
   } | null>;
 }
 
@@ -77,7 +77,7 @@ export function registerManagedRemoteRoutes(
     return { coordinatorHostId: coordinator, principalId: principal };
   };
   app.use(base, (_request, response, next) => {
-    response.setHeader("X-Piarium-Managed-Host", service.hostId);
+    response.setHeader("X-Varin-Managed-Host", service.hostId);
     next();
   });
 
@@ -97,10 +97,10 @@ export function registerManagedRemoteRoutes(
   }));
 
   app.put(`${base}/objects/:objectHash`, requireAuth, requireManagedAuth, route(async (request, response) => {
-    const coordinatorHostId = asString(request.header("x-piarium-coordinator-host"), "Coordinator identity");
+    const coordinatorHostId = asString(request.header("x-varin-coordinator-host"), "Coordinator identity");
     authorize(request, coordinatorHostId);
     const objectHash = asString(request.params.objectHash, "Object identity");
-    const byteLength = asNonNegativeInteger(request.header("x-piarium-object-length"), "Object byte length");
+    const byteLength = asNonNegativeInteger(request.header("x-varin-object-length"), "Object byte length");
     const controller = new AbortController();
     const abort = () => controller.abort();
     request.once("aborted", abort);

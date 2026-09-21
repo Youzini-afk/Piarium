@@ -1,14 +1,14 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+  VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+  VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
 } from "./index.js";
 
 const ASAR_DIRECTORY_SEGMENT = /(^|[\\/])([^\\/]+\.asar)([\\/])/i;
 
-export const PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE = "piarium-builtin-fingerprint.txt";
+export const VARIN_BUILTIN_ARTIFACT_FINGERPRINT_FILE = "varin-builtin-fingerprint.txt";
 
 /**
  * Electron keeps the logical module URL inside app.asar even when electron-builder
@@ -16,7 +16,7 @@ export const PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE = "piarium-builtin-finger
  * immutable artifact before execution, so their registered roots must name the
  * physical directory rather than an ASAR virtual directory.
  */
-export const resolvePiariumBuiltinPackageRoot = (
+export const resolveVarinBuiltinPackageRoot = (
   sourcePath: string,
   pathExists: (candidate: string) => boolean = existsSync,
 ): string => {
@@ -30,22 +30,22 @@ export const resolvePiariumBuiltinPackageRoot = (
   return unpackedPath;
 };
 
-export const PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
+export const VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
   [
-    PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-    resolvePiariumBuiltinPackageRoot(
+    VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    resolveVarinBuiltinPackageRoot(
       fileURLToPath(new URL("./builtin-packages/language-servers/", import.meta.url)),
     ),
   ],
   [
-    PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-    resolvePiariumBuiltinPackageRoot(
+    VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+    resolveVarinBuiltinPackageRoot(
       fileURLToPath(new URL("./builtin-packages/typescript-language/", import.meta.url)),
     ),
   ],
   [
-    PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
-    resolvePiariumBuiltinPackageRoot(
+    VARIN_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+    resolveVarinBuiltinPackageRoot(
       fileURLToPath(new URL("./builtin-packages/recovery/", import.meta.url)),
     ),
   ],

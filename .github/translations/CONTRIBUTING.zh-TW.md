@@ -1,8 +1,8 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
-# 為 Piarium 貢獻
+# 為 Varin 貢獻
 
-感謝你協助改進 Piarium。無論是 Pi 執行時期邊界、桌面與遠端介面、擴充功能整合、文件、測試、無障礙功能，
+感謝你協助改進 Varin。無論是 Pi 執行時期邊界、桌面與遠端介面、擴充功能整合、文件、測試、無障礙功能，
 還是平台支援，都歡迎貢獻。
 
 本指南說明公開的貢獻工作流程。具體實作工作的詳細儲存庫規則，請參閱 [AGENTS.md](../../AGENTS.md)、最近的套件
@@ -20,21 +20,21 @@ README，以及負責該功能的架構文件。
 ## 開始之前
 
 - 閱讀[行為準則](CODE_OF_CONDUCT.zh-TW.md)。
-- 使用 [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) 回報可重現的錯誤、提出功能建議，以及進行聚焦的技術討論。
+- 使用 [GitHub Issues](https://github.com/Youzini-afk/Varin/issues) 回報可重現的錯誤、提出功能建議，以及進行聚焦的技術討論。
 - 請依照 [SECURITY.md](../SECURITY.md) 中的私人流程提交漏洞。不要在 issue、討論、pull request、日誌或螢幕截圖中公開漏洞利用細節。
 - 開始重複性的變更之前，先搜尋現有的 issue 和 pull request。
 - 對於大型產品或架構變更，投入完整實作之前，先說明使用者成果和受影響的邊界。如果原型有助於評估取捨，歡迎先提供原型。
 
 ## 會影響貢獻的專案原則
 
-Piarium 不是圍繞多個程式設計代理 CLI 的通用包裝器。它有一個 Pi 原生領域，以及一個目前的預發布執行時期契約。
+Varin 不是圍繞多個程式設計代理 CLI 的通用包裝器。它有一個 Pi 原生領域，以及一個目前的預發布執行時期契約。
 
 1. **讓 Pi 保持權威。** Pi 負責工作階段、模型、驗證、設定、套件和擴充功能執行環境。請投影出可安全轉換為 JSON 的
-   Piarium 契約；不要把 Pi 狀態複製到平行的應用程式結構描述中。
+   Varin 契約；不要把 Pi 狀態複製到平行的應用程式結構描述中。
 2. **保留外掛程式的所有權。** 透過公開的命令、事件、設定和功能橋接來整合擴充功能。不要只為了建立 GUI 就解析私有資料庫，
    或複製外掛程式的遷移。
 3. **避免相容性沉積。** 在 1.0 之前的開發期間，所有產品介面會一起變動。替代方案獲得接受後，移除過時的 OpenCode 路徑和
-   已被取代的 Piarium 路徑；除非確實有持久化資料或外部用戶端的需求，否則不要累積協定 v13/v14 風格的相容性墊片。
+   已被取代的 Varin 路徑；除非確實有持久化資料或外部用戶端的需求，否則不要累積協定 v13/v14 風格的相容性墊片。
 4. **在受信任邊界執行權限控管。** Renderer 和遠端用戶端不能自行授權。請在擁有該功能的主機中驗證檔案系統、程序、網路、專案信任
    和憑證操作。
 5. **不要加入任意的產品限制。** 避免無提示截斷、模型數量上限、過短的逾時，或隱藏的並行上限。作業預算應是明確的部署選擇，
@@ -56,14 +56,14 @@ Piarium 不是圍繞多個程式設計代理 CLI 的通用包裝器。它有一�
 ### 複製與安裝
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run check:pi
 ```
 
 `bun.lock` 是權威來源。除非相依性變更有此要求，否則不要切換套件管理器或重新產生 lockfile。請仔細檢查生命週期腳本的
-變更；Piarium 刻意只允許必要的安裝腳本。
+變更；Varin 刻意只允許必要的安裝腳本。
 
 ## 常見開發介面
 
@@ -201,6 +201,6 @@ Pull request 應讓審查者無需重新拼湊你的調查過程就能驗證結�
 
 ## 授權條款
 
-提交貢獻即表示你同意該貢獻可以依 Piarium 的
+提交貢獻即表示你同意該貢獻可以依 Varin 的
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）散布，且匯入的第三方資料會保留
 [第三方通知](../../THIRD_PARTY_NOTICES.md)所要求的聲明。

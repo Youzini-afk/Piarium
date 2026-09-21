@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { RuntimeAPIs } from '@piarium/application-client';
-import type { DocumentsAPI, PiariumAgentInputSnapshotCaptureRequest } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
+import type { DocumentsAPI, VarinAgentInputSnapshotCaptureRequest } from '@varin/application-client';
 import { bindDocumentRegistry, getDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import {
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type PiAgentEvent,
   type PiAssistantMessage,
   type PiSessionEntry,
@@ -17,7 +17,7 @@ import {
   type SessionSnapshot,
   type SessionStats,
   type SessionSummary,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   createPiSessionStore,
   isPiSessionWorkerReady,
@@ -186,7 +186,7 @@ class FakeRuntime implements PiSessionStoreRuntime {
         ...(sessionId === undefined ? {} : { sessionId }),
         workerId: sessionId ?? 'catalog',
       },
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     } as RuntimeEventEnvelope);
   }
 
@@ -1542,10 +1542,10 @@ describe('Pi session store', () => {
 
   test('automatically captures the current dirty surface without putting document text in runtime params', async () => {
     const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const captures: PiariumAgentInputSnapshotCaptureRequest[] = [];
+    const captures: VarinAgentInputSnapshotCaptureRequest[] = [];
     const releases: Array<{ sessionId: string; context: unknown }> = [];
     const documents = {
-      captureAgentInputSnapshot: async (request: PiariumAgentInputSnapshotCaptureRequest) => {
+      captureAgentInputSnapshot: async (request: VarinAgentInputSnapshotCaptureRequest) => {
         captures.push(request);
         return {
           source: 'surface' as const,

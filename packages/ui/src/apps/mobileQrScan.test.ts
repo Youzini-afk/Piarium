@@ -34,7 +34,7 @@ describe('parseConnectionPayload', () => {
       pairingId: 'pair_android',
       secret: 'one-time',
       candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }],
-    })).replace('piarium://connect', 'Piarium://CONNECT');
+    })).replace('varin://connect', 'Varin://CONNECT');
     const payload = parseConnectionPayload(url);
     expect(payload && 'pairing' in payload ? payload.pairing.pairingId : null).toBe('pair_android');
   });
@@ -42,12 +42,12 @@ describe('parseConnectionPayload', () => {
   test('rejects non-connection and legacy/relay-offer payloads', () => {
     expect(parseConnectionPayload('')).toBeNull();
     expect(parseConnectionPayload('hello world')).toBeNull();
-    expect(parseConnectionPayload('piarium://connect')).toBeNull();
-    expect(parseConnectionPayload('piarium://session/abc')).toBeNull();
+    expect(parseConnectionPayload('varin://connect')).toBeNull();
+    expect(parseConnectionPayload('varin://session/abc')).toBeNull();
     // Legacy v1 direct links are no longer accepted.
-    expect(parseConnectionPayload('piarium://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
+    expect(parseConnectionPayload('varin://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
     // Legacy relay-offer format (mode=relay + fragment) is no longer accepted.
-    expect(parseConnectionPayload('piarium://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
+    expect(parseConnectionPayload('varin://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
   });
 });
 
@@ -71,7 +71,7 @@ describe('scanConnectionQr on Android', () => {
       scan,
       stopScan,
       startScan: mock(async () => {
-        listeners.get('barcodesScanned')?.({ barcodes: [{ rawValue: 'https://piarium.example' }] });
+        listeners.get('barcodesScanned')?.({ barcodes: [{ rawValue: 'https://varin.example' }] });
       }),
       addListener: mock((event: string, callback: (info: { barcodes?: Array<{ rawValue?: string }> }) => void) => {
         listeners.set(event, callback);
@@ -83,7 +83,7 @@ describe('scanConnectionQr on Android', () => {
       value: { Capacitor: { getPlatform: () => 'android', Plugins: { BarcodeScanner: plugin } } },
     });
 
-    expect(await scanConnectionQr()).toEqual({ status: 'ok', url: 'https://piarium.example' });
+    expect(await scanConnectionQr()).toEqual({ status: 'ok', url: 'https://varin.example' });
     expect(oneShotScanCalls).toBe(0);
     expect(stopCalls).toBe(1);
     expect(removeCalls).toBe(2);

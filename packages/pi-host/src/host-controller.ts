@@ -21,7 +21,7 @@ import {
   parsePiSessionFeatureMutation,
   parseProviderConfigInput,
   PiSessionFeatureValidationError,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type ProviderConfigDeleteScope,
   type ProviderConfigInput,
   ProviderConfigValidationError,
@@ -49,7 +49,7 @@ import {
   isWorkFocusId,
   isWorkFocusSource,
   type WorkFocusSelection,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
 import { expectRecord, readBoolean, readJson, readString } from "./params.js";
@@ -57,7 +57,7 @@ import { resolvePiSdkSpecifier } from "./pi-sdk-packages.js";
 import { SessionHost } from "./session-host.js";
 import type { HostTransport } from "./transport.js";
 
-export const PIARIUM_HOST_VERSION = "0.1.0";
+export const VARIN_HOST_VERSION = "0.1.0";
 
 const readAgentInputContext = (params: Record<string, unknown>): AgentInputContext => {
   if (params.inputContext === undefined) return { source: "disk" };
@@ -87,7 +87,7 @@ const readWorkFocusSelection = (params: Record<string, unknown>): WorkFocusSelec
 
 const optionalWorkFocusRole = (
   params: Record<string, unknown>,
-): import("@piarium/protocol").WorkFocusExecutionRole | undefined => {
+): import("@varin/protocol").WorkFocusExecutionRole | undefined => {
   const value = params.workFocusRole;
   if (value === undefined) return undefined;
   if (value !== "principal" && value !== "branch") {
@@ -545,7 +545,7 @@ export class HostController {
       () => {
         void this.#dispose(false).catch((error) => {
           process.stderr.write(
-            `Piarium host disposal failed: ${error instanceof Error ? error.message : String(error)}\n`,
+            `Varin host disposal failed: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         });
       },
@@ -558,7 +558,7 @@ export class HostController {
         );
         void this.#dispose(true).catch((disposeError) => {
           process.stderr.write(
-            `Piarium host disposal failed: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
+            `Varin host disposal failed: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
           );
         });
       },
@@ -600,7 +600,7 @@ export class HostController {
         kind: "response",
         ok: true,
         result,
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       } as WireEnvelope);
       shutdownAfterResponse = envelope.method === "host.shutdown";
     } catch (error) {
@@ -629,7 +629,7 @@ export class HostController {
       await this.#dispose(true);
     } catch (disposeError) {
       process.stderr.write(
-        `Piarium host disposal failed: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
+        `Varin host disposal failed: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
       );
     }
   }
@@ -652,10 +652,10 @@ export class HostController {
         readString(params, "clientName");
         readString(params, "clientVersion");
         readString(params, "mode");
-        if (!versions.includes(PIARIUM_PROTOCOL_VERSION)) {
+        if (!versions.includes(VARIN_PROTOCOL_VERSION)) {
           throw new HostError(
             "unsupported_version",
-            `Client does not support Piarium protocol v${PIARIUM_PROTOCOL_VERSION}`,
+            `Client does not support Varin protocol v${VARIN_PROTOCOL_VERSION}`,
           );
         }
         this.#sessionHost.setWorkspaceMutationJournalEnabled(
@@ -702,8 +702,8 @@ export class HostController {
         });
         return {
           capabilities: HOST_CAPABILITIES,
-          hostVersion: PIARIUM_HOST_VERSION,
-          protocolVersion: PIARIUM_PROTOCOL_VERSION,
+          hostVersion: VARIN_HOST_VERSION,
+          protocolVersion: VARIN_PROTOCOL_VERSION,
           runtime: this.runtimeDescriptor,
         };
       }

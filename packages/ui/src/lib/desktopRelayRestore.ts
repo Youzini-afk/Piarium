@@ -1,7 +1,7 @@
 import { isElectronShell } from '@/lib/desktop';
 import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeKey, switchRuntimeEndpointSafely } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeKey, switchRuntimeEndpointSafely } from '@varin/application-client';
 
 // Let the post-switch bootstrap traffic settle before the background refresh.
 const CANDIDATE_REFRESH_DELAY_MS = 5_000;

@@ -25,7 +25,7 @@ export function prepareOnnxRuntime() {
   if (installedVersion !== VERSION) {
     throw new Error(`ONNX source recipe is for ${VERSION}, but the installed package is ${installedVersion}.`);
   }
-  const cache = path.join(os.homedir(), '.cache', 'piarium-native', `onnxruntime-${COMMIT}-darwin-x64-r${RECIPE}`);
+  const cache = path.join(os.homedir(), '.cache', 'varin-native', `onnxruntime-${COMMIT}-darwin-x64-r${RECIPE}`);
   const payload = path.join(cache, 'payload');
   const receiptPath = path.join(cache, 'receipt.json');
   let receipt;

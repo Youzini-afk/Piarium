@@ -3,7 +3,7 @@ import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettin
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 import { recordOf, type CliOptions } from './cli-types.js';
 
-const UI_SESSION_COOKIE_NAME = 'piarium_ui_session';
+const UI_SESSION_COOKIE_NAME = 'varin_ui_session';
 
 interface HeadersLike {
   get?(name: string): string | null;
@@ -238,7 +238,7 @@ async function fetchTunnelProvidersFromPort(
     return null;
   }
   try {
-    const response = await fetchImpl(buildLocalUrl(port, '/api/piarium/tunnel/providers'));
+    const response = await fetchImpl(buildLocalUrl(port, '/api/varin/tunnel/providers'));
     if (!response.ok) return null;
     const body = recordOf(await response.json().catch(() => null));
     return Array.isArray(body.providers) ? body.providers : null;

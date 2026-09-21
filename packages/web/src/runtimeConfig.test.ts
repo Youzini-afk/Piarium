@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('@piarium/application-client', () => ({
+vi.mock('@varin/application-client', () => ({
   configureRuntimeUrlResolver: vi.fn(() => ({})),
   getRuntimeApiBaseUrl: vi.fn(() => ''),
   getRuntimeBearerTokenSync: vi.fn(() => ''),
@@ -16,12 +16,12 @@ vi.mock('@piarium/application-client', () => ({
   setRuntimeExtraHeaders: vi.fn(),
   switchRuntimeEndpoint: vi.fn(),
 }));
-vi.mock('@piarium/ui/lib/desktopRelayRestore', () => ({ restoreDesktopRelayRuntime: vi.fn(() => Promise.resolve()) }));
+vi.mock('@varin/ui/lib/desktopRelayRestore', () => ({ restoreDesktopRelayRuntime: vi.fn(() => Promise.resolve()) }));
 vi.mock('./api', () => ({ createWebAPIs: vi.fn() }));
 
-import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/application-client';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/application-client';
-import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
+import { setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
+import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
+import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
 import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
 
 const originalWindow = globalThis.window;
@@ -35,7 +35,7 @@ const installWindow = (value: Record<string, unknown>) => {
 
 const makeWindow = (search = ''): Record<string, unknown> => {
   const value: Record<string, unknown> = {
-    location: { origin: 'piarium-ui://app', search },
+    location: { origin: 'varin-ui://app', search },
     setTimeout: vi.fn(() => 1),
   };
   value.parent = value;
@@ -57,11 +57,11 @@ afterAll(() => {
 describe('readRuntimeBootstrapConfig', () => {
   test('reads the runtime injected into the current window', () => {
     const current = makeWindow();
-    current.__PIARIUM_API_BASE_URL__ = ' https://remote.example.com ';
-    current.__PIARIUM_CLIENT_TOKEN__ = ' remote-token ';
-    current.__PIARIUM_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
-    current.__PIARIUM_RUNTIME_HEADERS__ = { 'x-openchamber-relay': 'relay-value' };
-    current.__PIARIUM_RELAY_HOST_ID__ = ' remote-host ';
+    current.__VARIN_API_BASE_URL__ = ' https://remote.example.com ';
+    current.__VARIN_CLIENT_TOKEN__ = ' remote-token ';
+    current.__VARIN_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
+    current.__VARIN_RUNTIME_HEADERS__ = { 'x-openchamber-relay': 'relay-value' };
+    current.__VARIN_RELAY_HOST_ID__ = ' remote-host ';
     installWindow(current);
 
     expect(readRuntimeBootstrapConfig()).toEqual({
@@ -75,8 +75,8 @@ describe('readRuntimeBootstrapConfig', () => {
 
   test('does not read runtime credentials directly from a parent window', () => {
     const parent = makeWindow();
-    parent.__PIARIUM_API_BASE_URL__ = 'https://remote.example.com';
-    parent.__PIARIUM_CLIENT_TOKEN__ = 'remote-token';
+    parent.__VARIN_API_BASE_URL__ = 'https://remote.example.com';
+    parent.__VARIN_CLIENT_TOKEN__ = 'remote-token';
     const child = makeWindow('?piPanel=session-chat&piSessionId=ses_child');
     child.parent = parent;
     installWindow(child);
@@ -97,7 +97,7 @@ describe('createConfiguredWebAPIs', () => {
     const bootstrap = {
       apiBaseUrl: 'https://remote.example.com',
       clientToken: 'client-token',
-      localOrigin: 'piarium-ui://app',
+      localOrigin: 'varin-ui://app',
       runtimeHeaders: { 'x-runtime': 'value' },
       relayHostId: 'host-1',
     };
@@ -120,7 +120,7 @@ describe('createConfiguredWebAPIs', () => {
       hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
     };
     const bootstrap = {
-      apiBaseUrl: 'piarium-ui://app',
+      apiBaseUrl: 'varin-ui://app',
       clientToken: 'client-token',
       localOrigin: 'http://127.0.0.1:3000',
       relayHostId: 'host-1',

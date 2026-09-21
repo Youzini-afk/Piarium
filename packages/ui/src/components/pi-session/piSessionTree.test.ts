@@ -4,7 +4,7 @@ import type {
   PiSessionMessageEntry,
   PiUserMessage,
   SessionTreeNode,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { projectPiSessionTree } from './piSessionTree';
 
 const user = (id: string, parentId: string | null, text: string): PiSessionMessageEntry => ({

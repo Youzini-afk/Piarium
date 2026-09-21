@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createBashTool } from "../../src/harness/bash-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import type { ShellExecResult } from "@piarium/protocol";
+import type { ShellExecResult } from "@varin/protocol";
 
 function createFakeBridge(result: ShellExecResult): Pick<HostServicesBridge, "request"> {
   return {

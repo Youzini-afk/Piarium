@@ -55,7 +55,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import type { UsageWindow } from '@/types';
-import type { GitHubAuthStatus } from '@piarium/application-client';
+import type { GitHubAuthStatus } from '@varin/application-client';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -67,8 +67,8 @@ import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, startDesktop
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl } from '@varin/application-client';
 import { shouldResetDesktopMainTabToChat } from '@/components/layout/mainTabGuards';
 import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
@@ -740,7 +740,7 @@ export const Header: React.FC<HeaderProps> = ({
       return null;
     }
 
-    const injected = (window as unknown as { __PIARIUM_MACOS_MAJOR__?: unknown }).__PIARIUM_MACOS_MAJOR__;
+    const injected = (window as unknown as { __VARIN_MACOS_MAJOR__?: unknown }).__VARIN_MACOS_MAJOR__;
     if (typeof injected === 'number' && Number.isFinite(injected) && injected > 0) {
       return injected;
     }
@@ -828,7 +828,7 @@ export const Header: React.FC<HeaderProps> = ({
       setCurrentInstanceIsLocal(false);
 
       const cfg = await desktopHostsGet();
-      const localOrigin = window.__PIARIUM_LOCAL_ORIGIN__ || window.location.origin;
+      const localOrigin = window.__VARIN_LOCAL_ORIGIN__ || window.location.origin;
       const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
 
       if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
@@ -868,7 +868,7 @@ export const Header: React.FC<HeaderProps> = ({
     setRemoteUpdateError(null);
     try {
       const params = new URLSearchParams({ appType: 'web' });
-      const response = await runtimeFetch(`/api/piarium/update-check?${params.toString()}`, {
+      const response = await runtimeFetch(`/api/varin/update-check?${params.toString()}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -1081,7 +1081,7 @@ export const Header: React.FC<HeaderProps> = ({
     const untitled = t('sessions.sidebar.session.untitled');
     if (currentSessionSummary) return piSessionTitle(currentSessionSummary, untitled);
     if (!currentSessionId) {
-      return activeProjectLabel ?? 'Piarium';
+      return activeProjectLabel ?? 'Varin';
     }
     return currentSnapshot?.name?.trim() || untitled;
   }, [activeProjectLabel, currentSessionId, currentSessionSummary, currentSnapshot?.name, t]);
@@ -1479,11 +1479,11 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     void syncFullscreenState();
-    window.addEventListener('piarium:window-resized', onResize);
+    window.addEventListener('varin:window-resized', onResize);
 
     return () => {
       disposed = true;
-      window.removeEventListener('piarium:window-resized', onResize);
+      window.removeEventListener('varin:window-resized', onResize);
     };
   }, [isDesktopApp, isMacPlatform]);
 

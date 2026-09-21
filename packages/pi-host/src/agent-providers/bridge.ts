@@ -12,7 +12,7 @@ import type {
   PiAgentProviderDescriptor,
   PiAgentSourceScope,
   PiAgentStatus,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "../errors.js";
 import { toJsonValue } from "../json.js";
 import type {
@@ -21,7 +21,7 @@ import type {
   AgentProviderListResult,
 } from "./types.js";
 
-export const AGENT_PROVIDER_BRIDGE_CHANNEL = "piarium.agent-provider.discover/v1";
+export const AGENT_PROVIDER_BRIDGE_CHANNEL = "varin.agent-provider.discover/v1";
 export const AGENT_PROVIDER_BRIDGE_VERSION = 1 as const;
 
 interface AgentProviderBridgeContext {
@@ -362,8 +362,8 @@ export class AgentProviderBridge {
         const provider = parseBridgeProvider(value);
         if (!provider) {
           diagnostics.push({
-            message: "An extension offered an invalid Piarium agent provider bridge",
-            providerId: "piarium-agent-provider-bridge",
+            message: "An extension offered an invalid Varin agent provider bridge",
+            providerId: "varin-agent-provider-bridge",
             severity: "warning",
           });
           return;
@@ -385,7 +385,7 @@ export class AgentProviderBridge {
     } catch (error) {
       diagnostics.push({
         message: `Agent provider discovery failed: ${error instanceof Error ? error.message : String(error)}`,
-        providerId: "piarium-agent-provider-bridge",
+        providerId: "varin-agent-provider-bridge",
         severity: "error",
       });
     }

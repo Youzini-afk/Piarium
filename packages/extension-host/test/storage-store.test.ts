@@ -7,7 +7,7 @@ import { ExtensionStorageStore } from "../src/index.js";
 
 const directories: string[] = [];
 const temporaryDirectory = async (): Promise<string> => {
-  const directory = await mkdtemp(join(tmpdir(), "piarium-extension-storage-"));
+  const directory = await mkdtemp(join(tmpdir(), "varin-extension-storage-"));
   directories.push(directory);
   return directory;
 };
@@ -79,7 +79,7 @@ test("deleting extension data removes only the exact validated namespace and cle
   await storage.deleteExtensionData(address.extensionId);
   assert.equal((await storage.read(address)).exists, false);
   assert.deepEqual((await storage.read(neighbor)).document.data, { value: "keep" });
-  await assert.rejects(storage.deleteExtensionData("../escape"), /Invalid Piarium extension ID/);
+  await assert.rejects(storage.deleteExtensionData("../escape"), /Invalid Varin extension ID/);
 });
 
 test("prepared writes validate every address before committing the group", async () => {

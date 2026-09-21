@@ -1,9 +1,9 @@
 import {
   createSettingsFileStore,
-  type PiariumSettingsDocument,
+  type VarinSettingsDocument,
   type SettingsFileStore,
   type SettingsFileStoreOptions,
-} from '@piarium/settings-store';
+} from '@varin/settings-store';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
@@ -22,19 +22,19 @@ interface ManagedTunnelTokenUpdate extends ManagedTunnelPreset {
 
 export interface SettingsRuntimeDependencies {
   SETTINGS_FILE_PATH: string;
-  formatSettingsResponse(settings: PiariumSettingsDocument): PiariumSettingsDocument;
+  formatSettingsResponse(settings: VarinSettingsDocument): VarinSettingsDocument;
   fsPromises: NonNullable<SettingsFileStoreOptions['fsPromises']>;
   mergePersistedSettings(
-    current: PiariumSettingsDocument,
-    changes: PiariumSettingsDocument,
-  ): PiariumSettingsDocument;
-  normalizeSettingsPaths(settings: PiariumSettingsDocument): {
+    current: VarinSettingsDocument,
+    changes: VarinSettingsDocument,
+  ): VarinSettingsDocument;
+  normalizeSettingsPaths(settings: VarinSettingsDocument): {
     changed: boolean;
-    settings: PiariumSettingsDocument;
+    settings: VarinSettingsDocument;
   };
   path: NonNullable<SettingsFileStoreOptions['pathModule']>;
   sanitizeProjects?: ((projects: unknown) => ProjectEntry[] | undefined) | undefined;
-  sanitizeSettingsUpdate(settings: unknown): PiariumSettingsDocument;
+  sanitizeSettingsUpdate(settings: unknown): VarinSettingsDocument;
   settingsStore?: SettingsFileStore | undefined;
   syncManagedRemoteTunnelConfigWithPresets(presets: unknown): Promise<void>;
   upsertManagedRemoteTunnelToken(update: ManagedTunnelTokenUpdate): Promise<void>;
@@ -61,7 +61,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   const readSettingsFromDisk = () => settingsStore.read();
   const updateSettingsOnDisk = (
     mutator: Parameters<SettingsFileStore['update']>[0],
-  ): Promise<PiariumSettingsDocument> => settingsStore.update(mutator);
+  ): Promise<VarinSettingsDocument> => settingsStore.update(mutator);
 
   const validateProjectEntries = async (projects: unknown): Promise<ProjectEntry[]> => {
     if (!Array.isArray(projects)) {
@@ -95,10 +95,10 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   };
 
   const applyPersistedChanges = async (
-    current: PiariumSettingsDocument,
-    changes: PiariumSettingsDocument,
+    current: VarinSettingsDocument,
+    changes: VarinSettingsDocument,
     removals: readonly string[],
-  ): Promise<PiariumSettingsDocument> => {
+  ): Promise<VarinSettingsDocument> => {
     // Log field names only — changes can carry credentials (UI password,
     // client tokens, tunnel tokens) that must never reach the log file.
     console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
@@ -185,8 +185,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   };
 
   const persistSettings = async (
-    changes: PiariumSettingsDocument,
-  ): Promise<PiariumSettingsDocument> => {
+    changes: VarinSettingsDocument,
+  ): Promise<VarinSettingsDocument> => {
     const next = await updateSettingsOnDisk((current) => applyPersistedChanges(current, changes, []));
     return formatSettingsResponse(next);
   };
@@ -198,15 +198,15 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
    * document is left untouched.
    */
   const persistSettingsCas = async (
-    changes: PiariumSettingsDocument,
+    changes: VarinSettingsDocument,
     removals: readonly string[],
     expectedRevision: string | undefined,
-    revisionOf: (document: PiariumSettingsDocument) => string,
-  ): Promise<{ conflict: boolean; document: PiariumSettingsDocument; revision: string }> => {
+    revisionOf: (document: VarinSettingsDocument) => string,
+  ): Promise<{ conflict: boolean; document: VarinSettingsDocument; revision: string }> => {
     return settingsStore.transact(async (current): Promise<{
-      document?: PiariumSettingsDocument;
+      document?: VarinSettingsDocument;
       write?: boolean;
-      result: { conflict: boolean; document: PiariumSettingsDocument; revision: string };
+      result: { conflict: boolean; document: VarinSettingsDocument; revision: string };
     }> => {
       const revision = revisionOf(current);
       if (expectedRevision !== undefined && expectedRevision !== revision) {

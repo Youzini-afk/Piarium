@@ -4,7 +4,7 @@ import type { Express } from 'express';
 export interface MagicPromptRouteDependencies {
   fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir' | 'readFile' | 'writeFile'>;
   path: Pick<typeof import('node:path'), 'dirname' | 'join'>;
-  piariumDataDir: string;
+  varinDataDir: string;
 }
 
 export const registerMagicPromptRoutes = (
@@ -14,13 +14,13 @@ export const registerMagicPromptRoutes = (
   const {
     fsPromises,
     path,
-    piariumDataDir,
+    varinDataDir,
   } = dependencies;
 
   const runtime = createMagicPromptRuntime({
     fsPromises,
     path,
-    filePath: path.join(piariumDataDir, 'magic-prompts.json'),
+    filePath: path.join(varinDataDir, 'magic-prompts.json'),
   });
 
   app.get('/api/magic-prompts', async (_req, res) => {

@@ -26,10 +26,10 @@ describe('Google quota OAuth client resolution', () => {
   });
 
   it('keeps Gemini and Antigravity runtime credentials isolated', () => {
-    process.env.PIARIUM_GOOGLE_GEMINI_CLIENT_ID = 'gemini-client-id';
-    process.env.PIARIUM_GOOGLE_GEMINI_CLIENT_SECRET = 'gemini-client-secret';
-    process.env.PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_ID = 'antigravity-client-id';
-    process.env.PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_SECRET = 'antigravity-client-secret';
+    process.env.VARIN_GOOGLE_GEMINI_CLIENT_ID = 'gemini-client-id';
+    process.env.VARIN_GOOGLE_GEMINI_CLIENT_SECRET = 'gemini-client-secret';
+    process.env.VARIN_GOOGLE_ANTIGRAVITY_CLIENT_ID = 'antigravity-client-id';
+    process.env.VARIN_GOOGLE_ANTIGRAVITY_CLIENT_SECRET = 'antigravity-client-secret';
 
     expect(resolveGoogleOAuthClient('gemini')).toEqual({
       clientId: 'gemini-client-id',
@@ -42,7 +42,7 @@ describe('Google quota OAuth client resolution', () => {
   });
 
   it('requires both client fields', () => {
-    process.env.PIARIUM_GOOGLE_GEMINI_CLIENT_ID = 'gemini-client-id';
+    process.env.VARIN_GOOGLE_GEMINI_CLIENT_ID = 'gemini-client-id';
     expect(resolveGoogleOAuthClient('gemini')).toBeNull();
   });
 });

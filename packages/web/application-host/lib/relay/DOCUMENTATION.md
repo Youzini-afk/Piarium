@@ -2,13 +2,13 @@
 
 ## Purpose
 
-The private relay lets a Piarium client (mobile app, browser, or another desktop) reach a user's
-Piarium instance when it is not directly reachable (behind NAT, with no public URL or tunnel). The
+The private relay lets a Varin client (mobile app, browser, or another desktop) reach a user's
+Varin instance when it is not directly reachable (behind NAT, with no public URL or tunnel). The
 instance dials **outbound** to the configured relay; nothing needs to be exposed inbound.
 
 Traffic is **end-to-end encrypted between the two endpoints** (client and host instance). The relay infrastructure forwards opaque ciphertext and cannot read application traffic — it is an untrusted transport, not a trusted middlebox.
 
-This module (`packages/web/application-host/lib/relay/`) is the **host side**: it runs inside the Piarium Web
+This module (`packages/web/application-host/lib/relay/`) is the **host side**: it runs inside the Varin Web
 server, so it works for Electron desktop, headless server, and CLI installs alike. The **client side**
 lives in `packages/ui/src/lib/relay/`. The relay service is deployed separately and only brokers
 connections; the public code repository does not contain or implicitly trust that service.
@@ -19,7 +19,7 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 
 1. **Relay routing (Layer 1)** — outbound WebSocket connections to the relay, connection brokering, and host authentication to the relay. The relay routes each client to the correct host and forwards frames verbatim.
 2. **End-to-end encryption (Layer 2)** — an authenticated encrypted channel established directly between client and host, keyed so the relay cannot participate. Built on standard WebCrypto primitives (ECDH key agreement + AEAD framing). The host's encryption public key is distributed to the client out-of-band via the pairing payload and is the client's trust anchor.
-3. **Tunnel multiplexing (Layer 3)** — because a Piarium client speaks many concurrent HTTP requests,
+3. **Tunnel multiplexing (Layer 3)** — because a Varin client speaks many concurrent HTTP requests,
    event streams (SSE), and WebSockets to one origin, the encrypted channel carries a small
    multiplexing protocol. It frames HTTP request/response bodies and WebSocket sub-streams so the
    whole app works over one encrypted connection.
@@ -27,7 +27,7 @@ Traffic is modeled as three stacked layers. The relay understands only Layer 1; 
 ## Entrypoints and structure
 
 Host side (`packages/web/application-host/lib/relay/`):
-- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/piarium/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/application-host/index.js` only when the user has explicitly enabled the relay. `PIARIUM_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Piarium-owned endpoint before it is presented as a public production service.
+- `service.js` — thin entrypoint: relay config (enabled flag + relay URL), the management routes (`GET/POST /api/varin/relay/{status,enable,disable}`), a `getPairingCandidate()` accessor (the relay transport candidate folded into pairing-v2 links when enabled, consumed by the pairing-session route in `core-routes.js`), and lifecycle wiring. Started from `packages/web/application-host/index.js` only when the user has explicitly enabled the relay. `VARIN_RELAY_URL` (which must use `ws://` or `wss://`) pins an operator-selected endpoint and overrides the stored setting for the host connection, pairing candidate, and status, so paired clients inherit it automatically. The current fallback hostname is legacy deployment infrastructure and must be replaced with a Varin-owned endpoint before it is presented as a public production service.
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
 - `signing-key.js` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
@@ -46,8 +46,8 @@ Relay is not a separate link format: it is one transport candidate inside the un
 
 ## What travels the tunnel
 
-Everything a client normally sends to the single Piarium origin:
-- **HTTP** — Piarium APIs under `/api/*`, plus `/auth/*` and `/health`.
+Everything a client normally sends to the single Varin origin:
+- **HTTP** — Varin APIs under `/api/*`, plus `/auth/*` and `/health`.
 - **SSE** — long-lived streamed responses (the event stream and notifications). These are just HTTP responses whose body streams; the tunnel needs no special SSE handling.
 - **WebSocket** — the Pi runtime, terminal I/O, and dictation endpoints that use a real socket.
 
@@ -55,7 +55,7 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 
 ## Authentication model
 
-- The tunnel is **transport only**. The Piarium server still authenticates every tunneled request
+- The tunnel is **transport only**. The Varin server still authenticates every tunneled request
   exactly as it authenticates a direct remote client. The relay path grants reachability, not
   authorization.
 - Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter. This asymmetry is important when adding new WebSocket features.

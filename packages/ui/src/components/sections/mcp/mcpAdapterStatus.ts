@@ -1,4 +1,4 @@
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 
 export const MCP_ADAPTER_STATUS_CHANNEL = 'pi-mcp-adapter/status/v1';
 

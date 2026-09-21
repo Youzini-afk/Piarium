@@ -7,13 +7,13 @@ import {
 
 describe('AppImage child environment', () => {
   it('removes ARGV0 without changing other child variables', () => {
-    const env = { ARGV0: '/tmp/Piarium.AppImage', PATH: '/usr/bin' };
+    const env = { ARGV0: '/tmp/Varin.AppImage', PATH: '/usr/bin' };
     expect(stripAppImageArgv0Leak(env)).toEqual({ PATH: '/usr/bin' });
   });
 
   it('clears ARGV0 from the current process environment', () => {
     const previous = process.env.ARGV0;
-    process.env.ARGV0 = '/tmp/Piarium.AppImage';
+    process.env.ARGV0 = '/tmp/Varin.AppImage';
     try {
       clearAppImageArgv0FromProcessEnv();
       expect(process.env.ARGV0).toBeUndefined();

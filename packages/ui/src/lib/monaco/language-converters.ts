@@ -1,47 +1,47 @@
 import type { editor, IMarkdownString, IPosition, IRange, languages, Uri } from 'monaco-editor/editor';
 
 import type {
-  PiariumLanguageColorInformation,
-  PiariumLanguageColorPresentation,
-  PiariumLanguageCompletionItem,
-  PiariumLanguageDiagnostic,
-  PiariumLanguageDocumentHighlight,
-  PiariumLanguageDocumentLink,
-  PiariumLanguageFoldingRange,
-  PiariumLanguageHover,
-  PiariumLanguageInlayHint,
-  PiariumLanguageLocation,
-  PiariumLanguageLocationLink,
-  PiariumLanguageMarkupContent,
-  PiariumLanguageRange,
-  PiariumLanguageSelectionRange,
-  PiariumLanguageSemanticTokens,
-  PiariumLanguageSignatureHelp,
-  PiariumLanguageSymbol,
-  PiariumLanguageTextEdit,
-  PiariumResourceReference,
-} from '@piarium/application-client';
+  VarinLanguageColorInformation,
+  VarinLanguageColorPresentation,
+  VarinLanguageCompletionItem,
+  VarinLanguageDiagnostic,
+  VarinLanguageDocumentHighlight,
+  VarinLanguageDocumentLink,
+  VarinLanguageFoldingRange,
+  VarinLanguageHover,
+  VarinLanguageInlayHint,
+  VarinLanguageLocation,
+  VarinLanguageLocationLink,
+  VarinLanguageMarkupContent,
+  VarinLanguageRange,
+  VarinLanguageSelectionRange,
+  VarinLanguageSemanticTokens,
+  VarinLanguageSignatureHelp,
+  VarinLanguageSymbol,
+  VarinLanguageTextEdit,
+  VarinResourceReference,
+} from '@varin/application-client';
 import type { MonacoRuntime } from './runtime';
 
-export const PIARIUM_RESOURCE_URI_SCHEME = 'piarium-resource';
+export const VARIN_RESOURCE_URI_SCHEME = 'varin-resource';
 
 export type MonacoResolvableCompletionItem = languages.CompletionItem & {
-  __piariumResolveToken?: string;
-  __piariumContext?: PiariumResolvableContext;
+  __varinResolveToken?: string;
+  __varinContext?: VarinResolvableContext;
 };
 
 export type MonacoResolvableInlayHint = languages.InlayHint & {
-  __piariumResolveToken?: string;
-  __piariumContext?: PiariumResolvableContext;
+  __varinResolveToken?: string;
+  __varinContext?: VarinResolvableContext;
 };
 
 export type MonacoResolvableLink = languages.ILink & {
-  __piariumResolveToken?: string;
-  __piariumContext?: PiariumResolvableContext;
+  __varinResolveToken?: string;
+  __varinContext?: VarinResolvableContext;
 };
 
-export type PiariumResolvableContext = {
-  resource: PiariumResourceReference;
+export type VarinResolvableContext = {
+  resource: VarinResourceReference;
   languageId: string;
   documentVersion: number;
   providerId: string;
@@ -59,7 +59,7 @@ const SEMANTIC_TOKEN_MODIFIERS = [
   'modification', 'documentation', 'defaultLibrary',
 ];
 
-export const PIARIUM_SEMANTIC_TOKENS_LEGEND: languages.SemanticTokensLegend = {
+export const VARIN_SEMANTIC_TOKENS_LEGEND: languages.SemanticTokensLegend = {
   tokenTypes: SEMANTIC_TOKEN_TYPES,
   tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
 };
@@ -71,7 +71,7 @@ export const toMonacoPosition = (position: { line: number; character: number }):
   column: positive(position.character) + 1,
 });
 
-export const toMonacoRange = (range: PiariumLanguageRange): IRange => ({
+export const toMonacoRange = (range: VarinLanguageRange): IRange => ({
   startLineNumber: positive(range.start.line) + 1,
   startColumn: positive(range.start.character) + 1,
   endLineNumber: positive(range.end.line) + 1,
@@ -83,22 +83,22 @@ export const fromMonacoPosition = (position: IPosition) => ({
   character: Math.max(0, position.column - 1),
 });
 
-export const fromMonacoRange = (range: IRange): PiariumLanguageRange => ({
+export const fromMonacoRange = (range: IRange): VarinLanguageRange => ({
   start: { line: Math.max(0, range.startLineNumber - 1), character: Math.max(0, range.startColumn - 1) },
   end: { line: Math.max(0, range.endLineNumber - 1), character: Math.max(0, range.endColumn - 1) },
 });
 
 export const toMonacoResourceUri = (
   monaco: MonacoRuntime,
-  resource: PiariumResourceReference,
+  resource: VarinResourceReference,
 ): Uri => monaco.Uri.from({
-  scheme: PIARIUM_RESOURCE_URI_SCHEME,
+  scheme: VARIN_RESOURCE_URI_SCHEME,
   authority: resource.workspaceId,
   path: `/${resource.resourceId}`,
 });
 
-export const parseMonacoResourceUri = (uri: Uri): PiariumResourceReference | null => {
-  if (uri.scheme !== PIARIUM_RESOURCE_URI_SCHEME || !uri.authority) return null;
+export const parseMonacoResourceUri = (uri: Uri): VarinResourceReference | null => {
+  if (uri.scheme !== VARIN_RESOURCE_URI_SCHEME || !uri.authority) return null;
   const resourceId = uri.path.replace(/^\/+/, '').replace(/\\/g, '/');
   if (!resourceId) return null;
   const segments = resourceId.split('/');
@@ -113,7 +113,7 @@ const escapeMarkdown = (value: string): string => MARKDOWN_CONTROL_CHARACTERS.re
   value,
 );
 
-export const toMonacoMarkdown = (content: PiariumLanguageMarkupContent): IMarkdownString => ({
+export const toMonacoMarkdown = (content: VarinLanguageMarkupContent): IMarkdownString => ({
   value: content.kind === 'plaintext' ? escapeMarkdown(content.value) : content.value,
   isTrusted: false,
   supportHtml: false,
@@ -151,7 +151,7 @@ const completionKind = (monaco: MonacoRuntime, kind?: number): languages.Complet
 };
 
 const completionRange = (
-  item: PiariumLanguageCompletionItem,
+  item: VarinLanguageCompletionItem,
   fallbackRange: IRange,
 ): { insertText: string; range: IRange | languages.CompletionItemRanges } => {
   const textEdit = item.textEdit;
@@ -169,7 +169,7 @@ const completionRange = (
 
 export const toMonacoCompletionItem = (
   monaco: MonacoRuntime,
-  item: PiariumLanguageCompletionItem,
+  item: VarinLanguageCompletionItem,
   fallbackRange: IRange,
 ): MonacoResolvableCompletionItem => {
   const edit = completionRange(item, fallbackRange);
@@ -193,11 +193,11 @@ export const toMonacoCompletionItem = (
     ...(item.additionalTextEdits?.length
       ? { additionalTextEdits: item.additionalTextEdits.map(toMonacoTextEdit) }
       : {}),
-    ...(item.resolveToken ? { __piariumResolveToken: item.resolveToken } : {}),
+    ...(item.resolveToken ? { __varinResolveToken: item.resolveToken } : {}),
   };
 };
 
-export const toMonacoHover = (hover: PiariumLanguageHover | null): languages.Hover | null => (
+export const toMonacoHover = (hover: VarinLanguageHover | null): languages.Hover | null => (
   hover && hover.contents.length > 0
     ? {
         contents: hover.contents.map(toMonacoMarkdown),
@@ -207,7 +207,7 @@ export const toMonacoHover = (hover: PiariumLanguageHover | null): languages.Hov
 );
 
 export const toMonacoSignatureHelp = (
-  signature: PiariumLanguageSignatureHelp | null,
+  signature: VarinLanguageSignatureHelp | null,
 ): languages.SignatureHelpResult | null => {
   if (!signature) return null;
   return {
@@ -230,7 +230,7 @@ export const toMonacoSignatureHelp = (
 
 export const toMonacoLocationLink = (
   monaco: MonacoRuntime,
-  location: PiariumLanguageLocationLink,
+  location: VarinLanguageLocationLink,
 ): languages.LocationLink => ({
   uri: toMonacoResourceUri(monaco, location.resource),
   range: toMonacoRange(location.targetRange),
@@ -240,7 +240,7 @@ export const toMonacoLocationLink = (
 
 export const toMonacoLocation = (
   monaco: MonacoRuntime,
-  location: PiariumLanguageLocation,
+  location: VarinLanguageLocation,
 ): languages.Location => ({
   uri: toMonacoResourceUri(monaco, location.resource),
   range: toMonacoRange(location.range),
@@ -280,7 +280,7 @@ const symbolKind = (monaco: MonacoRuntime, kind: number): languages.SymbolKind =
 
 export const toMonacoDocumentSymbol = (
   monaco: MonacoRuntime,
-  symbol: PiariumLanguageSymbol,
+  symbol: VarinLanguageSymbol,
 ): languages.DocumentSymbol => ({
   name: symbol.name,
   detail: symbol.detail ?? '',
@@ -294,12 +294,12 @@ export const toMonacoDocumentSymbol = (
     : {}),
 });
 
-export const toMonacoTextEdit = (edit: PiariumLanguageTextEdit): languages.TextEdit => ({
+export const toMonacoTextEdit = (edit: VarinLanguageTextEdit): languages.TextEdit => ({
   range: toMonacoRange(edit.range),
   text: edit.newText,
 });
 
-const remapSemanticData = (tokens: PiariumLanguageSemanticTokens): Uint32Array => {
+const remapSemanticData = (tokens: VarinLanguageSemanticTokens): Uint32Array => {
   const output: number[] = [];
   for (let index = 0; index + 4 < tokens.data.length; index += 5) {
     const serverType = tokens.legend.tokenTypes[tokens.data[index + 3]];
@@ -324,14 +324,14 @@ const remapSemanticData = (tokens: PiariumLanguageSemanticTokens): Uint32Array =
 };
 
 export const toMonacoSemanticTokens = (
-  tokens: PiariumLanguageSemanticTokens | null,
+  tokens: VarinLanguageSemanticTokens | null,
 ): languages.SemanticTokens | null => tokens
   ? { data: remapSemanticData(tokens), ...(tokens.resultId ? { resultId: tokens.resultId } : {}) }
   : null;
 
 export const toMonacoInlayHint = (
   monaco: MonacoRuntime,
-  hint: PiariumLanguageInlayHint,
+  hint: VarinLanguageInlayHint,
 ): MonacoResolvableInlayHint => ({
   position: toMonacoPosition(hint.position),
   label: typeof hint.label === 'string'
@@ -350,12 +350,12 @@ export const toMonacoInlayHint = (
   ...(hint.textEdits?.length ? { textEdits: hint.textEdits.map(toMonacoTextEdit) } : {}),
   ...(hint.paddingLeft ? { paddingLeft: true } : {}),
   ...(hint.paddingRight ? { paddingRight: true } : {}),
-  ...(hint.resolveToken ? { __piariumResolveToken: hint.resolveToken } : {}),
+  ...(hint.resolveToken ? { __varinResolveToken: hint.resolveToken } : {}),
 });
 
 export const toMonacoDocumentHighlight = (
   monaco: MonacoRuntime,
-  highlight: PiariumLanguageDocumentHighlight,
+  highlight: VarinLanguageDocumentHighlight,
 ): languages.DocumentHighlight => ({
   range: toMonacoRange(highlight.range),
   kind: highlight.kind === 'read'
@@ -367,7 +367,7 @@ export const toMonacoDocumentHighlight = (
 
 export const toMonacoFoldingRange = (
   monaco: MonacoRuntime,
-  range: PiariumLanguageFoldingRange,
+  range: VarinLanguageFoldingRange,
 ): languages.FoldingRange => ({
   start: range.startLine + 1,
   end: range.endLine + 1,
@@ -380,9 +380,9 @@ export const toMonacoFoldingRange = (
         : {}),
 });
 
-export const toMonacoSelectionRanges = (range: PiariumLanguageSelectionRange): languages.SelectionRange[] => {
+export const toMonacoSelectionRanges = (range: VarinLanguageSelectionRange): languages.SelectionRange[] => {
   const values: languages.SelectionRange[] = [];
-  let current: PiariumLanguageSelectionRange | undefined = range;
+  let current: VarinLanguageSelectionRange | undefined = range;
   while (current) {
     values.push({ range: toMonacoRange(current.range) });
     current = current.parent;
@@ -392,7 +392,7 @@ export const toMonacoSelectionRanges = (range: PiariumLanguageSelectionRange): l
 
 const documentLinkUrl = (
   monaco: MonacoRuntime,
-  link: PiariumLanguageDocumentLink,
+  link: VarinLanguageDocumentLink,
 ): Uri | string | undefined => {
   if (!link.target) return undefined;
   if (link.target.kind === 'resource') return toMonacoResourceUri(monaco, link.target.resource);
@@ -401,23 +401,23 @@ const documentLinkUrl = (
 
 export const toMonacoDocumentLink = (
   monaco: MonacoRuntime,
-  link: PiariumLanguageDocumentLink,
+  link: VarinLanguageDocumentLink,
 ): MonacoResolvableLink => ({
   range: toMonacoRange(link.range),
   ...(documentLinkUrl(monaco, link) ? { url: documentLinkUrl(monaco, link) } : {}),
   ...(link.tooltip ? { tooltip: link.tooltip } : {}),
-  ...(link.resolveToken ? { __piariumResolveToken: link.resolveToken } : {}),
+  ...(link.resolveToken ? { __varinResolveToken: link.resolveToken } : {}),
 });
 
 export const toMonacoColorInformation = (
-  value: PiariumLanguageColorInformation,
+  value: VarinLanguageColorInformation,
 ): languages.IColorInformation => ({
   range: toMonacoRange(value.range),
   color: value.color,
 });
 
 export const toMonacoColorPresentation = (
-  value: PiariumLanguageColorPresentation,
+  value: VarinLanguageColorPresentation,
 ): languages.IColorPresentation => ({
   label: value.label,
   ...(value.textEdit ? { textEdit: toMonacoTextEdit(value.textEdit) } : {}),
@@ -427,12 +427,12 @@ export const toMonacoColorPresentation = (
 });
 
 export const markerOwner = (providerId: string, generation: number): string => (
-  `piarium-language:${encodeURIComponent(providerId)}:${generation}`
+  `varin-language:${encodeURIComponent(providerId)}:${generation}`
 );
 
 export const toMonacoMarker = (
   monaco: MonacoRuntime,
-  diagnostic: PiariumLanguageDiagnostic,
+  diagnostic: VarinLanguageDiagnostic,
 ): editor.IMarkerData => {
   const range = toMonacoRange(diagnostic.range);
   const tags: NonNullable<editor.IMarkerData['tags']> = [];

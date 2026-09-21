@@ -8,7 +8,7 @@ describe('Pi composer submission', () => {
     expect(rendered).toEqual({ text: '/skill:workspace-check' });
   });
 
-  test('renders Piarium magic commands into visible text and hidden instructions', async () => {
+  test('renders Varin magic commands into visible text and hidden instructions', async () => {
     const calls: Array<{ id: MagicPromptId; variables: Record<string, string> }> = [];
     const rendered = await renderPiComposerSubmission('/summary rate limits', async (id, variables = {}) => {
       calls.push({ id, variables });

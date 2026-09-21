@@ -14,12 +14,12 @@ import { createOnThreadDequeued } from "../../../web/application-host/lib/harnes
 import { createHarnessServiceHost, type HarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
-import type { HostEventData } from "@piarium/protocol";
+import type { HostEventData } from "@varin/protocol";
 
 /** Real Pi owns the source compaction and receives the child model input. */
 describe("inherit — Pi capture through Host dispatch and dequeue", () => {
   it("retains pre-compaction kept input, exact tool text and images without reading future parent state", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-inherit-acceptance-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-inherit-acceptance-"));
     const agentDir = join(root, "agent");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });

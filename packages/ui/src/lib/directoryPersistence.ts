@@ -1,10 +1,10 @@
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import {
   resolveRuntimeWorkspaceRoot,
   resolveWorkspaceAwareRestoredDirectory,
 } from '@/lib/defaultDirectory';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
@@ -72,11 +72,11 @@ export const waitForRuntimeSettingsSync = (
     if (settled) return;
     settled = true;
     windowObject.clearTimeout(timeout);
-    windowObject.removeEventListener('piarium:settings-synced', handleSettingsSynced);
+    windowObject.removeEventListener('varin:settings-synced', handleSettingsSynced);
     resolve(synced);
   };
   const handleSettingsSynced = () => finish(true);
-  windowObject.addEventListener('piarium:settings-synced', handleSettingsSynced, { once: true });
+  windowObject.addEventListener('varin:settings-synced', handleSettingsSynced, { once: true });
   const timeout = windowObject.setTimeout(() => finish(false), timeoutMs);
 });
 

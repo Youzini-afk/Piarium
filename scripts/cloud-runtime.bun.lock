@@ -3,92 +3,92 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "piarium-cloud-runtime",
+      "name": "varin-cloud-runtime",
     },
     "packages/application-client": {
-      "name": "@piarium/application-client",
+      "name": "@varin/application-client",
       "version": "0.1.0",
       "dependencies": {
-        "@piarium/extension-contract": "0.2.0",
-        "@piarium/protocol": "0.1.0",
+        "@varin/extension-contract": "0.2.0",
+        "@varin/protocol": "0.1.0",
       },
     },
     "packages/extension-builtins": {
-      "name": "@piarium/extension-builtins",
+      "name": "@varin/extension-builtins",
       "version": "0.1.0",
       "dependencies": {
-        "@piarium/extension-contract": "workspace:*",
+        "@varin/extension-contract": "workspace:*",
       },
     },
     "packages/extension-contract": {
-      "name": "@piarium/extension-contract",
+      "name": "@varin/extension-contract",
       "version": "0.2.0",
       "dependencies": {
         "semver": "^7.8.5",
       },
     },
     "packages/extension-host": {
-      "name": "@piarium/extension-host",
+      "name": "@varin/extension-host",
       "version": "0.1.0",
       "dependencies": {
-        "@piarium/extension-builtins": "workspace:*",
-        "@piarium/extension-contract": "workspace:*",
+        "@varin/extension-builtins": "workspace:*",
+        "@varin/extension-contract": "workspace:*",
         "esbuild": "^0.28.1",
         "tar": "^7.5.22",
       },
     },
     "packages/pi-host": {
-      "name": "@piarium/pi-host",
+      "name": "@varin/pi-host",
       "version": "0.1.0",
       "bin": {
-        "piarium-host": "./dist/host-bootstrap.js",
+        "varin-host": "./dist/host-bootstrap.js",
       },
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.85.1",
         "@earendil-works/pi-ai": "0.85.1",
         "@earendil-works/pi-coding-agent": "0.85.1",
-        "@piarium/protocol": "0.1.0",
+        "@varin/protocol": "0.1.0",
         "jsonc-parser": "^3.3.1",
         "proper-lockfile": "4.1.2",
         "typebox": "1.3.7",
       },
     },
     "packages/protocol": {
-      "name": "@piarium/protocol",
+      "name": "@varin/protocol",
       "version": "0.1.0",
     },
     "packages/runtime-broker": {
-      "name": "@piarium/runtime-broker",
+      "name": "@varin/runtime-broker",
       "version": "0.1.0",
       "dependencies": {
-        "@piarium/pi-host": "0.1.0",
-        "@piarium/protocol": "0.1.0",
-        "@piarium/settings-store": "0.7.0",
+        "@varin/pi-host": "0.1.0",
+        "@varin/protocol": "0.1.0",
+        "@varin/settings-store": "0.7.0",
       },
     },
     "packages/settings-store": {
-      "name": "@piarium/settings-store",
+      "name": "@varin/settings-store",
       "version": "0.7.0",
     },
     "packages/web": {
-      "name": "@piarium/web",
+      "name": "@varin/web",
       "version": "0.9.12",
       "bin": {
-        "piarium": "./bin/cli.js",
+        "varin": "./bin/cli.js",
       },
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@konbakuyomu/smart-search": "^0.1.17",
         "@mozilla/readability": "0.6.0",
         "@octokit/rest": "^22.0.1",
-        "@piarium/application-client": "workspace:*",
-        "@piarium/extension-builtins": "workspace:*",
-        "@piarium/extension-contract": "workspace:*",
-        "@piarium/extension-host": "workspace:*",
-        "@piarium/protocol": "workspace:*",
-        "@piarium/runtime-broker": "workspace:*",
-        "@piarium/settings-store": "workspace:*",
         "@simplewebauthn/server": "13.3.2",
+        "@varin/application-client": "workspace:*",
+        "@varin/extension-builtins": "workspace:*",
+        "@varin/extension-contract": "workspace:*",
+        "@varin/extension-host": "workspace:*",
+        "@varin/protocol": "workspace:*",
+        "@varin/runtime-broker": "workspace:*",
+        "@varin/settings-store": "workspace:*",
         "adm-zip": "^0.6.1",
         "compression": "^1.8.1",
         "cron-parser": "^4.9.0",
@@ -373,24 +373,6 @@
 
     "@peculiar/x509": ["@peculiar/x509@1.14.3", "", { "dependencies": { "@peculiar/asn1-cms": "^2.6.0", "@peculiar/asn1-csr": "^2.6.0", "@peculiar/asn1-ecc": "^2.6.0", "@peculiar/asn1-pkcs9": "^2.6.0", "@peculiar/asn1-rsa": "^2.6.0", "@peculiar/asn1-schema": "^2.6.0", "@peculiar/asn1-x509": "^2.6.0", "pvtsutils": "^1.3.6", "reflect-metadata": "^0.2.2", "tslib": "^2.8.1", "tsyringe": "^4.10.0" } }, "sha512-C2Xj8FZ0uHWeCXXqX5B4/gVFQmtSkiuOolzAgutjTfseNOHT3pUjljDZsTSxXFGgio54bCzVFqmEOUrIVk8RDA=="],
 
-    "@piarium/application-client": ["@piarium/application-client@workspace:packages/application-client"],
-
-    "@piarium/extension-builtins": ["@piarium/extension-builtins@workspace:packages/extension-builtins"],
-
-    "@piarium/extension-contract": ["@piarium/extension-contract@workspace:packages/extension-contract"],
-
-    "@piarium/extension-host": ["@piarium/extension-host@workspace:packages/extension-host"],
-
-    "@piarium/pi-host": ["@piarium/pi-host@workspace:packages/pi-host"],
-
-    "@piarium/protocol": ["@piarium/protocol@workspace:packages/protocol"],
-
-    "@piarium/runtime-broker": ["@piarium/runtime-broker@workspace:packages/runtime-broker"],
-
-    "@piarium/settings-store": ["@piarium/settings-store@workspace:packages/settings-store"],
-
-    "@piarium/web": ["@piarium/web@workspace:packages/web"],
-
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
     "@protobufjs/base64": ["@protobufjs/base64@1.1.2", "", {}, "sha512-AZkcAA5vnN/v4PDqKyMR5lx7hZttPDgClv83E//FMNhR2TMcLUhfRUBHCmSl0oi9zMgDDqRUJkSxO3wm85+XLg=="],
@@ -442,6 +424,24 @@
     "@types/node-fetch": ["@types/node-fetch@2.6.13", "", { "dependencies": { "@types/node": "*", "form-data": "^4.0.4" } }, "sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw=="],
 
     "@types/retry": ["@types/retry@0.12.0", "", {}, "sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA=="],
+
+    "@varin/application-client": ["@varin/application-client@workspace:packages/application-client"],
+
+    "@varin/extension-builtins": ["@varin/extension-builtins@workspace:packages/extension-builtins"],
+
+    "@varin/extension-contract": ["@varin/extension-contract@workspace:packages/extension-contract"],
+
+    "@varin/extension-host": ["@varin/extension-host@workspace:packages/extension-host"],
+
+    "@varin/pi-host": ["@varin/pi-host@workspace:packages/pi-host"],
+
+    "@varin/protocol": ["@varin/protocol@workspace:packages/protocol"],
+
+    "@varin/runtime-broker": ["@varin/runtime-broker@workspace:packages/runtime-broker"],
+
+    "@varin/settings-store": ["@varin/settings-store@workspace:packages/settings-store"],
+
+    "@varin/web": ["@varin/web@workspace:packages/web"],
 
     "abort-controller": ["abort-controller@3.0.0", "", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 

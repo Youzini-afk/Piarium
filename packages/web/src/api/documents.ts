@@ -1,31 +1,31 @@
 import type {
   DocumentsAPI,
-  PiariumDirtyBufferPublication,
-  PiariumDocumentDeleteRequest,
-  PiariumDocumentDeleteResult,
-  PiariumDocumentWatchEvent,
-  PiariumDocumentMoveRequest,
-  PiariumDocumentMoveResult,
-  PiariumDocumentReadResult,
-  PiariumDocumentRecoveryJournalSummary,
-  PiariumDocumentRecoveryReadResult,
-  PiariumDocumentRecoveryWriteRequest,
-  PiariumDocumentRecoveryWriteResult,
-  PiariumDocumentWriteRequest,
-  PiariumDocumentWriteResult,
-  PiariumResourceReference,
-  PiariumWorkspaceFileEvent,
-  PiariumWorkspaceIdentity,
+  VarinDirtyBufferPublication,
+  VarinDocumentDeleteRequest,
+  VarinDocumentDeleteResult,
+  VarinDocumentWatchEvent,
+  VarinDocumentMoveRequest,
+  VarinDocumentMoveResult,
+  VarinDocumentReadResult,
+  VarinDocumentRecoveryJournalSummary,
+  VarinDocumentRecoveryReadResult,
+  VarinDocumentRecoveryWriteRequest,
+  VarinDocumentRecoveryWriteResult,
+  VarinDocumentWriteRequest,
+  VarinDocumentWriteResult,
+  VarinResourceReference,
+  VarinWorkspaceFileEvent,
+  VarinWorkspaceIdentity,
   Subscription,
-} from '@piarium/application-client';
-import type { AgentInputContext } from '@piarium/protocol';
-import { DocumentsError, parseDocumentsFailureReason } from '@piarium/application-client';
-import { createDocumentWatchEventTracker } from '@piarium/ui/lib/documents/watch-events';
-import { runtimeFetch } from '@piarium/application-client';
+} from '@varin/application-client';
+import type { AgentInputContext } from '@varin/protocol';
+import { DocumentsError, parseDocumentsFailureReason } from '@varin/application-client';
+import { createDocumentWatchEventTracker } from '@varin/ui/lib/documents/watch-events';
+import { runtimeFetch } from '@varin/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {
@@ -54,13 +54,13 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
   return response.json();
 };
 
-const isResource = (value: unknown): value is PiariumResourceReference => {
+const isResource = (value: unknown): value is VarinResourceReference => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.workspaceId === 'string' && typeof candidate.resourceId === 'string';
 };
 
-const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
+const parseWorkspaceFileEvent = (value: unknown): VarinWorkspaceFileEvent => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new DocumentsError('Document watch returned an invalid event', { reason: 'failed' });
   }
@@ -81,7 +81,7 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
     if (!['overflow', 'reconnected', 'authority-changed', 'gap'].includes(String(event.reason))) {
       throw new DocumentsError('Document watch returned an invalid reset event', { reason: 'failed' });
     }
-    return event as PiariumWorkspaceFileEvent;
+    return event as VarinWorkspaceFileEvent;
   }
   if (!isResource(event.resource)) {
     throw new DocumentsError('Document watch returned an invalid resource event', { reason: 'failed' });
@@ -93,15 +93,15 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
     if (!isResource(event.from)) {
       throw new DocumentsError('Document watch returned an invalid move event', { reason: 'failed' });
     }
-    return event as PiariumWorkspaceFileEvent;
+    return event as VarinWorkspaceFileEvent;
   }
   if (!['created', 'changed', 'deleted'].includes(event.kind)) {
     throw new DocumentsError('Document watch returned an unknown event', { reason: 'failed' });
   }
-  return event as PiariumWorkspaceFileEvent;
+  return event as VarinWorkspaceFileEvent;
 };
 
-export const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEvent => {
+export const parseDocumentWatchEvent = (value: unknown): VarinDocumentWatchEvent => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
     if (event.kind === 'surface-operation') {
@@ -112,7 +112,7 @@ export const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEve
         || Object.hasOwn(event, 'content') || Object.hasOwn(event, 'targets')) {
         throw new DocumentsError('Document watch returned an invalid surface operation', { reason: 'failed' });
       }
-      return event as PiariumDocumentWatchEvent;
+      return event as VarinDocumentWatchEvent;
     }
     if (event.kind === 'dirty-state-barrier') {
       if (!['acquire', 'release'].includes(String(event.action))
@@ -122,7 +122,7 @@ export const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEve
         || !Array.isArray(event.paths) || event.paths.some((entry) => typeof entry !== 'string' || !entry)) {
         throw new DocumentsError('Document watch returned an invalid dirty-state barrier', { reason: 'failed' });
       }
-      return event as PiariumDocumentWatchEvent;
+      return event as VarinDocumentWatchEvent;
     }
   }
   return parseWorkspaceFileEvent(value);
@@ -142,7 +142,7 @@ const waitForReconnect = (signal: AbortSignal, delayMs: number): Promise<void> =
 
 const readSseEvents = async (
   response: Response,
-  listener: (event: PiariumDocumentWatchEvent) => void,
+  listener: (event: VarinDocumentWatchEvent) => void,
   signal: AbortSignal,
 ): Promise<void> => {
   const reader = response.body?.getReader();
@@ -175,13 +175,13 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   releaseAgentInputSnapshot: (request) => postJson('/api/documents/agent-input/release', request) as Promise<{ released: boolean }>,
   readSurfaceOperation: (request) => postJson('/api/documents/surface-operation/read', request) as ReturnType<NonNullable<DocumentsAPI['readSurfaceOperation']>>,
   completeSurfaceOperation: (request) => postJson('/api/documents/surface-operation/complete', request) as ReturnType<NonNullable<DocumentsAPI['completeSurfaceOperation']>>,
-  resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<PiariumWorkspaceIdentity>,
-  read: (resource: PiariumResourceReference) => postJson('/api/documents/read', { resource }) as Promise<PiariumDocumentReadResult>,
-  write: (request: PiariumDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<PiariumDocumentWriteResult>,
-  move: (request: PiariumDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<PiariumDocumentMoveResult>,
-  publishDirtyBuffers: (request) => postJson('/api/documents/dirty/publish', request) as Promise<PiariumDirtyBufferPublication>,
-  delete: (request: PiariumDocumentDeleteRequest) => postJson('/api/documents/delete', request) as Promise<PiariumDocumentDeleteResult>,
-  watch(workspaceId: string, listener: (event: PiariumDocumentWatchEvent) => void, options): Subscription {
+  resolveWorkspace: (input) => postJson('/api/documents/workspace/resolve', input) as Promise<VarinWorkspaceIdentity>,
+  read: (resource: VarinResourceReference) => postJson('/api/documents/read', { resource }) as Promise<VarinDocumentReadResult>,
+  write: (request: VarinDocumentWriteRequest) => postJson('/api/documents/write', request) as Promise<VarinDocumentWriteResult>,
+  move: (request: VarinDocumentMoveRequest) => postJson('/api/documents/move', request) as Promise<VarinDocumentMoveResult>,
+  publishDirtyBuffers: (request) => postJson('/api/documents/dirty/publish', request) as Promise<VarinDirtyBufferPublication>,
+  delete: (request: VarinDocumentDeleteRequest) => postJson('/api/documents/delete', request) as Promise<VarinDocumentDeleteResult>,
+  watch(workspaceId: string, listener: (event: VarinDocumentWatchEvent) => void, options): Subscription {
     const tracker = createDocumentWatchEventTracker(listener);
     const generation = getRuntimeEndpointGeneration();
     const controller = new AbortController();
@@ -253,15 +253,15 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
     };
   },
   listRecoveryJournals: async (request) => {
-    const payload = await postJson('/api/documents/recovery/list', request) as { journals?: PiariumDocumentRecoveryJournalSummary[] };
+    const payload = await postJson('/api/documents/recovery/list', request) as { journals?: VarinDocumentRecoveryJournalSummary[] };
     if (!Array.isArray(payload.journals)) {
       throw new DocumentsError('Document recovery list returned an invalid response', { reason: 'failed' });
     }
     return payload.journals;
   },
-  readRecoveryJournal: (journalId) => postJson('/api/documents/recovery/read', { journalId }) as Promise<PiariumDocumentRecoveryReadResult>,
-  writeRecoveryJournal: (request: PiariumDocumentRecoveryWriteRequest) => (
-    postJson('/api/documents/recovery/write', request) as Promise<PiariumDocumentRecoveryWriteResult>
+  readRecoveryJournal: (journalId) => postJson('/api/documents/recovery/read', { journalId }) as Promise<VarinDocumentRecoveryReadResult>,
+  writeRecoveryJournal: (request: VarinDocumentRecoveryWriteRequest) => (
+    postJson('/api/documents/recovery/write', request) as Promise<VarinDocumentRecoveryWriteResult>
   ),
   deleteRecoveryJournal: (request) => postJson('/api/documents/recovery/delete', request) as Promise<Awaited<ReturnType<DocumentsAPI['deleteRecoveryJournal']>>>,
 });

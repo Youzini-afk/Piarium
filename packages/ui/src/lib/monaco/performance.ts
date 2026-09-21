@@ -7,5 +7,5 @@ type MonacoPerformanceMark =
 
 export const markMonacoPerformance = (name: MonacoPerformanceMark): void => {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
-  performance.mark(`piarium.${name}`);
+  performance.mark(`varin.${name}`);
 };

@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolvePiariumDataDir } from '../../platform/data-paths.js';
+import { resolveVarinDataDir } from '../../platform/data-paths.js';
 
 export type ManagedQuotaProviderId = 'cursor' | 'ollama-cloud' | 'opencode-go';
 const MANAGED_QUOTA_PROVIDERS = new Set<string>(['opencode-go', 'ollama-cloud', 'cursor']);
 
 const credentialsDirectory = (): string => path.join(
-  resolvePiariumDataDir(process),
+  resolveVarinDataDir(process),
   'quota',
 );
 

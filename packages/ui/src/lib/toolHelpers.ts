@@ -187,8 +187,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       ]
     },
 
-    piarium: {
-      displayName: 'Piarium',
+    varin: {
+      displayName: 'Varin',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []

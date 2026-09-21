@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,9 +85,9 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
       {selectedAgent ? (
         <Icon name="ai-agent" className="size-4 shrink-0" />
       ) : (
-        <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
+        <VarinLogo width={16} height={16} decorative className="size-4 shrink-0" />
       )}
-      <span className="truncate">{selectedAgent?.name ?? 'Piarium'}</span>
+      <span className="truncate">{selectedAgent?.name ?? 'Varin'}</span>
     </button>
   );
 
@@ -102,8 +102,8 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         onClick={() => select(undefined)}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
-          <span>Piarium</span>
+          <VarinLogo width={16} height={16} decorative className="size-4 shrink-0" />
+          <span>Varin</span>
         </span>
         {!selectedAgent ? <Icon name="check" className="size-4 text-primary" /> : null}
       </button>
@@ -151,8 +151,8 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         <DropdownMenuItem onSelect={() => select(undefined)}>
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-2 font-medium">
-              <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
-              <span>Piarium</span>
+              <VarinLogo width={16} height={16} decorative className="size-4 shrink-0" />
+              <span>Varin</span>
             </span>
             {!selectedAgent ? <Icon name="check" className="size-4 shrink-0 text-primary" /> : null}
           </div>

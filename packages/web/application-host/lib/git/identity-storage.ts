@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import { resolveVarinDataDir } from '../platform/data-paths.js';
 
-const STORAGE_DIR = resolvePiariumDataDir(process);
+const STORAGE_DIR = resolveVarinDataDir(process);
 const STORAGE_FILE = path.join(STORAGE_DIR, 'git-identities.json');
 
 export interface GitIdentityProfile {

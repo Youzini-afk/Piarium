@@ -26,7 +26,7 @@
     --text-micro: 0.75rem;
     --text-settings-page-title: 1.125rem;
 
-    /* Initial light palette; matches the built-in Piarium theme before hydration. */
+    /* Initial light palette; matches the built-in Varin theme before hydration. */
     --background: #fcfcfc;
     --foreground: #262626;
     --card: #ffffff;
@@ -63,7 +63,7 @@
   }
 
   .dark {
-    /* Initial dark palette; matches the built-in Piarium theme before hydration. */
+    /* Initial dark palette; matches the built-in Varin theme before hydration. */
     --background: #171717;
     --foreground: #e7e7e7;
     --card: #282828;
@@ -135,9 +135,9 @@
     background-color: var(--background) !important;
   }
 
-  :root.desktop-runtime[data-piarium-vibrancy],
-  :root.desktop-runtime[data-piarium-vibrancy] body,
-  :root.desktop-runtime[data-piarium-vibrancy] #root {
+  :root.desktop-runtime[data-varin-vibrancy],
+  :root.desktop-runtime[data-varin-vibrancy] body,
+  :root.desktop-runtime[data-varin-vibrancy] #root {
     background: transparent !important;
     background-color: transparent !important;
   }

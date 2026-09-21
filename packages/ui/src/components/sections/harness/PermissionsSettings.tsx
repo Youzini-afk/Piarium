@@ -1,5 +1,5 @@
 import React from 'react';
-import { validatePermissionRule, type PermissionMode, type PermissionRule } from '@piarium/protocol';
+import { validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
 import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';

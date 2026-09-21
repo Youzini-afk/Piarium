@@ -128,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             ref={sidebarRef}
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
-                'bg-sidebar piarium-vibrancy-surface',
+                'bg-sidebar varin-vibrancy-surface',
                 isOpen && 'border-r border-sidebar-border',
                 !isOpen && 'border-r-0',
                 className,

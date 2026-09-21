@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { JsonObject } from '@piarium/extension-contract';
-import type { SurfaceContribution } from '@piarium/extension-surface';
+import type { JsonObject } from '@varin/extension-contract';
+import type { SurfaceContribution } from '@varin/extension-surface';
 import {
   createWorkbenchCompositionHost,
   getWorkbenchCompositionInspectorSnapshot,

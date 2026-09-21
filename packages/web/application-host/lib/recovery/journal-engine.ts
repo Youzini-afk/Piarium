@@ -40,7 +40,7 @@ import {
   type WorkspaceRecoveryTurnSettledInput,
   type WorkspaceRecoveryTurnStartInput,
   type WorkspaceRecoveryUncoveredPath,
-} from "@piarium/extension-contract";
+} from "@varin/extension-contract";
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from "./errors.js";
 import {
   normalizeResourceId,

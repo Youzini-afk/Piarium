@@ -1,38 +1,38 @@
 import type {
   LanguageServicesAPI,
-  PiariumLanguageCodeAction,
-  PiariumLanguageCommandRequest,
-  PiariumLanguageColorInformation,
-  PiariumLanguageColorPresentation,
-  PiariumLanguageCompletionItem,
-  PiariumLanguageDocumentHighlight,
-  PiariumLanguageDocumentLink,
-  PiariumLanguageDocumentSyncRequest,
-  PiariumLanguageDocumentSyncResult,
-  PiariumLanguageFeatureRequest,
-  PiariumLanguageFeatureResult,
-  PiariumLanguageLocation,
-  PiariumLanguageLocationLink,
-  PiariumLanguageFoldingRange,
-  PiariumLanguageHover,
-  PiariumLanguageInlayHint,
-  PiariumLanguageProviderStatus,
-  PiariumLanguageServiceEvent,
-  PiariumLanguageSelectionRange,
-  PiariumLanguageSemanticTokens,
-  PiariumLanguageSignatureHelp,
-  PiariumLanguageSymbol,
-  PiariumLanguageTextEdit,
-  PiariumLanguageWorkspaceEdit,
+  VarinLanguageCodeAction,
+  VarinLanguageCommandRequest,
+  VarinLanguageColorInformation,
+  VarinLanguageColorPresentation,
+  VarinLanguageCompletionItem,
+  VarinLanguageDocumentHighlight,
+  VarinLanguageDocumentLink,
+  VarinLanguageDocumentSyncRequest,
+  VarinLanguageDocumentSyncResult,
+  VarinLanguageFeatureRequest,
+  VarinLanguageFeatureResult,
+  VarinLanguageLocation,
+  VarinLanguageLocationLink,
+  VarinLanguageFoldingRange,
+  VarinLanguageHover,
+  VarinLanguageInlayHint,
+  VarinLanguageProviderStatus,
+  VarinLanguageServiceEvent,
+  VarinLanguageSelectionRange,
+  VarinLanguageSemanticTokens,
+  VarinLanguageSignatureHelp,
+  VarinLanguageSymbol,
+  VarinLanguageTextEdit,
+  VarinLanguageWorkspaceEdit,
   Subscription,
-} from '@piarium/application-client';
-import type { JsonValue } from '@piarium/extension-contract';
-import { LanguageServicesError, parseLanguageServicesFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+} from '@varin/application-client';
+import type { JsonValue } from '@varin/extension-contract';
+import { LanguageServicesError, parseLanguageServicesFailureReason } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import {
   getRuntimeEndpointGeneration,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {
@@ -63,7 +63,7 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
 
 const readSseEvents = async (
   response: Response,
-  listener: (event: PiariumLanguageServiceEvent) => void,
+  listener: (event: VarinLanguageServiceEvent) => void,
   signal: AbortSignal,
 ): Promise<void> => {
   const reader = response.body?.getReader();
@@ -79,24 +79,24 @@ const readSseEvents = async (
     for (const chunk of chunks) {
       const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
       if (!line) continue;
-      const event = JSON.parse(line.slice(6)) as PiariumLanguageServiceEvent;
+      const event = JSON.parse(line.slice(6)) as VarinLanguageServiceEvent;
       if (event && typeof event === 'object' && 'content' in event) continue;
       listener(event);
     }
   }
 };
 
-const feature = <T>(method: string, request: PiariumLanguageFeatureRequest) => (
-  postJson('/api/language/feature', { method, request }) as Promise<PiariumLanguageFeatureResult<T>>
+const feature = <T>(method: string, request: VarinLanguageFeatureRequest) => (
+  postJson('/api/language/feature', { method, request }) as Promise<VarinLanguageFeatureResult<T>>
 );
 
-const command = <T>(method: string, request: PiariumLanguageCommandRequest) => (
-  postJson('/api/language/feature', { method, request }) as Promise<PiariumLanguageFeatureResult<T>>
+const command = <T>(method: string, request: VarinLanguageCommandRequest) => (
+  postJson('/api/language/feature', { method, request }) as Promise<VarinLanguageFeatureResult<T>>
 );
 
 export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
   getStatus: (workspaceId, languageId) => (
-    postJson('/api/language/status', { workspaceId, languageId }) as Promise<PiariumLanguageProviderStatus>
+    postJson('/api/language/status', { workspaceId, languageId }) as Promise<VarinLanguageProviderStatus>
   ),
   subscribe(workspaceId, listener, options): Subscription {
     const generation = getRuntimeEndpointGeneration();
@@ -135,36 +135,36 @@ export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
       },
     };
   },
-  syncDocument: (request: PiariumLanguageDocumentSyncRequest) => (
-    postJson('/api/language/sync', request) as Promise<PiariumLanguageDocumentSyncResult>
+  syncDocument: (request: VarinLanguageDocumentSyncRequest) => (
+    postJson('/api/language/sync', request) as Promise<VarinLanguageDocumentSyncResult>
   ),
-  completion: (request) => feature<PiariumLanguageCompletionItem[]>('completion', request),
-  completionResolve: (request) => feature<PiariumLanguageCompletionItem>('completionResolve', request),
-  hover: (request) => feature<PiariumLanguageHover | null>('hover', request),
-  signatureHelp: (request) => feature<PiariumLanguageSignatureHelp | null>('signatureHelp', request),
-  definition: (request) => feature<PiariumLanguageLocationLink[]>('definition', request),
-  references: (request) => feature<PiariumLanguageLocation[]>('references', request),
-  documentSymbols: (request) => feature<PiariumLanguageSymbol[]>('documentSymbols', request),
-  workspaceSymbols: (request) => feature<PiariumLanguageSymbol[]>('workspaceSymbols', request),
-  rename: (request) => feature<PiariumLanguageWorkspaceEdit | null>('rename', request),
-  codeActions: (request) => feature<PiariumLanguageCodeAction[]>('codeActions', request),
-  codeActionResolve: (request) => feature<PiariumLanguageCodeAction>('codeActionResolve', request),
+  completion: (request) => feature<VarinLanguageCompletionItem[]>('completion', request),
+  completionResolve: (request) => feature<VarinLanguageCompletionItem>('completionResolve', request),
+  hover: (request) => feature<VarinLanguageHover | null>('hover', request),
+  signatureHelp: (request) => feature<VarinLanguageSignatureHelp | null>('signatureHelp', request),
+  definition: (request) => feature<VarinLanguageLocationLink[]>('definition', request),
+  references: (request) => feature<VarinLanguageLocation[]>('references', request),
+  documentSymbols: (request) => feature<VarinLanguageSymbol[]>('documentSymbols', request),
+  workspaceSymbols: (request) => feature<VarinLanguageSymbol[]>('workspaceSymbols', request),
+  rename: (request) => feature<VarinLanguageWorkspaceEdit | null>('rename', request),
+  codeActions: (request) => feature<VarinLanguageCodeAction[]>('codeActions', request),
+  codeActionResolve: (request) => feature<VarinLanguageCodeAction>('codeActionResolve', request),
   executeCommand: (request) => command<JsonValue | null>('executeCommand', request),
-  documentFormatting: (request) => feature<PiariumLanguageTextEdit[]>('documentFormatting', request),
-  documentRangeFormatting: (request) => feature<PiariumLanguageTextEdit[]>('documentRangeFormatting', request),
-  onTypeFormatting: (request) => feature<PiariumLanguageTextEdit[]>('onTypeFormatting', request),
-  semanticTokens: (request) => feature<PiariumLanguageSemanticTokens | null>('semanticTokens', request),
-  inlayHints: (request) => feature<PiariumLanguageInlayHint[]>('inlayHints', request),
-  inlayHintResolve: (request) => feature<PiariumLanguageInlayHint>('inlayHintResolve', request),
-  documentHighlights: (request) => feature<PiariumLanguageDocumentHighlight[]>('documentHighlights', request),
-  foldingRanges: (request) => feature<PiariumLanguageFoldingRange[]>('foldingRanges', request),
-  selectionRanges: (request) => feature<PiariumLanguageSelectionRange[]>('selectionRanges', request),
-  documentLinks: (request) => feature<PiariumLanguageDocumentLink[]>('documentLinks', request),
-  documentLinkResolve: (request) => feature<PiariumLanguageDocumentLink>('documentLinkResolve', request),
-  documentColors: (request) => feature<PiariumLanguageColorInformation[]>('documentColors', request),
-  colorPresentations: (request) => feature<PiariumLanguageColorPresentation[]>('colorPresentations', request),
+  documentFormatting: (request) => feature<VarinLanguageTextEdit[]>('documentFormatting', request),
+  documentRangeFormatting: (request) => feature<VarinLanguageTextEdit[]>('documentRangeFormatting', request),
+  onTypeFormatting: (request) => feature<VarinLanguageTextEdit[]>('onTypeFormatting', request),
+  semanticTokens: (request) => feature<VarinLanguageSemanticTokens | null>('semanticTokens', request),
+  inlayHints: (request) => feature<VarinLanguageInlayHint[]>('inlayHints', request),
+  inlayHintResolve: (request) => feature<VarinLanguageInlayHint>('inlayHintResolve', request),
+  documentHighlights: (request) => feature<VarinLanguageDocumentHighlight[]>('documentHighlights', request),
+  foldingRanges: (request) => feature<VarinLanguageFoldingRange[]>('foldingRanges', request),
+  selectionRanges: (request) => feature<VarinLanguageSelectionRange[]>('selectionRanges', request),
+  documentLinks: (request) => feature<VarinLanguageDocumentLink[]>('documentLinks', request),
+  documentLinkResolve: (request) => feature<VarinLanguageDocumentLink>('documentLinkResolve', request),
+  documentColors: (request) => feature<VarinLanguageColorInformation[]>('documentColors', request),
+  colorPresentations: (request) => feature<VarinLanguageColorPresentation[]>('colorPresentations', request),
   restart: (workspaceId, languageId) => (
-    postJson('/api/language/restart', { workspaceId, languageId }) as Promise<PiariumLanguageProviderStatus>
+    postJson('/api/language/restart', { workspaceId, languageId }) as Promise<VarinLanguageProviderStatus>
   ),
   async disposeWorkspace(workspaceId) {
     const generation = getRuntimeEndpointGeneration();

@@ -13,7 +13,7 @@ import {
   RiFolderAddLine,
   RiSearchLine,
 } from '@remixicon/react';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import {
   DndContext,
   type DragEndEvent,

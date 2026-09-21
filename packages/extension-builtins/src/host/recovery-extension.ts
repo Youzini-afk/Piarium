@@ -1,12 +1,12 @@
-import type { JsonValue } from "@piarium/extension-contract";
+import type { JsonValue } from "@varin/extension-contract";
 import {
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
-} from "@piarium/extension-contract";
+  VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
+} from "@varin/extension-contract";
 import {
   callWorkspaceRecoveryPrimitives,
   defineHostExtension,
-} from "@piarium/extension-sdk";
+} from "@varin/extension-sdk";
 
 export default defineHostExtension({
   activate(context) {
@@ -14,9 +14,9 @@ export default defineHostExtension({
       callWorkspaceRecoveryPrimitives(context.capabilities, method, params)
     );
     context.services.provide({
-      id: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+      id: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
       multiple: true,
-      version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+      version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
     }, {
       applyCombinedRecovery: (input) => call("applyCombinedRecovery", input),
       cancelCombinedOperation: (operationId) => call("cancelCombinedOperation", { operationId }),

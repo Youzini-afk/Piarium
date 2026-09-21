@@ -1,67 +1,67 @@
 ---
 title: Variables d’environnement
-description: Configurez le serveur Piarium, les terminaux, Git, la voix et les tunnels avec des variables d’environnement.
+description: Configurez le serveur Varin, les terminaux, Git, la voix et les tunnels avec des variables d’environnement.
 ---
 
 # Variables d’environnement
 
-Piarium lit ces variables d’environnement au démarrage. Pour les services de démarrage, `piarium startup enable` capture l’environnement actuel par défaut, donc relancez-le après avoir changé les variables que le service doit utiliser.
+Varin lit ces variables d’environnement au démarrage. Pour les services de démarrage, `varin startup enable` capture l’environnement actuel par défaut, donc relancez-le après avoir changé les variables que le service doit utiliser.
 
-Piarium embarque le runtime Pi. Il n’y a pas de serveur OpenCode séparé ni de variables d’intégration `OPENCODE_*`.
+Varin embarque le runtime Pi. Il n’y a pas de serveur OpenCode séparé ni de variables d’intégration `OPENCODE_*`.
 
-## Serveur Piarium
+## Serveur Varin
 
-### `PIARIUM_HOST`
+### `VARIN_HOST`
 
-Adresse de liaison du serveur web Piarium. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
+Adresse de liaison du serveur web Varin. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
 
-### `PIARIUM_UI_PASSWORD`
+### `VARIN_UI_PASSWORD`
 
 Mot de passe de l’UI navigateur. Utilisez-le quand vous liez hors de localhost, utilisez des tunnels, ou tournez derrière un reverse proxy.
 
-### `PIARIUM_API_ONLY`
+### `VARIN_API_ONLY`
 
-Démarre Piarium en mode headless quand la valeur est `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
+Démarre Varin en mode headless quand la valeur est `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
 
-### `PIARIUM_DATA_DIR`
+### `VARIN_DATA_DIR`
 
-Remplace le répertoire de données Piarium. La valeur par défaut est `~/.config/piarium`.
+Remplace le répertoire de données Varin. La valeur par défaut est `~/.config/varin`.
 
-### `PIARIUM_COMPRESS_API`
+### `VARIN_COMPRESS_API`
 
 Contrôle la compression des réponses API. Utilisez `true` ou `1` pour la forcer, `false` ou `0` pour la désactiver.
 
-### `PIARIUM_SKIP_API_COMPRESSION`
+### `VARIN_SKIP_API_COMPRESSION`
 
-Désactive la compression des réponses API quand la valeur est `true` ou `1`. Cela a priorité sur `PIARIUM_COMPRESS_API`.
+Désactive la compression des réponses API quand la valeur est `true` ou `1`. Cela a priorité sur `VARIN_COMPRESS_API`.
 
-### `PIARIUM_VERBOSE_REQUEST_LOGS`
+### `VARIN_VERBOSE_REQUEST_LOGS`
 
 Active les journaux HTTP détaillés quand la valeur est `true` ou `1`.
 
-### `PIARIUM_UPDATE_API_URL`
+### `VARIN_UPDATE_API_URL`
 
 Remplace le point de terminaison de l’API de vérification des mises à jour. La plupart des utilisateurs devraient le laisser non défini.
 
-### `PIARIUM_PACKAGE_MANAGER`
+### `VARIN_PACKAGE_MANAGER`
 
 Force le gestionnaire de paquets utilisé par les opérations de mise à jour quand la détection automatique se trompe.
 
 ## Terminal et Git
 
-### `PIARIUM_TERMINAL_SHELL`
+### `VARIN_TERMINAL_SHELL`
 
-Exécutable de shell utilisé pour les sessions terminal Piarium.
+Exécutable de shell utilisé pour les sessions terminal Varin.
 
-### `PIARIUM_GIT_BINARY`
+### `VARIN_GIT_BINARY`
 
-Exécutable Git utilisé par les fonctionnalités Git de Piarium.
+Exécutable Git utilisé par les fonctionnalités Git de Varin.
 
 ### `GIT_BINARY`
 
-Autre remplacement d’exécutable Git. Préférez `PIARIUM_GIT_BINARY` pour une configuration spécifique à Piarium.
+Autre remplacement d’exécutable Git. Préférez `VARIN_GIT_BINARY` pour une configuration spécifique à Varin.
 
-### `PIARIUM_GIT_READ_CACHE_TTL_MS`
+### `VARIN_GIT_READ_CACHE_TTL_MS`
 
 Durée de vie, en millisecondes, des lectures de fichiers Git mises en cache. Définissez `0` pour désactiver ce cache pendant le débogage.
 
@@ -69,22 +69,22 @@ Durée de vie, en millisecondes, des lectures de fichiers Git mises en cache. D�
 
 ### `OPENAI_API_KEY`
 
-Clé API utilisée par les fonctionnalités vocales Piarium qui appellent des services compatibles OpenAI.
+Clé API utilisée par les fonctionnalités vocales Varin qui appellent des services compatibles OpenAI.
 
-### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 Autorise les URL de base distantes compatibles OpenAI pour les fonctionnalités vocales quand la valeur est `true` ou `1`.
 
 ### `NGROK_AUTHTOKEN`
 
-Jeton d’auth ngrok utilisé par les commandes de tunnel Piarium. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
+Jeton d’auth ngrok utilisé par les commandes de tunnel Varin. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
 
 ## Aides runtime
 
 ### `BUN_BINARY`
 
-Exécutable Bun que Piarium doit utiliser pour lancer des processus daemon.
+Exécutable Bun que Varin doit utiliser pour lancer des processus daemon.
 
 ### `BUN_INSTALL`
 
-Racine d’installation de Bun. Piarium l’utilise pour trouver `bin/bun` au démarrage du daemon et pour les mises à jour.
+Racine d’installation de Bun. Varin l’utilise pour trouver `bin/bun` au démarrage du daemon et pour les mises à jour.

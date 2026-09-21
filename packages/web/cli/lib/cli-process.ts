@@ -14,15 +14,15 @@ export interface StoredInstanceOptions {
   uiPassword?: string | undefined;
 }
 
-export type PiariumProcessState = 'dead' | 'matched' | 'mismatched' | 'unknown';
+export type VarinProcessState = 'dead' | 'matched' | 'mismatched' | 'unknown';
 type NoticeHandler = (notice: CliNotice) => void;
 
 async function getPidFilePath(port: number): Promise<string> {
-  return path.join(getRunDir(), `piarium-${port}.pid`);
+  return path.join(getRunDir(), `varin-${port}.pid`);
 }
 
 async function getInstanceFilePath(port: number): Promise<string> {
-  return path.join(getRunDir(), `piarium-${port}.json`);
+  return path.join(getRunDir(), `varin-${port}.json`);
 }
 
 function readPidFile(pidFilePath: string): number | null {
@@ -118,7 +118,7 @@ function removeInstanceFile(instanceFilePath: string): void {
 // PID is known to be ours (a child we just spawned, or a process we are
 // stopping). Do NOT use it to validate a PID read from a pid file: after an
 // ungraceful shutdown the pid file is stale and the kernel may have recycled
-// that PID to an unrelated process — see isPiariumProcessRunning.
+// that PID to an unrelated process — see isVarinProcessRunning.
 function isProcessRunning(pid: unknown): boolean {
   if (typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) return false;
   try {
@@ -156,12 +156,12 @@ function readProcessCmdline(pid: number): string | null {
   return null;
 }
 
-function isPiariumCmdline(cmdline: unknown): boolean {
+function isVarinCmdline(cmdline: unknown): boolean {
   if (typeof cmdline !== 'string' || cmdline.length === 0) {
     return false;
   }
   const normalized = cmdline.toLowerCase().replace(/\\/g, '/');
-  if (normalized.includes('/@piarium/web/')) {
+  if (normalized.includes('/@varin/web/')) {
     return true;
   }
   return [
@@ -169,11 +169,11 @@ function isPiariumCmdline(cmdline: unknown): boolean {
     '/packages/web/server/index.js',
   ].some((entry) => {
     const entryIndex = normalized.indexOf(entry);
-    return entryIndex >= 0 && normalized.lastIndexOf('/piarium/', entryIndex) >= 0;
+    return entryIndex >= 0 && normalized.lastIndexOf('/varin/', entryIndex) >= 0;
   });
 }
 
-// Liveness + identity — "is the Piarium instance recorded in a pid file
+// Liveness + identity — "is the Varin instance recorded in a pid file
 // still the process running under this PID". Use this (not isProcessRunning)
 // when validating a PID read from a pid file. After an ungraceful shutdown
 // removePidFile never runs, so the stale PID can be recycled to an unrelated
@@ -181,15 +181,15 @@ function isPiariumCmdline(cmdline: unknown): boolean {
 // startup, which loops forever under systemd Restart=always (issue #1721).
 // Where identity can't be determined (Windows, unreadable /proc or ps), we fall
 // back to liveness so there are no false negatives on those platforms.
-function isPiariumProcessRunning(pid: unknown): boolean {
-  const state = getPiariumProcessState(pid);
+function isVarinProcessRunning(pid: unknown): boolean {
+  const state = getVarinProcessState(pid);
   return state === 'matched' || state === 'unknown';
 }
 
-function getPiariumProcessState(pid: unknown, options: {
+function getVarinProcessState(pid: unknown, options: {
   isProcessRunning?: (pid: number) => boolean;
   readProcessCmdline?: (pid: number) => string | null;
-} = {}): PiariumProcessState {
+} = {}): VarinProcessState {
   const checkProcessRunning = typeof options.isProcessRunning === 'function'
     ? options.isProcessRunning
     : isProcessRunning;
@@ -204,10 +204,10 @@ function getPiariumProcessState(pid: unknown, options: {
   if (cmdline === null) {
     return 'unknown';
   }
-  return isPiariumCmdline(cmdline) ? 'matched' : 'mismatched';
+  return isVarinCmdline(cmdline) ? 'matched' : 'mismatched';
 }
 
-function hasPiariumRuntimeInfo(info: unknown): info is { pid?: number | null; runtime: string } {
+function hasVarinRuntimeInfo(info: unknown): info is { pid?: number | null; runtime: string } {
   const value = recordOf(info);
   return typeof value.runtime === 'string' && value.runtime.length > 0;
 }
@@ -336,10 +336,10 @@ export {
   writeInstanceOptions,
   removeInstanceFile,
   isProcessRunning,
-  isPiariumCmdline,
-  isPiariumProcessRunning,
-  getPiariumProcessState,
-  hasPiariumRuntimeInfo,
+  isVarinCmdline,
+  isVarinProcessRunning,
+  getVarinProcessState,
+  hasVarinRuntimeInfo,
   terminateProcessTree,
   stopInstanceProcess,
 };

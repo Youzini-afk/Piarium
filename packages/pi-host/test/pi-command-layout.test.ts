@@ -16,7 +16,7 @@ async function writeCodingAgent(packageRoot: string): Promise<void> {
 
 describe("resolvePiCommandLayout", () => {
   it("reads an npm Windows cmd shim and the adjacent Node executable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-cmd-shim-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-cmd-shim-"));
     try {
       const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
       await writeCodingAgent(codingAgent);
@@ -42,7 +42,7 @@ describe("resolvePiCommandLayout", () => {
   });
 
   it("follows a Unix shebang script to the package root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-shebang-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-shebang-"));
     try {
       const codingAgent = join(root, "lib", "node_modules", "@earendil-works", "pi-coding-agent");
       await writeCodingAgent(codingAgent);
@@ -63,7 +63,7 @@ const basedir = ${JSON.stringify(root)};
   });
 
   it("reads a Windows bat shim", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-bat-shim-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-bat-shim-"));
     try {
       const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
       await writeCodingAgent(codingAgent);
@@ -86,7 +86,7 @@ const basedir = ${JSON.stringify(root)};
   });
 
   it("reads a PowerShell shim and a pnpm-style quoted package path", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-ps1-shim-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-ps1-shim-"));
     try {
       const codingAgent = join(root, "global", "5", "node_modules", "@earendil-works", "pi-coding-agent");
       await writeCodingAgent(codingAgent);
@@ -110,7 +110,7 @@ const basedir = ${JSON.stringify(root)};
   it("resolves a bun-style symlink target when available", {
     skip: process.platform === "win32",
   }, async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-bun-link-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-bun-link-"));
     try {
       const codingAgent = join(root, "install", "global", "node_modules", "@earendil-works", "pi-coding-agent");
       await writeCodingAgent(codingAgent);

@@ -5,7 +5,7 @@ import type {
   PiConfigTextFormat,
   PiConfigTextRoot,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
@@ -28,7 +28,7 @@ import {
   subscribePiConfig,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { parsePluginTextObjectDraft } from './usePluginConfigDraft';
 
@@ -98,7 +98,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       ) return;
       if (mutationRevision !== mutationRevisionRef.current) {
         if (externalInvalidation) {
-          setLoadError(t('settings.piarium.pluginSettings.source.externalChanged'));
+          setLoadError(t('settings.varin.pluginSettings.source.externalChanged'));
           setExternalChanged(true);
         }
         return;
@@ -260,9 +260,9 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         || actionTargetKey !== runtimeTargetKeyRef.current
       ) return;
       if (event.reason === 'error') {
-        setLoadError(t('settings.piarium.pluginSettings.source.watchFailed'));
+        setLoadError(t('settings.varin.pluginSettings.source.watchFailed'));
       } else if (dirtyRef.current) {
-        setLoadError(t('settings.piarium.pluginSettings.source.externalChanged'));
+        setLoadError(t('settings.varin.pluginSettings.source.externalChanged'));
         setExternalChanged(true);
       } else {
         void load(true);
@@ -276,7 +276,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       void load(true);
     }).catch(() => {
       if (!active) return;
-      setLoadError(t('settings.piarium.pluginSettings.source.watchFailed'));
+      setLoadError(t('settings.varin.pluginSettings.source.watchFailed'));
     });
     return () => {
       active = false;
@@ -292,30 +292,30 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         <div className="flex items-center gap-2">
           <Icon name="code-box" className="size-4 text-muted-foreground" />
           <h4 className="typography-ui-label text-foreground">
-            {t('settings.piarium.pluginSettings.advanced.title')}
+            {t('settings.varin.pluginSettings.advanced.title')}
           </h4>
         </div>
         <p className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.advanced.description')}
+          {t('settings.varin.pluginSettings.advanced.description')}
         </p>
       </div>
 
-      <SettingsFieldRow label={t('settings.piarium.pluginSettings.advanced.root')}>
+      <SettingsFieldRow label={t('settings.varin.pluginSettings.advanced.root')}>
         <Select value={root} disabled={saving || dirty} onValueChange={(value) => setRoot(value as PiConfigTextRoot)}>
           <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
             <SelectValue>
-              {t(`settings.piarium.pluginSettings.advanced.root.${root === 'user-config' ? 'userConfig' : root}` as never)}
+              {t(`settings.varin.pluginSettings.advanced.root.${root === 'user-config' ? 'userConfig' : root}` as never)}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="agent">{t('settings.piarium.pluginSettings.advanced.root.agent')}</SelectItem>
-            <SelectItem value="user-config">{t('settings.piarium.pluginSettings.advanced.root.userConfig')}</SelectItem>
-            <SelectItem value="project">{t('settings.piarium.pluginSettings.advanced.root.project')}</SelectItem>
-            <SelectItem value="home">{t('settings.piarium.pluginSettings.advanced.root.home')}</SelectItem>
+            <SelectItem value="agent">{t('settings.varin.pluginSettings.advanced.root.agent')}</SelectItem>
+            <SelectItem value="user-config">{t('settings.varin.pluginSettings.advanced.root.userConfig')}</SelectItem>
+            <SelectItem value="project">{t('settings.varin.pluginSettings.advanced.root.project')}</SelectItem>
+            <SelectItem value="home">{t('settings.varin.pluginSettings.advanced.root.home')}</SelectItem>
           </SelectContent>
         </Select>
       </SettingsFieldRow>
-      <SettingsFieldRow label={t('settings.piarium.pluginSettings.advanced.format')}>
+      <SettingsFieldRow label={t('settings.varin.pluginSettings.advanced.format')}>
         <Select value={format} disabled={saving || dirty} onValueChange={(value) => setFormat(value as PiConfigTextFormat)}>
           <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
             <SelectValue>{format.toUpperCase()}</SelectValue>
@@ -327,15 +327,15 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         </Select>
       </SettingsFieldRow>
       <SettingsFieldRow
-        label={t('settings.piarium.pluginSettings.advanced.path')}
-        info={t('settings.piarium.pluginSettings.advanced.pathDescription')}
+        label={t('settings.varin.pluginSettings.advanced.path')}
+        info={t('settings.varin.pluginSettings.advanced.pathDescription')}
         controlClassName="w-full max-w-[24rem]"
       >
         <Input
           value={path}
           disabled={saving || dirty}
           onChange={(event) => setPath(event.target.value)}
-          placeholder={t('settings.piarium.pluginSettings.advanced.customPath')}
+          placeholder={t('settings.varin.pluginSettings.advanced.customPath')}
           className="min-w-0 flex-1 font-mono"
         />
         <Button
@@ -345,7 +345,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
           disabled={saving || dirty || !path.trim() || (!selectionChanged && snapshot !== null)}
           onClick={chooseSelection}
         >
-          {t('settings.piarium.pluginSettings.advanced.loadCustom')}
+          {t('settings.varin.pluginSettings.advanced.loadCustom')}
         </Button>
       </SettingsFieldRow>
 
@@ -355,7 +355,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         </p>
       ) : (
         <p className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.advanced.loadPrompt')}
+          {t('settings.varin.pluginSettings.advanced.loadPrompt')}
         </p>
       )}
 
@@ -376,17 +376,17 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
 
       {parsed.error ? (
         <p className="typography-meta text-[var(--status-error)]">
-          {t('settings.piarium.recovery.pluginSettings.invalidJson')}
+          {t('settings.varin.recovery.pluginSettings.invalidJson')}
         </p>
       ) : null}
       {projectBlocked && !loading ? (
         <p className="typography-meta text-[var(--status-warning)]">
-          {t('settings.piarium.recovery.pluginSettings.projectUntrusted')}
+          {t('settings.varin.recovery.pluginSettings.projectUntrusted')}
         </p>
       ) : null}
       {dirty ? (
         <p className="typography-meta text-[var(--status-warning)]">
-          {t('settings.piarium.pluginSettings.advanced.dirtyGuard')}
+          {t('settings.varin.pluginSettings.advanced.dirtyGuard')}
         </p>
       ) : null}
       {loadError ? (
@@ -404,8 +404,8 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         >
           <Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
           {dirty
-            ? t('settings.piarium.pluginSettings.source.discard')
-            : t('settings.piarium.recovery.actions.refresh')}
+            ? t('settings.varin.pluginSettings.source.discard')
+            : t('settings.varin.recovery.actions.refresh')}
         </Button>
         <Button
           type="button"

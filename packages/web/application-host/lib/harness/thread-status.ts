@@ -18,7 +18,7 @@ import {
   type ThreadMessagePeer,
   type ThreadParent,
   type ThreadRun,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { ThreadRegistry } from "./thread-registry.js";
 
 /** ~20 visible characters is a preview budget, not a content limit. */

@@ -14,7 +14,7 @@ import {
 } from "./knowledge-suggestions.js";
 
 // Scratch stores live in the OS temp dir; see recall-tool.test.ts.
-const TEST_DIR = join(tmpdir(), "piarium-test-suggestions");
+const TEST_DIR = join(tmpdir(), "varin-test-suggestions");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
 }

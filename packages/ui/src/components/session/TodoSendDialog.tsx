@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
+import type { ModelDescriptor, ThinkingLevel } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {

@@ -1,14 +1,14 @@
 import type { I18nKey } from '@/lib/i18n';
-import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@piarium/protocol';
+import type { PiAgentCatalogSnapshot, PiAgentDescriptor } from '@varin/protocol';
 import type { AgentProviderFilter, AgentStatusFilter } from './agents-catalog-store';
 
 export const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
-  delegatable: 'settings.piarium.pluginSettings.subagents.kind.delegatable',
-  internal: 'settings.piarium.agents.kind.internal',
-  primary: 'settings.piarium.agents.kind.primary',
-  profile: 'settings.piarium.agents.kind.profile',
-  service: 'settings.piarium.agents.kind.service',
-  workflow: 'settings.piarium.pluginSettings.subagents.kind.workflow',
+  delegatable: 'settings.varin.pluginSettings.subagents.kind.delegatable',
+  internal: 'settings.varin.agents.kind.internal',
+  primary: 'settings.varin.agents.kind.primary',
+  profile: 'settings.varin.agents.kind.profile',
+  service: 'settings.varin.agents.kind.service',
+  workflow: 'settings.varin.pluginSettings.subagents.kind.workflow',
 };
 
 export function filterAgentsCatalog(

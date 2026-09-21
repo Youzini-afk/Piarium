@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { editor, languages } from 'monaco-editor/editor';
 
-import type { LanguageServicesAPI, PiariumLanguageDiagnostic } from '@piarium/application-client';
+import type { LanguageServicesAPI, VarinLanguageDiagnostic } from '@varin/application-client';
 import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { DocumentIdentity, DocumentRecord, DocumentWorkspaceEditInput } from '@/lib/documents/types';
 import { MonacoLanguageBridge } from './language-bridge';
@@ -107,7 +107,7 @@ describe('MonacoLanguageBridge', () => {
         registerColorProvider: () => ({ dispose: providerDispose }),
       },
     } as unknown as MonacoRuntime;
-    const diagnostic: PiariumLanguageDiagnostic = {
+    const diagnostic: VarinLanguageDiagnostic = {
       resource: identity,
       documentVersion: 3,
       severity: 'warning',
@@ -270,16 +270,16 @@ describe('MonacoLanguageBridge', () => {
     diagnostics = [{ ...diagnostic, generation: 3, message: 'New generation' }];
     diagnosticsListener?.();
     expect(markers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ owner: 'piarium-language:fixture:2', items: [] }),
+      expect.objectContaining({ owner: 'varin-language:fixture:2', items: [] }),
       expect.objectContaining({
-        owner: 'piarium-language:fixture:3',
+        owner: 'varin-language:fixture:3',
         items: [expect.objectContaining({ message: 'New generation' })],
       }),
     ]));
 
     bridge.release('view:one');
     expect(releaseDocument).toHaveBeenCalledWith(identity);
-    expect(markers.at(-1)).toMatchObject({ owner: 'piarium-language:fixture:3', items: [] });
+    expect(markers.at(-1)).toMatchObject({ owner: 'varin-language:fixture:3', items: [] });
     expect(providerDispose).toHaveBeenCalled();
     bridge.dispose();
   });

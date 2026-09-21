@@ -1,6 +1,6 @@
 import React from 'react';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import type { SessionSummary } from '@piarium/protocol';
+import type { SessionSummary } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -40,8 +40,8 @@ import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
-import { getRuntimeBearerTokenSync } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl } from '@piarium/application-client';
+import { getRuntimeBearerTokenSync } from '@varin/application-client';
+import { getRuntimeApiBaseUrl } from '@varin/application-client';
 import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
@@ -1291,12 +1291,12 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     size="icon"
                     onClick={handleOpenAbout}
                     className="size-9 text-muted-foreground hover:text-foreground"
-                    aria-label={t('sessions.sidebar.footer.actions.aboutPiarium')}
+                    aria-label={t('sessions.sidebar.footer.actions.aboutVarin')}
                   >
                     <Icon name="information" className="size-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">{t('sessions.sidebar.footer.actions.aboutPiarium')}</TooltipContent>
+                <TooltipContent side="top">{t('sessions.sidebar.footer.actions.aboutVarin')}</TooltipContent>
             </Tooltip>
             {showUpdateButton ? (
               <Tooltip>

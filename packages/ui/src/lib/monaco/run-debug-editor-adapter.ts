@@ -9,11 +9,11 @@ import {
 import type { MonacoRuntime } from './runtime';
 
 export const RUN_DEBUG_DECORATION_CLASS_NAMES = {
-  breakpointGlyph: 'piarium-monaco-breakpoint-glyph',
-  currentFrameGlyph: 'piarium-monaco-current-debug-frame-glyph',
-  currentFrameLine: 'piarium-monaco-current-debug-frame-line',
-  testFailureGlyph: 'piarium-monaco-test-failure-glyph',
-  testFailureLine: 'piarium-monaco-test-failure-line',
+  breakpointGlyph: 'varin-monaco-breakpoint-glyph',
+  currentFrameGlyph: 'varin-monaco-current-debug-frame-glyph',
+  currentFrameLine: 'varin-monaco-current-debug-frame-line',
+  testFailureGlyph: 'varin-monaco-test-failure-glyph',
+  testFailureLine: 'varin-monaco-test-failure-line',
 } as const;
 
 type RunDebugEditorAdapterOptions = {
@@ -105,7 +105,7 @@ export const createRunDebugEditorAdapter = ({
         || (
           typeof Element !== 'undefined'
           && browserTarget instanceof Element
-          && browserTarget.closest('.piarium-editor-inline-comment-glyph')
+          && browserTarget.closest('.varin-editor-inline-comment-glyph')
         )
       ) return;
       void toggleRunDebugBreakpoint(identity, event.target.position.lineNumber).catch(() => undefined);

@@ -7,7 +7,7 @@ import type { WalkthroughCacheEntry, WalkthroughPointer } from './types.js';
 // The store resolves its directory at import time from the environment, so the
 // temp dir has to be in place before the module is loaded.
 const TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-store-'));
-process.env.PIARIUM_DATA_DIR = TEMP_ROOT;
+process.env.VARIN_DATA_DIR = TEMP_ROOT;
 
 const store = await import('./store.js');
 const {

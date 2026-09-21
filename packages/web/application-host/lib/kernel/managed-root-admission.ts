@@ -1,4 +1,4 @@
-import type { ThreadWorktree } from "@piarium/protocol";
+import type { ThreadWorktree } from "@varin/protocol";
 import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileRootResolver } from "./storage-adapter.js";
 

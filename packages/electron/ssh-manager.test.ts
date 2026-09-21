@@ -130,7 +130,7 @@ describe('ElectronSshManager', () => {
   });
 
   test('creates a PowerShell-backed askpass helper on Windows', async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ssh-askpass-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-askpass-test-'));
     tempDirs.push(tempDir);
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(tempDir, 'settings.json'),
@@ -144,7 +144,7 @@ describe('ElectronSshManager', () => {
     expect(path.basename(result.askpassPath)).toBe('askpass.cmd');
     expect(result.cleanupPaths.map((filePath) => path.basename(filePath))).toEqual(['askpass.cmd', 'askpass.ps1']);
     expect(await fsp.readFile(path.join(tempDir, 'askpass.cmd'), 'utf8')).toContain('WindowsPowerShell');
-    expect(await fsp.readFile(path.join(tempDir, 'askpass.ps1'), 'utf8')).toContain('PIARIUM_SSH_ASKPASS_VALUE');
+    expect(await fsp.readFile(path.join(tempDir, 'askpass.ps1'), 'utf8')).toContain('VARIN_SSH_ASKPASS_VALUE');
   });
 
   test('runs each Windows port forward as an independent hidden SSH process', async () => {
@@ -161,7 +161,7 @@ describe('ElectronSshManager', () => {
     });
     const parsed: ParsedSshCommand = { destination: 'user@example.test', args: [] };
     manager.sshAuth.set(parsed, {
-      askpassPath: 'C:\\Piarium\\askpass.cmd',
+      askpassPath: 'C:\\Varin\\askpass.cmd',
       sshPassword: 'secret-value',
       children: new Set(),
     });
@@ -182,8 +182,8 @@ describe('ElectronSshManager', () => {
       expect(call.args).toContain('-N');
       expect(call.options.windowsHide).toBe(true);
       const env = call.options.env;
-      expect(env?.SSH_ASKPASS).toBe('C:\\Piarium\\askpass.cmd');
-      expect(env?.PIARIUM_SSH_ASKPASS_VALUE).toBe('secret-value');
+      expect(env?.SSH_ASKPASS).toBe('C:\\Varin\\askpass.cmd');
+      expect(env?.VARIN_SSH_ASKPASS_VALUE).toBe('secret-value');
     }
     const call0 = calls[0];
     const call1 = calls[1];
@@ -247,7 +247,7 @@ describe('ElectronSshManager', () => {
       };
     }
     manager.sshAuth.set(parsed, {
-      askpassPath: 'C:\\Piarium\\askpass.cmd',
+      askpassPath: 'C:\\Varin\\askpass.cmd',
       sshPassword: null,
       children: new Set(),
     });
@@ -259,7 +259,7 @@ describe('ElectronSshManager', () => {
         connectionTimeoutSec: 30,
         localForward: { bindHost: '127.0.0.1' },
         portForwards: [],
-        remotePiarium: { installMethod: 'npm', keepRunning: true, mode: 'external', uploadBundleOverSsh: false },
+        remoteVarin: { installMethod: 'npm', keepRunning: true, mode: 'external', uploadBundleOverSsh: false },
         auth: {},
       } as SshInstance,
       parsed,
@@ -329,7 +329,7 @@ describe('ElectronSshManager', () => {
     }
   });
 
-  test('stores a client token for forwarded Piarium hosts when UI password is configured', async () => {
+  test('stores a client token for forwarded Varin hosts when UI password is configured', async () => {
     let loginPayload: Record<string, unknown> | null = null;
     const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/auth/session') {
@@ -341,7 +341,7 @@ describe('ElectronSshManager', () => {
       res.writeHead(404).end();
     });
     const localUrl = await listen(server);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ssh-manager-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-ssh-manager-test-'));
     tempDirs.push(tempDir);
     const settingsFilePath = path.join(tempDir, 'settings.json');
     const manager = new ElectronSshManager({

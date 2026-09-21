@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiUsage } from '@piarium/protocol';
+import type { PiUsage } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import {

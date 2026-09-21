@@ -2,7 +2,7 @@
  * Dictation local-speech worker process.
  *
  * Hosts the sherpa-onnx native inference (Parakeet STT) in a separate process
- * so ONNX decoding never blocks the main Piarium server. Communicates
+ * so ONNX decoding never blocks the main Varin server. Communicates
  * with the parent over child_process IPC (advanced serialization, so Buffers
  * survive the trip as Uint8Array).
  *
@@ -25,7 +25,7 @@ import { pcm16ToWav } from '../audio.js';
 import path from 'path';
 import type { WorkerRequest } from '../types.js';
 
-process.title = 'Piarium Dictation';
+process.title = 'Varin Dictation';
 
 const engines = new Map<string, SherpaOfflineRecognizerEngine>();
 const ttsEngines = new Map<string, SherpaTtsEngine>();

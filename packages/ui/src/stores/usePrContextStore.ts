@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import type {
   GitHubAPI,
   GitHubPullRequestContextResult,
   GitHubRepoSelector,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const PR_CONTEXT_TTL_MS = 30_000;
 const PR_CONTEXT_MAX_ENTRIES = 20;

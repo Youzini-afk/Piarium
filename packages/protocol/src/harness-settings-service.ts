@@ -2,8 +2,8 @@
  * Agent-facing settings service (D-306 / Stage S).
  *
  * These methods expose the shared settings catalog
- * (`@piarium/application-client` `SETTINGS_CATALOG`) to harness workers.
- * Values are always resolved through the owning authority — the Piarium
+ * (`@varin/application-client` `SETTINGS_CATALOG`) to harness workers.
+ * Values are always resolved through the owning authority — the Varin
  * settings document, Pi `settings.json`, or the domain service an `action`
  * entry points at. The service never maintains a parallel store.
  */

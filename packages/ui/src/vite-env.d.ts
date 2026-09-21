@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface Window {
-    __PIARIUM_HOME__?: string;
-    __piariumDebug?: {
+    __VARIN_HOME__?: string;
+    __varinDebug?: {
         getCurrentSession: () => unknown;
         getLastAssistantMessage: () => unknown;
         getAllMessages: (truncate?: boolean) => unknown[];

@@ -6,7 +6,7 @@ import type {
   Thread,
   ThreadReport,
   ThreadRunOutcome,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { ThreadRegistry } from "./thread-registry.js";
 
 interface BrokerEventLike {

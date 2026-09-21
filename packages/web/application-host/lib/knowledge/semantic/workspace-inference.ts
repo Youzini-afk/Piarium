@@ -5,7 +5,7 @@ import type {
   HarnessRerankResult,
   HarnessInferenceBindingSnapshot,
   PiSettingsSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { embeddingSettingsFromSnapshot } from './backend.js';
 import { rerankSettingsFromSnapshot } from '../../harness/explore-rerank.js';
 

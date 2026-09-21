@@ -1,19 +1,19 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from 'react';
 import {
-  PIARIUM_BUILTIN_AGENTS_EXTENSION,
-  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
-  PIARIUM_BUILTIN_FLEET_EXTENSION,
-  PIARIUM_BUILTIN_HARNESS_EXTENSION,
-  PIARIUM_BUILTIN_MCP_EXTENSION,
-  PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
-  PIARIUM_BUILTIN_RECOVERY_EXTENSION,
-  type PiariumBuiltinExtensionDefinition,
-} from '@piarium/extension-builtins';
+  VARIN_BUILTIN_AGENTS_EXTENSION,
+  VARIN_BUILTIN_EXTENSION_DEFINITIONS,
+  VARIN_BUILTIN_FLEET_EXTENSION,
+  VARIN_BUILTIN_HARNESS_EXTENSION,
+  VARIN_BUILTIN_MCP_EXTENSION,
+  VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
+  VARIN_BUILTIN_RECOVERY_EXTENSION,
+  type VarinBuiltinExtensionDefinition,
+} from '@varin/extension-builtins';
 import {
-  type PiariumApplicationSurface,
-} from '@piarium/extension-contract';
-import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/extension-surface';
+  type VarinApplicationSurface,
+} from '@varin/extension-contract';
+import type { SurfaceActivation, SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
@@ -23,7 +23,7 @@ import {
 } from '@/components/sections/harness/HarnessSettingsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
-import { RecoverySettings } from '@/components/sections/piarium/RecoverySettings';
+import { RecoverySettings } from '@/components/sections/varin/RecoverySettings';
 import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
 import { ContextModeSettings } from '@/components/sections/plugin-settings/ContextModeSettings';
 import { AftSettings } from '@/components/sections/plugin-settings/AftSettings';
@@ -61,11 +61,11 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
 };
 
 const pageImplementation = (
-  definition: PiariumBuiltinExtensionDefinition,
+  definition: VarinBuiltinExtensionDefinition,
   contributionId: string,
 ): SettingsPageImplementation => {
   switch (definition.manifest.id) {
-    case PIARIUM_BUILTIN_AGENTS_EXTENSION.manifest.id:
+    case VARIN_BUILTIN_AGENTS_EXTENSION.manifest.id:
       return {
         renderContent: () => (
           <WorkbenchOwnedView
@@ -83,9 +83,9 @@ const pageImplementation = (
           />
         ),
       };
-    case PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.id:
+    case VARIN_BUILTIN_FLEET_EXTENSION.manifest.id:
       return { renderContent: () => <FleetPage /> };
-    case PIARIUM_BUILTIN_MCP_EXTENSION.manifest.id:
+    case VARIN_BUILTIN_MCP_EXTENSION.manifest.id:
       return {
         isAvailable: (context) => context.mcpInstalled,
         renderContent: () => (
@@ -104,12 +104,12 @@ const pageImplementation = (
           />
         ),
       };
-    case PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.id:
+    case VARIN_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.id:
       return {
         renderContent: () => <PluginSettingsPage />,
         renderSidebar: (options) => <PluginSettingsSidebar onItemSelect={options.onItemSelect} />,
       };
-    case PIARIUM_BUILTIN_HARNESS_EXTENSION.manifest.id: {
+    case VARIN_BUILTIN_HARNESS_EXTENSION.manifest.id: {
       const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
       const slug = typeof contribution?.data.slug === 'string' ? contribution.data.slug : '';
       const section = HARNESS_SECTION_BY_SLUG[slug];
@@ -126,7 +126,7 @@ const McpPluginSettingsAdapter: React.FC = () => {
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   return (
     <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
-      {t('settings.piarium.pluginSettings.mcp.open')}
+      {t('settings.varin.pluginSettings.mcp.open')}
     </Button>
   );
 };
@@ -170,10 +170,10 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
 });
 
 const contributionImplementation = (
-  definition: PiariumBuiltinExtensionDefinition,
+  definition: VarinBuiltinExtensionDefinition,
   contributionId: string,
 ): unknown => {
-  if (definition.manifest.id === PIARIUM_BUILTIN_RECOVERY_EXTENSION.manifest.id) {
+  if (definition.manifest.id === VARIN_BUILTIN_RECOVERY_EXTENSION.manifest.id) {
     return { render: () => <RecoverySettings /> } satisfies PiSettingsPanelImplementation;
   }
   const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
@@ -195,8 +195,8 @@ const contributionImplementation = (
 };
 
 export const activateBuiltinPiIntegration = (
-  definition: PiariumBuiltinExtensionDefinition,
-  surface?: PiariumApplicationSurface,
+  definition: VarinBuiltinExtensionDefinition,
+  surface?: VarinApplicationSurface,
 ): SurfaceActivation => (context: SurfaceActivationContext) => {
   for (const contribution of definition.manifest.contributions ?? []) {
     if (surface && !contribution.supports.includes(surface)) continue;
@@ -207,4 +207,4 @@ export const activateBuiltinPiIntegration = (
   }
 };
 
-export const BUILTIN_PI_INTEGRATION_DEFINITIONS = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS;
+export const BUILTIN_PI_INTEGRATION_DEFINITIONS = VARIN_BUILTIN_EXTENSION_DEFINITIONS;

@@ -393,7 +393,7 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
     if (!pinned) throw new Error(`Working-state pin is unavailable: ${pin.pinId}`);
     return this.store.materializeStates(pinned.states, directory);
   }
-  async measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement> {
+  async measurePin(pin: WorkingStatePin): Promise<import("@varin/protocol").ThreadSpaceMeasurement> {
     const pinned = this.pins.get(pin.pinId);
     if (!pinned) throw new Error(`Working-state pin is unavailable: ${pin.pinId}`);
     return measurementFromStates(pinned.states);

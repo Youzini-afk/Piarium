@@ -6,7 +6,7 @@ import type {
   WorkspaceCombinedRecoveryPrepareInput,
   WorkspaceRecoveryCheckpointQuery,
   WorkspaceRecoveryTurnSettledInput,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import type { DocumentAuthorityOptions } from '../documents/authority.js';
 import {
   createDocumentAuthorityHarness,

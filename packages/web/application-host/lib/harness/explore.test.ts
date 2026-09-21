@@ -755,7 +755,7 @@ describe("explore structure slices", () => {
 
   it("falls back when tree-sitter wasm is missing and does not fail the tool", async () => {
     const missing = createTreeSitterStructureProvider({
-      runtimeFromUrl: pathToFileURL(join(mkdtempSync(join(tmpdir(), "piarium-missing-structure-")), "index.js")).href,
+      runtimeFromUrl: pathToFileURL(join(mkdtempSync(join(tmpdir(), "varin-missing-structure-")), "index.js")).href,
     });
     const content = Array.from({ length: 10 }, (_, index) => index === 6 ? "needle" : `line ${index + 1}`).join("\n");
     const result = await explore({ question: "needle" }, {

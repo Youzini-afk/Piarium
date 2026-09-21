@@ -2,7 +2,7 @@ import { isPathWithinRoot } from '../workspace/path-safety.js';
 import type fs from 'node:fs';
 import type path from 'node:path';
 
-const SKIP_NAMES = new Set(['node_modules', '.git', 'dist', 'out', '.piarium', 'coverage']);
+const SKIP_NAMES = new Set(['node_modules', '.git', 'dist', 'out', '.varin', 'coverage']);
 const TEST_FILE = /\.(test|spec)\.(cjs|js|mjs)$/;
 
 export const walkWorkspaceTestFiles = async ({

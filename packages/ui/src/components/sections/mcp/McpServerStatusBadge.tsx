@@ -4,12 +4,12 @@ import { cn } from '@/lib/utils';
 import type { McpAdapterServerStatus } from './mcpAdapterStatus';
 
 const STATUS_LABEL_KEYS: Readonly<Record<McpAdapterServerStatus, I18nKey>> = {
-  cached: 'settings.piarium.mcp.runtime.status.cached',
-  connected: 'settings.piarium.mcp.runtime.status.connected',
-  disabled: 'settings.piarium.mcp.runtime.status.disabled',
-  failed: 'settings.piarium.mcp.runtime.status.failed',
-  'needs-auth': 'settings.piarium.mcp.runtime.status.needsAuth',
-  'not-connected': 'settings.piarium.mcp.runtime.status.notConnected',
+  cached: 'settings.varin.mcp.runtime.status.cached',
+  connected: 'settings.varin.mcp.runtime.status.connected',
+  disabled: 'settings.varin.mcp.runtime.status.disabled',
+  failed: 'settings.varin.mcp.runtime.status.failed',
+  'needs-auth': 'settings.varin.mcp.runtime.status.needsAuth',
+  'not-connected': 'settings.varin.mcp.runtime.status.notConnected',
 };
 
 const statusTone = (status: McpAdapterServerStatus): string => {

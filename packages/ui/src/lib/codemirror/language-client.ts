@@ -3,7 +3,7 @@ import { autocompletion, type Completion } from '@codemirror/autocomplete';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension } from '@codemirror/state';
 import { hoverTooltip, type EditorView } from '@codemirror/view';
-import type { PiariumLanguageDiagnostic } from '@piarium/application-client';
+import type { VarinLanguageDiagnostic } from '@varin/application-client';
 import { getBoundLanguageServices } from '@/lib/language-services/session';
 import {
   getLanguageDiagnosticsForResource,
@@ -13,7 +13,7 @@ import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import type { DocumentIdentity } from '@/lib/documents/types';
 
-const EMPTY_DIAGNOSTICS: readonly PiariumLanguageDiagnostic[] = [];
+const EMPTY_DIAGNOSTICS: readonly VarinLanguageDiagnostic[] = [];
 
 // This deliberately implements the mobile/embedded CodeMirror subset of the
 // shared Host language DTO. Desktop/Web file tabs use MonacoLanguageBridge.

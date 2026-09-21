@@ -68,7 +68,7 @@ describe("baseline-rebase", () => {
   };
 
   beforeEach(async () => {
-    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-rebase-test-"));
+    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-rebase-test-"));
     const workspace = path.join(tempDir, "workspace");
     const root = path.join(tempDir, "recovery");
     await fs.promises.mkdir(workspace, { recursive: true });

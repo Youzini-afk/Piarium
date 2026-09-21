@@ -1,7 +1,7 @@
 import React from 'react';
-import type { ThreadParent } from '@piarium/protocol';
-import { runtimeFetch } from '@piarium/application-client';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import type { ThreadParent } from '@varin/protocol';
+import { runtimeFetch } from '@varin/application-client';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import {
   mergeHarnessThreadSnapshot,
   parseHarnessThreadProjection,
@@ -102,7 +102,7 @@ export const HarnessThreadStateProvider: React.FC<{
     void reload(controller.signal).catch((error) => {
       if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : String(error));
     });
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'stream-ready') {
         void reload(controller.signal).catch((error) => {
           if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : String(error));

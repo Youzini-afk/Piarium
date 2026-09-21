@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from './store.js';
 
-const previousDataDir = process.env.PIARIUM_DATA_DIR;
+const previousDataDir = process.env.VARIN_DATA_DIR;
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-quota-store-'));
-process.env.PIARIUM_DATA_DIR = temporaryDirectory;
+process.env.VARIN_DATA_DIR = temporaryDirectory;
 
 describe('quota credential store', () => {
   it('uses owner-only permissions and rejects arbitrary provider paths', () => {
@@ -24,7 +24,7 @@ describe('quota credential store', () => {
 });
 
 afterAll(() => {
-  if (previousDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
-  else process.env.PIARIUM_DATA_DIR = previousDataDir;
+  if (previousDataDir === undefined) delete process.env.VARIN_DATA_DIR;
+  else process.env.VARIN_DATA_DIR = previousDataDir;
   fs.rmSync(temporaryDirectory, { recursive: true, force: true });
 });

@@ -1,4 +1,4 @@
-export interface PiariumAuthenticatedClient extends Record<string, unknown> {
+export interface VarinAuthenticatedClient extends Record<string, unknown> {
   allowedDirectories?: string[];
   capabilities?: string[];
   id: string;
@@ -6,14 +6,14 @@ export interface PiariumAuthenticatedClient extends Record<string, unknown> {
   profile?: string;
 }
 
-export type PiariumRequestAuthContext =
+export type VarinRequestAuthContext =
   | {
-      client: PiariumAuthenticatedClient;
+      client: VarinAuthenticatedClient;
       clientId: string;
       type: 'client';
     }
   | {
-    client?: PiariumAuthenticatedClient;
+    client?: VarinAuthenticatedClient;
     clientId?: string;
     token?: string;
     type: 'session';
@@ -24,8 +24,8 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      __piariumExternalAuditAttached?: boolean;
-      piariumAuth?: PiariumRequestAuthContext;
+      __varinExternalAuditAttached?: boolean;
+      varinAuth?: VarinRequestAuthContext;
     }
   }
 }

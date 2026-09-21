@@ -1,9 +1,9 @@
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
-import type { PiRuntimeManagementAPI } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeUrlResolver } from '@piarium/application-client';
+import type { PiRuntimeSnapshot } from '@varin/protocol';
+import type { PiRuntimeManagementAPI } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
 
-const MANAGER_PREFIX = '/api/piarium/runtime-manager';
+const MANAGER_PREFIX = '/api/varin/runtime-manager';
 
 const readSnapshot = async (response: Response): Promise<PiRuntimeSnapshot> => {
   const payload = await response.json().catch(() => ({ error: response.statusText }));

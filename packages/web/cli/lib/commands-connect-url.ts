@@ -18,7 +18,7 @@ import { createClientPairingRuntime } from '#application-host/lib/client-auth/pa
 import { createRelayIdentityRuntime } from '#application-host/lib/relay/identity.js';
 import { DEFAULT_RELAY_URL } from '#application-host/lib/relay/service.js';
 import { bytesToBase64Url } from '#application-host/lib/relay/e2ee.js';
-import { createSettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -45,10 +45,10 @@ function isValidRelayUrl(value: unknown): value is string {
 }
 
 // Resolve the relay endpoint the same way the running host does (service.js):
-// PIARIUM_RELAY_URL env override, then the stored setting, then the default —
+// VARIN_RELAY_URL env override, then the stored setting, then the default —
 // so the pairing link points at the same relay the host connects out to.
 function resolveRelayUrl(settings: Record<string, unknown>): string {
-  const envUrl = process.env.PIARIUM_RELAY_URL;
+  const envUrl = process.env.VARIN_RELAY_URL;
   if (isValidRelayUrl(envUrl)) return envUrl.trim();
   const stored = recordOf(settings.privateRelay).relayUrl;
   if (isValidRelayUrl(stored)) return stored.trim();
@@ -113,12 +113,12 @@ function createCliPairingRuntime() {
   });
 }
 
-// Mirror of encodePairingConnectionPayload in @piarium/ui (the bin cannot
+// Mirror of encodePairingConnectionPayload in @varin/ui (the bin cannot
 // import the UI package). Keep in sync: v2 payload → base64url(JSON) in the URL
 // query, so the one-time secret rides the link, never the network.
 function encodePairingConnectUrl(payload: Record<string, unknown>): string {
   const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
-  return `piarium://connect?v=2&p=${encoded}`;
+  return `varin://connect?v=2&p=${encoded}`;
 }
 
 type PairingRecord = Awaited<ReturnType<ReturnType<typeof createClientPairingRuntime>['createPairingSession']>>['pairing'];
@@ -153,7 +153,7 @@ async function resolveConnectUrlServerUrl(options: CliOptions & { port: number }
   source: 'configured-host' | 'lan-detected' | 'loopback-fallback';
 }> {
   let hostOverride = options.host;
-  if (typeof hostOverride !== 'string' && !process.env.PIARIUM_HOST) {
+  if (typeof hostOverride !== 'string' && !process.env.VARIN_HOST) {
     const storedOptions = readInstanceOptions(await getInstanceFilePath(options.port));
     if (typeof storedOptions?.host === 'string' && storedOptions.host.trim()) {
       hostOverride = storedOptions.host.trim();
@@ -234,7 +234,7 @@ async function displayTunnelQrCode(url: string): Promise<void> {
 function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand }) {
   return async function connectUrlCommand(options: CliOptions = {}): Promise<void> {
     const port = typeof options.port === 'number' ? options.port : 3000;
-    assertSafeBrowserPort(port, { context: 'Piarium connect-url' });
+    assertSafeBrowserPort(port, { context: 'Varin connect-url' });
     const explicitServerUrl = options.server ? normalizeServerUrlForConnection(options.server) : null;
     if (options.server && !explicitServerUrl) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
@@ -300,9 +300,9 @@ function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand 
       return;
     }
 
-    clackIntro('Piarium pairing link');
+    clackIntro('Varin pairing link');
     if (serverState.autoStarted) {
-      logStatus('success', `started Piarium on port ${port}`);
+      logStatus('success', `started Varin on port ${port}`);
     }
     logStatus('success', connectUrl);
     clackLog.info(`Server URL: ${serverUrl}`);
@@ -316,20 +316,20 @@ function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand 
       clackLog.info(`Fingerprint: ${pairing.fingerprint}`);
     }
     if (resolvedServerUrl.source === 'lan-detected') {
-      clackLog.info('Detected a LAN address because Piarium is bound to all interfaces. Use --server to override it.');
+      clackLog.info('Detected a LAN address because Varin is bound to all interfaces. Use --server to override it.');
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
-      clackLog.warn('Piarium is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
+      clackLog.warn('Varin is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
     } else if (isLoopbackServerUrl(serverUrl)) {
       // The direct candidate points at this machine only — other devices cannot
       // use it. Say so instead of letting a "LAN" link silently not work (or a
       // --relay link silently go relay-only).
       if (options.relay) {
-      logStatus('warning', '[LAN_UNREACHABLE]', 'Piarium only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
+      logStatus('warning', '[LAN_UNREACHABLE]', 'Varin only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
       } else {
-        logStatus('warning', '[LAN_UNREACHABLE]', 'Piarium only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
+        logStatus('warning', '[LAN_UNREACHABLE]', 'Varin only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
       }
     }
-    clackLog.info('Scan or paste this link into another Piarium client. It is single-use and expires.');
+    clackLog.info('Scan or paste this link into another Varin client. It is single-use and expires.');
     if (options.qr === true) {
       await displayTunnelQrCode(connectUrl);
     }

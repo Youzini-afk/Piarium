@@ -1,10 +1,10 @@
 {
-  "name": "@piarium/application-client",
+  "name": "@varin/application-client",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Framework-neutral Piarium application client boundary: RuntimeAPIs, typed failures, transport, and runtime switch primitives.",
+  "description": "Framework-neutral Varin application client boundary: RuntimeAPIs, typed failures, transport, and runtime switch primitives.",
   "files": [
     "dist"
   ],
@@ -28,8 +28,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/protocol": "0.1.0",
-    "@piarium/extension-contract": "0.2.0"
+    "@varin/protocol": "0.1.0",
+    "@varin/extension-contract": "0.2.0"
   },
   "engines": {
     "node": ">=22.19.0"

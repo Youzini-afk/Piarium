@@ -3,11 +3,11 @@ import {
   createRuntimeSuccessResponse,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
-  PIARIUM_PROTOCOL_VERSION,
-} from '@piarium/protocol';
+  VARIN_PROTOCOL_VERSION,
+} from '@varin/protocol';
 import type {
   RuntimeWebSocket,
-} from '@piarium/runtime-client';
+} from '@varin/runtime-client';
 import {
   createPiRuntimeConnection,
   disconnectPiRuntime,
@@ -41,7 +41,7 @@ class HandshakeSocket implements RuntimeWebSocket {
             settings: true,
           },
           hostVersion: '0.1.0',
-          protocolVersion: PIARIUM_PROTOCOL_VERSION,
+          protocolVersion: VARIN_PROTOCOL_VERSION,
           runtime: {
             agentDir: 'C:/agent',
             nodePath: 'node',
@@ -74,7 +74,7 @@ describe('Pi runtime UI connection', () => {
         order.push('auth');
         return 'url-token';
       },
-      resolveWebSocketUrl: () => 'ws://runtime.test/api/piarium/runtime/ws',
+      resolveWebSocketUrl: () => 'ws://runtime.test/api/varin/runtime/ws',
       runtimeKey: 'runtime-test',
     });
 

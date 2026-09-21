@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PiSessionEntry, SessionEntriesResult, TranscriptRef } from "@piarium/protocol";
+import type { PiSessionEntry, SessionEntriesResult, TranscriptRef } from "@varin/protocol";
 import { createThreadTranscriptReader } from "./thread-transcript.js";
 
 const entry = (id: string, parentId: string | null, text: string): PiSessionEntry => ({

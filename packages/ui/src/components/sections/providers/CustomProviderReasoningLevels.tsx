@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { THINKING_LEVELS, type ProviderModelConfigInput, type ThinkingLevel } from '@piarium/protocol';
+import { THINKING_LEVELS, type ProviderModelConfigInput, type ThinkingLevel } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';

@@ -1,5 +1,5 @@
-import { createSettingsFileStore } from '@piarium/settings-store';
-import type { SettingsFileStore } from '@piarium/settings-store';
+import { createSettingsFileStore } from '@varin/settings-store';
+import type { SettingsFileStore } from '@varin/settings-store';
 import type cryptoModule from 'node:crypto';
 
 const STORE_VERSION = 1;

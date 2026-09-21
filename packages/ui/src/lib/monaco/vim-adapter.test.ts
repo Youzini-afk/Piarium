@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { editor, IKeyboardEvent } from 'monaco-editor/editor';
 
 import type { MonacoRuntime } from './runtime';
-import { createPiariumMonacoVimAdapter } from './vim-adapter';
+import { createVarinMonacoVimAdapter } from './vim-adapter';
 
 class FakeElement {
   className = '';
@@ -159,7 +159,7 @@ afterEach(() => {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
 });
 
-describe('Piarium Monaco Vim adapter', () => {
+describe('Varin Monaco Vim adapter', () => {
   test('supports modal input, destructive commands, search, save, and clean disposal', async () => {
     Object.defineProperty(globalThis, 'document', {
       configurable: true,
@@ -173,7 +173,7 @@ describe('Piarium Monaco Vim adapter', () => {
       Range: FakeRange,
       Selection: FakeSelection,
     } as unknown as MonacoRuntime;
-    const adapter = createPiariumMonacoVimAdapter({
+    const adapter = createVarinMonacoVimAdapter({
       commandAriaLabel: 'Vim command',
       editor: editorInstance as unknown as editor.IStandaloneCodeEditor,
       monaco,
@@ -226,7 +226,7 @@ describe('Piarium Monaco Vim adapter', () => {
     expect(statusNode.children).toEqual([]);
     editorInstance.simulate('i');
     expect(adapter.mode()).toBe('normal');
-    const reenabled = createPiariumMonacoVimAdapter({
+    const reenabled = createVarinMonacoVimAdapter({
       commandAriaLabel: 'Vim command',
       editor: editorInstance as unknown as editor.IStandaloneCodeEditor,
       monaco,

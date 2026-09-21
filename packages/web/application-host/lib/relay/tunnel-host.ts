@@ -3,7 +3,7 @@
 // HTTP streams -> fetch http://127.0.0.1:<port> with streamed duplex bodies;
 // WS streams -> `ws` client to the loopback WebSocket endpoints.
 // The dispatcher NEVER injects credentials: tunneled requests authenticate
-// exactly like any remote client (Piarium bearer token and URL auth token).
+// exactly like any remote client (Varin bearer token and URL auth token).
 // Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
 
 import { WebSocket } from 'ws';
@@ -84,7 +84,7 @@ const isAllowedHttpPath = (pathname: string): boolean =>
   || pathname.startsWith('/auth/');
 
 const ALLOWED_WS_PATHS = new Set([
-  '/api/piarium/runtime/ws',
+  '/api/varin/runtime/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
 ]);
@@ -226,7 +226,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) continue;
       headers[lower] = value;
     }
-    headers['x-piarium-relay-connection'] = connectionId;
+    headers['x-varin-relay-connection'] = connectionId;
     // Browser-generated Origin is not visible to the tunnel client. Present the
     // loopback origin being dialed and overwrite any client-supplied value.
     headers.origin = loopbackOrigin;
@@ -486,9 +486,9 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     // use the client's window.location.origin: it's unreliable in WKWebView (empty
     // or "null" for custom schemes), and the `ws` client sends no Origin at all
     // otherwise — a no-origin upgrade is rejected 403. The request itself is still
-    // authenticated by the tunneled Piarium URL token, not by this origin.
+    // authenticated by the tunneled Varin URL token, not by this origin.
     const dialHeaders = {
-      'x-piarium-relay-connection': connectionId,
+      'x-varin-relay-connection': connectionId,
       origin: `http://127.0.0.1:${getLocalPort()}`,
     };
     let socket: WebSocket;

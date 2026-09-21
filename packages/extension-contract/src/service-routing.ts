@@ -1,11 +1,11 @@
 import type {
-  PiariumExtensionDiagnostic,
-  PiariumExtensionStorageSnapshot,
+  VarinExtensionDiagnostic,
+  VarinExtensionStorageSnapshot,
 } from "./types.js";
 
-export const PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION = 1 as const;
+export const VARIN_SERVICE_ROUTING_SCHEMA_VERSION = 1 as const;
 
-export interface PiariumExtensionServiceRoutingContext {
+export interface VarinExtensionServiceRoutingContext {
   agentId?: string;
   distributionId?: string;
   invocationId?: string;
@@ -19,49 +19,49 @@ export interface PiariumExtensionServiceRoutingContext {
   workspaceId?: string;
 }
 
-export interface PiariumExtensionServiceRoutingRule {
+export interface VarinExtensionServiceRoutingRule {
   allowFallback: boolean;
   providerKey: string;
-  scope: PiariumExtensionServiceRoutingContext;
+  scope: VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
 
-export interface PiariumExtensionServiceRoutingDocument {
+export interface VarinExtensionServiceRoutingDocument {
   revision: number;
-  rules: PiariumExtensionServiceRoutingRule[];
-  schemaVersion: typeof PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION;
+  rules: VarinExtensionServiceRoutingRule[];
+  schemaVersion: typeof VARIN_SERVICE_ROUTING_SCHEMA_VERSION;
   updatedAt: string;
 }
 
-export interface PiariumExtensionServiceRoutingSnapshot {
+export interface VarinExtensionServiceRoutingSnapshot {
   authoritative: boolean;
-  diagnostics: PiariumExtensionDiagnostic[];
-  document: PiariumExtensionServiceRoutingDocument;
+  diagnostics: VarinExtensionDiagnostic[];
+  document: VarinExtensionServiceRoutingDocument;
   hostId: string;
   storageState: "missing" | "ready" | "stale";
 }
 
-export interface PiariumExtensionServiceRoutingRuleUpdateRequest {
+export interface VarinExtensionServiceRoutingRuleUpdateRequest {
   expectedRevision: number;
-  rule: PiariumExtensionServiceRoutingRule;
+  rule: VarinExtensionServiceRoutingRule;
 }
 
-export interface PiariumExtensionServiceRoutingRuleRemoveRequest {
+export interface VarinExtensionServiceRoutingRuleRemoveRequest {
   expectedRevision: number;
-  scope: PiariumExtensionServiceRoutingContext;
+  scope: VarinExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
 
-export interface PiariumExtensionServiceRoutingCandidate {
+export interface VarinExtensionServiceRoutingCandidate {
   providerId: string;
   providerKey: string;
 }
 
-export interface PiariumExtensionServiceRoutingResolution {
-  diagnostics: PiariumExtensionDiagnostic[];
-  matchedRule?: PiariumExtensionServiceRoutingRule;
+export interface VarinExtensionServiceRoutingResolution {
+  diagnostics: VarinExtensionDiagnostic[];
+  matchedRule?: VarinExtensionServiceRoutingRule;
   providerId?: string;
   providerKey?: string;
   status: "ambiguous" | "resolved" | "unavailable";
@@ -80,7 +80,7 @@ const SCOPE_FIELDS = [
   "modelProviderId",
   "modelId",
   "invocationId",
-] as const satisfies readonly (keyof PiariumExtensionServiceRoutingContext)[];
+] as const satisfies readonly (keyof VarinExtensionServiceRoutingContext)[];
 
 const record = (value: unknown): Record<string, unknown> | null => (
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -106,13 +106,13 @@ const revision = (value: unknown, label: string, allowZero = true): number => {
   return Number(value);
 };
 
-export const parsePiariumExtensionServiceRoutingContext = (
+export const parseVarinExtensionServiceRoutingContext = (
   value: unknown,
   options: { allowEmpty?: boolean } = {},
-): PiariumExtensionServiceRoutingContext => {
+): VarinExtensionServiceRoutingContext => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing context must be an object");
-  const context: PiariumExtensionServiceRoutingContext = {};
+  const context: VarinExtensionServiceRoutingContext = {};
   for (const field of SCOPE_FIELDS) {
     if (raw[field] !== undefined) context[field] = text(raw[field], `scope.${field}`);
   }
@@ -120,36 +120,36 @@ export const parsePiariumExtensionServiceRoutingContext = (
   return context;
 };
 
-export const parsePiariumExtensionServiceRoutingRule = (value: unknown): PiariumExtensionServiceRoutingRule => {
+export const parseVarinExtensionServiceRoutingRule = (value: unknown): VarinExtensionServiceRoutingRule => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing rule must be an object");
   if (typeof raw.allowFallback !== "boolean") throw new Error("Service routing rule allowFallback must be boolean");
   return {
     allowFallback: raw.allowFallback,
     providerKey: text(raw.providerKey, "providerKey"),
-    scope: parsePiariumExtensionServiceRoutingContext(raw.scope),
+    scope: parseVarinExtensionServiceRoutingContext(raw.scope),
     serviceId: serviceId(raw.serviceId, "serviceId"),
     version: revision(raw.version, "version", false),
   };
 };
 
-export const serviceRoutingScopeKey = (scopeValue: PiariumExtensionServiceRoutingContext | unknown): string => {
-  const scope = parsePiariumExtensionServiceRoutingContext(scopeValue);
+export const serviceRoutingScopeKey = (scopeValue: VarinExtensionServiceRoutingContext | unknown): string => {
+  const scope = parseVarinExtensionServiceRoutingContext(scopeValue);
   return SCOPE_FIELDS.flatMap((field) => scope[field] ? [`${field}=${JSON.stringify(scope[field])}`] : []).join("&");
 };
 
 export const serviceRoutingRuleKey = (
-  rule: Pick<PiariumExtensionServiceRoutingRule, "scope" | "serviceId" | "version">,
+  rule: Pick<VarinExtensionServiceRoutingRule, "scope" | "serviceId" | "version">,
 ): string => `${rule.serviceId}@${rule.version}\0${serviceRoutingScopeKey(rule.scope)}`;
 
-export const parsePiariumExtensionServiceRoutingDocument = (
+export const parseVarinExtensionServiceRoutingDocument = (
   value: unknown,
-): PiariumExtensionServiceRoutingDocument => {
+): VarinExtensionServiceRoutingDocument => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing document must be an object");
-  if (raw.schemaVersion !== PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION) throw new Error("Service routing schemaVersion is unsupported");
+  if (raw.schemaVersion !== VARIN_SERVICE_ROUTING_SCHEMA_VERSION) throw new Error("Service routing schemaVersion is unsupported");
   if (!Array.isArray(raw.rules)) throw new Error("Service routing rules must be an array");
-  const rules = raw.rules.map(parsePiariumExtensionServiceRoutingRule);
+  const rules = raw.rules.map(parseVarinExtensionServiceRoutingRule);
   const keys = rules.map(serviceRoutingRuleKey);
   if (new Set(keys).size !== keys.length) throw new Error("Service routing rule identities must be unique");
   const updatedAt = text(raw.updatedAt, "updatedAt");
@@ -157,14 +157,14 @@ export const parsePiariumExtensionServiceRoutingDocument = (
   return {
     revision: revision(raw.revision, "revision"),
     rules,
-    schemaVersion: PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION,
+    schemaVersion: VARIN_SERVICE_ROUTING_SCHEMA_VERSION,
     updatedAt,
   };
 };
 
-export const parsePiariumExtensionServiceRoutingSnapshot = (
+export const parseVarinExtensionServiceRoutingSnapshot = (
   value: unknown,
-): PiariumExtensionServiceRoutingSnapshot => {
+): VarinExtensionServiceRoutingSnapshot => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing snapshot must be an object");
   const storageState = raw.storageState;
@@ -175,51 +175,51 @@ export const parsePiariumExtensionServiceRoutingSnapshot = (
   if (!Array.isArray(raw.diagnostics)) throw new Error("Service routing diagnostics must be an array");
   return {
     authoritative: raw.authoritative,
-    diagnostics: raw.diagnostics as PiariumExtensionDiagnostic[],
-    document: parsePiariumExtensionServiceRoutingDocument(raw.document),
+    diagnostics: raw.diagnostics as VarinExtensionDiagnostic[],
+    document: parseVarinExtensionServiceRoutingDocument(raw.document),
     hostId: text(raw.hostId, "hostId"),
     storageState,
   };
 };
 
-export const parsePiariumExtensionServiceRoutingRuleUpdateRequest = (
+export const parseVarinExtensionServiceRoutingRuleUpdateRequest = (
   value: unknown,
-): PiariumExtensionServiceRoutingRuleUpdateRequest => {
+): VarinExtensionServiceRoutingRuleUpdateRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing update request must be an object");
-  return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), rule: parsePiariumExtensionServiceRoutingRule(raw.rule) };
+  return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), rule: parseVarinExtensionServiceRoutingRule(raw.rule) };
 };
 
-export const parsePiariumExtensionServiceRoutingRuleRemoveRequest = (
+export const parseVarinExtensionServiceRoutingRuleRemoveRequest = (
   value: unknown,
-): PiariumExtensionServiceRoutingRuleRemoveRequest => {
+): VarinExtensionServiceRoutingRuleRemoveRequest => {
   const raw = record(value);
   if (!raw) throw new Error("Service routing remove request must be an object");
   return {
     expectedRevision: revision(raw.expectedRevision, "expectedRevision"),
-    scope: parsePiariumExtensionServiceRoutingContext(raw.scope),
+    scope: parseVarinExtensionServiceRoutingContext(raw.scope),
     serviceId: serviceId(raw.serviceId, "serviceId"),
     version: revision(raw.version, "version", false),
   };
 };
 
-export const defaultPiariumExtensionServiceRoutingDocument = (): PiariumExtensionServiceRoutingDocument => ({
+export const defaultVarinExtensionServiceRoutingDocument = (): VarinExtensionServiceRoutingDocument => ({
   revision: 0,
   rules: [],
-  schemaVersion: PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION,
+  schemaVersion: VARIN_SERVICE_ROUTING_SCHEMA_VERSION,
   updatedAt: new Date(0).toISOString(),
 });
 
 export const serviceRoutingDocumentFromStorage = (
-  snapshot: PiariumExtensionStorageSnapshot,
-): PiariumExtensionServiceRoutingDocument => parsePiariumExtensionServiceRoutingDocument({
-  ...(snapshot.exists ? snapshot.document.data : defaultPiariumExtensionServiceRoutingDocument()),
+  snapshot: VarinExtensionStorageSnapshot,
+): VarinExtensionServiceRoutingDocument => parseVarinExtensionServiceRoutingDocument({
+  ...(snapshot.exists ? snapshot.document.data : defaultVarinExtensionServiceRoutingDocument()),
   revision: snapshot.document.revision,
-  schemaVersion: PIARIUM_SERVICE_ROUTING_SCHEMA_VERSION,
+  schemaVersion: VARIN_SERVICE_ROUTING_SCHEMA_VERSION,
   updatedAt: snapshot.document.updatedAt,
 });
 
-const precedence = (scope: PiariumExtensionServiceRoutingContext): [number, number] => {
+const precedence = (scope: VarinExtensionServiceRoutingContext): [number, number] => {
   let highest = -1;
   let dimensions = 0;
   SCOPE_FIELDS.forEach((field, index) => {
@@ -231,26 +231,26 @@ const precedence = (scope: PiariumExtensionServiceRoutingContext): [number, numb
 };
 
 const matchesContext = (
-  scope: PiariumExtensionServiceRoutingContext,
-  context: PiariumExtensionServiceRoutingContext,
+  scope: VarinExtensionServiceRoutingContext,
+  context: VarinExtensionServiceRoutingContext,
 ): boolean => SCOPE_FIELDS.every((field) => scope[field] === undefined || scope[field] === context[field]);
 
-const routingDiagnostic = (code: string, message: string): PiariumExtensionDiagnostic => ({
+const routingDiagnostic = (code: string, message: string): VarinExtensionDiagnostic => ({
   code,
   message,
   severity: code.includes("fallback") ? "warning" : "error",
   timestamp: new Date().toISOString(),
 });
 
-export const resolvePiariumExtensionServiceRouting = (options: {
-  candidates: readonly PiariumExtensionServiceRoutingCandidate[];
-  context?: PiariumExtensionServiceRoutingContext;
-  document: PiariumExtensionServiceRoutingDocument | unknown;
+export const resolveVarinExtensionServiceRouting = (options: {
+  candidates: readonly VarinExtensionServiceRoutingCandidate[];
+  context?: VarinExtensionServiceRoutingContext;
+  document: VarinExtensionServiceRoutingDocument | unknown;
   serviceId: string;
   version: number;
-}): PiariumExtensionServiceRoutingResolution => {
-  const document = parsePiariumExtensionServiceRoutingDocument(options.document);
-  const context = parsePiariumExtensionServiceRoutingContext(options.context ?? {}, { allowEmpty: true });
+}): VarinExtensionServiceRoutingResolution => {
+  const document = parseVarinExtensionServiceRoutingDocument(options.document);
+  const context = parseVarinExtensionServiceRoutingContext(options.context ?? {}, { allowEmpty: true });
   const id = serviceId(options.serviceId, "serviceId");
   const version = revision(options.version, "version", false);
   const candidates = options.candidates.filter((candidate) => candidate.providerId.trim() && candidate.providerKey.trim());
@@ -261,12 +261,12 @@ export const resolvePiariumExtensionServiceRouting = (options: {
     const rightPrecedence = precedence(right.scope);
     return rightPrecedence[0] - leftPrecedence[0] || rightPrecedence[1] - leftPrecedence[1];
   });
-  const diagnostics: PiariumExtensionDiagnostic[] = [];
+  const diagnostics: VarinExtensionDiagnostic[] = [];
   for (let index = 0; index < matching.length;) {
     const rank = precedence(matching[index]!.scope);
-    const peers: PiariumExtensionServiceRoutingRule[] = [];
+    const peers: VarinExtensionServiceRoutingRule[] = [];
     while (index < matching.length) {
-      const current = matching[index] as PiariumExtensionServiceRoutingRule;
+      const current = matching[index] as VarinExtensionServiceRoutingRule;
       const currentRank = precedence(current.scope);
       if (currentRank[0] !== rank[0] || currentRank[1] !== rank[1]) break;
       peers.push(current);
@@ -282,7 +282,7 @@ export const resolvePiariumExtensionServiceRouting = (options: {
         status: "ambiguous",
       };
     }
-    const rule = peers[0] as PiariumExtensionServiceRoutingRule;
+    const rule = peers[0] as VarinExtensionServiceRoutingRule;
     const provider = candidates.find((candidate) => candidate.providerKey === rule.providerKey);
     if (provider) {
       return {
@@ -300,7 +300,7 @@ export const resolvePiariumExtensionServiceRouting = (options: {
     if (!rule.allowFallback) return { diagnostics, matchedRule: rule, providerKey: rule.providerKey, status: "unavailable" };
   }
   if (candidates.length === 1) {
-    const candidate = candidates[0] as PiariumExtensionServiceRoutingCandidate;
+    const candidate = candidates[0] as VarinExtensionServiceRoutingCandidate;
     return {
       diagnostics,
       providerId: candidate.providerId,

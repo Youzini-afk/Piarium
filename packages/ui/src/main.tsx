@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/fonts'
 import './styles/application'
-import { PiariumApplication } from './apps/PiariumApplication'
+import { VarinApplication } from './apps/VarinApplication'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
@@ -12,16 +12,16 @@ import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import { initializeLocale, I18nProvider } from './lib/i18n'
-import type { RuntimeAPIs } from '@piarium/application-client'
+import type { RuntimeAPIs } from '@varin/application-client'
 
 declare global {
   interface Window {
-    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
+    __VARIN_RUNTIME_APIS__?: RuntimeAPIs;
   }
 }
 
-const runtimeAPIs = (typeof window !== 'undefined' && window.__PIARIUM_RUNTIME_APIS__) || (() => {
-  throw new Error('Piarium runtime APIs were not provided.');
+const runtimeAPIs = (typeof window !== 'undefined' && window.__VARIN_RUNTIME_APIS__) || (() => {
+  throw new Error('Varin runtime APIs were not provided.');
 })();
 
 initializeLocale();
@@ -54,7 +54,7 @@ createRoot(rootElement).render(
       <ThemeSystemProvider>
         <ThemeProvider>
           <SessionAuthGate apis={runtimeAPIs}>
-            <PiariumApplication apis={runtimeAPIs} />
+            <VarinApplication apis={runtimeAPIs} />
           </SessionAuthGate>
         </ThemeProvider>
       </ThemeSystemProvider>

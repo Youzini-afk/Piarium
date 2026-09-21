@@ -85,7 +85,7 @@ describe('project icon routes', () => {
       fsPromises,
       path,
       crypto,
-      piariumDataDir: '/tmp/piarium-test',
+      varinDataDir: '/tmp/varin-test',
       sanitizeProjects: (projects: unknown) => Array.isArray(projects) ? projects : [],
       readSettingsFromDisk: async () => ({
         projects: [{

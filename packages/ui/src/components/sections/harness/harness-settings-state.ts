@@ -1,4 +1,4 @@
-import { mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue, type PiSettingsSnapshot } from '@piarium/protocol';
+import { mergeHarnessSettings, type HarnessSettings, type HarnessSettingsInput, type JsonValue, type PiSettingsSnapshot } from '@varin/protocol';
 
 /** Objects merge, arrays replace, undefined removes a setting (restores inheritance). */
 export type HarnessSettingsPatch = { [key: string]: unknown };

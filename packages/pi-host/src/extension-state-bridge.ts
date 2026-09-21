@@ -1,5 +1,5 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { toJsonValue } from "./json.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
@@ -9,7 +9,7 @@ export const MCP_ADAPTER_STATUS_CHANNEL = "pi-mcp-adapter/status/v1";
 const PUBLIC_STATE_CHANNELS = [MCP_ADAPTER_STATUS_CHANNEL] as const;
 
 /**
- * Projects versioned, public extension snapshots into the Piarium transport.
+ * Projects versioned, public extension snapshots into the Varin transport.
  * The producing extension remains the only owner of runtime state and behavior.
  */
 export function createExtensionStateBridgeExtension(emit: EventEmitter): ExtensionFactory {

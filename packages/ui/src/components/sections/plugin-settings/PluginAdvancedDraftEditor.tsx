@@ -28,8 +28,8 @@ export const PluginAdvancedDraftEditor: React.FC<PluginAdvancedDraftEditorProps>
   return (
     <SettingsControlGroup
       className="border-t border-border/60 pt-5"
-      title={t('settings.piarium.pluginSettings.advanced.sectionTitle')}
-      info={t('settings.piarium.pluginSettings.advanced.sameDraftDescription')}
+      title={t('settings.varin.pluginSettings.advanced.sectionTitle')}
+      info={t('settings.varin.pluginSettings.advanced.sameDraftDescription')}
     >
       <Collapsible open={editorOpen} onOpenChange={setOpen}>
         <CollapsibleTrigger
@@ -38,8 +38,8 @@ export const PluginAdvancedDraftEditor: React.FC<PluginAdvancedDraftEditorProps>
         >
           <span className="typography-ui-label text-foreground">
             {editorOpen
-              ? t('settings.piarium.pluginSettings.advanced.hide')
-              : t('settings.piarium.pluginSettings.advanced.show')}
+              ? t('settings.varin.pluginSettings.advanced.hide')
+              : t('settings.varin.pluginSettings.advanced.show')}
           </span>
           <Icon
             name={editorOpen ? 'arrow-up-s' : 'arrow-down-s'}
@@ -48,7 +48,7 @@ export const PluginAdvancedDraftEditor: React.FC<PluginAdvancedDraftEditorProps>
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-2 pt-3">
           <p className="break-all font-mono typography-micro text-muted-foreground">
-            {controller.path || t('settings.piarium.pluginSettings.loadingPath')}
+            {controller.path || t('settings.varin.pluginSettings.loadingPath')}
           </p>
           <div className="h-80 overflow-hidden rounded-md border border-border/60 bg-background">
             <CodeMirrorEditor
@@ -62,7 +62,7 @@ export const PluginAdvancedDraftEditor: React.FC<PluginAdvancedDraftEditorProps>
           </div>
           {controller.rawError ? (
             <p className="typography-meta text-[var(--status-error)]">
-              {t('settings.piarium.recovery.pluginSettings.invalidJson')}
+              {t('settings.varin.recovery.pluginSettings.invalidJson')}
             </p>
           ) : null}
         </CollapsibleContent>

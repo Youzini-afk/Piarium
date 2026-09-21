@@ -1,15 +1,15 @@
 # UI Auth Module Documentation
 
 ## Purpose
-This module owns Piarium UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
+This module owns Varin UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
 
-Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.js`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer piarium_client_...`.
+Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/application-host/lib/client-auth/remote-clients.js`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer varin_client_...`.
 
 Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.js`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
-`ui-auth.js` can mint short-lived `piarium_url_token` credentials scoped to explicit readable or
+`ui-auth.js` can mint short-lived `varin_url_token` credentials scoped to explicit readable or
 realtime paths. Callers obtain them through the shared runtime auth/URL helpers; long-lived client
 bearer tokens are never placed in URLs. Unknown paths and legacy token query parameters are rejected
 rather than becoming a compatibility write path.

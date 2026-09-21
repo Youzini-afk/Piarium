@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import type { HarnessActorContext } from "@piarium/protocol";
+import type { HarnessActorContext } from "@varin/protocol";
 import { createHarnessPathAuthority } from "./path-authority.js";
 
 const actor = (workspaceId = "workspace-1"): HarnessActorContext => ({

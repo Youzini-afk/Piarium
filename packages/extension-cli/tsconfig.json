@@ -5,10 +5,10 @@
     "types": ["node"],
     "noEmit": true,
     "paths": {
-      "@piarium/extension-contract": ["packages/extension-contract/src/index.ts"],
-      "@piarium/extension-sdk": ["packages/extension-sdk/src/index.ts"],
-      "@piarium/extension-sdk/testing": ["packages/extension-sdk/src/testing.ts"],
-      "@piarium/extension-surface": ["packages/extension-surface/src/index.ts"]
+      "@varin/extension-contract": ["packages/extension-contract/src/index.ts"],
+      "@varin/extension-sdk": ["packages/extension-sdk/src/index.ts"],
+      "@varin/extension-sdk/testing": ["packages/extension-sdk/src/testing.ts"],
+      "@varin/extension-surface": ["packages/extension-surface/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

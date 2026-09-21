@@ -1,4 +1,4 @@
-import type { PiSessionEntry } from '@piarium/protocol';
+import type { PiSessionEntry } from '@varin/protocol';
 import type { WebSource } from '@/stores/useWebSourcesStore';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (

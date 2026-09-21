@@ -7,7 +7,7 @@ import {
   encodeRuntimeEnvelope,
   isRuntimeMethod,
   parseAgentInputContext,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
@@ -201,7 +201,7 @@ describe("surface runtime protocol", () => {
             kind: "request",
             method: "host.shutdown",
             params: {},
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           }),
         ),
       (error: unknown) => {
@@ -218,7 +218,7 @@ describe("surface runtime protocol", () => {
             event: "session.closed",
             kind: "event",
             seq: 0,
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           }),
         ),
       /event.source/,
@@ -232,7 +232,7 @@ describe("surface runtime protocol", () => {
             kind: "event",
             seq: 0,
             source: { role: "catalog", workerId: "w" },
-            v: PIARIUM_PROTOCOL_VERSION,
+            v: VARIN_PROTOCOL_VERSION,
           }),
         ),
       (error: unknown) => {

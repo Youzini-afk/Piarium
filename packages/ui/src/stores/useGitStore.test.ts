@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { GitStatus } from '@piarium/application-client';
+import type { GitStatus } from '@varin/application-client';
 import { useGitStore } from './useGitStore';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 type Deferred<T> = {
   promise: Promise<T>;

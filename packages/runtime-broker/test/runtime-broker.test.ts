@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
+import { VARIN_PROTOCOL_VERSION } from "@varin/protocol";
 import type { PiRuntimeBrokerEvent } from "../src/index.js";
 import {
   dispatchRuntimeRequest,
@@ -14,7 +14,7 @@ import {
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
 
 test("broker owns catalog and per-session Pi workers", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-broker-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-runtime-broker-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const homeDir = join(root, "home");
@@ -25,7 +25,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
     `export default function extension(pi: any) {
       pi.registerCommand("broker-seed", {
         description: "Create a deterministic broker integration entry",
-        handler: async () => pi.appendEntry("piarium.broker.smoke", {
+        handler: async () => pi.appendEntry("varin.broker.smoke", {
           agentDir: process.env.PI_CODING_AGENT_DIR,
           ready: true,
         }),
@@ -60,9 +60,9 @@ test("broker owns catalog and per-session Pi workers", async () => {
       clientName: "surface-test",
       clientVersion: "0.1.0",
       mode: "test",
-      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+      protocolVersions: [VARIN_PROTOCOL_VERSION],
     });
-    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
+    assert.equal(handshake.protocolVersion, VARIN_PROTOCOL_VERSION);
     assert.equal(broker.catalogStarted, true);
     assert.deepEqual(await broker.listSessions(workspace), []);
     const workspaceProvider = await dispatchRuntimeRequest(
@@ -443,7 +443,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
           entry !== null &&
           !Array.isArray(entry) &&
           entry.type === "custom" &&
-          entry.customType === "piarium.broker.smoke",
+          entry.customType === "varin.broker.smoke",
       ),
     );
     assert.ok(
@@ -453,7 +453,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
           entry !== null &&
           !Array.isArray(entry) &&
           entry.type === "custom" &&
-          entry.customType === "piarium.broker.smoke" &&
+          entry.customType === "varin.broker.smoke" &&
           typeof entry.data === "object" &&
           entry.data !== null &&
           !Array.isArray(entry.data) &&
@@ -464,7 +464,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
       sessionId: created.sessionId,
     });
     assert.equal(tree.sessionId, created.sessionId);
-    assert.match(JSON.stringify(tree.tree), /piarium\.broker\.smoke/);
+    assert.match(JSON.stringify(tree.tree), /varin\.broker\.smoke/);
 
     assert.deepEqual(
       await dispatchRuntimeRequest(broker, "session.rename", {
@@ -513,7 +513,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
 });
 
 test("session deletion retires a worker when an extension shutdown hook never settles", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-delete-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-runtime-delete-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   await mkdir(join(workspace, ".pi", "extensions"), { recursive: true });
@@ -552,7 +552,7 @@ test("session deletion retires a worker when an extension shutdown hook never se
 });
 
 test("session preview reads persisted history without activating a session worker", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-preview-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-runtime-preview-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const safePath = `--${resolve(workspace).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
@@ -605,7 +605,7 @@ test("session preview reads persisted history without activating a session worke
 });
 
 test("surface explicitly resolves project trust without a broker-owned deadline", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-trust-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-runtime-trust-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   await mkdir(join(workspace, ".pi", "extensions"), { recursive: true });
@@ -671,7 +671,7 @@ test("surface explicitly resolves project trust without a broker-owned deadline"
 });
 
 test("workspace configuration watches survive catalog context switches and cancel explicitly", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-config-watch-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-runtime-config-watch-"));
   const workspaceA = join(root, "workspace-a");
   const workspaceB = join(root, "workspace-b");
   const agentDir = join(root, "agent");

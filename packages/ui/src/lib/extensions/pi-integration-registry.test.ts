@@ -1,11 +1,11 @@
 import { expect, mock, test } from 'bun:test';
 import {
-  PIARIUM_BUILTIN_FLEET_EXTENSION,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,
-  PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
-} from '@piarium/extension-builtins';
-import { SurfaceExtensionRuntime } from '@piarium/extension-surface';
-import type { PackageDescriptor } from '@piarium/protocol';
+  VARIN_BUILTIN_FLEET_EXTENSION,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION,
+  VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
+} from '@varin/extension-builtins';
+import { SurfaceExtensionRuntime } from '@varin/extension-surface';
+import type { PackageDescriptor } from '@varin/protocol';
 
 mock.module('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
@@ -21,20 +21,20 @@ test('built-in activation skips contributions unsupported by the current Surface
     owner: {
       desiredRevision: 1,
       entrypointId: 'main',
-      extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.id,
-      extensionVersion: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.version,
+      extensionId: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.id,
+      extensionVersion: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.version,
       generation: 1,
       hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
       realmId: 'mobile-ide-filter-test',
     },
-  }, activateBuiltinPiIntegration(PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION, 'mobile'));
+  }, activateBuiltinPiIntegration(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION, 'mobile'));
 
   expect(runtime.getSnapshot().actual[0]?.status).toBe('active');
   expect(runtime.getSnapshot().contributions).toEqual([]);
 });
 
-test('a Piarium adapter contribution can be withdrawn without changing the Pi package', async () => {
-  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+test('a Varin adapter contribution can be withdrawn without changing the Pi package', async () => {
+  const definition = VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.subagents')
   ));
   expect(definition).toBeDefined();
@@ -69,7 +69,7 @@ test('a Piarium adapter contribution can be withdrawn without changing the Pi pa
 });
 
 test('maps the pi-lens package to its built-in settings adapter', async () => {
-  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+  const definition = VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.pi-lens')
   ));
   expect(definition).toBeDefined();
@@ -102,7 +102,7 @@ test('maps the pi-lens package to its built-in settings adapter', async () => {
 });
 
 test('maps only @cortexkit/aft-pi to the AFT settings adapter', async () => {
-  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+  const definition = VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.aft')
   ));
   expect(definition).toBeDefined();
@@ -142,7 +142,7 @@ test('maps only @cortexkit/aft-pi to the AFT settings adapter', async () => {
 });
 
 test('maps only pi-hermes-memory to the Hermes Memory settings adapter', async () => {
-  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+  const definition = VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.hermes-memory')
   ));
   expect(definition).toBeDefined();
@@ -180,7 +180,7 @@ test('maps only pi-hermes-memory to the Hermes Memory settings adapter', async (
 });
 
 test('maps only pi-rtk-optimizer to the RTK settings adapter', async () => {
-  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+  const definition = VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.rtk')
   ));
   expect(definition).toBeDefined();
@@ -218,11 +218,11 @@ test('maps only pi-rtk-optimizer to the RTK settings adapter', async () => {
 });
 
 test('the public Fleet builtin owns both work providers and has no Plugin Settings adapter', () => {
-  expect(PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.integrates?.piPackages).toEqual([
+  expect(VARIN_BUILTIN_FLEET_EXTENSION.manifest.integrates?.piPackages).toEqual([
     'pi-subagents',
     'pi-background-tasks',
   ]);
-  expect(PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.some((definition) => (
+  expect(VARIN_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.some((definition) => (
     definition.manifest.integrates?.piPackages?.includes('pi-background-tasks')
   ))).toBe(false);
 });

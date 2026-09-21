@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionSnapshot, SessionSummary } from '@piarium/protocol';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { SessionSnapshot, SessionSummary } from '@varin/protocol';
+import type { ProjectEntry } from '@varin/application-client';
 import { projectPiTraySessions } from './piTraySnapshot';
 
 const summary = (

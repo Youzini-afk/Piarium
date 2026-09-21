@@ -1,11 +1,11 @@
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import type {
   ThreadResultHistory,
   ThreadResultHistoryEntry,
   ThreadResultHistoryReleaseParams,
   ThreadResultHistoryReleaseResult,
   ThreadResultRetentionReason,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const retentionReasons: readonly ThreadResultRetentionReason[] = [
   'branch-head',

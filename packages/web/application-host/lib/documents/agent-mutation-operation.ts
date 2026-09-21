@@ -1,4 +1,4 @@
-import type { DocumentSurfaceWritePathResult } from "@piarium/protocol";
+import type { DocumentSurfaceWritePathResult } from "@varin/protocol";
 import type { DurableFileOperationContext } from "../recovery/durable-file-operation.js";
 import {
   parseRecoveryState,

@@ -4,7 +4,7 @@ import type { SessionEntry, SessionMessageEntry, CompactionEntry } from "@earend
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { createHistoryTool } from "../../src/harness/history-tool.js";
-import { assembleFreshInput, minePiBranchEntries, type FreshInputSeed } from "@piarium/protocol";
+import { assembleFreshInput, minePiBranchEntries, type FreshInputSeed } from "@varin/protocol";
 import { projectSessionEntry } from "../../src/protocol-projector.js";
 
 const buildFreshInput = ({ entries, recentUserMessages = 3, ...seed }: FreshInputSeed & {

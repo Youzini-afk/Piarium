@@ -1,18 +1,18 @@
 apply plugin: 'com.android.application'
 
-def ciVersionCode = System.getenv('PIARIUM_ANDROID_VERSION_CODE')
-def ciVersionName = System.getenv('PIARIUM_ANDROID_VERSION_NAME')
-def ciKeystorePath = System.getenv('PIARIUM_ANDROID_KEYSTORE_PATH')
-def ciKeystorePassword = System.getenv('PIARIUM_ANDROID_KEYSTORE_PASSWORD')
-def ciKeyAlias = System.getenv('PIARIUM_ANDROID_KEY_ALIAS')
-def ciKeyPassword = System.getenv('PIARIUM_ANDROID_KEY_PASSWORD')
+def ciVersionCode = System.getenv('VARIN_ANDROID_VERSION_CODE')
+def ciVersionName = System.getenv('VARIN_ANDROID_VERSION_NAME')
+def ciKeystorePath = System.getenv('VARIN_ANDROID_KEYSTORE_PATH')
+def ciKeystorePassword = System.getenv('VARIN_ANDROID_KEYSTORE_PASSWORD')
+def ciKeyAlias = System.getenv('VARIN_ANDROID_KEY_ALIAS')
+def ciKeyPassword = System.getenv('VARIN_ANDROID_KEY_PASSWORD')
 def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
 
 android {
-    namespace "dev.piarium.mobile"
+    namespace "dev.varin.mobile"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "dev.piarium.mobile"
+        applicationId "dev.varin.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode ciVersionCode ? ciVersionCode.toInteger() : 1
@@ -67,5 +67,5 @@ try {
         apply plugin: 'com.google.gms.google-services'
     }
 } catch(Exception e) {
-    logger.info("Piarium google-services.json not found; Firebase push notifications are disabled")
+    logger.info("Varin google-services.json not found; Firebase push notifications are disabled")
 }

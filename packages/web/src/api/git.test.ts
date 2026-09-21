@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@piarium/ui/lib/gitApiHttp', () => ({
+vi.mock('@varin/ui/lib/gitApiHttp', () => ({
   cloneRepository: vi.fn(),
   checkIsGitRepository: vi.fn(),
   getGitStatus: vi.fn(),

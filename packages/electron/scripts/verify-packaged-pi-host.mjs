@@ -13,14 +13,14 @@ const brokerEntry = path.resolve(brokerEntryArgument);
 const hostEntry = path.resolve(hostEntryArgument);
 const hostPackageRoot = path.dirname(path.dirname(hostEntry));
 const packagedModules = await realpath(path.resolve(hostPackageRoot, '..', '..'));
-const agentDir = await mkdtemp(path.join(os.tmpdir(), 'piarium-packaged-host-'));
+const agentDir = await mkdtemp(path.join(os.tmpdir(), 'varin-packaged-host-'));
 const previousCwd = process.cwd();
 let lifecycle;
 
 try {
   process.chdir(agentDir);
   for (const name of Object.keys(process.env)) {
-    if (name.startsWith('PIARIUM_PI_') || name === 'NODE_PATH') delete process.env[name];
+    if (name.startsWith('VARIN_PI_') || name === 'NODE_PATH') delete process.env[name];
   }
   const sdk = await import(pathToFileURL(path.join(hostPackageRoot, 'dist', 'pi-sdk-packages.js')).href);
   for (const name of sdk.PI_SDK_PACKAGE_NAMES) {
@@ -39,12 +39,12 @@ try {
   const createBroker = (options) => new runtimeBroker.PiRuntimeBroker({
     ...options,
     agentDir,
-    client: { clientName: 'piarium-package-verifier', clientVersion: '0.1.0', mode: 'test' },
+    client: { clientName: 'varin-package-verifier', clientVersion: '0.1.0', mode: 'test' },
     foundationalPackages: [],
     emit: (event) => {
       if (event.kind !== 'diagnostic') return;
       const writer = event.level === 'error' ? console.error : console.log;
-      writer(`[piarium-package:${event.role}] ${event.message}`);
+      writer(`[varin-package:${event.role}] ${event.message}`);
     },
     projectTrustOverride: true,
   });
@@ -65,7 +65,7 @@ try {
     throw new Error(`Packaged Pi Host did not start the expected bundled runtime ${piVersion}`);
   }
   await lifecycle.listSessions(agentDir);
-  console.log(`[piarium-package] verified default bundled Pi ${handshake.runtime.piVersion} startup and catalog from packaged dependencies`);
+  console.log(`[varin-package] verified default bundled Pi ${handshake.runtime.piVersion} startup and catalog from packaged dependencies`);
 } finally {
   await lifecycle?.dispose().catch(() => {});
   process.chdir(previousCwd);

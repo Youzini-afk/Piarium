@@ -1,4 +1,4 @@
-# Piarium 测试与 CI 体系重整设计
+# Varin 测试与 CI 体系重整设计
 
 Status: accepted design (D-292); Stage Q implemented and accepted (D-293/D-295), locally verified; the former VS Code companion was retired under D-296 and locally verified
 

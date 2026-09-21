@@ -1,5 +1,5 @@
-import { SurfaceCapabilityRegistry } from '@piarium/extension-surface';
-import type { JsonObject, JsonValue } from '@piarium/extension-contract';
+import { SurfaceCapabilityRegistry } from '@varin/extension-surface';
+import type { JsonObject, JsonValue } from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';

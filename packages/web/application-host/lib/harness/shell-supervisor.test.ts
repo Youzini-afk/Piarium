@@ -219,16 +219,16 @@ describe("background shell output", () => {
       onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
       resize: () => undefined,
       write: (data) => {
-        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
         if (ready) {
           queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
           return;
         }
-        const token = data.match(/__PIARIUM_SENTINEL_([0-9a-f]+):B/)?.[1];
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
         if (!token) return;
-        queueMicrotask(() => { for (const handler of dataHandlers) handler(`__PIARIUM_SENTINEL_${token}:B\nfirst`); });
+        queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\nfirst`); });
         setTimeout(() => {
-          for (const handler of dataHandlers) handler(` second\n__PIARIUM_SENTINEL_${token}:C:/workspace\n__PIARIUM_SENTINEL_${token}:E:0\n`);
+          for (const handler of dataHandlers) handler(` second\n__VARIN_SENTINEL_${token}:C:/workspace\n__VARIN_SENTINEL_${token}:E:0\n`);
         }, 30);
       },
     };
@@ -257,7 +257,7 @@ describe("background shell output", () => {
       const read = await supervisor.read("sh_1");
       expect(read.text).toContain("first second");
       expect(read).toMatchObject({ running: false, exitCode: 0 });
-      expect(read.text).not.toContain("PIARIUM_SENTINEL");
+      expect(read.text).not.toContain("VARIN_SENTINEL");
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -274,7 +274,7 @@ describe("background shell output", () => {
       onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
       resize: () => undefined,
       write: (data) => {
-        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
         if (ready) {
           queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
         }
@@ -352,7 +352,7 @@ describe("shell-supervisor initialization and cancellation", () => {
       onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
       resize: () => undefined,
       write: (data) => {
-        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
         if (ready && mode === "pending") {
           queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
         }
@@ -476,7 +476,7 @@ describe("shell-supervisor disposal protection", () => {
       },
       resize: () => undefined,
       write: (data) => {
-        const ready = data.match(/(__PIARIUM_READY_[0-9a-f]+__)/)?.[1];
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
         if (ready) queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
       },
     };

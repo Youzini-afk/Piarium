@@ -13,7 +13,7 @@ module.exports = (context) => {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
   const unpackedNodeModulesPath = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
-  const kernelExecutable = context.electronPlatformName === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel';
+  const kernelExecutable = context.electronPlatformName === 'win32' ? 'varin-kernel.exe' : 'varin-kernel';
   const packagedKernelPath = path.join(resourcesPath, 'kernel', kernelExecutable);
   const kernelManifestPath = path.join(resourcesPath, 'kernel', 'manifest.json');
   if (!fs.existsSync(packagedKernelPath) || !fs.existsSync(kernelManifestPath)) {
@@ -28,8 +28,8 @@ module.exports = (context) => {
   const kernelBytes = fs.readFileSync(packagedKernelPath);
   const kernelDigest = crypto.createHash('sha256').update(kernelBytes).digest('hex');
   const binaryIdentity = detectKernelBinaryIdentity(kernelBytes);
-  const targetArchitecture = normalizeKernelArchitecture(process.env.PIARIUM_TARGET_ARCH || process.arch);
-  const expectedTargetTriple = process.env.PIARIUM_TARGET_TRIPLE || defaultKernelTargetTriple(context.electronPlatformName, targetArchitecture);
+  const targetArchitecture = normalizeKernelArchitecture(process.env.VARIN_TARGET_ARCH || process.arch);
+  const expectedTargetTriple = process.env.VARIN_TARGET_TRIPLE || defaultKernelTargetTriple(context.electronPlatformName, targetArchitecture);
   if (kernelManifest.schema !== 3 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest
     || kernelManifest.protocolVersion !== 1 || kernelManifest.platform !== context.electronPlatformName
     || kernelManifest.arch !== targetArchitecture || kernelManifest.targetTriple !== expectedTargetTriple
@@ -58,24 +58,24 @@ module.exports = (context) => {
     throw new Error(`Missing packaged web UI at ${packagedWebDistPath}`);
   }
   fs.rmSync(
-    path.join(unpackedNodeModulesPath, '@piarium', 'web', 'dist'),
+    path.join(unpackedNodeModulesPath, '@varin', 'web', 'dist'),
     { recursive: true, force: true },
   );
 
   const requiredApplicationHostFiles = [
-    path.join('node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
-    path.join('node_modules', '@piarium', 'runtime-broker', 'dist', 'index.js'),
-    path.join('node_modules', '@piarium', 'extension-host', 'dist', 'index.js'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'piarium-builtin-fingerprint.txt'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'piarium.extension.json'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'host.cjs'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'piarium-builtin-fingerprint.txt'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'piarium.extension.json'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'host.cjs'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript-language-server.mjs'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'package.json'),
-    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'lib', 'tsserver.js'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'production-boundary.json'),
+    path.join('node_modules', '@varin', 'pi-host', 'dist', 'host-bootstrap.js'),
+    path.join('node_modules', '@varin', 'runtime-broker', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'extension-host', 'dist', 'index.js'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin-builtin-fingerprint.txt'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'varin.extension.json'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'recovery', 'host.cjs'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'varin-builtin-fingerprint.txt'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'varin.extension.json'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'host.cjs'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript-language-server.mjs'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'package.json'),
+    path.join('node_modules', '@varin', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'lib', 'tsserver.js'),
+    path.join('node_modules', '@varin', 'web', 'server', 'production-boundary.json'),
   ];
   for (const relativePath of requiredApplicationHostFiles) {
     const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);
@@ -90,19 +90,19 @@ module.exports = (context) => {
       throw new Error(`Missing unpacked application-host runtime file at ${packagedPath}`);
     }
   }
-  const bundledModelDirectory = path.join(unpackedNodeModulesPath, '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime');
+  const bundledModelDirectory = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime');
   if (fs.existsSync(bundledModelDirectory)) throw new Error('Local model weights entered the base installer');
 
   const packagedHostEntry = path.join(
     unpackedNodeModulesPath,
-    '@piarium',
+    '@varin',
     'pi-host',
     'dist',
     'host-bootstrap.js',
   );
   const packagedBrokerEntry = path.join(
     unpackedNodeModulesPath,
-    '@piarium',
+    '@varin',
     'runtime-broker',
     'dist',
     'index.js',

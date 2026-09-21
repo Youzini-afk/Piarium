@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
@@ -55,7 +55,7 @@ const DefaultAction: React.FC<{
   if (!explicit) {
     return (
       <span className="shrink-0 typography-micro text-muted-foreground">
-        {t('settings.piarium.pluginSettings.field.pluginDefault')}
+        {t('settings.varin.pluginSettings.field.pluginDefault')}
       </span>
     );
   }
@@ -68,7 +68,7 @@ const DefaultAction: React.FC<{
       onClick={onReset}
       className="shrink-0 !font-normal text-muted-foreground"
     >
-      {t('settings.piarium.pluginSettings.field.useDefault')}
+      {t('settings.varin.pluginSettings.field.useDefault')}
     </Button>
   );
 };
@@ -196,15 +196,15 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps & {
   const field = useField({ draft, onRemove, onSet, path });
   const current = validBoolean(field.raw);
   const unsupported = field.explicit && current === undefined;
-  const notSetLabel = unsetLabel ?? t('settings.piarium.pluginSettings.field.pluginDefault');
+  const notSetLabel = unsetLabel ?? t('settings.varin.pluginSettings.field.pluginDefault');
   const value = unsupported ? 'unsupported' : current === undefined ? 'default' : optionKey(current);
   const selectedLabel = unsupported
-    ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+    ? t('settings.varin.pluginSettings.field.unsupportedValue')
     : current === undefined
     ? notSetLabel
     : current
-      ? t('settings.piarium.pluginSettings.field.enabled')
-      : t('settings.piarium.pluginSettings.field.disabled');
+      ? t('settings.varin.pluginSettings.field.enabled')
+      : t('settings.varin.pluginSettings.field.disabled');
   return (
     <SettingsFieldRow
       label={label}
@@ -232,12 +232,12 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps & {
         <SelectContent>
           {unsupported ? (
             <SelectItem value="unsupported" disabled>
-              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+              {t('settings.varin.pluginSettings.field.unsupportedValue')}
             </SelectItem>
           ) : null}
           <SelectItem value="default">{notSetLabel}</SelectItem>
-          <SelectItem value={optionKey(true)}>{t('settings.piarium.pluginSettings.field.enabled')}</SelectItem>
-          <SelectItem value={optionKey(false)}>{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
+          <SelectItem value={optionKey(true)}>{t('settings.varin.pluginSettings.field.enabled')}</SelectItem>
+          <SelectItem value={optionKey(false)}>{t('settings.varin.pluginSettings.field.disabled')}</SelectItem>
         </SelectContent>
       </Select>
     </SettingsFieldRow>
@@ -360,12 +360,12 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
         inputMode={step !== undefined && !Number.isInteger(step) ? 'decimal' : 'numeric'}
         preserveTypedPrecision={preserveTypedPrecision}
         emptyLabel={unsupported
-          ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+          ? t('settings.varin.pluginSettings.field.unsupportedValue')
           : explicitEmpty
             ? emptyLabel
             : undefined}
         placeholder={unsupported
-          ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+          ? t('settings.varin.pluginSettings.field.unsupportedValue')
           : field.explicit
             ? emptyLabel
             : undefined}
@@ -454,13 +454,13 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
           aria-label={fieldAriaLabel(label, path)}
         >
           <SelectValue>
-            {selectedOption?.label ?? t('settings.piarium.pluginSettings.field.unsupportedValue')}
+            {selectedOption?.label ?? t('settings.varin.pluginSettings.field.unsupportedValue')}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {unsupported ? (
             <SelectItem value="unsupported" disabled>
-              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+              {t('settings.varin.pluginSettings.field.unsupportedValue')}
             </SelectItem>
           ) : null}
           {options.map((option) => (
@@ -502,9 +502,9 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
   const current = options.find((option) => option.value === field.raw);
   const unsupported = field.explicit && current === undefined;
   const value = current ? optionKey(current.value) : unsupported ? 'unsupported' : 'default';
-  const notSetLabel = unsetLabel ?? t('settings.piarium.pluginSettings.field.pluginDefault');
+  const notSetLabel = unsetLabel ?? t('settings.varin.pluginSettings.field.pluginDefault');
   const unsupportedValueLabel = unsupportedLabel
-    ?? t('settings.piarium.pluginSettings.field.unsupportedValue');
+    ?? t('settings.varin.pluginSettings.field.unsupportedValue');
   const selectedLabel = current?.label ?? (unsupported
     ? unsupportedValueLabel
     : notSetLabel);

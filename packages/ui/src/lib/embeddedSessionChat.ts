@@ -4,7 +4,7 @@ export type EmbeddedSessionChatConfig = {
   readOnly: boolean;
 };
 
-export const PIARIUM_EMBEDDED_SESSION_CHAT_PANEL = 'session-chat';
+export const VARIN_EMBEDDED_SESSION_CHAT_PANEL = 'session-chat';
 
 export const normalizeEmbeddedSessionDirectory = (value: string | null | undefined): string => {
   if (!value) return '';
@@ -25,7 +25,7 @@ export const buildEmbeddedSessionChatURL = ({
   const resolvedPath = basePath ?? (typeof window === 'undefined' ? '/' : window.location.pathname);
   const url = new URL(resolvedPath, resolvedOrigin);
   url.searchParams.set('surface', 'desktop');
-  url.searchParams.set('piPanel', PIARIUM_EMBEDDED_SESSION_CHAT_PANEL);
+  url.searchParams.set('piPanel', VARIN_EMBEDDED_SESSION_CHAT_PANEL);
   url.searchParams.set('piSessionId', sessionId);
   if (readOnly) {
     url.searchParams.set('piReadOnly', '1');
@@ -38,7 +38,7 @@ export const buildEmbeddedSessionChatURL = ({
 };
 
 export const readEmbeddedSessionChatConfigFromParams = (params: URLSearchParams): EmbeddedSessionChatConfig | null => {
-  if (params.get('piPanel') !== PIARIUM_EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('piPanel') !== VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
     return null;
   }
 
@@ -73,7 +73,7 @@ export const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | nul
 };
 
 export const shouldConsumeSessionUrlParams = (params: URLSearchParams): boolean => {
-  if (params.get('piPanel') === PIARIUM_EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('piPanel') === VARIN_EMBEDDED_SESSION_CHAT_PANEL) {
     return false;
   }
 

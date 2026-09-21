@@ -165,7 +165,7 @@ export const createPlatformEnvironmentRuntime = (options: {
   const resolveGitBinaryForSpawn = (): string => {
     if (processLike.platform !== 'win32') return 'git';
     if (resolvedGitBinary) return resolvedGitBinary;
-    const explicit = [processLike.env.GIT_BINARY, processLike.env.PIARIUM_GIT_BINARY]
+    const explicit = [processLike.env.GIT_BINARY, processLike.env.VARIN_GIT_BINARY]
       .map((value) => (typeof value === 'string' ? value.trim() : ''))
       .filter(Boolean);
     for (const candidate of explicit) {

@@ -66,7 +66,7 @@ export const encodeClientConnectionPayload = (payload: ClientConnectionPayload):
   params.set('token', payload.token);
   if (payload.label) params.set('label', payload.label);
   if (payload.profile) params.set('profile', payload.profile);
-  return `piarium://connect?${params.toString()}`;
+  return `varin://connect?${params.toString()}`;
 };
 
 export const parseClientConnectionPayload = (value: string): ClientConnectionPayload | null => {
@@ -75,7 +75,7 @@ export const parseClientConnectionPayload = (value: string): ClientConnectionPay
 
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'piarium:' || url.hostname !== 'connect') return null;
+    if (url.protocol !== 'varin:' || url.hostname !== 'connect') return null;
     const version = url.searchParams.get('v');
     const serverUrl = url.searchParams.get('server')?.trim() || '';
     const token = url.searchParams.get('token')?.trim() || '';
@@ -249,7 +249,7 @@ export const encodePairingConnectionPayload = (payload: PairingConnectionPayload
   const params = new URLSearchParams();
   params.set('v', '2');
   params.set('p', base64UrlEncode(JSON.stringify(normalized)));
-  return `piarium://connect?${params.toString()}`;
+  return `varin://connect?${params.toString()}`;
 };
 
 export const parsePairingConnectionPayload = (value: string): PairingConnectionPayload | null => {
@@ -257,7 +257,7 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'piarium:' || url.hostname !== 'connect') return null;
+    if (url.protocol !== 'varin:' || url.hostname !== 'connect') return null;
     if (url.searchParams.get('v') !== '2') return null;
     const encoded = url.searchParams.get('p') || '';
     if (!encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
@@ -270,13 +270,13 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
 };
 
 // Old Android WebViews can mis-parse non-special schemes such as
-// `piarium://connect`. This sibling reads the two query fields directly, then
+// `varin://connect`. This sibling reads the two query fields directly, then
 // delegates to the same payload normalization used by the URL-based parser.
 export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   const question = trimmed.indexOf('?');
-  if (question === -1 || !/^piarium:\/\/connect\/?$/i.test(trimmed.slice(0, question))) return null;
+  if (question === -1 || !/^varin:\/\/connect\/?$/i.test(trimmed.slice(0, question))) return null;
   let version: string | null = null;
   let encoded: string | null = null;
   for (const part of trimmed.slice(question + 1).split('&')) {

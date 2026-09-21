@@ -1,6 +1,6 @@
 import React from 'react';
 import type { editor } from 'monaco-editor/editor';
-import type { JsonValue } from '@piarium/extension-contract';
+import type { JsonValue } from '@varin/extension-contract';
 import { createTwoFilesPatch } from 'diff';
 
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,7 @@ import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monac
 import { registerFileEditorCommandTarget } from '@/lib/monaco/editor-command-service';
 import { getFileEditorModelRegistry } from '@/lib/monaco/model-session';
 import { loadMonacoRuntime, type MonacoRuntime } from '@/lib/monaco/runtime';
-import { registerPiariumMonacoTheme } from '@/lib/monaco/theme';
+import { registerVarinMonacoTheme } from '@/lib/monaco/theme';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import type { EditorViewState } from '@/lib/workbench/editors/types';
 import { patchEditorViewState } from '@/lib/workbench/editors/session';
@@ -28,7 +28,7 @@ import {
   releasePiEditorContextOwner,
 } from '@/stores/usePiEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapter';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -174,7 +174,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host || !monaco) return undefined;
-    const theme = registerPiariumMonacoTheme(monaco, currentTheme);
+    const theme = registerVarinMonacoTheme(monaco, currentTheme);
     const instance = monaco.editor.createDiffEditor(host, {
       ...createMonacoEditorOptions({
         ariaLabel: path,
@@ -209,7 +209,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
 
   React.useEffect(() => {
     if (!monaco || !diffEditor) return;
-    monaco.editor.setTheme(registerPiariumMonacoTheme(monaco, currentTheme));
+    monaco.editor.setTheme(registerVarinMonacoTheme(monaco, currentTheme));
     diffEditor.updateOptions({
       ...createMonacoEditorOptions({
         ariaLabel: path,
@@ -321,7 +321,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
         scheduleCapture();
       }),
       modifiedEditor.addAction({
-        id: 'piarium.editor.attachDiff',
+        id: 'varin.editor.attachDiff',
         label: tRef.current('workbench.attachment.attachDiff'),
         contextMenuGroupId: 'navigation',
         contextMenuOrder: 21,

@@ -1,6 +1,6 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
-import { requestPiariumApi } from './cli-runtime.js';
+import { requestVarinApi } from './cli-runtime.js';
 import { isJsonMode, printJson } from '../cli-output.js';
 import { recordOf, type CliOptions } from './cli-types.js';
 
@@ -14,7 +14,7 @@ const formatProjectLine = (project: ProjectSummary): string => `- \`${project.la
 
 async function projectsCommand(options: CliOptions = {}, action = 'list'): Promise<void> {
   if (action === 'help') {
-    process.stdout.write(`Piarium Projects Commands\n\nUSAGE:\n  piarium projects [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Piarium server port\n  --json                  Output machine-readable JSON\n`);
+    process.stdout.write(`Varin Projects Commands\n\nUSAGE:\n  varin projects [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Varin server port\n  --json                  Output machine-readable JSON\n`);
     return;
   }
   if (action !== 'list') {
@@ -22,7 +22,7 @@ async function projectsCommand(options: CliOptions = {}, action = 'list'): Promi
   }
 
   const port = await resolveTargetPort(options);
-  const settings = await requestPiariumApi(port, '/api/config/settings', options);
+  const settings = await requestVarinApi(port, '/api/config/settings', options);
   const projects = Array.isArray(settings.projects)
     ? settings.projects.map(recordOf).filter((project): project is Record<string, unknown> & ProjectSummary => (
         typeof project.id === 'string' && typeof project.label === 'string' && typeof project.path === 'string'

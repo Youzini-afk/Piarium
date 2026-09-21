@@ -15,8 +15,8 @@ import { executeRecall } from "../../harness/recall-tool.js";
 import { createRecallSearchService } from "../../harness/harness-services.js";
 import { createKnowledgeVectorRuntime } from "./runtime.js";
 import { knowledgeEmbedText } from "./identity.js";
-import { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS } from "@piarium/protocol";
-import type { HarnessEmbedResult, HarnessResolvedEmbeddingBinding, PiSettingsSnapshot } from "@piarium/protocol";
+import { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS } from "@varin/protocol";
+import type { HarnessEmbedResult, HarnessResolvedEmbeddingBinding, PiSettingsSnapshot } from "@varin/protocol";
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 const tempDir = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), "piarium-knowledge-recall-"));
+  const dir = mkdtempSync(join(tmpdir(), "varin-knowledge-recall-"));
   cleanup.unshift(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 };

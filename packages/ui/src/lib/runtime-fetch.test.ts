@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from '@piarium/application-client';
-import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '@piarium/application-client';
-import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@piarium/application-client';
+import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from '@varin/application-client';
+import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from '@varin/application-client';
+import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@varin/application-client';
 
 const originalFetch = globalThis.fetch;
 
@@ -33,10 +33,10 @@ describe('buildRuntimeFetchUrl', () => {
       configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
-        value: { location: { origin: 'piarium-ui://app', href: 'piarium-ui://app/index.html' } },
+        value: { location: { origin: 'varin-ui://app', href: 'varin-ui://app/index.html' } },
       });
 
-      expect(buildRuntimeFetchUrl('piarium-ui://app/api/config/settings')).toBe('https://api.example/api/config/settings');
+      expect(buildRuntimeFetchUrl('varin-ui://app/api/config/settings')).toBe('https://api.example/api/config/settings');
       expect(buildRuntimeFetchUrl('https://external.example/api/config/settings')).toBe('https://external.example/api/config/settings');
     } finally {
       setRuntimeUrlResolver(previous);
@@ -311,17 +311,17 @@ describe('runtimeFetch header sanitization', () => {
 
   test('sanitizeHeadersForBrowser leaves Latin-1 directory hints unchanged', () => {
     const path = 'C:\\work\\foo%20bar';
-    const result = sanitizeHeadersForBrowser({ 'x-piarium-directory': path });
+    const result = sanitizeHeadersForBrowser({ 'x-varin-directory': path });
     expect(result).toBeFalsy();
   });
 
   test('sanitizeHeadersForBrowser encodes non-Latin-1 directory hints with marker', () => {
     const path = 'D:\\文件夹';
-    const result = sanitizeHeadersForBrowser({ 'x-piarium-directory': path });
+    const result = sanitizeHeadersForBrowser({ 'x-varin-directory': path });
     expect(result).toBeTruthy();
     const encoded = Object.fromEntries(result!);
-    expect(encoded['x-piarium-directory']).toBe(encodeURIComponent(path));
-    expect(encoded['x-piarium-directory-encoding']).toBe('uri');
+    expect(encoded['x-varin-directory']).toBe(encodeURIComponent(path));
+    expect(encoded['x-varin-directory-encoding']).toBe('uri');
   });
 
   test('sanitizeHeadersForBrowser returns undefined for empty/undefined input', () => {
@@ -360,15 +360,15 @@ describe('runtimeFetch header sanitization', () => {
       }) as typeof fetch;
 
       await runtimeFetch('/api/config/providers', {
-        headers: { 'x-piarium-directory': 'D:\\文件夹' },
+        headers: { 'x-varin-directory': 'D:\\文件夹' },
       });
 
       expect(calls).toHaveLength(1);
-      const encoded = calls[0].headers.get('x-piarium-directory');
+      const encoded = calls[0].headers.get('x-varin-directory');
       expect(encoded).not.toBe('D:\\文件夹');
       // decodeURIComponent round-trips back to original
       expect(decodeURIComponent(encoded!)).toBe('D:\\文件夹');
-      expect(calls[0].headers.get('x-piarium-directory-encoding')).toBe('uri');
+      expect(calls[0].headers.get('x-varin-directory-encoding')).toBe('uri');
     } finally {
       setRuntimeUrlResolver(previous);
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });

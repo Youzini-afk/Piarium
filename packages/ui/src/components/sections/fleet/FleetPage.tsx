@@ -8,7 +8,7 @@ import type {
   PiFleetLogsData,
   PiFleetProviderSnapshot,
   PiFleetSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
@@ -28,7 +28,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
   getRuntimeKey,
   subscribeRuntimeEndpointChanged,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { requestPluginSettingsIntegration } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -68,26 +68,26 @@ const STATE_FILTERS: FleetStateFilter[] = [
 ];
 
 const KIND_LABEL_KEYS: Record<PiFleetEntryKind, I18nKey> = {
-  'background-agent': 'settings.piarium.fleet.kind.background-agent',
-  'background-task': 'settings.piarium.fleet.kind.background-task',
-  'delegated-agent': 'settings.piarium.fleet.kind.delegated-agent',
+  'background-agent': 'settings.varin.fleet.kind.background-agent',
+  'background-task': 'settings.varin.fleet.kind.background-task',
+  'delegated-agent': 'settings.varin.fleet.kind.delegated-agent',
 };
 const STATE_LABEL_KEYS: Record<PiFleetEntryState, I18nKey> = {
-  completed: 'settings.piarium.fleet.entryState.completed',
-  failed: 'settings.piarium.fleet.entryState.failed',
-  running: 'settings.piarium.fleet.entryState.running',
-  stopped: 'settings.piarium.fleet.entryState.stopped',
+  completed: 'settings.varin.fleet.entryState.completed',
+  failed: 'settings.varin.fleet.entryState.failed',
+  running: 'settings.varin.fleet.entryState.running',
+  stopped: 'settings.varin.fleet.entryState.stopped',
 };
 const ACTION_LABEL_KEYS: Record<string, I18nKey> = {
-  kill: 'settings.piarium.fleet.actions.kill',
-  logs: 'settings.piarium.fleet.actions.logs',
-  run: 'settings.piarium.fleet.actions.newTask',
+  kill: 'settings.varin.fleet.actions.kill',
+  logs: 'settings.varin.fleet.actions.logs',
+  run: 'settings.varin.fleet.actions.newTask',
 };
 const PROVIDER_STATE_LABEL_KEYS: Record<PiFleetProviderSnapshot['state'], I18nKey> = {
-  active: 'settings.piarium.fleet.provider.state.active',
-  degraded: 'settings.piarium.fleet.provider.state.degraded',
-  incompatible: 'settings.piarium.fleet.provider.state.incompatible',
-  unavailable: 'settings.piarium.fleet.provider.state.unavailable',
+  active: 'settings.varin.fleet.provider.state.active',
+  degraded: 'settings.varin.fleet.provider.state.degraded',
+  incompatible: 'settings.varin.fleet.provider.state.incompatible',
+  unavailable: 'settings.varin.fleet.provider.state.unavailable',
 };
 
 const providerToneClass = (provider: PiFleetProviderSnapshot): string => {
@@ -259,7 +259,7 @@ export const FleetPage: React.FC = () => {
       await refresh(false);
     } catch (commandError) {
       if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return;
-      toast.error(t('settings.piarium.fleet.commandFailed'), {
+      toast.error(t('settings.varin.fleet.commandFailed'), {
         description: commandError instanceof Error ? commandError.message : String(commandError),
       });
     } finally {
@@ -324,7 +324,7 @@ export const FleetPage: React.FC = () => {
       return true;
     } catch (actionError) {
       if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return false;
-      toast.error(t('settings.piarium.fleet.actionFailed'), {
+      toast.error(t('settings.varin.fleet.actionFailed'), {
         description: actionError instanceof Error ? actionError.message : String(actionError),
       });
       return false;
@@ -356,7 +356,7 @@ export const FleetPage: React.FC = () => {
 
   const requestEntryAction = React.useCallback((entry: PiFleetEntry, descriptor: PiFleetActionDescriptor) => {
     if (descriptor.action === 'kill') {
-      if (!window.confirm(t('settings.piarium.fleet.actions.killConfirm', { name: entry.name }))) return;
+      if (!window.confirm(t('settings.varin.fleet.actions.killConfirm', { name: entry.name }))) return;
     }
     void runFleetAction({
       action: descriptor.action,
@@ -376,7 +376,7 @@ export const FleetPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.fleet.title')}
-      description={t('settings.piarium.fleet.description')}
+      description={t('settings.varin.fleet.description')}
       className="max-w-6xl"
       showSaveStatus={false}
       headerEnd={sessionId ? (
@@ -389,28 +389,28 @@ export const FleetPage: React.FC = () => {
           className="gap-1.5"
         >
           <Icon name="refresh" className={loading ? 'size-4 animate-spin' : 'size-4'} />
-          {t('settings.piarium.fleet.refresh')}
+          {t('settings.varin.fleet.refresh')}
         </Button>
       ) : undefined}
     >
       <SettingsSection
         settingsItem="fleet.provider"
-        title={t('settings.piarium.fleet.provider.title')}
-        description={t('settings.piarium.fleet.provider.description')}
+        title={t('settings.varin.fleet.provider.title')}
+        description={t('settings.varin.fleet.provider.description')}
         divider={false}
         headerAction={(
           <Button type="button" variant="outline" size="xs" onClick={openSubagentsSettings}>
-            {t('settings.piarium.fleet.configure')}
+            {t('settings.varin.fleet.configure')}
           </Button>
         )}
       >
         {!sessionId ? (
           <div className="rounded-lg border border-border/60 bg-background/40 px-4 py-4">
             <p className="typography-ui-label text-foreground">
-              {t('settings.piarium.fleet.noSession.title')}
+              {t('settings.varin.fleet.noSession.title')}
             </p>
             <p className="mt-1 typography-meta text-muted-foreground">
-              {t('settings.piarium.fleet.noSession.description')}
+              {t('settings.varin.fleet.noSession.description')}
             </p>
           </div>
         ) : providers.length > 0 ? (
@@ -432,7 +432,7 @@ export const FleetPage: React.FC = () => {
         ) : loading ? (
           <div className="flex items-center gap-2 py-3 typography-meta text-muted-foreground">
             <Icon name="loader-4" className="size-4 animate-spin" />
-            {t('settings.piarium.fleet.loading')}
+            {t('settings.varin.fleet.loading')}
           </div>
         ) : null}
         {visibleError ? (
@@ -442,16 +442,16 @@ export const FleetPage: React.FC = () => {
 
       <SettingsSection
         settingsItem="fleet.list"
-        title={t('settings.piarium.fleet.list.title')}
+        title={t('settings.varin.fleet.list.title')}
         headerAction={visibleSnapshot ? (
           <span className="tabular-nums typography-meta text-muted-foreground">
-            {t('settings.piarium.fleet.active.count', { count: visibleSnapshot.totalActive })}
+            {t('settings.varin.fleet.active.count', { count: visibleSnapshot.totalActive })}
           </span>
         ) : undefined}
       >
         {!sessionId ? (
           <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.fleet.active.unavailable')}
+            {t('settings.varin.fleet.active.unavailable')}
           </p>
         ) : (
           <div className="@3xl:grid @3xl:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] @3xl:items-start @3xl:gap-6">
@@ -459,38 +459,38 @@ export const FleetPage: React.FC = () => {
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('settings.piarium.fleet.search.placeholder')}
-                aria-label={t('settings.piarium.fleet.search.placeholder')}
+                placeholder={t('settings.varin.fleet.search.placeholder')}
+                aria-label={t('settings.varin.fleet.search.placeholder')}
                 className="max-w-md"
               />
               <SettingsChipGroup
-                aria-label={t('settings.piarium.fleet.filter.provider')}
+                aria-label={t('settings.varin.fleet.filter.provider')}
                 value={providerFilter}
                 onChange={setProviderFilter}
                 options={[
-                  { value: 'all', label: t('settings.piarium.fleet.filter.providerAll') },
+                  { value: 'all', label: t('settings.varin.fleet.filter.providerAll') },
                   ...providers.map((provider) => ({ value: provider.id, label: provider.label })),
                 ]}
               />
               <SettingsChipGroup
-                aria-label={t('settings.piarium.fleet.filter.kind')}
+                aria-label={t('settings.varin.fleet.filter.kind')}
                 value={kindFilter}
                 onChange={setKindFilter}
                 options={KIND_FILTERS.map((value) => ({
                   value,
                   label: value === 'all'
-                    ? t('settings.piarium.fleet.filter.kindAll')
+                    ? t('settings.varin.fleet.filter.kindAll')
                     : t(KIND_LABEL_KEYS[value]),
                 }))}
               />
               <SettingsChipGroup
-                aria-label={t('settings.piarium.fleet.filter.state')}
+                aria-label={t('settings.varin.fleet.filter.state')}
                 value={stateFilter}
                 onChange={setStateFilter}
                 options={STATE_FILTERS.map((value) => ({
                   value,
                   label: value === 'all'
-                    ? t('settings.piarium.fleet.filter.stateAll')
+                    ? t('settings.varin.fleet.filter.stateAll')
                     : t(STATE_LABEL_KEYS[value]),
                 }))}
               />
@@ -507,7 +507,7 @@ export const FleetPage: React.FC = () => {
                     setRunDraft(emptyRunDraft());
                   }}
                 >
-                  {t('settings.piarium.fleet.actions.newTask')}
+                  {t('settings.varin.fleet.actions.newTask')}
                 </Button>
               ) : null}
               {visibleEntries.length > 0 ? (
@@ -556,13 +556,13 @@ export const FleetPage: React.FC = () => {
                 <div className="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center">
                   <Icon name="pulse" className="mx-auto size-6 text-muted-foreground" />
                   <p className="mt-3 typography-ui-label text-foreground">
-                    {t('settings.piarium.fleet.list.empty')}
+                    {t('settings.varin.fleet.list.empty')}
                   </p>
                 </div>
               )}
               {visibleSnapshot && visibleSnapshot.omitted > 0 ? (
                 <p className="typography-meta text-muted-foreground">
-                  {t('settings.piarium.fleet.active.omitted', { count: visibleSnapshot.omitted })}
+                  {t('settings.varin.fleet.active.omitted', { count: visibleSnapshot.omitted })}
                 </p>
               ) : null}
             </div>
@@ -580,15 +580,15 @@ export const FleetPage: React.FC = () => {
                   }}
                 >
                   <Icon name="arrow-left" className="size-4" />
-                  {t('settings.piarium.fleet.back')}
+                  {t('settings.varin.fleet.back')}
                 </Button>
               ) : null}
               {visibleComposingRun && runProviderId ? (
                 <div className="space-y-4">
-                  <p className="typography-ui-label text-foreground">{t('settings.piarium.fleet.run.title')}</p>
+                  <p className="typography-ui-label text-foreground">{t('settings.varin.fleet.run.title')}</p>
                   {runProviders.length > 1 ? (
                     <SettingsChipGroup
-                      aria-label={t('settings.piarium.fleet.filter.provider')}
+                      aria-label={t('settings.varin.fleet.filter.provider')}
                       value={runProviderId}
                       onChange={setRunProviderId}
                       options={runProviders.map((provider) => ({
@@ -597,13 +597,13 @@ export const FleetPage: React.FC = () => {
                       }))}
                     />
                   ) : null}
-                  <SettingsStackedField label={t('settings.piarium.fleet.run.name')}>
+                  <SettingsStackedField label={t('settings.varin.fleet.run.name')}>
                     <Input
                       value={runDraft.name}
                       onChange={(event) => setRunDraft((current) => ({ ...current, name: event.target.value }))}
                     />
                   </SettingsStackedField>
-                  <SettingsStackedField label={t('settings.piarium.fleet.run.command')}>
+                  <SettingsStackedField label={t('settings.varin.fleet.run.command')}>
                     <Input
                       value={runDraft.command}
                       onChange={(event) => setRunDraft((current) => ({ ...current, command: event.target.value }))}
@@ -612,19 +612,19 @@ export const FleetPage: React.FC = () => {
                   <SettingsCheckboxRow
                     checked={runDraft.isAgent}
                     onChange={(checked) => setRunDraft((current) => ({ ...current, isAgent: checked }))}
-                    label={t('settings.piarium.fleet.run.isAgent')}
+                    label={t('settings.varin.fleet.run.isAgent')}
                   />
                   <SettingsCheckboxRow
                     checked={runDraft.notifyOnCompletion}
                     onChange={(checked) => setRunDraft((current) => ({ ...current, notifyOnCompletion: checked }))}
-                    label={t('settings.piarium.fleet.run.notifyOnCompletion')}
+                    label={t('settings.varin.fleet.run.notifyOnCompletion')}
                   />
                   <SettingsCheckboxRow
                     checked={runDraft.triggerOnCompletion}
                     onChange={(checked) => setRunDraft((current) => ({ ...current, triggerOnCompletion: checked }))}
-                    label={t('settings.piarium.fleet.run.triggerOnCompletion')}
+                    label={t('settings.varin.fleet.run.triggerOnCompletion')}
                   />
-                  <SettingsFieldRow label={t('settings.piarium.fleet.run.timeoutSeconds')}>
+                  <SettingsFieldRow label={t('settings.varin.fleet.run.timeoutSeconds')}>
                     <NumberInput
                       value={runDraft.timeoutSeconds}
                       min={1}
@@ -640,7 +640,7 @@ export const FleetPage: React.FC = () => {
                       disabled={!runDraft.name.trim() || !runDraft.command.trim() || visibleBusyAction !== null}
                       onClick={() => void submitRun()}
                     >
-                      {t('settings.piarium.fleet.run.submit')}
+                      {t('settings.varin.fleet.run.submit')}
                     </Button>
                     <Button
                       type="button"
@@ -648,7 +648,7 @@ export const FleetPage: React.FC = () => {
                       size="sm"
                       onClick={() => setComposingRun(false)}
                     >
-                      {t('settings.piarium.fleet.run.cancel')}
+                      {t('settings.varin.fleet.run.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -680,14 +680,14 @@ export const FleetPage: React.FC = () => {
                     <span>{nowLabel(selectedEntry.startedAt, now)}</span>
                     {selectedEntry.tokens ? (
                       <span>
-                        {t('settings.piarium.fleet.entry.tokens', {
+                        {t('settings.varin.fleet.entry.tokens', {
                           count: new Intl.NumberFormat().format(selectedEntry.tokens.total),
                         })}
                       </span>
                     ) : null}
                     {selectedEntry.bytesWritten !== undefined ? (
                       <span>
-                        {t('settings.piarium.fleet.entry.bytes', {
+                        {t('settings.varin.fleet.entry.bytes', {
                           count: new Intl.NumberFormat().format(selectedEntry.bytesWritten),
                         })}
                       </span>
@@ -695,8 +695,8 @@ export const FleetPage: React.FC = () => {
                   </div>
                   {selectedEntry.tokens ? (
                     <div className="flex gap-3 typography-micro text-muted-foreground/80">
-                      <span>{t('settings.piarium.fleet.entry.input', { count: selectedEntry.tokens.input })}</span>
-                      <span>{t('settings.piarium.fleet.entry.output', { count: selectedEntry.tokens.output })}</span>
+                      <span>{t('settings.varin.fleet.entry.input', { count: selectedEntry.tokens.input })}</span>
+                      <span>{t('settings.varin.fleet.entry.output', { count: selectedEntry.tokens.output })}</span>
                     </div>
                   ) : null}
                   {selectedEntry.actions.length > 0 ? (
@@ -717,12 +717,12 @@ export const FleetPage: React.FC = () => {
                   ) : null}
                   {entryAdvertisesAction(selectedEntry, 'logs') ? (
                     <div>
-                      <p className="typography-ui-label text-foreground">{t('settings.piarium.fleet.logs.title')}</p>
+                      <p className="typography-ui-label text-foreground">{t('settings.varin.fleet.logs.title')}</p>
                       {visibleLogs && visibleLogs.identity === fleetEntryIdentity(selectedEntry) ? (
                         <>
                           {visibleLogs.value.truncated ? (
                             <p className="mt-1 typography-meta text-muted-foreground">
-                              {t('settings.piarium.fleet.logs.truncated', { bytes: visibleLogs.value.bytesRead })}
+                              {t('settings.varin.fleet.logs.truncated', { bytes: visibleLogs.value.bytesRead })}
                             </p>
                           ) : null}
                           <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-background/40 p-3 typography-micro text-foreground">
@@ -731,7 +731,7 @@ export const FleetPage: React.FC = () => {
                         </>
                       ) : (
                         <p className="mt-1 typography-meta text-muted-foreground">
-                          {t('settings.piarium.fleet.logs.empty')}
+                          {t('settings.varin.fleet.logs.empty')}
                         </p>
                       )}
                     </div>
@@ -739,7 +739,7 @@ export const FleetPage: React.FC = () => {
                 </div>
               ) : (
                 <p className="typography-meta text-muted-foreground">
-                  {t('settings.piarium.fleet.detail.empty')}
+                  {t('settings.varin.fleet.detail.empty')}
                 </p>
               )}
             </div>
@@ -749,8 +749,8 @@ export const FleetPage: React.FC = () => {
 
       <SettingsSection
         settingsItem="fleet.actions"
-        title={t('settings.piarium.fleet.actions.title')}
-        description={t('settings.piarium.fleet.actions.description')}
+        title={t('settings.varin.fleet.actions.title')}
+        description={t('settings.varin.fleet.actions.description')}
       >
         <div className="flex flex-wrap gap-2">
           {commandNames.has('subagents-fleet') ? (
@@ -761,7 +761,7 @@ export const FleetPage: React.FC = () => {
               disabled={!sessionId || runningCommand !== null}
               onClick={() => void runCommand('subagents-fleet')}
             >
-              {t('settings.piarium.fleet.actions.inspector')}
+              {t('settings.varin.fleet.actions.inspector')}
             </Button>
           ) : null}
           {commandNames.has('subagents-stop') ? (
@@ -772,7 +772,7 @@ export const FleetPage: React.FC = () => {
               disabled={!sessionId || runningCommand !== null}
               onClick={() => void runCommand('subagents-stop')}
             >
-              {t('settings.piarium.fleet.actions.stop')}
+              {t('settings.varin.fleet.actions.stop')}
             </Button>
           ) : null}
           {commandNames.has('subagents-doctor') ? (
@@ -783,15 +783,15 @@ export const FleetPage: React.FC = () => {
               disabled={!sessionId || runningCommand !== null}
               onClick={() => void runCommand('subagents-doctor')}
             >
-              {t('settings.piarium.fleet.actions.doctor')}
+              {t('settings.varin.fleet.actions.doctor')}
             </Button>
           ) : null}
           <Button type="button" variant="ghost" size="sm" onClick={() => setSettingsPage('plugins')}>
-            {t('settings.piarium.fleet.actions.packages')}
+            {t('settings.varin.fleet.actions.packages')}
           </Button>
         </div>
         <p className="mt-3 typography-meta text-muted-foreground">
-          {t('settings.piarium.fleet.actions.targetNote')}
+          {t('settings.varin.fleet.actions.targetNote')}
         </p>
       </SettingsSection>
     </SettingsPageLayout>

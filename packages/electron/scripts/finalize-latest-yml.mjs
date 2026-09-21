@@ -5,11 +5,11 @@ import path from 'node:path';
 
 const dir = process.env.LATEST_YML_DIR;
 const repo = process.env.GH_REPO;
-const version = process.env.PIARIUM_VERSION;
+const version = process.env.VARIN_VERSION;
 
 if (!dir) throw new Error('LATEST_YML_DIR is required');
 if (!repo) throw new Error('GH_REPO is required');
-if (!version) throw new Error('PIARIUM_VERSION is required');
+if (!version) throw new Error('VARIN_VERSION is required');
 
 const parse = (content) => {
   const lines = content.split('\n');

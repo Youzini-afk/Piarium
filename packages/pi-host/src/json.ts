@@ -1,4 +1,4 @@
-import type { JsonValue } from "@piarium/protocol";
+import type { JsonValue } from "@varin/protocol";
 
 export function toJsonValue(value: unknown, maxDepth?: number): JsonValue {
   if (maxDepth !== undefined && (!Number.isSafeInteger(maxDepth) || maxDepth < 0)) {

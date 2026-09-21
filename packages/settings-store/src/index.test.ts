@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 const createStore = async () => {
-  const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'piarium-settings-store-'));
+  const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'varin-settings-store-'));
   roots.push(root);
   const filePath = path.join(root, 'settings.json');
   return { filePath, store: createSettingsFileStore({ filePath }) };
@@ -31,7 +31,7 @@ describe('settings file store', () => {
   });
 
   it('returns a cloned caller default only when no complete document exists', async () => {
-    const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'piarium-settings-store-default-'));
+    const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'varin-settings-store-default-'));
     roots.push(root);
     const filePath = path.join(root, 'state.json');
     const defaultValue = { version: 1, entries: {} };

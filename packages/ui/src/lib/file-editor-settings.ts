@@ -1,4 +1,4 @@
-// Types are owned by @piarium/application-client. Re-exported for backward compatibility.
+// Types are owned by @varin/application-client. Re-exported for backward compatibility.
 export type {
   FileEditorProfileToggle,
   FileEditorLineNumbers,
@@ -8,7 +8,7 @@ export type {
   FileEditorAccessibilitySupport,
   FileEditorSettings,
   FileEditorSettingsPatch,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 import type {
   FileEditorProfileToggle,
@@ -19,7 +19,7 @@ import type {
   FileEditorAccessibilitySupport,
   FileEditorSettings,
   FileEditorSettingsPatch,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 export const DEFAULT_FILE_EDITOR_SETTINGS: Readonly<FileEditorSettings> = Object.freeze({
   accessibilitySupport: 'auto',

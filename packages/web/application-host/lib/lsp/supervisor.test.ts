@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from './supervisor.js';
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from './servers.js';
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from './servers.js';
 
 type LanguageRuntime = ReturnType<typeof createLanguageSupervisor>;
 interface TestLanguageEvent extends Record<string, unknown> {
@@ -43,7 +43,7 @@ const fixtureProvider = (overrides: {
 } = {}) => ({
   providerId: overrides.providerId ?? 'fixture',
   command: process.execPath,
-  args: PIARIUM_LSP_FIXTURE_SERVER_ARGS,
+  args: VARIN_LSP_FIXTURE_SERVER_ARGS,
   languageIds: overrides.languageIds ?? ['typescript'],
   source: overrides.source ?? 'host',
   ...(overrides.env ? { env: overrides.env } : {}),
@@ -496,7 +496,7 @@ describe('language supervisor', () => {
       isTrusted: async () => true,
     });
     try {
-      language.registerProvider(fixtureProvider({ env: { PIARIUM_LSP_FIXTURE_MINIMAL: '1' } }));
+      language.registerProvider(fixtureProvider({ env: { VARIN_LSP_FIXTURE_MINIMAL: '1' } }));
       const resource = harness.resource('unsupported.ts');
       await language.syncDocument({
         resource,
@@ -574,8 +574,8 @@ describe('language supervisor', () => {
       isTrusted: async () => true,
     });
     try {
-      language.registerProvider(fixtureProvider({ providerId: 'crash', languageIds: ['typescript'], env: { PIARIUM_LSP_FIXTURE_CRASH: '1' } }));
-      language.registerProvider(fixtureProvider({ providerId: 'python', languageIds: ['python'], env: { PIARIUM_LSP_FIXTURE_CRASH: '' } }));
+      language.registerProvider(fixtureProvider({ providerId: 'crash', languageIds: ['typescript'], env: { VARIN_LSP_FIXTURE_CRASH: '1' } }));
+      language.registerProvider(fixtureProvider({ providerId: 'python', languageIds: ['python'], env: { VARIN_LSP_FIXTURE_CRASH: '' } }));
       const events: TestLanguageEvent[] = [];
       language.subscribe(harness.identity.workspaceId, (event) => events.push(event as TestLanguageEvent));
       await language.syncDocument({
@@ -879,7 +879,7 @@ describe('language supervisor', () => {
     });
     try {
       // The minimal fixture advertises no callHierarchyProvider.
-      language.registerProvider(fixtureProvider({ env: { PIARIUM_LSP_FIXTURE_MINIMAL: '1' } }));
+      language.registerProvider(fixtureProvider({ env: { VARIN_LSP_FIXTURE_MINIMAL: '1' } }));
       const resource = harness.resource('a.ts');
       await language.syncDocument({
         resource,

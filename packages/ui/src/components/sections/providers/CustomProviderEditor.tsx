@@ -425,11 +425,11 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
             <Input
               value={state.api}
               onChange={(event) => updateField('api', event.target.value)}
-              list="piarium-provider-apis"
+              list="varin-provider-apis"
               placeholder="openai-completions"
               className="h-7 w-full font-mono sm:w-[280px]"
             />
-            <datalist id="piarium-provider-apis">
+            <datalist id="varin-provider-apis">
               {COMMON_PROVIDER_APIS.map((api) => <option key={api} value={api} />)}
             </datalist>
             {renderTypeDescription(state.api) && (

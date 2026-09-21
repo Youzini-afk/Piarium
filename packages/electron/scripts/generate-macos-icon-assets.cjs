@@ -26,7 +26,7 @@ const actoolPath = resolveActool();
 const retryableActoolFailure = /IBPlatformToolFailureException|AssetCatalogAgent|tool closed the connection|model configuration used to open the store is incompatible/i;
 
 for (let attempt = 1; attempt <= 3; attempt += 1) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-app-icon-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-app-icon-'));
   try {
     const result = spawnSync(actoolPath, [
       sourceIconPath,

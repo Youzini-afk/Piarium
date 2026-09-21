@@ -1,4 +1,4 @@
-# Piarium native recovery journal
+# Varin native recovery journal
 
 Status: built-in kernel provider delivered; Rust system-kernel Stage R complete through D-282.
 
@@ -6,10 +6,10 @@ Last updated: 2026-09-15
 
 ## Decision
 
-Piarium owns combined conversation and file rollback through the selected versioned
-`piarium.workspace-recovery` Host service. Pi remains authoritative for its append-only conversation
+Varin owns combined conversation and file rollback through the selected versioned
+`varin.workspace-recovery` Host service. Pi remains authoritative for its append-only conversation
 tree. The official provider is the statically distributed, replaceable
-`piarium.builtin.recovery` extension; it is not a Pi package or a separately published application
+`varin.builtin.recovery` extension; it is not a Pi package or a separately published application
 package.
 
 The recovery unit is an affected-file change set. A message checkpoint is not a complete manifest of
@@ -28,7 +28,7 @@ kernel, the old TS file writer is test-only, and the cross-domain Registry+disk 
 against the real Rust storage/file/recovery authority.
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor
-consulted by Piarium's native rollback path.
+consulted by Varin's native rollback path.
 
 ## Why the full-workspace transaction model was removed
 
@@ -43,7 +43,7 @@ multi-step conversation/files saga then placed exceptional recovery concerns on 
 rollback. Durable operation records could also grow with the complete workspace.
 
 Mature editors use a narrower unit. The following editor behaviors are historical external evidence,
-not current Piarium integrations:
+not current Varin integrations:
 
 - VS Code captures a file baseline when that file is first edited in a request and records file
   operations afterward;
@@ -52,7 +52,7 @@ not current Piarium integrations:
 - Zed delegates whole-tree structural sharing to Git and consequently cannot provide the same feature
   outside a repository.
 
-Piarium follows the first two patterns and keeps Git out of the authority path.
+Varin follows the first two patterns and keeps Git out of the authority path.
 
 ## Product semantics
 
@@ -81,7 +81,7 @@ cancel. There is no normal new-workspace mode.
 
 ### Redo
 
-Before applying the inverse change set, Piarium records the current state of those affected paths. That
+Before applying the inverse change set, Varin records the current state of those affected paths. That
 small safety set drives operation compensation and explicit undo/redo. No full safety snapshot is
 created.
 
@@ -91,7 +91,7 @@ The Web Host advertises `HostHandshakeParams.capabilities.workspaceMutationJourn
 the bridge only when this value is explicitly true, so other Pi Hosts cannot be left waiting for an
 acknowledgement they do not implement.
 
-When enabled, Piarium supplies same-name custom definitions for Pi's built-in `write` and `edit` tools.
+When enabled, Varin supplies same-name custom definitions for Pi's built-in `write` and `edit` tools.
 They reuse Pi's original schemas, rendering, validation, and execution. Only the execution boundary is
 wrapped:
 
@@ -138,7 +138,7 @@ there is no arbitrary product file-size cutoff. Cost is paid only when a touched
 before/after object.
 
 Storage location is provider capability, not a mandatory built-in mode. The built-in Rust provider shares
-WorkingState's kernel root at `<PIARIUM_DATA_DIR>/kernel/<hostId>`, reports `application-data`, and advertises
+WorkingState's kernel root at `<VARIN_DATA_DIR>/kernel/<hostId>`, reports `application-data`, and advertises
 `storageManagement: false`; it has no project override or independent transfer because R1 keeps WorkingState,
 Recovery, and their object references in one transaction authority.
 
@@ -147,9 +147,9 @@ The v5 replacement-provider contract retains the four optional locations below w
 
 | Mode | Replacement-provider location |
 | --- | --- |
-| application data | provider storage below `PIARIUM_DATA_DIR` |
-| workspace local | `<workspace>/.piarium/recovery/v1` |
-| workspace adjacent | `<workspace-parent>/.piarium-recovery/<workspaceId>/v1` |
+| application data | provider storage below `VARIN_DATA_DIR` |
+| workspace local | `<workspace>/.varin/recovery/v1` |
+| workspace adjacent | `<workspace-parent>/.varin-recovery/<workspaceId>/v1` |
 | custom | `<selected-root>/<authorityId>/<workspaceId>/v1` |
 
 For such a provider, project choice overrides its global default and verified transfer switches its own
@@ -174,9 +174,9 @@ paths, wait for in-flight saves, publish its latest dirty-buffer revision, and a
 Apply holds that barrier while it rechecks each path, stores its safety state, atomically replaces the
 path, and verifies the target identity. A disconnected or unresponsive surface produces the retryable
 `dirty-state-unavailable` result rather than an empty dirty set. The acknowledgement deadline defaults to
-one document-watch heartbeat and can be changed with `PIARIUM_DIRTY_BARRIER_TIMEOUT_MS`.
+one document-watch heartbeat and can be changed with `VARIN_DIRTY_BARRIER_TIMEOUT_MS`.
 
-If a later path fails, or Pi rejects the expected conversation leaf, Piarium restores already-applied
+If a later path fails, or Pi rejects the expected conversation leaf, Varin restores already-applied
 paths from the safety set when their current identity still matches the attempted target. A concurrent
 external edit is never overwritten by compensation; the operation becomes `needs-attention` with the
 exact path. No global workspace maintenance bit survives a crash.
@@ -192,9 +192,9 @@ or platform liveness uncertainty keeps the fence.
 
 ## External and shell boundary
 
-A generic native process can choose paths dynamically and bypass Piarium APIs. Portable filesystem
+A generic native process can choose paths dynamically and bypass Varin APIs. Portable filesystem
 watchers report those changes after the write and cannot recreate bytes that were never observed before
-the write. Piarium therefore does not claim exact combined rollback for an unjournalled `bash`, terminal,
+the write. Varin therefore does not claim exact combined rollback for an unjournalled `bash`, terminal,
 Git, extension, or unrelated-process change. The watcher records the affected path; today that marks the
 whole turn incomplete, and under revision R1 it marks only that path uncovered while journaled paths stay
 restorable. Conversation-only rollback remains immediate in both cases.

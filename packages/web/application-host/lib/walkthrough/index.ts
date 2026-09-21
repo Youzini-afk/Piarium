@@ -77,7 +77,7 @@ const generationTimeoutMs = (hunkCount: number): number => Math.min(
 // what comes before it: reasoning models spend the same allowance thinking and
 // return nothing when it runs out, which is a bill for no answer.
 //
-// So the ask is derived from the model rather than fixed. Piarium's existing 4k
+// So the ask is derived from the model rather than fixed. Varin's existing 4k
 // small-model reserve is the floor; roomier models can spend more on reasoning
 // without reserving most of their context away from the diff.
 //
@@ -96,7 +96,7 @@ const OUTPUT_CONTEXT_SHARE = 0.125;
 
 /**
  * Answer allowance for a specific model: as much as it admits it can emit,
- * bounded by a share of its context and never below Piarium's existing
+ * bounded by a share of its context and never below Varin's existing
  * small-model output reserve.
  */
 const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }: {

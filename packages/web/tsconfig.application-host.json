@@ -11,15 +11,15 @@
     "noEmit": false,
     "lib": ["ES2023"],
     "paths": {
-      "@piarium/extension-contract": ["./node_modules/@piarium/extension-contract/dist/index.d.ts"],
-      "@piarium/extension-contract/*": ["./node_modules/@piarium/extension-contract/*"],
-      "@piarium/protocol": ["./node_modules/@piarium/protocol/dist/index.d.ts"],
-      "@piarium/application-client": ["./node_modules/@piarium/application-client/dist/index.d.ts"],
-      "@piarium/settings-store": ["./node_modules/@piarium/settings-store/dist/index.d.ts"],
-      "@piarium/runtime-broker": ["./node_modules/@piarium/runtime-broker/dist/index.d.ts"],
-      "@piarium/extension-host": ["./node_modules/@piarium/extension-host/dist/index.d.ts"],
-      "@piarium/extension-loader": ["./node_modules/@piarium/extension-loader/dist/index.d.ts"],
-      "@piarium/extension-builtins": ["./node_modules/@piarium/extension-builtins/dist/index.d.ts"]
+      "@varin/extension-contract": ["./node_modules/@varin/extension-contract/dist/index.d.ts"],
+      "@varin/extension-contract/*": ["./node_modules/@varin/extension-contract/*"],
+      "@varin/protocol": ["./node_modules/@varin/protocol/dist/index.d.ts"],
+      "@varin/application-client": ["./node_modules/@varin/application-client/dist/index.d.ts"],
+      "@varin/settings-store": ["./node_modules/@varin/settings-store/dist/index.d.ts"],
+      "@varin/runtime-broker": ["./node_modules/@varin/runtime-broker/dist/index.d.ts"],
+      "@varin/extension-host": ["./node_modules/@varin/extension-host/dist/index.d.ts"],
+      "@varin/extension-loader": ["./node_modules/@varin/extension-loader/dist/index.d.ts"],
+      "@varin/extension-builtins": ["./node_modules/@varin/extension-builtins/dist/index.d.ts"]
     }
   },
   "include": ["application-host/**/*.ts"],

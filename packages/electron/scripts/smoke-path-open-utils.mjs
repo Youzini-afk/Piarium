@@ -20,7 +20,7 @@ const expectRejects = async (label, callback, expected) => {
   throw new Error(`${label}: expected rejection`);
 };
 
-const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-path-open-'));
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-path-open-'));
 try {
   const existingFile = path.join(tempRoot, 'existing.txt');
   await fs.writeFile(existingFile, 'ok', 'utf8');

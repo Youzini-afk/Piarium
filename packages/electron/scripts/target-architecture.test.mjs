@@ -35,7 +35,7 @@ test('rejects conflicting architecture inputs', () => {
     () => resolveTargetArchitecture({
       platform: 'linux',
       hostArchitecture: 'x64',
-      environment: { PIARIUM_TARGET_ARCH: 'x64', ELECTRON_BUILDER_ARCH: 'arm64' },
+      environment: { VARIN_TARGET_ARCH: 'x64', ELECTRON_BUILDER_ARCH: 'arm64' },
     }),
     /Conflicting target architectures/,
   );
@@ -46,7 +46,7 @@ test('rejects cross-architecture Linux packaging', () => {
     () => resolveTargetArchitecture({
       platform: 'linux',
       hostArchitecture: 'x86_64',
-      environment: { PIARIUM_TARGET_ARCH: 'aarch64' },
+      environment: { VARIN_TARGET_ARCH: 'aarch64' },
     }),
     /must be built natively.*host is x64, target is arm64/,
   );
@@ -56,7 +56,7 @@ test('accepts matching native Linux architecture aliases', () => {
   assert.equal(resolveTargetArchitecture({
     platform: 'linux',
     hostArchitecture: 'x64',
-    environment: { PIARIUM_TARGET_ARCH: 'amd64' },
+    environment: { VARIN_TARGET_ARCH: 'amd64' },
   }).node, 'x64');
 });
 

@@ -3,7 +3,7 @@ import type {
   HarnessActorContext,
   HarnessActorIdentity,
   HarnessCapability,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { createHarnessRouter, type HarnessService } from "./router.js";
 
 const ACTOR: HarnessActorIdentity = {

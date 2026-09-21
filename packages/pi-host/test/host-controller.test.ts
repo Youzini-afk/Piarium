@@ -7,12 +7,12 @@ import {
   createRequest,
   type EventEnvelope,
   type HarnessInferenceBindingSnapshot,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   ProtocolDecodeError,
   type ResponseEnvelope,
   type SessionSnapshot,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostController } from "../src/host-controller.js";
 import { MemoryHostTransport } from "../src/transport.js";
 
@@ -26,7 +26,7 @@ function isEvent(envelope: WireEnvelope, event: string): envelope is EventEnvelo
 
 describe("HostController", () => {
   it("handshakes, trusts a project, loads an extension, and bridges its UI", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     const extensionLoadLog = join(root, "extension-loads.txt");
@@ -36,8 +36,8 @@ describe("HostController", () => {
       `import { appendFileSync } from "node:fs";
       export default function extension(pi: any) {
         appendFileSync(${JSON.stringify(extensionLoadLog)}, "loaded\\n", "utf8");
-        pi.registerProvider("piarium-test-provider", {
-          name: "Piarium Test Provider",
+        pi.registerProvider("varin-test-provider", {
+          name: "Varin Test Provider",
           baseUrl: "https://provider.invalid/v1",
           api: "openai-completions",
           models: [{
@@ -51,7 +51,7 @@ describe("HostController", () => {
           }],
         });
         pi.registerCommand("ui-test", {
-          description: "Exercise the Piarium extension UI bridge",
+          description: "Exercise the Varin extension UI bridge",
           handler: async (_args: string, ctx: any) => {
             const confirmed = await ctx.ui.confirm("Proceed?", "Confirm from test");
             await ctx.ui.custom(() => ({
@@ -61,7 +61,7 @@ describe("HostController", () => {
             }), { overlay: true, overlayOptions: { width: 72 } });
             ctx.ui.notify(confirmed ? "confirmed" : "cancelled", "info");
             ctx.ui.setEditorText("restored by extension");
-            pi.appendEntry("piarium.test", { confirmed });
+            pi.appendEntry("varin.test", { confirmed });
           },
         });
       }\n`,
@@ -76,7 +76,7 @@ describe("HostController", () => {
           clientName: "host-test",
           clientVersion: "0.0.0",
           mode: "test",
-          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+          protocolVersions: [VARIN_PROTOCOL_VERSION],
         }),
       );
       const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake"));
@@ -123,7 +123,7 @@ describe("HostController", () => {
           id: string;
           modelCount: number;
         }>
-      ).find((entry) => entry.id === "piarium-test-provider");
+      ).find((entry) => entry.id === "varin-test-provider");
       assert.ok(provider);
       assert.equal(provider.auth.configured, false);
       assert.deepEqual(provider.auth.methods.map((method) => method.type), ["api_key"]);
@@ -131,7 +131,7 @@ describe("HostController", () => {
 
       transport.receive(
         createRequest("provider-login", "provider.login", {
-          providerId: "piarium-test-provider",
+          providerId: "varin-test-provider",
           type: "api_key",
         }),
       );
@@ -139,7 +139,7 @@ describe("HostController", () => {
         (entry) =>
           isEvent(entry, "provider.auth.prompt") &&
           entry.event === "provider.auth.prompt" &&
-          entry.data.providerId === "piarium-test-provider",
+          entry.data.providerId === "varin-test-provider",
       );
       assert.ok(authPrompt.kind === "event" && authPrompt.event === "provider.auth.prompt");
       assert.equal(authPrompt.data.prompt.type, "secret");
@@ -168,7 +168,7 @@ describe("HostController", () => {
         }>
       ).find(
         (entry) =>
-          entry.provider === "piarium-test-provider" && entry.id === "test-model",
+          entry.provider === "varin-test-provider" && entry.id === "test-model",
       );
       assert.ok(model);
       assert.equal(model.available, true);
@@ -230,14 +230,14 @@ describe("HostController", () => {
       );
       const entries = await transport.waitFor((entry) => isResponse(entry, "entries"));
       assert.ok(entries.kind === "response" && entries.ok);
-      assert.match(JSON.stringify(entries.result), /piarium\.test/);
+      assert.match(JSON.stringify(entries.result), /varin\.test/);
 
       transport.receive(
         createRequest("tree", "session.tree", { sessionId: snapshot.sessionId }),
       );
       const tree = await transport.waitFor((entry) => isResponse(entry, "tree"));
       assert.ok(tree.kind === "response" && tree.ok);
-      assert.match(JSON.stringify(tree.result), /piarium\.test/);
+      assert.match(JSON.stringify(tree.result), /varin\.test/);
 
       transport.receive(
         createRequest("header", "session.header", { sessionId: snapshot.sessionId }),
@@ -432,7 +432,7 @@ describe("HostController", () => {
       transport.receive(
         createRequest("home-config-get", "config.text.get", {
           format: "json",
-          path: `.piarium-host-test-${snapshot.sessionId}.json`,
+          path: `.varin-host-test-${snapshot.sessionId}.json`,
           root: "home",
         }),
       );
@@ -494,7 +494,7 @@ describe("HostController", () => {
         kind: "request",
         method: "session.create",
         params: {},
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       } as WireEnvelope);
       const response = await transport.waitFor((entry) => isResponse(entry, "invalid"));
       assert.ok(response.kind === "response" && !response.ok);
@@ -505,7 +505,7 @@ describe("HostController", () => {
   });
 
   it("watches validated configuration authorities across atomic replacement and cancellation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-config-watch-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-config-watch-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
     await mkdir(cwd, { recursive: true });
@@ -654,7 +654,7 @@ describe("HostController", () => {
   });
 
   it("denies project configuration watches when the project is not trusted", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-config-watch-trust-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-config-watch-trust-"));
     const cwd = join(root, "workspace");
     const transport = new MemoryHostTransport();
     const controller = new HostController({
@@ -698,7 +698,7 @@ describe("HostController", () => {
   });
 
   it("serializes session lifecycle requests while allowing trust responses", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-queue-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-queue-"));
     const agentDir = join(root, "agent");
     const workspaceA = join(root, "workspace-a");
     const workspaceB = join(root, "workspace-b");
@@ -759,7 +759,7 @@ describe("HostController", () => {
   });
 
   it("cancels queued inference and releases rejected or invalid batch reservations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-inference-queue-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-inference-queue-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([
@@ -896,7 +896,7 @@ describe("HostController", () => {
   });
 
   it("reports the selected runtime source and package root in the handshake", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-runtime-"));
     const packageRoot = join(root, "external-pi");
     const transport = new MemoryHostTransport();
     const controller = new HostController({
@@ -912,7 +912,7 @@ describe("HostController", () => {
           clientName: "host-test",
           clientVersion: "0.0.0",
           mode: "test",
-          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+          protocolVersions: [VARIN_PROTOCOL_VERSION],
         }),
       );
       const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake"));
@@ -931,7 +931,7 @@ describe("HostController", () => {
   });
 
   it("enforces catalog and package worker ownership inside the Host", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-role-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-role-"));
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
 

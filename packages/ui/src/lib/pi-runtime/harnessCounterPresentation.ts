@@ -1,4 +1,4 @@
-import type { SessionStats } from '@piarium/protocol';
+import type { SessionStats } from '@varin/protocol';
 
 export interface HarnessCounterPresentation {
   cacheHitPercent?: number;

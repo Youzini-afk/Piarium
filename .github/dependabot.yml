@@ -55,7 +55,7 @@ updates:
         patterns:
           - electron
           - electron-context-menu
-      # Pi publishes its packages in lockstep and Piarium pins them to one exact version, so a
+      # Pi publishes its packages in lockstep and Varin pins them to one exact version, so a
       # single-package bump is a half upgrade that cannot pass. Upgrading also means refreshing the
       # cloud runtime lockfile, so keep it one review.
       pi-runtime:

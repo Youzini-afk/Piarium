@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  defaultPiariumExtensionServiceRoutingDocument,
-  resolvePiariumExtensionServiceRouting,
+  defaultVarinExtensionServiceRoutingDocument,
+  resolveVarinExtensionServiceRouting,
 } from "../src/index.js";
 
 const candidates = [
@@ -11,7 +11,7 @@ const candidates = [
 ];
 
 test("service routing resolves the most specific matching scope with a stable provider key", () => {
-  const document = defaultPiariumExtensionServiceRoutingDocument();
+  const document = defaultVarinExtensionServiceRoutingDocument();
   document.rules = [
     {
       allowFallback: false,
@@ -28,7 +28,7 @@ test("service routing resolves the most specific matching scope with a stable pr
       version: 1,
     },
   ];
-  const resolution = resolvePiariumExtensionServiceRouting({
+  const resolution = resolveVarinExtensionServiceRouting({
     candidates,
     context: { sessionId: "session-a", userId: "youzi" },
     document,
@@ -40,7 +40,7 @@ test("service routing resolves the most specific matching scope with a stable pr
 });
 
 test("service routing falls through only when the missing selection allows fallback", () => {
-  const document = defaultPiariumExtensionServiceRoutingDocument();
+  const document = defaultVarinExtensionServiceRoutingDocument();
   document.rules = [
     {
       allowFallback: true,
@@ -57,7 +57,7 @@ test("service routing falls through only when the missing selection allows fallb
       version: 1,
     },
   ];
-  const resolution = resolvePiariumExtensionServiceRouting({
+  const resolution = resolveVarinExtensionServiceRouting({
     candidates,
     context: { sessionId: "session-a", userId: "youzi" },
     document,
@@ -69,7 +69,7 @@ test("service routing falls through only when the missing selection allows fallb
   assert.equal(resolution.diagnostics[0]?.code, "service_selection_fallback");
 
   document.rules[0]!.allowFallback = false;
-  const unavailable = resolvePiariumExtensionServiceRouting({
+  const unavailable = resolveVarinExtensionServiceRouting({
     candidates,
     context: { sessionId: "session-a", userId: "youzi" },
     document,
@@ -80,7 +80,7 @@ test("service routing falls through only when the missing selection allows fallb
 });
 
 test("equally specific conflicting rules are explicit instead of load-order dependent", () => {
-  const document = defaultPiariumExtensionServiceRoutingDocument();
+  const document = defaultVarinExtensionServiceRoutingDocument();
   document.rules = [
     {
       allowFallback: false,
@@ -97,7 +97,7 @@ test("equally specific conflicting rules are explicit instead of load-order depe
       version: 1,
     },
   ];
-  const resolution = resolvePiariumExtensionServiceRouting({
+  const resolution = resolveVarinExtensionServiceRouting({
     candidates,
     context: { sessionId: "session-a", userId: "youzi", workspaceId: "/workspace" },
     document,

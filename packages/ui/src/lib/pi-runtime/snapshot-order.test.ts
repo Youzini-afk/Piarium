@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import type { PiRuntimeSnapshot } from '@varin/protocol';
 import { shouldApplyPiRuntimeSnapshot } from './snapshot-order';
 
 const snapshot = (revision: number): PiRuntimeSnapshot => ({

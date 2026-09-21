@@ -4,83 +4,83 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const BASH_SCRIPT = `if [ -n "\${PIARIUM_SHELL_INTEGRATION:-}" ]; then
+const BASH_SCRIPT = `if [ -n "\${VARIN_SHELL_INTEGRATION:-}" ]; then
   return 0 2>/dev/null || exit 0
 fi
-export PIARIUM_SHELL_INTEGRATION=1
+export VARIN_SHELL_INTEGRATION=1
 
 if ! shopt -q login_shell 2>/dev/null; then
   [ -f /etc/bash.bashrc ] && . /etc/bash.bashrc
   [ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
 fi
 
-__piarium_escape() {
+__varin_escape() {
   printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/;/\\\\x3b/g'
 }
 
-__piarium_emit() {
-  printf '\\033]633;pi;%s;%s\\007' "\${PIARIUM_SHELL_INTEGRATION_ID:-}" "\$1"
+__varin_emit() {
+  printf '\\033]633;pi;%s;%s\\007' "\${VARIN_SHELL_INTEGRATION_ID:-}" "\$1"
 }
 
-__piarium_awaiting=
-__piarium_prompt_command() {
-  local __piarium_status=\$?
-  if [ -n "\$__piarium_awaiting" ]; then
-    local __piarium_cmd
-    __piarium_cmd=\$(HISTTIMEFORMAT= builtin history 1 | sed 's/^ *[0-9][0-9]* *//')
-    if [ -n "\$__piarium_cmd" ]; then
-      __piarium_emit "E;\$(__piarium_escape "\$__piarium_cmd")"
+__varin_awaiting=
+__varin_prompt_command() {
+  local __varin_status=\$?
+  if [ -n "\$__varin_awaiting" ]; then
+    local __varin_cmd
+    __varin_cmd=\$(HISTTIMEFORMAT= builtin history 1 | sed 's/^ *[0-9][0-9]* *//')
+    if [ -n "\$__varin_cmd" ]; then
+      __varin_emit "E;\$(__varin_escape "\$__varin_cmd")"
     fi
-    __piarium_emit "D;\$__piarium_status"
-    __piarium_awaiting=
+    __varin_emit "D;\$__varin_status"
+    __varin_awaiting=
   fi
-  __piarium_emit "P;Cwd=\$(__piarium_escape "\$PWD")"
-  __piarium_emit "A"
+  __varin_emit "P;Cwd=\$(__varin_escape "\$PWD")"
+  __varin_emit "A"
 }
 
-__piarium_debug_trap() {
+__varin_debug_trap() {
   [ -n "\${COMP_LINE:-}" ] && return
-  [ -n "\$__piarium_awaiting" ] && return
+  [ -n "\$__varin_awaiting" ] && return
   case "\$BASH_COMMAND" in
-    __piarium_prompt_command*|__piarium_debug_trap*) return ;;
+    __varin_prompt_command*|__varin_debug_trap*) return ;;
   esac
-  __piarium_awaiting=1
-  __piarium_emit "C"
+  __varin_awaiting=1
+  __varin_emit "C"
 }
 
 if declare -p PROMPT_COMMAND >/dev/null 2>&1; then
   if [[ "\$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    PROMPT_COMMAND=(__piarium_prompt_command "\${PROMPT_COMMAND[@]}")
+    PROMPT_COMMAND=(__varin_prompt_command "\${PROMPT_COMMAND[@]}")
   else
-    PROMPT_COMMAND="__piarium_prompt_command; \${PROMPT_COMMAND}"
+    PROMPT_COMMAND="__varin_prompt_command; \${PROMPT_COMMAND}"
   fi
 else
-  PROMPT_COMMAND="__piarium_prompt_command"
+  PROMPT_COMMAND="__varin_prompt_command"
 fi
 
-__piarium_prev_debug=
-__piarium_trap_debug=\$(trap -p DEBUG 2>/dev/null || true)
-if [ -n "\$__piarium_trap_debug" ]; then
-  __piarium_prev_debug=\${__piarium_trap_debug#trap -- \\'}
-  __piarium_prev_debug=\${__piarium_prev_debug%\\' DEBUG}
+__varin_prev_debug=
+__varin_trap_debug=\$(trap -p DEBUG 2>/dev/null || true)
+if [ -n "\$__varin_trap_debug" ]; then
+  __varin_prev_debug=\${__varin_trap_debug#trap -- \\'}
+  __varin_prev_debug=\${__varin_prev_debug%\\' DEBUG}
 fi
-if [ -n "\$__piarium_prev_debug" ]; then
-  trap '__piarium_debug_trap; eval "\$__piarium_prev_debug"' DEBUG
+if [ -n "\$__varin_prev_debug" ]; then
+  trap '__varin_debug_trap; eval "\$__varin_prev_debug"' DEBUG
 else
-  trap '__piarium_debug_trap' DEBUG
+  trap '__varin_debug_trap' DEBUG
 fi
 `;
 
-export const POWERSHELL_COMMAND_START_CAPTURE = `$global:__PiariumNativeExitBaseline = $global:LASTEXITCODE
-  $global:__PiariumNativeExitBaselineSet = $true`;
+export const POWERSHELL_COMMAND_START_CAPTURE = `$global:__VarinNativeExitBaseline = $global:LASTEXITCODE
+  $global:__VarinNativeExitBaselineSet = $true`;
 
-export const POWERSHELL_EXIT_CAPTURE = `$__piarium_success = $?
-  $__piarium_exit = $global:LASTEXITCODE
-  $__piarium_native_status_observed = $false
-  if ($global:__PiariumNativeExitBaselineSet -eq $true) {
-    $__piarium_native_status_observed = if ($__piarium_exit -is [int]) {
-      if ($global:__PiariumNativeExitBaseline -is [int]) {
-        [int]$__piarium_exit -ne [int]$global:__PiariumNativeExitBaseline
+export const POWERSHELL_EXIT_CAPTURE = `$__varin_success = $?
+  $__varin_exit = $global:LASTEXITCODE
+  $__varin_native_status_observed = $false
+  if ($global:__VarinNativeExitBaselineSet -eq $true) {
+    $__varin_native_status_observed = if ($__varin_exit -is [int]) {
+      if ($global:__VarinNativeExitBaseline -is [int]) {
+        [int]$__varin_exit -ne [int]$global:__VarinNativeExitBaseline
       } else {
         $true
       }
@@ -91,124 +91,124 @@ export const POWERSHELL_EXIT_CAPTURE = `$__piarium_success = $?
   # LASTEXITCODE has no generation counter. A changed native status proves
   # that this command ran a native process; an unchanged value is explicitly
   # treated as unknown and falls back to cmdlet success/failure semantics.
-  $code = if ($__piarium_success) { 0 } elseif ($__piarium_native_status_observed) { [int]$__piarium_exit } else { 1 }
-  $global:__PiariumNativeExitBaseline = $__piarium_exit
-  $global:__PiariumNativeExitBaselineSet = $true`;
+  $code = if ($__varin_success) { 0 } elseif ($__varin_native_status_observed) { [int]$__varin_exit } else { 1 }
+  $global:__VarinNativeExitBaseline = $__varin_exit
+  $global:__VarinNativeExitBaselineSet = $true`;
 
-const POWERSHELL_SCRIPT = `if ($env:PIARIUM_SHELL_INTEGRATION) { return }
-$env:PIARIUM_SHELL_INTEGRATION = '1'
+const POWERSHELL_SCRIPT = `if ($env:VARIN_SHELL_INTEGRATION) { return }
+$env:VARIN_SHELL_INTEGRATION = '1'
 
-function global:__PiariumEscape([string]$Value) {
+function global:__VarinEscape([string]$Value) {
   return (($Value -replace '\\\\', '\\\\\\\\') -replace ';', '\\x3b')
 }
 
-function global:__PiariumEmit([string]$Payload) {
-  [Console]::Write(("\`e]633;pi;" + $env:PIARIUM_SHELL_INTEGRATION_ID + ";" + $Payload + "\`a"))
+function global:__VarinEmit([string]$Payload) {
+  [Console]::Write(("\`e]633;pi;" + $env:VARIN_SHELL_INTEGRATION_ID + ";" + $Payload + "\`a"))
 }
 
-$__PiariumOriginalPrompt = $function:prompt
+$__VarinOriginalPrompt = $function:prompt
 function global:prompt {
   ${POWERSHELL_EXIT_CAPTURE}
-  if ($global:__PiariumAwaitingFinish) {
-    __PiariumEmit ("D;" + $code)
-    $global:__PiariumAwaitingFinish = $false
+  if ($global:__VarinAwaitingFinish) {
+    __VarinEmit ("D;" + $code)
+    $global:__VarinAwaitingFinish = $false
   }
-  __PiariumEmit ("P;Cwd=" + (__PiariumEscape $PWD.Path))
-  __PiariumEmit 'A'
-  if ($__PiariumOriginalPrompt) { & $__PiariumOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)> " }
+  __VarinEmit ("P;Cwd=" + (__VarinEscape $PWD.Path))
+  __VarinEmit 'A'
+  if ($__VarinOriginalPrompt) { & $__VarinOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)> " }
 }
 
 if (Get-Module -ListAvailable -Name PSReadLine) {
   Import-Module PSReadLine -ErrorAction SilentlyContinue
-  $__PiariumPreviousHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
+  $__VarinPreviousHistoryHandler = (Get-PSReadLineOption).AddToHistoryHandler
   Set-PSReadLineOption -AddToHistoryHandler {
     param($line)
     if ($line) {
       ${POWERSHELL_COMMAND_START_CAPTURE}
-      __PiariumEmit ("E;" + (__PiariumEscape $line))
-      __PiariumEmit 'C'
-      $global:__PiariumAwaitingFinish = $true
+      __VarinEmit ("E;" + (__VarinEscape $line))
+      __VarinEmit 'C'
+      $global:__VarinAwaitingFinish = $true
     }
-    if ($__PiariumPreviousHistoryHandler) {
-      return & $__PiariumPreviousHistoryHandler $line
+    if ($__VarinPreviousHistoryHandler) {
+      return & $__VarinPreviousHistoryHandler $line
     }
     $true
   }
 }
 `;
 
-const zshUserZdot = `"\${PIARIUM_USER_ZDOTDIR:-\$HOME}"`;
-const zshUserZdotSet = `"\${PIARIUM_USER_ZDOTDIR_SET:-0}"`;
+const zshUserZdot = `"\${VARIN_USER_ZDOTDIR:-\$HOME}"`;
+const zshUserZdotSet = `"\${VARIN_USER_ZDOTDIR_SET:-0}"`;
 
-const ZSH_ENV_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
-__piarium_user_zdotdir_set=${zshUserZdotSet}
-if [ -f "\$__piarium_user_zdotdir/.zshenv" ]; then
-  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
-  . "\$__piarium_user_zdotdir/.zshenv"
+const ZSH_ENV_SCRIPT = `__varin_user_zdotdir=${zshUserZdot}
+__varin_user_zdotdir_set=${zshUserZdotSet}
+if [ -f "\$__varin_user_zdotdir/.zshenv" ]; then
+  if [ "\$__varin_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__varin_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__varin_user_zdotdir/.zshenv"
 fi
-ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+ZDOTDIR="\${VARIN_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
-const ZSH_PROFILE_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
-__piarium_user_zdotdir_set=${zshUserZdotSet}
-if [ -f "\$__piarium_user_zdotdir/.zprofile" ]; then
-  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
-  . "\$__piarium_user_zdotdir/.zprofile"
+const ZSH_PROFILE_SCRIPT = `__varin_user_zdotdir=${zshUserZdot}
+__varin_user_zdotdir_set=${zshUserZdotSet}
+if [ -f "\$__varin_user_zdotdir/.zprofile" ]; then
+  if [ "\$__varin_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__varin_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__varin_user_zdotdir/.zprofile"
 fi
-ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+ZDOTDIR="\${VARIN_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
-const ZSH_LOGIN_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
-__piarium_user_zdotdir_set=${zshUserZdotSet}
-if [ -f "\$__piarium_user_zdotdir/.zlogin" ]; then
-  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
-  . "\$__piarium_user_zdotdir/.zlogin"
+const ZSH_LOGIN_SCRIPT = `__varin_user_zdotdir=${zshUserZdot}
+__varin_user_zdotdir_set=${zshUserZdotSet}
+if [ -f "\$__varin_user_zdotdir/.zlogin" ]; then
+  if [ "\$__varin_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__varin_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__varin_user_zdotdir/.zlogin"
 fi
-ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+ZDOTDIR="\${VARIN_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
-const ZSH_SCRIPT = `if [ -n "\${PIARIUM_SHELL_INTEGRATION:-}" ]; then
+const ZSH_SCRIPT = `if [ -n "\${VARIN_SHELL_INTEGRATION:-}" ]; then
   return 0 2>/dev/null || exit 0
 fi
-export PIARIUM_SHELL_INTEGRATION=1
-__piarium_user_zdotdir=${zshUserZdot}
-__piarium_user_zdotdir_set=${zshUserZdotSet}
+export VARIN_SHELL_INTEGRATION=1
+__varin_user_zdotdir=${zshUserZdot}
+__varin_user_zdotdir_set=${zshUserZdotSet}
 [ -f /etc/zshrc ] && . /etc/zshrc
-if [ -f "\$__piarium_user_zdotdir/.zshrc" ]; then
-  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
-  . "\$__piarium_user_zdotdir/.zshrc"
-  ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+if [ -f "\$__varin_user_zdotdir/.zshrc" ]; then
+  if [ "\$__varin_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__varin_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__varin_user_zdotdir/.zshrc"
+  ZDOTDIR="\${VARIN_ZDOTDIR:-\$ZDOTDIR}"
 fi
 
-__piarium_escape() {
+__varin_escape() {
   printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/;/\\\\x3b/g'
 }
 
-__piarium_emit() {
-  printf '\\033]633;pi;%s;%s\\007' "\${PIARIUM_SHELL_INTEGRATION_ID:-}" "\$1"
+__varin_emit() {
+  printf '\\033]633;pi;%s;%s\\007' "\${VARIN_SHELL_INTEGRATION_ID:-}" "\$1"
 }
 
-__piarium_preexec() {
-  __piarium_emit "E;\$(__piarium_escape "\$1")"
-  __piarium_emit "C"
+__varin_preexec() {
+  __varin_emit "E;\$(__varin_escape "\$1")"
+  __varin_emit "C"
 }
 
-__piarium_precmd() {
-  __piarium_emit "D;\$?"
-  __piarium_emit "P;Cwd=\$(__piarium_escape "\$PWD")"
-  __piarium_emit "A"
+__varin_precmd() {
+  __varin_emit "D;\$?"
+  __varin_emit "P;Cwd=\$(__varin_escape "\$PWD")"
+  __varin_emit "A"
 }
 
 autoload -Uz add-zsh-hook 2>/dev/null || true
 if typeset -f add-zsh-hook >/dev/null 2>&1; then
-  add-zsh-hook preexec __piarium_preexec
-  add-zsh-hook precmd __piarium_precmd
+  add-zsh-hook preexec __varin_preexec
+  add-zsh-hook precmd __varin_precmd
 fi
 `;
 
 const scriptPath = (name: string, contents: string, encoding: BufferEncoding = "utf8"): string => {
   const hash = createHash("sha256").update(contents).digest("hex").slice(0, 16);
-  const directory = join(tmpdir(), "piarium-shell-integration");
+  const directory = join(tmpdir(), "varin-shell-integration");
   mkdirSync(directory, { recursive: true });
   const file = join(directory, `${name}-${hash}${name === "powershell" ? ".ps1" : ".sh"}`);
   writeFileSync(file, contents, { encoding });
@@ -234,7 +234,7 @@ const materializeZshDotDir = (): string => {
     .update(ZSH_LOGIN_SCRIPT)
     .digest("hex")
     .slice(0, 16);
-  const directory = join(tmpdir(), "piarium-shell-integration", `zsh-${hash}`);
+  const directory = join(tmpdir(), "varin-shell-integration", `zsh-${hash}`);
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, ".zshenv"), ZSH_ENV_SCRIPT);
   writeFileSync(join(directory, ".zprofile"), ZSH_PROFILE_SCRIPT);
@@ -259,9 +259,9 @@ export const shellIntegrationLaunch = (
   if (!family) return null;
   const userZdotDir = process.env.ZDOTDIR;
   const env: Record<string, string> = {
-    PIARIUM_SHELL_INTEGRATION_KIND: family,
-    PIARIUM_SHELL_INTEGRATION_ID: integrationId,
-    ...(loginShell ? { PIARIUM_LOGIN_SHELL: "1" } : {}),
+    VARIN_SHELL_INTEGRATION_KIND: family,
+    VARIN_SHELL_INTEGRATION_ID: integrationId,
+    ...(loginShell ? { VARIN_LOGIN_SHELL: "1" } : {}),
   };
   if (family === "powershell") {
     return {
@@ -276,9 +276,9 @@ export const shellIntegrationLaunch = (
       env: {
         ...env,
         ZDOTDIR: zdotdir,
-        PIARIUM_ZDOTDIR: zdotdir,
-        PIARIUM_USER_ZDOTDIR_SET: userZdotDir === undefined ? "0" : "1",
-        ...(userZdotDir === undefined ? {} : { PIARIUM_USER_ZDOTDIR: userZdotDir }),
+        VARIN_ZDOTDIR: zdotdir,
+        VARIN_USER_ZDOTDIR_SET: userZdotDir === undefined ? "0" : "1",
+        ...(userZdotDir === undefined ? {} : { VARIN_USER_ZDOTDIR: userZdotDir }),
       },
     };
   }

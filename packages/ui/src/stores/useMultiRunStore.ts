@@ -1,4 +1,4 @@
-import { THINKING_LEVELS, type ImageAttachment, type ThinkingLevel } from '@piarium/protocol';
+import { THINKING_LEVELS, type ImageAttachment, type ThinkingLevel } from '@varin/protocol';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type {
@@ -9,14 +9,14 @@ import type {
 import {
   getWorktreeSetupWaitEnabled,
   saveWorktreeSetupCommands,
-  type PiariumProjectRef,
+  type VarinProjectRef,
 } from '@/lib/project-config';
 import {
-  checkPiariumGitRepository,
-  createPiariumWorktree,
-  removePiariumWorktree,
-  resolvePiariumRootTrackingRemote,
-} from '@/lib/piariumWorktrees';
+  checkVarinGitRepository,
+  createVarinWorktree,
+  removeVarinWorktree,
+  resolveVarinRootTrackingRemote,
+} from '@/lib/varinWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { renderPiComposerSubmission } from '@/lib/pi-session/piComposerSubmission';
 import { useDirectoryStore } from './useDirectoryStore';
@@ -120,7 +120,7 @@ const prepareAttachments = (
   };
 };
 
-const resolveActiveProject = (): PiariumProjectRef | null => {
+const resolveActiveProject = (): VarinProjectRef | null => {
   const projectsState = useProjectsStore.getState();
   const activeProjectId = projectsState.activeProjectId;
   const project = activeProjectId
@@ -188,11 +188,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const project = resolveActiveProject();
           if (!project) throw new Error('Select a project');
           const directory = project.path;
-          const shouldIsolateRuns = await checkPiariumGitRepository(directory) && params.isolateRuns !== false;
+          const shouldIsolateRuns = await checkVarinGitRepository(directory) && params.isolateRuns !== false;
           const normalizedGroupSlug = toGitSafeSlug(groupName);
           const groupSlug = normalizedGroupSlug || stableFallbackSlug(groupName);
           const rootTrackingRemote = shouldIsolateRuns
-            ? await resolvePiariumRootTrackingRemote(directory)
+            ? await resolveVarinRootTrackingRemote(directory)
             : null;
           const setupCommands = params.setupCommands?.filter((command) => command.trim().length > 0) ?? [];
           const createdRuns: CreatedRun[] = [];
@@ -228,11 +228,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
               });
 
               let sessionId: string | undefined;
-              let worktreeMetadata: Awaited<ReturnType<typeof createPiariumWorktree>> | undefined;
+              let worktreeMetadata: Awaited<ReturnType<typeof createVarinWorktree>> | undefined;
               try {
                 let worktreePath = directory;
                 if (shouldIsolateRuns) {
-                  worktreeMetadata = await createPiariumWorktree(project, {
+                  worktreeMetadata = await createVarinWorktree(project, {
                     branchName: preferredName,
                     mode: 'new',
                     preferredName,
@@ -276,7 +276,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
               } catch (error) {
                 if (sessionId) await piSessions.deleteSession(sessionId).catch(() => undefined);
                 if (worktreeMetadata) {
-                  await removePiariumWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
+                  await removeVarinWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
                     .catch(() => undefined);
                 }
                 failures.push({
@@ -311,7 +311,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 ? instructionParts.join('\n\n')
                 : undefined;
               const task = params.agent && directInstructions
-                ? `${expanded}\n\n<piarium-run-instructions>\n${directInstructions}\n</piarium-run-instructions>`
+                ? `${expanded}\n\n<varin-run-instructions>\n${directInstructions}\n</varin-run-instructions>`
                 : expanded;
               const text = params.agent ? renderPiAgentInvocation(params.agent, task) : task;
               const accepted = await piSessions.prompt(

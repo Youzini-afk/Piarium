@@ -14,16 +14,16 @@ import type {
   DebugSessionRecord,
   DebugStartRequest,
   ExtensionRunOwner,
-  PiariumBreakpoint,
-  PiariumDebugBreakpointListResult,
-  PiariumDebugBreakpointsResult,
-  PiariumDebugEvent,
-  PiariumDebugFeatureResult,
-  PiariumDebugScope,
-  PiariumDebugSessionStatus,
-  PiariumDebugStackFrame,
-  PiariumDebugThread,
-  PiariumDebugVariable,
+  VarinBreakpoint,
+  VarinDebugBreakpointListResult,
+  VarinDebugBreakpointsResult,
+  VarinDebugEvent,
+  VarinDebugFeatureResult,
+  VarinDebugScope,
+  VarinDebugSessionStatus,
+  VarinDebugStackFrame,
+  VarinDebugThread,
+  VarinDebugVariable,
   ProcessWriter,
   RegisteredDebugAdapter,
   RunPathModule,
@@ -40,10 +40,10 @@ const asRecord = (value: unknown): MessageRecord => (
 
 const ownerScopeKey = (owner?: ExtensionRunOwner) => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
-  : 'piarium.host';
+  : 'varin.host';
 const exactOwnerKey = (owner?: ExtensionRunOwner) => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
-  : 'piarium.host\0host';
+  : 'varin.host\0host';
 
 
 const registerProcessWriter = async (
@@ -95,9 +95,9 @@ export const createDebugSupervisor = ({
 }: RunSupervisorOptions) => {
   const adapters: RegisteredDebugAdapter[] = [];
   const sessions = new Map<string, DebugSessionRecord>();
-  const breakpoints = new Map<string, PiariumBreakpoint[]>();
+  const breakpoints = new Map<string, VarinBreakpoint[]>();
   const watches = new Map<string, string[]>();
-  const workspaceListeners = new Map<string, Set<(event: PiariumDebugEvent) => void>>();
+  const workspaceListeners = new Map<string, Set<(event: VarinDebugEvent) => void>>();
   const generations = new Map<string, number>();
   const pendingExits = new Set<Promise<void>>();
 
@@ -123,14 +123,14 @@ export const createDebugSupervisor = ({
     return next;
   };
 
-  const emit = (workspaceId: string, event: PiariumDebugEvent): void => {
+  const emit = (workspaceId: string, event: VarinDebugEvent): void => {
     const listeners = workspaceListeners.get(workspaceId);
     if (!listeners) return;
     for (const listener of listeners) listener(event);
   };
 
-  const snapshotFor = (record: DebugSessionRecord): PiariumDebugSessionStatus => {
-    const snapshot: PiariumDebugSessionStatus = {
+  const snapshotFor = (record: DebugSessionRecord): VarinDebugSessionStatus => {
+    const snapshot: VarinDebugSessionStatus = {
       status: record.status,
       workspaceId: record.workspaceId,
       sessionId: record.sessionId,
@@ -183,14 +183,14 @@ export const createDebugSupervisor = ({
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
   };
 
-  const getStatus = (request: unknown): PiariumDebugSessionStatus => {
+  const getStatus = (request: unknown): VarinDebugSessionStatus => {
     const workspaceId = workspaceIdOf(request);
     const existing = sessions.get(workspaceId);
     if (existing) return snapshotFor(existing);
     return { status: 'absent', workspaceId };
   };
 
-  const listBreakpoints = (request: unknown): PiariumBreakpoint[] => (
+  const listBreakpoints = (request: unknown): VarinBreakpoint[] => (
     breakpoints.get(workspaceIdOf(request)) ?? []
   );
 
@@ -201,12 +201,12 @@ export const createDebugSupervisor = ({
       : null;
   };
 
-  function breakpointResult(workspaceId: string): PiariumDebugBreakpointListResult;
-  function breakpointResult(workspaceId: string, status: 'stale'): PiariumDebugBreakpointsResult;
+  function breakpointResult(workspaceId: string): VarinDebugBreakpointListResult;
+  function breakpointResult(workspaceId: string, status: 'stale'): VarinDebugBreakpointsResult;
   function breakpointResult(
     workspaceId: string,
     status: 'ready' | 'stale' = 'ready',
-  ): PiariumDebugBreakpointsResult {
+  ): VarinDebugBreakpointsResult {
     const record = activeSession(workspaceId);
     return {
       status,
@@ -216,7 +216,7 @@ export const createDebugSupervisor = ({
     };
   }
 
-  const setBreakpoints = (request: DebugBreakpointMutationRequest): PiariumDebugBreakpointsResult => {
+  const setBreakpoints = (request: DebugBreakpointMutationRequest): VarinDebugBreakpointsResult => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const resourceId = typeof request?.resourceId === 'string' ? request.resourceId : '';
     const record = activeSession(workspaceId);
@@ -258,7 +258,7 @@ export const createDebugSupervisor = ({
     return result;
   };
 
-  const start = async (request: DebugStartRequest): Promise<PiariumDebugSessionStatus> => {
+  const start = async (request: DebugStartRequest): Promise<VarinDebugSessionStatus> => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const existing = sessions.get(workspaceId);
     if (existing) await disposeRecord(existing, 'Replaced by a new debug session');
@@ -401,8 +401,8 @@ export const createDebugSupervisor = ({
       const initialized = rpc.waitForEvent('initialized');
       const capabilities = asRecord(await rpc.request('initialize', {
         adapterID: adapter.adapterId,
-        clientID: 'piarium',
-        clientName: 'Piarium',
+        clientID: 'varin',
+        clientName: 'Varin',
         pathFormat: 'path',
         linesStartAt1: true,
         columnsStartAt1: true,
@@ -445,8 +445,8 @@ export const createDebugSupervisor = ({
 
   const withSessionStatus = async (
     workspaceId: string,
-    action: (record: DebugSessionRecord, rpc: NonNullable<DebugSessionRecord['rpc']>) => Promise<PiariumDebugSessionStatus>,
-  ): Promise<PiariumDebugSessionStatus> => {
+    action: (record: DebugSessionRecord, rpc: NonNullable<DebugSessionRecord['rpc']>) => Promise<VarinDebugSessionStatus>,
+  ): Promise<VarinDebugSessionStatus> => {
     const record = sessions.get(workspaceId);
     const rpc = record?.rpc;
     if (!record || !rpc) {
@@ -478,8 +478,8 @@ export const createDebugSupervisor = ({
     action: (
       record: DebugSessionRecord,
       rpc: NonNullable<DebugSessionRecord['rpc']>,
-    ) => Promise<PiariumDebugFeatureResult<Value>>,
-  ): Promise<PiariumDebugFeatureResult<Value>> => {
+    ) => Promise<VarinDebugFeatureResult<Value>>,
+  ): Promise<VarinDebugFeatureResult<Value>> => {
     const record = sessions.get(workspaceId);
     const rpc = record?.rpc;
     if (!record || !rpc) return { status: 'absent', workspaceId };
@@ -510,9 +510,9 @@ export const createDebugSupervisor = ({
     }
   };
 
-  const mapFrame = (frame: unknown, root: string): PiariumDebugStackFrame => {
+  const mapFrame = (frame: unknown, root: string): VarinDebugStackFrame => {
     const value = asRecord(frame);
-    const mapped: PiariumDebugStackFrame = {
+    const mapped: VarinDebugStackFrame = {
       id: Number(value.id) || 0,
       name: typeof value.name === 'string' ? value.name : '(anonymous)',
       line: Number(value.line) || 1,
@@ -580,10 +580,10 @@ export const createDebugSupervisor = ({
       return { status: 'unregistered', adapterId };
     },
     getStatus,
-    listBreakpoints: (request: unknown): PiariumDebugBreakpointListResult => breakpointResult(workspaceIdOf(request)),
+    listBreakpoints: (request: unknown): VarinDebugBreakpointListResult => breakpointResult(workspaceIdOf(request)),
     setBreakpoints,
     start,
-    async stop(request: unknown): Promise<PiariumDebugSessionStatus> {
+    async stop(request: unknown): Promise<VarinDebugSessionStatus> {
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (!record) return { status: 'absent', workspaceId };
@@ -617,7 +617,7 @@ export const createDebugSupervisor = ({
       await rpc.request('stepOut', { threadId: 1 });
       return snapshotFor(record);
     }),
-    getThreads: (request: DebugRequest) => withSessionFeature<PiariumDebugThread[]>(request.workspaceId, async (record, rpc) => {
+    getThreads: (request: DebugRequest) => withSessionFeature<VarinDebugThread[]>(request.workspaceId, async (record, rpc) => {
       const raw = asRecord(await rpc.request('threads', {}));
       const threads = Array.isArray(raw.threads) ? raw.threads : [];
       return {
@@ -634,7 +634,7 @@ export const createDebugSupervisor = ({
         }),
       };
     }),
-    getStack: (request: DebugRequest) => withSessionFeature<PiariumDebugStackFrame[]>(request.workspaceId, async (record, rpc) => {
+    getStack: (request: DebugRequest) => withSessionFeature<VarinDebugStackFrame[]>(request.workspaceId, async (record, rpc) => {
       const raw = asRecord(await rpc.request('stackTrace', { threadId: Number(request.threadId) || 1 }));
       const frames = Array.isArray(raw.stackFrames) ? raw.stackFrames : [];
       return {
@@ -645,7 +645,7 @@ export const createDebugSupervisor = ({
         value: frames.map((frame) => mapFrame(frame, record.root)),
       };
     }),
-    getScopes: (request: DebugRequest) => withSessionFeature<PiariumDebugScope[]>(request.workspaceId, async (record, rpc) => {
+    getScopes: (request: DebugRequest) => withSessionFeature<VarinDebugScope[]>(request.workspaceId, async (record, rpc) => {
       const raw = asRecord(await rpc.request('scopes', { frameId: Number(request.frameId) || 1 }));
       const scopes = Array.isArray(raw.scopes) ? raw.scopes : [];
       return {
@@ -663,7 +663,7 @@ export const createDebugSupervisor = ({
         }),
       };
     }),
-    getVariables: (request: DebugRequest) => withSessionFeature<PiariumDebugVariable[]>(request.workspaceId, async (record, rpc) => {
+    getVariables: (request: DebugRequest) => withSessionFeature<VarinDebugVariable[]>(request.workspaceId, async (record, rpc) => {
       const raw = asRecord(await rpc.request('variables', {
         variablesReference: Number(request.variablesReference) || 0,
       }));
@@ -675,7 +675,7 @@ export const createDebugSupervisor = ({
         generation: record.generation,
         value: variables.map((variable) => {
           const value = asRecord(variable);
-          const mapped: PiariumDebugVariable = {
+          const mapped: VarinDebugVariable = {
             name: typeof value.name === 'string' ? value.name : '',
             value: typeof value.value === 'string' ? value.value : '',
             variablesReference: Number(value.variablesReference) || 0,
@@ -724,7 +724,7 @@ export const createDebugSupervisor = ({
       watches.set(workspaceId, current);
       return { status: 'ready', workspaceId, expressions: current };
     },
-    subscribe(workspaceId: string, listener: (event: PiariumDebugEvent) => void) {
+    subscribe(workspaceId: string, listener: (event: VarinDebugEvent) => void) {
       const listeners = workspaceListeners.get(workspaceId) ?? new Set();
       listeners.add(listener);
       workspaceListeners.set(workspaceId, listeners);

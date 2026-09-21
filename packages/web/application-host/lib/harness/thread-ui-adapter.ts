@@ -1,7 +1,7 @@
 import type { HarnessServiceHost } from "./service-host.js";
 import type { HarnessThreadRoutesOptions } from "./thread-routes.js";
 import type { ThreadRuntime } from "./thread-runtime.js";
-import type { ThreadSendParams } from "@piarium/protocol";
+import type { ThreadSendParams } from "@varin/protocol";
 import { createThreadSendService } from "./thread-services.js";
 
 /**

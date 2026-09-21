@@ -1,4 +1,4 @@
-import type { PiCommandDescriptor } from '@piarium/protocol';
+import type { PiCommandDescriptor } from '@varin/protocol';
 
 export const PI_LENS_RUNTIME_COMMANDS = [
   'lens-toggle',

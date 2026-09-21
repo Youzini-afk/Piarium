@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { TerminalAPI, TerminalHandlers } from '@piarium/application-client';
+import type { TerminalAPI, TerminalHandlers } from '@varin/application-client';
 import { waitForTerminalExit } from './projectActionTerminal';
 import { detectDevServerCommand } from './detectDevServer';
 

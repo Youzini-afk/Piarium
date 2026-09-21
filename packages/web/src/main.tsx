@@ -1,22 +1,22 @@
 import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
 import { registerSW } from 'virtual:pwa-register';
 
-import type { RuntimeAPIs } from '@piarium/application-client';
-import { getStoredMobileLayoutPreference } from '@piarium/ui/lib/mobileLayoutPreference';
-import type { HostedSurface } from '@piarium/ui/lib/runtimeSurface';
+import type { RuntimeAPIs } from '@varin/application-client';
+import { getStoredMobileLayoutPreference } from '@varin/ui/lib/mobileLayoutPreference';
+import type { HostedSurface } from '@varin/ui/lib/runtimeSurface';
 import {
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
-} from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
-import '@piarium/ui/styles/application';
-import '@piarium/ui/styles/fonts';
+} from '@varin/ui/components/layout/contextPanelEmbeddedChat';
+import '@varin/ui/styles/application';
+import '@varin/ui/styles/fonts';
 
 import { detectHostedSurface } from './hostedSurface';
 
 declare global {
   interface Window {
-    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
-    __PIARIUM_SURFACE__?: HostedSurface;
+    __VARIN_RUNTIME_APIS__?: RuntimeAPIs;
+    __VARIN_SURFACE__?: HostedSurface;
   }
 }
 
@@ -36,7 +36,7 @@ const hostedSurface = detectHostedSurface({
   isCoarsePointer: isCoarsePointer(),
   mobileLayoutPreference: getStoredMobileLayoutPreference(),
 });
-window.__PIARIUM_SURFACE__ = hostedSurface;
+window.__VARIN_SURFACE__ = hostedSurface;
 
 type PrerenderingDocument = Document & {
   prerendering?: boolean;
@@ -107,17 +107,17 @@ const start = async (): Promise<void> => {
   const embeddedBootstrap = isEmbeddedSessionChat()
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;
-  window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
+  window.__VARIN_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
 
   if (hostedSurface === 'mobile') {
-    const { registerWorkbenchShells } = await import('@piarium/ui/workbenches/register-shells');
+    const { registerWorkbenchShells } = await import('@varin/ui/workbenches/register-shells');
     await registerWorkbenchShells('mobile');
-    const { renderMobileApp } = await import('@piarium/ui/apps/renderMobileApp');
-    renderMobileApp(window.__PIARIUM_RUNTIME_APIS__);
-    void import('@piarium/ui/lib/extensions/managed-runtime').then(({ startSurfaceExtensions }) => (
+    const { renderMobileApp } = await import('@varin/ui/apps/renderMobileApp');
+    renderMobileApp(window.__VARIN_RUNTIME_APIS__);
+    void import('@varin/ui/lib/extensions/managed-runtime').then(({ startSurfaceExtensions }) => (
       startSurfaceExtensions()
     )).catch((error) => {
-      console.error('[Piarium Extensions] Managed Surface startup failed:', error);
+      console.error('[Varin Extensions] Managed Surface startup failed:', error);
     });
     return;
   }
@@ -126,15 +126,15 @@ const start = async (): Promise<void> => {
   // restored. Rendering still waits for the selected transport, so the auth
   // gate never probes a transient endpoint, but network/JS work no longer runs
   // serially behind a direct-address probe or relay handshake.
-  const applicationModule = import('@piarium/ui/main');
+  const applicationModule = import('@varin/ui/main');
   await Promise.all([getDesktopRelayRestoreReady(), applicationModule]);
 };
 
 void start();
 
 if (import.meta.hot) {
-  import.meta.hot.on('piarium:theme-updated', (theme: unknown) => {
-    window.dispatchEvent(new CustomEvent('piarium:theme-hmr', { detail: theme }));
+  import.meta.hot.on('varin:theme-updated', (theme: unknown) => {
+    window.dispatchEvent(new CustomEvent('varin:theme-hmr', { detail: theme }));
   });
 }
 

@@ -3,13 +3,13 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
-const LICENSE_URL = 'https://github.com/Youzini-afk/Piarium/blob/main/LICENSE';
+const LICENSE_URL = 'https://github.com/Youzini-afk/Varin/blob/main/LICENSE';
 
 interface AboutDialogProps {
   open: boolean;
@@ -33,8 +33,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
         const response = await runtimeFetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
-          if (typeof data.piariumVersion === 'string' && data.piariumVersion.trim()) {
-            setVersion(data.piariumVersion);
+          if (typeof data.varinVersion === 'string' && data.varinVersion.trim()) {
+            setVersion(data.varinVersion);
             return;
           }
         }
@@ -59,10 +59,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <PiariumLogo width={64} height={64} />
+          <VarinLogo width={64} height={64} />
 
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold">Piarium</h2>
+            <h2 className="text-lg font-semibold">Varin</h2>
             <div className="space-y-0.5 typography-meta text-muted-foreground">
               {displayVersion && (
                 <p>{t('aboutDialog.versionLabel', { version: displayVersion })}</p>
@@ -86,7 +86,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           <div className="flex flex-col items-center gap-2 pt-2">
             <div className="flex items-center justify-center gap-4">
               <a
-                href="https://github.com/Youzini-afk/Piarium"
+                href="https://github.com/Youzini-afk/Varin"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"

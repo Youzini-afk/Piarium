@@ -47,7 +47,7 @@ const server = createJsonRpcServer({
     return {};
   },
   onNotification(method) {
-    if (method === 'initialized' && process.env.PIARIUM_TEST_FIXTURE_CRASH === '1') {
+    if (method === 'initialized' && process.env.VARIN_TEST_FIXTURE_CRASH === '1') {
       process.exit(17);
     }
   },

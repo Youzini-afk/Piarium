@@ -33,7 +33,7 @@ changelog-*.png
 *.vsix
 /npm/
 /tsc/
-/piarium@*/
+/varin@*/
 local-dev*
 
 .graymatter/

@@ -1,66 +1,66 @@
 import type {
   SurfaceActivationContext,
   SurfaceOwnerIdentity,
-} from "@piarium/extension-surface";
+} from "@varin/extension-surface";
 import type {
   JsonObject,
   JsonValue,
-  PiariumContextValue,
-  PiariumEditorDocumentController,
-  PiariumEditorMonacoClearDecorationsRequestV1,
-  PiariumEditorMonacoExecuteActionRequestV1,
-  PiariumEditorMonacoOperationResultV1,
-  PiariumEditorMonacoRevealRequestV1,
-  PiariumEditorMonacoServiceV1,
-  PiariumEditorMonacoSetDecorationsRequestV1,
-  PiariumEditorMonacoSetSelectionRequestV1,
-  PiariumEditorMonacoStateResultV1,
-  PiariumEditorMonacoViewRequestV1,
-  PiariumEditorMonacoViewResultV1,
-  PiariumEditorMonacoWaitForStateRequestV1,
-  PiariumExtensionAssetPayload,
-  PiariumExtensionContributionKind,
-  PiariumExtensionServiceProvision,
-  PiariumExtensionServiceRoutingContext,
-  PiariumExtensionStaticContribution,
-  PiariumExtensionStorageOpenRequest,
-  PiariumExtensionStorageSnapshot,
-  PiariumTransitionSceneAnimatedPhase,
-  PiariumTransitionSceneFrameV1,
-} from "@piarium/extension-contract";
+  VarinContextValue,
+  VarinEditorDocumentController,
+  VarinEditorMonacoClearDecorationsRequestV1,
+  VarinEditorMonacoExecuteActionRequestV1,
+  VarinEditorMonacoOperationResultV1,
+  VarinEditorMonacoRevealRequestV1,
+  VarinEditorMonacoServiceV1,
+  VarinEditorMonacoSetDecorationsRequestV1,
+  VarinEditorMonacoSetSelectionRequestV1,
+  VarinEditorMonacoStateResultV1,
+  VarinEditorMonacoViewRequestV1,
+  VarinEditorMonacoViewResultV1,
+  VarinEditorMonacoWaitForStateRequestV1,
+  VarinExtensionAssetPayload,
+  VarinExtensionContributionKind,
+  VarinExtensionServiceProvision,
+  VarinExtensionServiceRoutingContext,
+  VarinExtensionStaticContribution,
+  VarinExtensionStorageOpenRequest,
+  VarinExtensionStorageSnapshot,
+  VarinTransitionSceneAnimatedPhase,
+  VarinTransitionSceneFrameV1,
+} from "@varin/extension-contract";
 import {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-} from "@piarium/extension-contract";
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+} from "@varin/extension-contract";
 
-export interface PiariumSurfaceAsset {
+export interface VarinSurfaceAsset {
   bytes: Uint8Array;
   contentType: string;
   integrity: string;
   path: string;
 }
 
-export interface PiariumSurfaceAssets {
-  read(path: string): Promise<PiariumSurfaceAsset>;
+export interface VarinSurfaceAssets {
+  read(path: string): Promise<VarinSurfaceAsset>;
   url(path: string): Promise<string>;
 }
 
-export interface PiariumSurfaceStyles {
+export interface VarinSurfaceStyles {
   use(path: string): Promise<void>;
 }
 
-export interface PiariumManagedSurfaceContext extends SurfaceActivationContext {
-  readonly assets: PiariumSurfaceAssets;
-  readonly styles: PiariumSurfaceStyles;
+export interface VarinManagedSurfaceContext extends SurfaceActivationContext {
+  readonly assets: VarinSurfaceAssets;
+  readonly styles: VarinSurfaceStyles;
 }
 
-export type PiariumSurfaceMountDisposer = () => void | Promise<void>;
+export type VarinSurfaceMountDisposer = () => void | Promise<void>;
 
 /**
- * Per-mount state supplied by a Piarium Surface host. The signal belongs to this
+ * Per-mount state supplied by a Varin Surface host. The signal belongs to this
  * mounted view, so it is aborted for prop changes as well as owner teardown.
  */
-export interface PiariumSurfaceMountContext<TProps extends object = Record<string, unknown>> {
+export interface VarinSurfaceMountContext<TProps extends object = Record<string, unknown>> {
   readonly contributionId: string;
   readonly owner: Readonly<SurfaceOwnerIdentity>;
   readonly props: Readonly<TProps>;
@@ -68,34 +68,34 @@ export interface PiariumSurfaceMountContext<TProps extends object = Record<strin
   readonly signal: AbortSignal;
 }
 
-export interface PiariumEditorMountProps {
-  document: PiariumEditorDocumentController;
+export interface VarinEditorMountProps {
+  document: VarinEditorDocumentController;
   providerId: string;
   resource: { resourceId: string; workspaceId: string };
   viewId: string;
 }
 
 /**
- * Stable per-transition external store. Piarium owns the handoff transaction; a scene owns only its
+ * Stable per-transition external store. Varin owns the handoff transaction; a scene owns only its
  * rendering and may complete the current animated phase before its declared duration elapses.
  */
-export interface PiariumTransitionSceneControllerV1 {
-  complete(transitionId: number, phase: PiariumTransitionSceneAnimatedPhase): void;
-  getSnapshot(): PiariumTransitionSceneFrameV1;
+export interface VarinTransitionSceneControllerV1 {
+  complete(transitionId: number, phase: VarinTransitionSceneAnimatedPhase): void;
+  getSnapshot(): VarinTransitionSceneFrameV1;
   subscribe(listener: () => void): () => void;
 }
 
-export interface PiariumTransitionSceneMountProps {
-  transition: PiariumTransitionSceneControllerV1;
+export interface VarinTransitionSceneMountProps {
+  transition: VarinTransitionSceneControllerV1;
 }
 
-export interface PiariumIsolatedTransitionSceneFrameMessage {
+export interface VarinIsolatedTransitionSceneFrameMessage {
   contributionId: string;
-  frame: PiariumTransitionSceneFrameV1;
+  frame: VarinTransitionSceneFrameV1;
   type: "motion.transition.frame";
 }
 
-export interface PiariumIsolatedEditorMountMessage {
+export interface VarinIsolatedEditorMountMessage {
   contributionId: string;
   props: {
     providerId: string;
@@ -106,58 +106,58 @@ export interface PiariumIsolatedEditorMountMessage {
 }
 
 /** Framework-neutral runtime implementation for a DOM-backed contribution. */
-export interface PiariumSurfaceMountImplementation<TProps extends object = Record<string, unknown>> {
+export interface VarinSurfaceMountImplementation<TProps extends object = Record<string, unknown>> {
   mount(
     container: HTMLElement,
-    context: PiariumSurfaceMountContext<TProps>,
-  ): void | PiariumSurfaceMountDisposer | Promise<void | PiariumSurfaceMountDisposer>;
+    context: VarinSurfaceMountContext<TProps>,
+  ): void | VarinSurfaceMountDisposer | Promise<void | VarinSurfaceMountDisposer>;
 }
 
-export type PiariumSurfaceMount<TProps extends object = Record<string, unknown>> =
-  PiariumSurfaceMountImplementation<TProps>["mount"];
+export type VarinSurfaceMount<TProps extends object = Record<string, unknown>> =
+  VarinSurfaceMountImplementation<TProps>["mount"];
 
 export const defineSurfaceMount = <TProps extends object = Record<string, unknown>>(
-  implementation: PiariumSurfaceMount<TProps> | PiariumSurfaceMountImplementation<TProps>,
-): PiariumSurfaceMountImplementation<TProps> => typeof implementation === "function"
+  implementation: VarinSurfaceMount<TProps> | VarinSurfaceMountImplementation<TProps>,
+): VarinSurfaceMountImplementation<TProps> => typeof implementation === "function"
   ? { mount: implementation }
   : implementation;
 
-export type PiariumManagedSurfaceActivation = (
-  context: PiariumManagedSurfaceContext,
+export type VarinManagedSurfaceActivation = (
+  context: VarinManagedSurfaceContext,
 ) => void | Promise<void>;
 
-export interface PiariumManagedSurfaceExtension {
-  activate: PiariumManagedSurfaceActivation;
+export interface VarinManagedSurfaceExtension {
+  activate: VarinManagedSurfaceActivation;
 }
 
-export type PiariumManagedSurfaceModule = {
-  activate?: PiariumManagedSurfaceActivation;
-  default?: PiariumManagedSurfaceActivation | PiariumManagedSurfaceExtension;
+export type VarinManagedSurfaceModule = {
+  activate?: VarinManagedSurfaceActivation;
+  default?: VarinManagedSurfaceActivation | VarinManagedSurfaceExtension;
 };
 
 export const defineSurfaceExtension = (
-  extension: PiariumManagedSurfaceActivation | PiariumManagedSurfaceExtension,
-): PiariumManagedSurfaceExtension => (
+  extension: VarinManagedSurfaceActivation | VarinManagedSurfaceExtension,
+): VarinManagedSurfaceExtension => (
   typeof extension === "function" ? { activate: extension } : extension
 );
 
 export const resolveSurfaceExtensionModule = (
-  module: PiariumManagedSurfaceModule,
-): PiariumManagedSurfaceExtension => {
+  module: VarinManagedSurfaceModule,
+): VarinManagedSurfaceExtension => {
   const candidate = module.default ?? module;
   if (typeof candidate === "function") return { activate: candidate };
   if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
     return { activate: candidate.activate.bind(candidate) };
   }
-  throw new Error("Managed Piarium Surface module must export activate or a default extension definition");
+  throw new Error("Managed Varin Surface module must export activate or a default extension definition");
 };
 
-export interface PiariumIsolatedCapabilityClient {
+export interface VarinIsolatedCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
   has(capability: string): boolean;
 }
 
-export interface PiariumIsolatedServiceClient {
+export interface VarinIsolatedServiceClient {
   call(
     id: string,
     version: number,
@@ -169,39 +169,39 @@ export interface PiariumIsolatedServiceClient {
   use<TImplementation = unknown>(id: string, version: number, providerId?: string): TImplementation;
 }
 
-export interface PiariumIsolatedSurfaceContext {
+export interface VarinIsolatedSurfaceContext {
   readonly assets: {
-    read(path: string): Promise<PiariumExtensionAssetPayload>;
+    read(path: string): Promise<VarinExtensionAssetPayload>;
   };
-  readonly capabilities: PiariumIsolatedCapabilityClient;
+  readonly capabilities: VarinIsolatedCapabilityClient;
   readonly context: {
     delete(key: string): Promise<boolean>;
-    set(key: string, value: PiariumContextValue): Promise<boolean>;
+    set(key: string, value: VarinContextValue): Promise<boolean>;
   };
-  contribute(descriptor: PiariumExtensionStaticContribution, options?: { viewId?: string }): void;
+  contribute(descriptor: VarinExtensionStaticContribution, options?: { viewId?: string }): void;
   effect(disposer: () => void | Promise<void>): void;
-  readonly services: PiariumIsolatedServiceClient;
+  readonly services: VarinIsolatedServiceClient;
   readonly signal: AbortSignal;
 }
 
-export interface PiariumEditorMonacoClientV1 {
-  clearDecorations(request: PiariumEditorMonacoClearDecorationsRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  executeAction(request: PiariumEditorMonacoExecuteActionRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  focus(request?: PiariumEditorMonacoViewRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  getActiveView(): Promise<PiariumEditorMonacoViewResultV1>;
-  getState(): Promise<PiariumEditorMonacoStateResultV1>;
-  getView(request?: PiariumEditorMonacoViewRequestV1): Promise<PiariumEditorMonacoViewResultV1>;
-  reveal(request: PiariumEditorMonacoRevealRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  setDecorations(request: PiariumEditorMonacoSetDecorationsRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  setSelection(request: PiariumEditorMonacoSetSelectionRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
-  waitForState(request: PiariumEditorMonacoWaitForStateRequestV1): Promise<PiariumEditorMonacoStateResultV1>;
+export interface VarinEditorMonacoClientV1 {
+  clearDecorations(request: VarinEditorMonacoClearDecorationsRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  executeAction(request: VarinEditorMonacoExecuteActionRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  focus(request?: VarinEditorMonacoViewRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  getActiveView(): Promise<VarinEditorMonacoViewResultV1>;
+  getState(): Promise<VarinEditorMonacoStateResultV1>;
+  getView(request?: VarinEditorMonacoViewRequestV1): Promise<VarinEditorMonacoViewResultV1>;
+  reveal(request: VarinEditorMonacoRevealRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  setDecorations(request: VarinEditorMonacoSetDecorationsRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  setSelection(request: VarinEditorMonacoSetSelectionRequestV1): Promise<VarinEditorMonacoOperationResultV1>;
+  waitForState(request: VarinEditorMonacoWaitForStateRequestV1): Promise<VarinEditorMonacoStateResultV1>;
 }
 
-type PiariumEditorMonacoServiceContext =
-  | Pick<PiariumManagedSurfaceContext, "useService">
-  | Pick<PiariumIsolatedSurfaceContext, "services">;
+type VarinEditorMonacoServiceContext =
+  | Pick<VarinManagedSurfaceContext, "useService">
+  | Pick<VarinIsolatedSurfaceContext, "services">;
 
-const monacoServiceAbsent = (): PiariumEditorMonacoOperationResultV1 => ({
+const monacoServiceAbsent = (): VarinEditorMonacoOperationResultV1 => ({
   reason: "provider-inactive",
   status: "absent",
 });
@@ -210,17 +210,17 @@ const monacoServiceAbsent = (): PiariumEditorMonacoOperationResultV1 => ({
  * Resolve the owner-bound optional Monaco service injected by the Surface runtime. The extension does
  * not provide an owner identity; managed and isolated callers receive the same serialized subset.
  */
-export const createPiariumEditorMonacoClient = (
-  context: PiariumEditorMonacoServiceContext,
-): PiariumEditorMonacoClientV1 => {
-  const invoke = async <TResult extends PiariumEditorMonacoOperationResultV1 | PiariumEditorMonacoStateResultV1>(
-    method: keyof PiariumEditorMonacoServiceV1,
+export const createVarinEditorMonacoClient = (
+  context: VarinEditorMonacoServiceContext,
+): VarinEditorMonacoClientV1 => {
+  const invoke = async <TResult extends VarinEditorMonacoOperationResultV1 | VarinEditorMonacoStateResultV1>(
+    method: keyof VarinEditorMonacoServiceV1,
     args: JsonValue[],
   ): Promise<TResult> => {
     if ("useService" in context) {
-      const service = context.useService<PiariumEditorMonacoServiceV1>(
-        PIARIUM_EDITOR_MONACO_SERVICE_ID,
-        PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+      const service = context.useService<VarinEditorMonacoServiceV1>(
+        VARIN_EDITOR_MONACO_SERVICE_ID,
+        VARIN_EDITOR_MONACO_SERVICE_VERSION,
       );
       if (!service) return monacoServiceAbsent() as TResult;
       const handler = service[method] as (...values: unknown[]) => unknown;
@@ -230,13 +230,13 @@ export const createPiariumEditorMonacoClient = (
       return await Promise.resolve(handler(...args)) as TResult;
     }
     const available = await context.services.has(
-      PIARIUM_EDITOR_MONACO_SERVICE_ID,
-      PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+      VARIN_EDITOR_MONACO_SERVICE_ID,
+      VARIN_EDITOR_MONACO_SERVICE_VERSION,
     );
     if (!available) return monacoServiceAbsent() as TResult;
     return await context.services.call(
-      PIARIUM_EDITOR_MONACO_SERVICE_ID,
-      PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+      VARIN_EDITOR_MONACO_SERVICE_ID,
+      VARIN_EDITOR_MONACO_SERVICE_VERSION,
       method,
       args,
     ) as TResult;
@@ -248,110 +248,110 @@ export const createPiariumEditorMonacoClient = (
     clearDecorations: (request) => invoke("clearDecorations", requestArgs(request)),
     executeAction: (request) => invoke("executeAction", requestArgs(request)),
     focus: (request) => invoke("focus", requestArgs(request)),
-    getActiveView: () => invoke<PiariumEditorMonacoViewResultV1>("getActiveView", []),
-    getState: () => invoke<PiariumEditorMonacoStateResultV1>("getState", []),
-    getView: (request) => invoke<PiariumEditorMonacoViewResultV1>("getView", requestArgs(request)),
+    getActiveView: () => invoke<VarinEditorMonacoViewResultV1>("getActiveView", []),
+    getState: () => invoke<VarinEditorMonacoStateResultV1>("getState", []),
+    getView: (request) => invoke<VarinEditorMonacoViewResultV1>("getView", requestArgs(request)),
     reveal: (request) => invoke("reveal", requestArgs(request)),
     setDecorations: (request) => invoke("setDecorations", requestArgs(request)),
     setSelection: (request) => invoke("setSelection", requestArgs(request)),
-    waitForState: (request) => invoke<PiariumEditorMonacoStateResultV1>("waitForState", requestArgs(request)),
+    waitForState: (request) => invoke<VarinEditorMonacoStateResultV1>("waitForState", requestArgs(request)),
   };
 };
 
-export type PiariumIsolatedSurfaceActivation = (
-  context: PiariumIsolatedSurfaceContext,
+export type VarinIsolatedSurfaceActivation = (
+  context: VarinIsolatedSurfaceContext,
 ) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
 
-export interface PiariumIsolatedSurfaceExtension {
-  activate: PiariumIsolatedSurfaceActivation;
+export interface VarinIsolatedSurfaceExtension {
+  activate: VarinIsolatedSurfaceActivation;
 }
 
-export type PiariumIsolatedSurfaceModule = {
-  activate?: PiariumIsolatedSurfaceActivation;
-  default?: PiariumIsolatedSurfaceActivation | PiariumIsolatedSurfaceExtension;
+export type VarinIsolatedSurfaceModule = {
+  activate?: VarinIsolatedSurfaceActivation;
+  default?: VarinIsolatedSurfaceActivation | VarinIsolatedSurfaceExtension;
 };
 
 export const defineIsolatedExtension = (
-  extension: PiariumIsolatedSurfaceActivation | PiariumIsolatedSurfaceExtension,
-): PiariumIsolatedSurfaceExtension => typeof extension === "function" ? { activate: extension } : extension;
+  extension: VarinIsolatedSurfaceActivation | VarinIsolatedSurfaceExtension,
+): VarinIsolatedSurfaceExtension => typeof extension === "function" ? { activate: extension } : extension;
 
 export const resolveIsolatedExtensionModule = (
-  module: PiariumIsolatedSurfaceModule,
-): PiariumIsolatedSurfaceExtension => {
+  module: VarinIsolatedSurfaceModule,
+): VarinIsolatedSurfaceExtension => {
   const candidate = module.default ?? module;
   if (typeof candidate === "function") return { activate: candidate };
   if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
     return { activate: candidate.activate.bind(candidate) };
   }
-  throw new Error("Isolated Piarium Surface module must export activate or a default extension definition");
+  throw new Error("Isolated Varin Surface module must export activate or a default extension definition");
 };
 
-export interface PiariumHostCapabilityClient {
+export interface VarinHostCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
 }
 
-export interface PiariumHostServiceClient {
+export interface VarinHostServiceClient {
   call(method: string, ...args: JsonValue[]): Promise<JsonValue>;
 }
 
-export interface PiariumHostServiceUseOptions {
+export interface VarinHostServiceUseOptions {
   providerId?: string;
-  routing?: PiariumExtensionServiceRoutingContext;
+  routing?: VarinExtensionServiceRoutingContext;
 }
 
-export type PiariumHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
+export type VarinHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
 
-export interface PiariumHostStorageDocumentClient {
-  readonly snapshot: PiariumExtensionStorageSnapshot;
-  refresh(): Promise<PiariumExtensionStorageSnapshot>;
-  update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
+export interface VarinHostStorageDocumentClient {
+  readonly snapshot: VarinExtensionStorageSnapshot;
+  refresh(): Promise<VarinExtensionStorageSnapshot>;
+  update(data: JsonObject, expectedRevision?: number): Promise<VarinExtensionStorageSnapshot>;
 }
 
-export interface PiariumHostStorageClient extends PiariumHostStorageDocumentClient {
-  open(request: PiariumExtensionStorageOpenRequest): Promise<PiariumHostStorageDocumentClient>;
+export interface VarinHostStorageClient extends VarinHostStorageDocumentClient {
+  open(request: VarinExtensionStorageOpenRequest): Promise<VarinHostStorageDocumentClient>;
 }
 
-export interface PiariumHostAssets {
+export interface VarinHostAssets {
   /** Resolve a forward-slash package-relative file to its immutable local path. */
   path(logicalPath: string): string;
 }
 
-export interface PiariumBrokeredHostContext {
-  readonly assets: PiariumHostAssets;
-  readonly capabilities: PiariumHostCapabilityClient;
+export interface VarinBrokeredHostContext {
+  readonly assets: VarinHostAssets;
+  readonly capabilities: VarinHostCapabilityClient;
   effect(disposer: () => void | Promise<void>): void;
   readonly services: {
-    provide(descriptor: PiariumExtensionServiceProvision, handler: PiariumHostServiceHandler): void;
-    use(id: string, version: number, provider?: string | PiariumHostServiceUseOptions): PiariumHostServiceClient;
+    provide(descriptor: VarinExtensionServiceProvision, handler: VarinHostServiceHandler): void;
+    use(id: string, version: number, provider?: string | VarinHostServiceUseOptions): VarinHostServiceClient;
   };
   readonly signal: AbortSignal;
-  readonly storage: PiariumHostStorageClient;
+  readonly storage: VarinHostStorageClient;
 }
 
-export interface PiariumExtensionMigrationInput {
+export interface VarinExtensionMigrationInput {
   data: JsonObject;
   fromSchemaVersion: number;
   toSchemaVersion: number;
 }
 
-export interface PiariumBrokeredHostExtension {
-  activate(context: PiariumBrokeredHostContext): void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
-  migrate?(input: PiariumExtensionMigrationInput): JsonObject | Promise<JsonObject>;
+export interface VarinBrokeredHostExtension {
+  activate(context: VarinBrokeredHostContext): void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
+  migrate?(input: VarinExtensionMigrationInput): JsonObject | Promise<JsonObject>;
 }
 
-export type PiariumBrokeredHostModule = {
-  activate?: PiariumBrokeredHostExtension["activate"];
-  default?: PiariumBrokeredHostExtension | PiariumBrokeredHostExtension["activate"];
-  migrate?: PiariumBrokeredHostExtension["migrate"];
+export type VarinBrokeredHostModule = {
+  activate?: VarinBrokeredHostExtension["activate"];
+  default?: VarinBrokeredHostExtension | VarinBrokeredHostExtension["activate"];
+  migrate?: VarinBrokeredHostExtension["migrate"];
 };
 
 export const defineHostExtension = (
-  extension: PiariumBrokeredHostExtension | PiariumBrokeredHostExtension["activate"],
-): PiariumBrokeredHostExtension => typeof extension === "function" ? { activate: extension } : extension;
+  extension: VarinBrokeredHostExtension | VarinBrokeredHostExtension["activate"],
+): VarinBrokeredHostExtension => typeof extension === "function" ? { activate: extension } : extension;
 
 export const resolveHostExtensionModule = (
-  module: PiariumBrokeredHostModule,
-): PiariumBrokeredHostExtension => {
+  module: VarinBrokeredHostModule,
+): VarinBrokeredHostExtension => {
   const candidate = module.default ?? module;
   if (typeof candidate === "function") return { activate: candidate, ...(module.migrate ? { migrate: module.migrate } : {}) };
   if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
@@ -361,69 +361,69 @@ export const resolveHostExtensionModule = (
       ...(migrate ? { migrate } : {}),
     };
   }
-  throw new Error("Brokered Piarium Host module must export activate or a default extension definition");
+  throw new Error("Brokered Varin Host module must export activate or a default extension definition");
 };
 
-export const PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
-export const PIARIUM_WORKSPACE_SEARCH_CAPABILITY = "workspace.search";
-export const PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
-export const PIARIUM_WORKSPACE_TASKS_CAPABILITY = "workspace.tasks";
-export const PIARIUM_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
-export const PIARIUM_WORKSPACE_TEST_CAPABILITY = "workspace.test";
-export const PIARIUM_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY = "workspace.recovery-primitives";
+export const VARIN_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
+export const VARIN_WORKSPACE_SEARCH_CAPABILITY = "workspace.search";
+export const VARIN_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
+export const VARIN_WORKSPACE_TASKS_CAPABILITY = "workspace.tasks";
+export const VARIN_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
+export const VARIN_WORKSPACE_TEST_CAPABILITY = "workspace.test";
+export const VARIN_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY = "workspace.recovery-primitives";
 
 export {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-  PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
-  PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  PIARIUM_WORKBENCH_CONTEXT_KEYS,
-  PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SLOTS,
-} from "@piarium/extension-contract";
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  VARIN_TRANSITION_SCENE_CONTRACT_VERSION,
+  VARIN_TRANSITION_SCENE_DATA_CONTRACT,
+  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  VARIN_WORKBENCH_CONTEXT_KEYS,
+  VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
+  VARIN_WORKBENCH_IDE_PROFILE_ID,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SLOTS,
+} from "@varin/extension-contract";
 
 export type {
-  PiariumContextExpressionV1,
-  PiariumContextValue,
-  PiariumEditorDocumentApplyEditsResult,
-  PiariumEditorDocumentController,
-  PiariumEditorDocumentEdit,
-  PiariumEditorDocumentSnapshot,
-  PiariumEditorDocumentUpdateResult,
-  PiariumEditorMonacoAbsentReasonV1,
-  PiariumEditorMonacoClearDecorationsRequestV1,
-  PiariumEditorMonacoDecorationV1,
-  PiariumEditorMonacoExecuteActionRequestV1,
-  PiariumEditorMonacoFailureResultV1,
-  PiariumEditorMonacoOperationResultV1,
-  PiariumEditorMonacoPositionV1,
-  PiariumEditorMonacoRangeV1,
-  PiariumEditorMonacoRevealRequestV1,
-  PiariumEditorMonacoSelectionV1,
-  PiariumEditorMonacoServiceV1,
-  PiariumEditorMonacoSetDecorationsRequestV1,
-  PiariumEditorMonacoSetSelectionRequestV1,
-  PiariumEditorMonacoStateResultV1,
-  PiariumEditorMonacoStateSnapshotV1,
-  PiariumEditorMonacoStaleReasonV1,
-  PiariumEditorMonacoUnsupportedReasonV1,
-  PiariumEditorMonacoViewRequestV1,
-  PiariumEditorMonacoViewResultV1,
-  PiariumEditorMonacoViewSnapshotV1,
-  PiariumEditorMonacoWaitForStateRequestV1,
-  PiariumTransitionSceneAnimatedPhase,
-  PiariumTransitionSceneContributionDataV1,
-  PiariumTransitionSceneDirection,
-  PiariumTransitionSceneDurationSet,
-  PiariumTransitionSceneFrameV1,
-  PiariumTransitionSceneId,
-  PiariumTransitionScenePhase,
-  PiariumTransitionScenePhaseDurations,
-  PiariumTransitionSceneTempo,
-} from "@piarium/extension-contract";
+  VarinContextExpressionV1,
+  VarinContextValue,
+  VarinEditorDocumentApplyEditsResult,
+  VarinEditorDocumentController,
+  VarinEditorDocumentEdit,
+  VarinEditorDocumentSnapshot,
+  VarinEditorDocumentUpdateResult,
+  VarinEditorMonacoAbsentReasonV1,
+  VarinEditorMonacoClearDecorationsRequestV1,
+  VarinEditorMonacoDecorationV1,
+  VarinEditorMonacoExecuteActionRequestV1,
+  VarinEditorMonacoFailureResultV1,
+  VarinEditorMonacoOperationResultV1,
+  VarinEditorMonacoPositionV1,
+  VarinEditorMonacoRangeV1,
+  VarinEditorMonacoRevealRequestV1,
+  VarinEditorMonacoSelectionV1,
+  VarinEditorMonacoServiceV1,
+  VarinEditorMonacoSetDecorationsRequestV1,
+  VarinEditorMonacoSetSelectionRequestV1,
+  VarinEditorMonacoStateResultV1,
+  VarinEditorMonacoStateSnapshotV1,
+  VarinEditorMonacoStaleReasonV1,
+  VarinEditorMonacoUnsupportedReasonV1,
+  VarinEditorMonacoViewRequestV1,
+  VarinEditorMonacoViewResultV1,
+  VarinEditorMonacoViewSnapshotV1,
+  VarinEditorMonacoWaitForStateRequestV1,
+  VarinTransitionSceneAnimatedPhase,
+  VarinTransitionSceneContributionDataV1,
+  VarinTransitionSceneDirection,
+  VarinTransitionSceneDurationSet,
+  VarinTransitionSceneFrameV1,
+  VarinTransitionSceneId,
+  VarinTransitionScenePhase,
+  VarinTransitionScenePhaseDurations,
+  VarinTransitionSceneTempo,
+} from "@varin/extension-contract";
 
 export const defineViewMount = defineSurfaceMount;
 
@@ -433,84 +433,84 @@ export const defineViewMount = defineSurfaceMount;
 // A managed Shell can mount child contributions (replacements and slots) via
 // the composition host. This is the public, framework-neutral API for
 // external Shells that need to compose sub-regions without importing
-// @piarium/ui private modules.
+// @varin/ui private modules.
 // ---------------------------------------------------------------------------
 
-export interface PiariumWorkbenchChildMount {
+export interface VarinWorkbenchChildMount {
   dispose(reason?: unknown): Promise<void>;
 }
 
-export interface PiariumWorkbenchCompositionHost {
+export interface VarinWorkbenchCompositionHost {
   mountReplacement(options: {
     container: HTMLElement;
     target: string;
     props?: JsonObject;
-  }): Promise<PiariumWorkbenchChildMount>;
+  }): Promise<VarinWorkbenchChildMount>;
 
   mountSlot(options: {
     container: HTMLElement;
     slot: string;
-    kind?: PiariumExtensionContributionKind;
+    kind?: VarinExtensionContributionKind;
     props?: JsonObject;
-  }): Promise<PiariumWorkbenchChildMount>;
+  }): Promise<VarinWorkbenchChildMount>;
 }
 
-export interface PiariumShellMountContext<TProps extends object = Record<string, unknown>>
-  extends PiariumSurfaceMountContext<TProps> {
-  readonly workbench: PiariumWorkbenchCompositionHost;
+export interface VarinShellMountContext<TProps extends object = Record<string, unknown>>
+  extends VarinSurfaceMountContext<TProps> {
+  readonly workbench: VarinWorkbenchCompositionHost;
 }
 
-export interface PiariumShellMountImplementation<TProps extends object = Record<string, unknown>> {
+export interface VarinShellMountImplementation<TProps extends object = Record<string, unknown>> {
   mount(
     container: HTMLElement,
-    context: PiariumShellMountContext<TProps>,
-  ): void | PiariumSurfaceMountDisposer | Promise<void | PiariumSurfaceMountDisposer>;
+    context: VarinShellMountContext<TProps>,
+  ): void | VarinSurfaceMountDisposer | Promise<void | VarinSurfaceMountDisposer>;
 }
 
-export type PiariumShellMount<TProps extends object = Record<string, unknown>> =
-  PiariumShellMountImplementation<TProps>["mount"];
+export type VarinShellMount<TProps extends object = Record<string, unknown>> =
+  VarinShellMountImplementation<TProps>["mount"];
 
 export const defineShellMount = <TProps extends object = Record<string, unknown>>(
-  implementation: PiariumShellMount<TProps> | PiariumShellMountImplementation<TProps>,
-): PiariumShellMountImplementation<TProps> => typeof implementation === "function"
+  implementation: VarinShellMount<TProps> | VarinShellMountImplementation<TProps>,
+): VarinShellMountImplementation<TProps> => typeof implementation === "function"
   ? { mount: implementation }
   : implementation;
 export const defineTransitionSceneMount = (
   implementation:
-    | PiariumSurfaceMount<PiariumTransitionSceneMountProps>
-    | PiariumSurfaceMountImplementation<PiariumTransitionSceneMountProps>,
-): PiariumSurfaceMountImplementation<PiariumTransitionSceneMountProps> => defineSurfaceMount(implementation);
+    | VarinSurfaceMount<VarinTransitionSceneMountProps>
+    | VarinSurfaceMountImplementation<VarinTransitionSceneMountProps>,
+): VarinSurfaceMountImplementation<VarinTransitionSceneMountProps> => defineSurfaceMount(implementation);
 export const defineEditorMount = (
   implementation:
-    | PiariumSurfaceMount<PiariumEditorMountProps>
-    | PiariumSurfaceMountImplementation<PiariumEditorMountProps>,
-): PiariumSurfaceMountImplementation<PiariumEditorMountProps> => defineSurfaceMount(implementation);
+    | VarinSurfaceMount<VarinEditorMountProps>
+    | VarinSurfaceMountImplementation<VarinEditorMountProps>,
+): VarinSurfaceMountImplementation<VarinEditorMountProps> => defineSurfaceMount(implementation);
 
 export const callWorkspaceDocuments = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_DOCUMENTS_CAPABILITY, method, params);
 
 export const callWorkspaceSearch = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_SEARCH_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_SEARCH_CAPABILITY, method, params);
 
 export const callWorkspaceLanguage = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_LANGUAGE_CAPABILITY, method, params);
 
 export const callWorkspaceRecoveryPrimitives = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY, method, params);
 
-export interface PiariumWorkspaceDocumentsClient {
+export interface VarinWorkspaceDocumentsClient {
   delete(request: JsonObject): Promise<JsonValue>;
   move(request: JsonObject): Promise<JsonValue>;
   read(resource: JsonObject): Promise<JsonValue>;
@@ -519,8 +519,8 @@ export interface PiariumWorkspaceDocumentsClient {
 }
 
 export const createWorkspaceDocumentsClient = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
-): PiariumWorkspaceDocumentsClient => ({
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
+): VarinWorkspaceDocumentsClient => ({
   resolveWorkspace: (input) => callWorkspaceDocuments(capabilities, "resolveWorkspace", input),
   read: (resource) => callWorkspaceDocuments(capabilities, "read", resource),
   write: (request) => callWorkspaceDocuments(capabilities, "write", request),
@@ -528,7 +528,7 @@ export const createWorkspaceDocumentsClient = (
   delete: (request) => callWorkspaceDocuments(capabilities, "delete", request),
 });
 
-export type PiariumLanguageProviderDescriptor = {
+export type VarinLanguageProviderDescriptor = {
   args?: readonly string[];
   command: string;
   initializationOptions?: JsonObject;
@@ -538,18 +538,18 @@ export type PiariumLanguageProviderDescriptor = {
   workspaceId?: string;
 };
 
-export type PiariumHostDescriptorFactory<TDescriptor> = (
-  context: PiariumBrokeredHostContext,
+export type VarinHostDescriptorFactory<TDescriptor> = (
+  context: VarinBrokeredHostContext,
 ) => TDescriptor | Promise<TDescriptor>;
 
-export interface PiariumWorkspaceLanguageClient {
+export interface VarinWorkspaceLanguageClient {
   disposeWorkspace(workspaceId: string): Promise<JsonValue>;
   getStatus(workspaceId: string, languageId?: string): Promise<JsonValue>;
-  registerProvider(descriptor: PiariumLanguageProviderDescriptor): Promise<JsonValue>;
+  registerProvider(descriptor: VarinLanguageProviderDescriptor): Promise<JsonValue>;
   unregisterProvider(providerId: string): Promise<JsonValue>;
 }
 
-const languageProviderParams = (descriptor: PiariumLanguageProviderDescriptor): JsonObject => {
+const languageProviderParams = (descriptor: VarinLanguageProviderDescriptor): JsonObject => {
   const params: JsonObject = {
     command: descriptor.command,
     languageIds: [...descriptor.languageIds],
@@ -563,8 +563,8 @@ const languageProviderParams = (descriptor: PiariumLanguageProviderDescriptor): 
 };
 
 export const createWorkspaceLanguageClient = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
-): PiariumWorkspaceLanguageClient => ({
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
+): VarinWorkspaceLanguageClient => ({
   registerProvider: (descriptor) => callWorkspaceLanguage(capabilities, "registerProvider", languageProviderParams(descriptor)),
   unregisterProvider: (providerId) => callWorkspaceLanguage(capabilities, "unregisterProvider", { providerId }),
   getStatus: (workspaceId, languageId) => callWorkspaceLanguage(capabilities, "getStatus", {
@@ -575,8 +575,8 @@ export const createWorkspaceLanguageClient = (
 });
 
 export const defineLanguageProvider = (
-  input: PiariumLanguageProviderDescriptor | PiariumHostDescriptorFactory<PiariumLanguageProviderDescriptor>,
-): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  input: VarinLanguageProviderDescriptor | VarinHostDescriptorFactory<VarinLanguageProviderDescriptor>,
+): VarinBrokeredHostExtension => defineHostExtension(async (context) => {
   const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceLanguageClient(context.capabilities);
   await client.registerProvider({
@@ -587,24 +587,24 @@ export const defineLanguageProvider = (
 });
 
 export const callWorkspaceDebug = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_DEBUG_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_DEBUG_CAPABILITY, method, params);
 
 export const callWorkspaceTest = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_TEST_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_TEST_CAPABILITY, method, params);
 
 export const callWorkspaceTasks = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
   method: string,
   params: JsonValue,
-): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_TASKS_CAPABILITY, method, params);
+): Promise<JsonValue> => capabilities.call(VARIN_WORKSPACE_TASKS_CAPABILITY, method, params);
 
-export type PiariumDebugAdapterDescriptor = {
+export type VarinDebugAdapterDescriptor = {
   adapterId: string;
   args?: readonly string[];
   command: string;
@@ -613,7 +613,7 @@ export type PiariumDebugAdapterDescriptor = {
   workspaceId?: string;
 };
 
-export type PiariumTestProviderDescriptor = {
+export type VarinTestProviderDescriptor = {
   args?: readonly string[];
   command?: string;
   kind?: string;
@@ -622,7 +622,7 @@ export type PiariumTestProviderDescriptor = {
   workspaceId?: string;
 };
 
-const debugAdapterParams = (descriptor: PiariumDebugAdapterDescriptor): JsonObject => {
+const debugAdapterParams = (descriptor: VarinDebugAdapterDescriptor): JsonObject => {
   const params: JsonObject = {
     adapterId: descriptor.adapterId,
     command: descriptor.command,
@@ -634,7 +634,7 @@ const debugAdapterParams = (descriptor: PiariumDebugAdapterDescriptor): JsonObje
   return params;
 };
 
-const testProviderParams = (descriptor: PiariumTestProviderDescriptor): JsonObject => {
+const testProviderParams = (descriptor: VarinTestProviderDescriptor): JsonObject => {
   const params: JsonObject = { providerId: descriptor.providerId };
   if (descriptor.command) params.command = descriptor.command;
   if (descriptor.args) params.args = [...descriptor.args];
@@ -644,37 +644,37 @@ const testProviderParams = (descriptor: PiariumTestProviderDescriptor): JsonObje
   return params;
 };
 
-export interface PiariumWorkspaceDebugClient {
+export interface VarinWorkspaceDebugClient {
   getStatus(workspaceId: string): Promise<JsonValue>;
-  registerAdapter(descriptor: PiariumDebugAdapterDescriptor): Promise<JsonValue>;
+  registerAdapter(descriptor: VarinDebugAdapterDescriptor): Promise<JsonValue>;
   unregisterAdapter(adapterId: string): Promise<JsonValue>;
 }
 
-export interface PiariumWorkspaceTestClient {
+export interface VarinWorkspaceTestClient {
   discover(workspaceId: string): Promise<JsonValue>;
-  registerProvider(descriptor: PiariumTestProviderDescriptor): Promise<JsonValue>;
+  registerProvider(descriptor: VarinTestProviderDescriptor): Promise<JsonValue>;
   unregisterProvider(providerId: string): Promise<JsonValue>;
 }
 
 export const createWorkspaceDebugClient = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
-): PiariumWorkspaceDebugClient => ({
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
+): VarinWorkspaceDebugClient => ({
   registerAdapter: (descriptor) => callWorkspaceDebug(capabilities, "registerAdapter", debugAdapterParams(descriptor)),
   unregisterAdapter: (adapterId) => callWorkspaceDebug(capabilities, "unregisterAdapter", { adapterId }),
   getStatus: (workspaceId) => callWorkspaceDebug(capabilities, "getStatus", { workspaceId }),
 });
 
 export const createWorkspaceTestClient = (
-  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
-): PiariumWorkspaceTestClient => ({
+  capabilities: VarinIsolatedCapabilityClient | VarinHostCapabilityClient,
+): VarinWorkspaceTestClient => ({
   registerProvider: (descriptor) => callWorkspaceTest(capabilities, "registerProvider", testProviderParams(descriptor)),
   unregisterProvider: (providerId) => callWorkspaceTest(capabilities, "unregisterProvider", { providerId }),
   discover: (workspaceId) => callWorkspaceTest(capabilities, "discover", { workspaceId }),
 });
 
 export const defineDebugAdapter = (
-  input: PiariumDebugAdapterDescriptor | PiariumHostDescriptorFactory<PiariumDebugAdapterDescriptor>,
-): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  input: VarinDebugAdapterDescriptor | VarinHostDescriptorFactory<VarinDebugAdapterDescriptor>,
+): VarinBrokeredHostExtension => defineHostExtension(async (context) => {
   const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceDebugClient(context.capabilities);
   await client.registerAdapter({
@@ -685,8 +685,8 @@ export const defineDebugAdapter = (
 });
 
 export const defineTestProvider = (
-  input: PiariumTestProviderDescriptor | PiariumHostDescriptorFactory<PiariumTestProviderDescriptor>,
-): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  input: VarinTestProviderDescriptor | VarinHostDescriptorFactory<VarinTestProviderDescriptor>,
+): VarinBrokeredHostExtension => defineHostExtension(async (context) => {
   const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceTestClient(context.capabilities);
   await client.registerProvider({

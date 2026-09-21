@@ -26,7 +26,7 @@ import type {
   WorkFocusId,
   WorkFocusExecutionRole,
   WorkFocusSelection,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   findFoundationalPackageBySource,
   FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
@@ -37,7 +37,7 @@ import {
   type FoundationalPiPackageManifestEntry,
   type FoundationalPiPackageStatusSnapshot,
   type PackageDescriptor,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { PiHostClient, type PiHostExit } from "./host-client.js";
 import { PiRuntimeBrokerError } from "./errors.js";
 import { SessionMetadataStore } from "./session-metadata-store.js";
@@ -575,7 +575,7 @@ export class PiRuntimeBroker {
       this.#emit({
         kind: "diagnostic",
         level: "error",
-        message: `Failed to read Piarium session metadata: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to read Varin session metadata: ${error instanceof Error ? error.message : String(error)}`,
         role: "catalog",
         workerId: worker.id,
       });
@@ -1659,7 +1659,7 @@ export class PiRuntimeBroker {
       this.#emit({
         kind: "diagnostic",
         level: "error",
-        message: `Failed to read Piarium session metadata: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to read Varin session metadata: ${error instanceof Error ? error.message : String(error)}`,
         role: "session",
         workerId: worker.id,
       });
@@ -2199,7 +2199,7 @@ export class PiRuntimeBroker {
             this.#emit({
               kind: "diagnostic",
               level: "error",
-              message: `Failed to refresh Piarium session workspace binding: ${error instanceof Error ? error.message : String(error)}`,
+              message: `Failed to refresh Varin session workspace binding: ${error instanceof Error ? error.message : String(error)}`,
               role: "session",
               workerId: client.id,
             });

@@ -1,18 +1,18 @@
-# Piarium Desktop
+# Varin Desktop
 
-Electron desktop runtime for Piarium on macOS, Windows, and Linux.
+Electron desktop runtime for Varin on macOS, Windows, and Linux.
 
 The desktop uses Electron 44 and requires macOS 13 or newer on Mac. Release artifacts target
 x64 and ARM64. Electron and `electron-context-menu` are upgraded together because the menu
 package uses Electron's clipboard API.
 
-This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and Piarium server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
+This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and Varin server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
 ## How it runs
 
-Desktop starts the Piarium web server in the same Electron main process. There is no separate sidecar subprocess for the Piarium server.
+Desktop starts the Varin web server in the same Electron main process. There is no separate sidecar subprocess for the Varin server.
 
-The `main.ts` source imports `@piarium/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
+The `main.ts` source imports `@varin/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Normal startup resolves the bundled Pi runtime, or the installation explicitly selected by the user.
 It does not scan PATH or package managers. The production catalog worker's handshake establishes readiness;
@@ -26,7 +26,7 @@ Electron backend or renderer IPC surface.
 
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
-The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
+The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__VARIN_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
 
 ## Main files
 
@@ -49,17 +49,17 @@ The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/
 
 ## Desktop IPC contract
 
-All 58 `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@piarium/application-client/desktop` subpath.
+All 58 `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@varin/application-client/desktop` subpath.
 
 The contract exports:
 
-- `PiariumDesktopCommandMap` — a map from command name to `{ args, result }` for all 58 commands
-- `PiariumDesktopBridge` — the typed bridge interface implemented by preload and consumed by the UI
-- `PIARIUM_DESKTOP_COMMAND_LIST` — the canonical command catalog (used by architecture tests)
-- `PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS` — the subset allowed for non-local renderers
+- `VarinDesktopCommandMap` — a map from command name to `{ args, result }` for all 58 commands
+- `VarinDesktopBridge` — the typed bridge interface implemented by preload and consumed by the UI
+- `VARIN_DESKTOP_COMMAND_LIST` — the canonical command catalog (used by architecture tests)
+- `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS` — the subset allowed for non-local renderers
 - `PreloadBootstrapPayload` — a discriminated union that carries credentials only for local pages
 
-The preload bridge (`preload.ts`) implements `PiariumDesktopBridge` and accepts only the exhaustive event catalog shared with the typed main-process emit helpers. The main process validates raw command names with the shared runtime catalog, exhaustively handles the resulting command union, and gates remote-unsafe commands through `REMOTE_SAFE_DESKTOP_COMMANDS`.
+The preload bridge (`preload.ts`) implements `VarinDesktopBridge` and accepts only the exhaustive event catalog shared with the typed main-process emit helpers. The main process validates raw command names with the shared runtime catalog, exhaustively handles the resulting command union, and gates remote-unsafe commands through `REMOTE_SAFE_DESKTOP_COMMANDS`.
 
 The `desktop-contract.test.ts` suite verifies command and event catalog completeness, remote-safe subset equality, unknown-name rejection, argument/result type fixtures, and bootstrap credential isolation.
 
@@ -127,9 +127,9 @@ the current Host. It does not require npm, Bun or Python on the user's machine.
 
 Build its separate native archive with `bun run --cwd packages/electron package:local-semantic`.
 This is the only build path that downloads the pinned model and prepares Node ONNX. It emits
-`Piarium-local-semantic-<version>-<platform>-<arch>.tar.gz` and a checksum into `dist`; the release
+`Varin-local-semantic-<version>-<platform>-<arch>.tar.gz` and a checksum into `dist`; the release
 workflow publishes these alongside, rather than inside, the application. The archive excludes the
-unused browser ONNX distribution. Set `PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK` to that archive when running
+unused browser ONNX distribution. Set `VARIN_SMOKE_LOCAL_SEMANTIC_PACK` to that archive when running
 the desktop smoke to additionally exercise the explicit import flow.
 
 ### Native libraries built from source
@@ -145,7 +145,7 @@ Two native recipes supply binaries absent from the pinned npm packages:
 
 These recipes run for their respective base or optional component builds. They validate the installed
 dependency version, build from the fixed source revision, and check the resulting architecture.
-Verified payloads and hash receipts are cached under `~/.cache/piarium-native`; release jobs cache
+Verified payloads and hash receipts are cached under `~/.cache/varin-native`; release jobs cache
 only those outputs, not source checkouts or build directories. The optional component build runs real
 MiniLM inference through Electron, so successful compilation alone does not establish runtime support.
 
@@ -164,11 +164,11 @@ bun run electron:build:win
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
 The assisted NSIS directory page treats a browsed path as the parent directory and displays the resolved
-installation root. Selecting `D:\` therefore becomes `D:\Piarium`; selecting an existing `D:\Piarium`
-remains unchanged instead of becoming `D:\Piarium\Piarium`.
+installation root. Selecting `D:\` therefore becomes `D:\Varin`; selecting an existing `D:\Varin`
+remains unchanged instead of becoming `D:\Varin\Varin`.
 
 Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The workflow sets
-`PIARIUM_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
+`VARIN_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
 and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
 
 After packaging, verify that the unpacked application starts the default bundled Pi runtime using only
@@ -191,7 +191,7 @@ workflow currently produces unsigned `dmg` and `zip` assets by explicitly disabl
 hardened runtime, DMG signing, and notarization. A future signed distribution can supply Apple signing
 credentials and restore those production signing options without changing the application payload.
 
-Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
+Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `VARIN_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
 
 ### Code signing
 
@@ -200,7 +200,7 @@ Windows code signing is optional. If signing credentials are present, `package.m
 - `CSC_LINK` / `CSC_KEY_PASSWORD`
 - `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`
 
-For compatibility with earlier Piarium automation, `package.mjs` also maps `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD` to the standard `WIN_CSC_*` names when the standard variables are not set.
+For compatibility with earlier Varin automation, `package.mjs` also maps `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD` to the standard `WIN_CSC_*` names when the standard variables are not set.
 
 When these variables are absent, the build falls back to an unsigned NSIS installer.
 
@@ -213,14 +213,14 @@ assembles the architecture-specific updater channels, and can upload only the ve
 existing draft GitHub Release. Publishing the draft remains a separate deliberate action.
 
 The Linux and macOS smoke path starts the unpacked packaged application, waits for the renderer's
-`__piariumAppReady` signal, rejects the React error boundary, checks `/health`, and creates and closes a
+`__varinAppReady` signal, rejects the React error boundary, checks `/health`, and creates and closes a
 real terminal. Linux additionally verifies the AppImage, Electron executable, desktop identity, and
 packaged native module architecture. macOS checks the application executable and packaged `.node`
 modules before launch.
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 
-Linux AppImages must be built natively. Set `PIARIUM_TARGET_ARCH=x64` or `PIARIUM_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the native Electron rebuild and Electron Builder architecture. Linux identity is stable across architectures: executable `piarium`, desktop file `piarium.desktop`, icon `piarium`, and `StartupWMClass=piarium`.
+Linux AppImages must be built natively. Set `VARIN_TARGET_ARCH=x64` or `VARIN_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the native Electron rebuild and Electron Builder architecture. Linux identity is stable across architectures: executable `varin`, desktop file `varin.desktop`, icon `varin`, and `StartupWMClass=varin`.
 
 After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, Electron executable, and all packaged native `.node` modules.
 
@@ -243,38 +243,38 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 ## Pi runtime
 
-Packaged Desktop builds include Piarium's compiled Host bootstrap and runtime broker, but runtime
+Packaged Desktop builds include Varin's compiled Host bootstrap and runtime broker, but runtime
 execution no longer binds to a permanently bundled copy of the three Pi SDK packages. The Runtime
 Manager discovers a user-level Pi installation, verifies its package root and Node executable, and
 accepts it only after the Host handshake succeeds. Onboarding and Settings may select, install, or
 upgrade that installation; a newer Pi is retained, and no downgrade or silent upgrade is performed.
 
-Electron's executable provides Node mode for the Piarium Host process, so running the desktop shell
+Electron's executable provides Node mode for the Varin Host process, so running the desktop shell
 does not require a separately installed Node runtime. Pi remains an independent user-level tool and
-can still be used by the Pi CLI outside Piarium. Cloud distributions deliberately keep a pinned Pi
+can still be used by the Pi CLI outside Varin. Cloud distributions deliberately keep a pinned Pi
 runtime because their unattended hosts have different reproducibility needs.
 
 The official ordinary installer still has to prove that its final dependency inventory contains no
 unused Pi SDK copy; the optional offline distribution may instead carry an explicitly verified
 standalone installation payload. The production dependencies that normal Node workers do require
-remain unpacked for filesystem module resolution. Chromium locale files are limited to Piarium's
+remain unpacked for filesystem module resolution. Chromium locale files are limited to Varin's
 supported interface languages.
 
 ## Common env vars
 
 | Variable | Use |
 |----------|-----|
-| `PIARIUM_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
-| `PIARIUM_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
-| `PIARIUM_SKIP_LOCAL_SERVER=1` | Skips the in-process local Piarium server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery |
-| `PIARIUM_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
-| `PIARIUM_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
-| `PIARIUM_RUNTIME=desktop` | Set by Electron before starting the web server |
-| `PIARIUM_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
-| `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` | Opts Windows packaging into the `node-pty` C++ source build instead of its verified published prebuild |
-| `PIARIUM_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
-| `PIARIUM_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
-| `PIARIUM_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
+| `VARIN_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
+| `VARIN_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
+| `VARIN_SKIP_LOCAL_SERVER=1` | Skips the in-process local Varin server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery |
+| `VARIN_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
+| `VARIN_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
+| `VARIN_RUNTIME=desktop` | Set by Electron before starting the web server |
+| `VARIN_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
+| `VARIN_REBUILD_NODE_PTY_FROM_SOURCE=1` | Opts Windows packaging into the `node-pty` C++ source build instead of its verified published prebuild |
+| `VARIN_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
+| `VARIN_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
+| `VARIN_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
 
 ## Native features owned here
 
@@ -297,21 +297,21 @@ Add new native capabilities in this order:
 
 1. Add the command, arguments, result, and any event payload to the shared contract in `packages/application-client/src/desktop.ts`.
 2. Add or update the `preload.ts` bridge only if a new renderer-facing shape is needed.
-3. Add the real command handling in `main.ts` under `piarium:invoke`; its exhaustive command check must continue to compile.
+3. Add the real command handling in `main.ts` under `varin:invoke`; its exhaustive command check must continue to compile.
 4. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities.
 5. Keep server/runtime APIs in `packages/web` when the behavior is not inherently native.
 
 ## Logs and data
 
-Electron uses `electron-log`. In development, console logs are also visible in the terminal. In packaged apps, logs are written through the platform log path for the `Piarium` app name.
+Electron uses `electron-log`. In development, console logs are also visible in the terminal. In packaged apps, logs are written through the platform log path for the `Varin` app name.
 
-Development builds use a separate user data directory named `Piarium Dev`, so dev state does not overwrite normal packaged app state.
+Development builds use a separate user data directory named `Varin Dev`, so dev state does not overwrite normal packaged app state.
 
 ## Things to be careful with
 
 - Keep desktop-specific code in this package. Pi runtime behavior belongs in the host/broker packages.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
-- Keep `@piarium/web` and its runtime packages external in `bundle-main.mjs`; the packaged Host, Pi workers, kernel manifest and assets must resolve from the release layout.
+- Keep `@varin/web` and its runtime packages external in `bundle-main.mjs`; the packaged Host, Pi workers, kernel manifest and assets must resolve from the release layout.
 - Run `verify:native` after changing Electron, Rust-kernel packaging, TriviumDB, sherpa, or target architecture; do not restore addon rebuilds for storage or PTY.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 

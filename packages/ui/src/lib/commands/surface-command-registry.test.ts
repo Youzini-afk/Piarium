@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import {
   ensureBuiltinWorkbenchCommands,
   executeSurfaceCommandContribution,
@@ -10,7 +10,7 @@ import {
 
 test('withdraws and restores built-in command contributions without a document refresh', async () => {
   await ensureBuiltinWorkbenchCommands();
-  const registrations = workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot());
+  const registrations = workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot());
   const expectedCommandIds = [
     'new-session',
     'new-worktree',
@@ -45,15 +45,15 @@ test('withdraws and restores built-in command contributions without a document r
   ];
   expect(registrations.map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
   expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
-    .toBe('piarium.builtin.commands.editor.save-all');
+    .toBe('varin.builtin.commands.editor.save-all');
   expect(registrations.find((registration) => registration.meta.commandId === 'toggle-sidebar')?.meta.mobileTitleKey)
     .toBe('commandPalette.item.showSessionSwitcher');
 
   await setBuiltinWorkbenchCommandsEnabled(false);
-  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot())).toEqual([]);
+  expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot())).toEqual([]);
 
   await setBuiltinWorkbenchCommandsEnabled(true);
-  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot()).length)
+  expect(workbenchCommandRegistrationsFromSnapshot(varinSurfaceRuntime.getSnapshot()).length)
     .toBe(expectedCommandIds.length);
 });
 

@@ -5,7 +5,7 @@ import {
   type LsOperations,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { DocumentPathOverlayResult } from "@piarium/protocol";
+import type { DocumentPathOverlayResult } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const pathKey = (value: string): string => (

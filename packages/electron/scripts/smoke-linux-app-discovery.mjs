@@ -19,7 +19,7 @@ const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 
-const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-linux-apps-'));
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-linux-apps-'));
 try {
   const dataHome = path.join(tempRoot, 'data-home');
   const dataDir = path.join(tempRoot, 'system-data');

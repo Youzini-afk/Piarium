@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessServiceMap } from "@varin/protocol";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
@@ -24,7 +24,7 @@ const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-working-branch-view-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-working-branch-view-"));
   const workspace = path.join(root, "workspace");
   const recoveryRoot = path.join(root, "recovery");
   const worktree = path.join(root, "worktree");

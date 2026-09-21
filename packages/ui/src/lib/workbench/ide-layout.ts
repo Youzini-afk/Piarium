@@ -1,12 +1,12 @@
 import {
-  PIARIUM_CORE_SERVICE_VERSION,
-  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
-  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+  VARIN_CORE_SERVICE_VERSION,
+  VARIN_WORKBENCH_IDE_PROFILE_ID,
+  VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
   type JsonObject,
   type JsonValue,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { getRuntimeKey, registerRuntimeEndpointSwitchBlocker } from '@piarium/application-client';
+import { getRuntimeKey, registerRuntimeEndpointSwitchBlocker } from '@varin/application-client';
 
 const IDE_WORKBENCH_LAYOUT_VERSION = 1 as const;
 const WRITE_COALESCE_MS = 250;
@@ -21,7 +21,7 @@ export type IdeWorkbenchActivityId = 'explorer' | 'search' | 'git' | 'run' | 'ex
  */
 type IdeWorkbenchSecondaryId = 'session';
 
-export type PiariumIdeLayoutNode =
+export type VarinIdeLayoutNode =
   | {
       axis: 'horizontal' | 'vertical';
       children: string[];
@@ -38,10 +38,10 @@ export type PiariumIdeLayoutNode =
     }
   | { id: string; kind: 'editor-area' };
 
-export interface PiariumIdeLayoutDocument {
+export interface VarinIdeLayoutDocument {
   schemaVersion: typeof IDE_WORKBENCH_LAYOUT_VERSION;
   rootId: string;
-  nodes: Record<string, PiariumIdeLayoutNode>;
+  nodes: Record<string, VarinIdeLayoutNode>;
   floating: Array<{ viewId: string; x: number; y: number; width: number; height: number }>;
   activityVisible: boolean;
   statusVisible: boolean;
@@ -50,7 +50,7 @@ export interface PiariumIdeLayoutDocument {
 export type IdeWorkbenchLayoutStatus = 'empty' | 'failure' | 'loading' | 'malformed' | 'missing' | 'ready';
 
 export interface IdeWorkbenchLayoutState {
-  document: PiariumIdeLayoutDocument;
+  document: VarinIdeLayoutDocument;
   dirty: boolean;
   errorMessage: string | null;
   profileId: string;
@@ -84,7 +84,7 @@ const SECONDARY_VIEW_IDS: IdeWorkbenchSecondaryId[] = ['session'];
 const RETIRED_SECONDARY_VIEW_IDS = new Set(['agent', 'context', 'fleet', 'recovery']);
 const BOTTOM_VIEW_IDS = ['terminal', 'problems', 'output', 'tasks'];
 
-export const DEFAULT_IDE_WORKBENCH_LAYOUT: PiariumIdeLayoutDocument = {
+export const DEFAULT_IDE_WORKBENCH_LAYOUT: VarinIdeLayoutDocument = {
   schemaVersion: IDE_WORKBENCH_LAYOUT_VERSION,
   rootId: IDE_LAYOUT_NODE_IDS.root,
   nodes: {
@@ -130,7 +130,7 @@ export const DEFAULT_IDE_WORKBENCH_LAYOUT: PiariumIdeLayoutDocument = {
   statusVisible: true,
 };
 
-const cloneDefault = (): PiariumIdeLayoutDocument => structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+const cloneDefault = (): VarinIdeLayoutDocument => structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
 
 const isObject = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -138,7 +138,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => (
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
-const parseNode = (value: unknown, key: string): PiariumIdeLayoutNode => {
+const parseNode = (value: unknown, key: string): VarinIdeLayoutNode => {
   if (!isObject(value) || value.id !== key || typeof value.kind !== 'string') {
     throw new Error(`Invalid IDE layout node: ${key}`);
   }
@@ -180,7 +180,7 @@ const parseNode = (value: unknown, key: string): PiariumIdeLayoutNode => {
   throw new Error(`Unknown IDE layout node kind: ${key}`);
 };
 
-export const parseIdeWorkbenchLayout = (value: unknown): PiariumIdeLayoutDocument => {
+export const parseIdeWorkbenchLayout = (value: unknown): VarinIdeLayoutDocument => {
   if (!isObject(value) || value.schemaVersion !== IDE_WORKBENCH_LAYOUT_VERSION) {
     throw new Error('Unsupported IDE layout document');
   }
@@ -246,19 +246,19 @@ export const parseIdeWorkbenchLayout = (value: unknown): PiariumIdeLayoutDocumen
   };
 };
 
-const stack = (document: PiariumIdeLayoutDocument, id: string): Extract<PiariumIdeLayoutNode, { kind: 'stack' }> => {
+const stack = (document: VarinIdeLayoutDocument, id: string): Extract<VarinIdeLayoutNode, { kind: 'stack' }> => {
   const node = document.nodes[id];
   if (!node || node.kind !== 'stack') throw new Error(`IDE layout stack is unavailable: ${id}`);
   return node;
 };
 
-const split = (document: PiariumIdeLayoutDocument, id: string): Extract<PiariumIdeLayoutNode, { kind: 'split' }> => {
+const split = (document: VarinIdeLayoutDocument, id: string): Extract<VarinIdeLayoutNode, { kind: 'split' }> => {
   const node = document.nodes[id];
   if (!node || node.kind !== 'split') throw new Error(`IDE layout split is unavailable: ${id}`);
   return node;
 };
 
-export const projectIdeWorkbenchLayout = (document: PiariumIdeLayoutDocument): IdeWorkbenchLayoutProjection => {
+export const projectIdeWorkbenchLayout = (document: VarinIdeLayoutDocument): IdeWorkbenchLayoutProjection => {
   const root = split(document, IDE_LAYOUT_NODE_IDS.root);
   const primary = stack(document, IDE_LAYOUT_NODE_IDS.primary);
   const secondary = stack(document, IDE_LAYOUT_NODE_IDS.secondary);
@@ -307,11 +307,11 @@ const subscribe = (listener: () => void): (() => void) => {
 
 export const subscribeIdeWorkbenchLayout = subscribe;
 
-const recordKey = (workspaceId: string, profileId = PIARIUM_WORKBENCH_IDE_PROFILE_ID): string => (
+const recordKey = (workspaceId: string, profileId = VARIN_WORKBENCH_IDE_PROFILE_ID): string => (
   `${getRuntimeKey()}\0${profileId}\0${workspaceId}`
 );
 
-const emptyRecord = (workspaceId: string, profileId = PIARIUM_WORKBENCH_IDE_PROFILE_ID): LayoutRecord => ({
+const emptyRecord = (workspaceId: string, profileId = VARIN_WORKBENCH_IDE_PROFILE_ID): LayoutRecord => ({
   document: cloneDefault(),
   dirty: false,
   errorMessage: null,
@@ -372,8 +372,8 @@ const invoke = async (record: LayoutRecord, method: 'read' | 'write', input: Jso
     args: [input],
     method,
     providerId: record.providerId,
-    serviceId: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
-    version: PIARIUM_CORE_SERVICE_VERSION,
+    serviceId: VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
+    version: VARIN_CORE_SERVICE_VERSION,
   });
   return parseStoredSnapshot(value);
 };
@@ -518,7 +518,7 @@ function scheduleWrite(key: string): void {
 
 export const patchIdeWorkbenchLayout = (
   workspaceId: string,
-  update: (document: PiariumIdeLayoutDocument) => PiariumIdeLayoutDocument,
+  update: (document: VarinIdeLayoutDocument) => VarinIdeLayoutDocument,
 ): void => {
   const key = recordKey(workspaceId);
   const current = getRecord(workspaceId);
@@ -536,9 +536,9 @@ export const patchIdeWorkbenchLayout = (
 };
 
 export const updateIdeLayoutNode = (
-  document: PiariumIdeLayoutDocument,
-  node: PiariumIdeLayoutNode,
-): PiariumIdeLayoutDocument => ({
+  document: VarinIdeLayoutDocument,
+  node: VarinIdeLayoutNode,
+): VarinIdeLayoutDocument => ({
   ...document,
   nodes: { ...document.nodes, [node.id]: node },
 });

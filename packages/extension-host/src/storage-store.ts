@@ -2,37 +2,37 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import {
-  isPiariumExtensionId,
-  PiariumExtensionContractError,
-  parsePiariumExtensionStorageAddress,
-  parsePiariumExtensionStorageSnapshot,
+  isVarinExtensionId,
+  VarinExtensionContractError,
+  parseVarinExtensionStorageAddress,
+  parseVarinExtensionStorageSnapshot,
   type JsonObject,
-  type PiariumExtensionDiagnostic,
-  type PiariumExtensionStorageAddress,
-  type PiariumExtensionStorageDocument,
-  type PiariumExtensionStorageSnapshot,
-} from "@piarium/extension-contract";
+  type VarinExtensionDiagnostic,
+  type VarinExtensionStorageAddress,
+  type VarinExtensionStorageDocument,
+  type VarinExtensionStorageSnapshot,
+} from "@varin/extension-contract";
 import { ExtensionStorageError, ExtensionStorageRevisionConflictError } from "./errors.js";
 
 const LOCK_RETRY_MS = 25;
 const transactionState = Symbol("extensionStorageTransactionState");
 const transactionSetCommitted = Symbol("extensionStorageTransactionSetCommitted");
 
-interface StoredExtensionDocument extends PiariumExtensionStorageDocument {
-  address: PiariumExtensionStorageAddress;
+interface StoredExtensionDocument extends VarinExtensionStorageDocument {
+  address: VarinExtensionStorageAddress;
 }
 
 interface LastValidStorage {
-  document: PiariumExtensionStorageDocument;
+  document: VarinExtensionStorageDocument;
   exists: boolean;
   fingerprint: string;
 }
 
 interface ExtensionStorageTransactionState {
-  address: PiariumExtensionStorageAddress;
-  committed: PiariumExtensionStorageSnapshot | null;
+  address: VarinExtensionStorageAddress;
+  committed: VarinExtensionStorageSnapshot | null;
   data: JsonObject;
-  previous: PiariumExtensionStorageSnapshot;
+  previous: VarinExtensionStorageSnapshot;
   schemaVersion: number;
   store: ExtensionStorageStore;
 }
@@ -98,18 +98,18 @@ const atomicWrite = async (path: string, value: unknown): Promise<void> => {
   finally { await rm(temporary, { force: true }); }
 };
 
-const emptyDocument = (): PiariumExtensionStorageDocument => ({
+const emptyDocument = (): VarinExtensionStorageDocument => ({
   data: {},
   revision: 0,
   schemaVersion: 0,
   updatedAt: new Date(0).toISOString(),
 });
 
-const fingerprint = (document: PiariumExtensionStorageDocument): string => (
+const fingerprint = (document: VarinExtensionStorageDocument): string => (
   createHash("sha256").update(JSON.stringify(document)).digest("hex")
 );
 
-const diagnostic = (address: PiariumExtensionStorageAddress, code: string, message: string): PiariumExtensionDiagnostic => ({
+const diagnostic = (address: VarinExtensionStorageAddress, code: string, message: string): VarinExtensionDiagnostic => ({
   code,
   extensionId: address.extensionId,
   message,
@@ -119,7 +119,7 @@ const diagnostic = (address: PiariumExtensionStorageAddress, code: string, messa
 
 const assertJsonObject = (value: JsonObject): JsonObject => {
   const serialized = JSON.stringify(value);
-  if (serialized === undefined) throw new Error("Piarium extension storage data is not JSON-safe");
+  if (serialized === undefined) throw new Error("Varin extension storage data is not JSON-safe");
   return JSON.parse(serialized) as JsonObject;
 };
 
@@ -132,16 +132,16 @@ export interface ExtensionStorageMigrationInput {
 export type ExtensionStorageMigrator = (input: ExtensionStorageMigrationInput) => JsonObject | Promise<JsonObject>;
 
 export class ExtensionStorageMigrationTransaction {
-  readonly address: PiariumExtensionStorageAddress;
-  readonly previous: PiariumExtensionStorageSnapshot;
+  readonly address: VarinExtensionStorageAddress;
+  readonly previous: VarinExtensionStorageSnapshot;
   readonly targetSchemaVersion: number;
   readonly #store: ExtensionStorageStore;
   #targetData: JsonObject;
-  #committed: PiariumExtensionStorageSnapshot | null = null;
+  #committed: VarinExtensionStorageSnapshot | null = null;
 
   constructor(options: {
-    address: PiariumExtensionStorageAddress;
-    previous: PiariumExtensionStorageSnapshot;
+    address: VarinExtensionStorageAddress;
+    previous: VarinExtensionStorageSnapshot;
     store: ExtensionStorageStore;
     targetData: JsonObject;
     targetSchemaVersion: number;
@@ -162,8 +162,8 @@ export class ExtensionStorageMigrationTransaction {
     this.#targetData = assertJsonObject(data);
   }
 
-  async commit(): Promise<PiariumExtensionStorageSnapshot> {
-    this.#committed ??= (await this.#store.commitPrepared([this]))[0] as PiariumExtensionStorageSnapshot;
+  async commit(): Promise<VarinExtensionStorageSnapshot> {
+    this.#committed ??= (await this.#store.commitPrepared([this]))[0] as VarinExtensionStorageSnapshot;
     return this.#committed;
   }
 
@@ -183,7 +183,7 @@ export class ExtensionStorageMigrationTransaction {
     };
   }
 
-  [transactionSetCommitted](snapshot: PiariumExtensionStorageSnapshot | null): void {
+  [transactionSetCommitted](snapshot: VarinExtensionStorageSnapshot | null): void {
     this.#committed = snapshot;
   }
 }
@@ -199,18 +199,18 @@ export class ExtensionStorageStore {
     this.directory = join(this.dataDir, "extensions", "storage");
   }
 
-  read(addressValue: PiariumExtensionStorageAddress | unknown): Promise<PiariumExtensionStorageSnapshot> {
-    const address = parsePiariumExtensionStorageAddress(addressValue);
+  read(addressValue: VarinExtensionStorageAddress | unknown): Promise<VarinExtensionStorageSnapshot> {
+    const address = parseVarinExtensionStorageAddress(addressValue);
     return this.#serialize(this.#path(address), () => this.#readPreserving(address));
   }
 
   update(
-    addressValue: PiariumExtensionStorageAddress | unknown,
+    addressValue: VarinExtensionStorageAddress | unknown,
     expectedRevision: number,
     schemaVersion: number,
     dataValue: JsonObject,
-  ): Promise<PiariumExtensionStorageSnapshot> {
-    const address = parsePiariumExtensionStorageAddress(addressValue);
+  ): Promise<VarinExtensionStorageSnapshot> {
+    const address = parseVarinExtensionStorageAddress(addressValue);
     if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) throw new Error("Extension storage schemaVersion must be non-negative");
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("Extension storage expectedRevision must be non-negative");
     const data = assertJsonObject(dataValue);
@@ -223,7 +223,7 @@ export class ExtensionStorageStore {
         if (current.document.revision !== expectedRevision) {
           throw new ExtensionStorageRevisionConflictError(expectedRevision, current.document.revision);
         }
-        const document: PiariumExtensionStorageDocument = {
+        const document: VarinExtensionStorageDocument = {
           data,
           revision: current.document.revision + 1,
           schemaVersion,
@@ -239,7 +239,7 @@ export class ExtensionStorageStore {
   }
 
   async deleteExtensionData(extensionId: string): Promise<void> {
-    if (!isPiariumExtensionId(extensionId)) throw new Error(`Invalid Piarium extension ID: ${extensionId}`);
+    if (!isVarinExtensionId(extensionId)) throw new Error(`Invalid Varin extension ID: ${extensionId}`);
     const namespace = join(this.directory, extensionId);
     const namespacePrefix = `${namespace}${sep}`;
     const belongsToNamespace = (path: string): boolean => path === namespace || path.startsWith(namespacePrefix);
@@ -258,12 +258,12 @@ export class ExtensionStorageStore {
 
   commitPrepared(
     transactions: readonly ExtensionStorageMigrationTransaction[],
-  ): Promise<PiariumExtensionStorageSnapshot[]> {
+  ): Promise<VarinExtensionStorageSnapshot[]> {
     if (transactions.length === 0) return Promise.resolve([]);
     const states = transactions.map((transaction) => transaction[transactionState]());
     if (states.some((state) => state.store !== this)) throw new Error("Extension storage transaction belongs to another store");
     if (states.every((state) => state.committed !== null)) {
-      return Promise.resolve(states.map((state) => structuredClone(state.committed as PiariumExtensionStorageSnapshot)));
+      return Promise.resolve(states.map((state) => structuredClone(state.committed as VarinExtensionStorageSnapshot)));
     }
     if (states.some((state) => state.committed !== null)) throw new Error("Cannot commit a partially committed storage transaction group");
     const entries = states.map((state, index) => ({ index, path: this.#path(state.address), state }))
@@ -285,7 +285,7 @@ export class ExtensionStorageStore {
             throw new ExtensionStorageRevisionConflictError(expectedRevision, value.document.revision);
           }
         });
-        const documents = entries.map((entry, index): PiariumExtensionStorageDocument => ({
+        const documents = entries.map((entry, index): VarinExtensionStorageDocument => ({
           data: structuredClone(entry.state.data),
           revision: (current[index]?.document.revision ?? 0) + 1,
           schemaVersion: entry.state.schemaVersion,
@@ -312,15 +312,15 @@ export class ExtensionStorageStore {
           if (rollbackErrors.length > 0) {
             throw new ExtensionStorageError(
               "storage_write_failed",
-              `Failed to commit and fully roll back Piarium extension storage: ${rollbackErrors.join("; ")}`,
+              `Failed to commit and fully roll back Varin extension storage: ${rollbackErrors.join("; ")}`,
               { cause: error },
             );
           }
           throw error;
         }
-        const snapshots: PiariumExtensionStorageSnapshot[] = new Array(entries.length);
+        const snapshots: VarinExtensionStorageSnapshot[] = new Array(entries.length);
         entries.forEach((entry, index) => {
-          const document = documents[index] as PiariumExtensionStorageDocument;
+          const document = documents[index] as VarinExtensionStorageDocument;
           const snapshot = this.#snapshot(entry.state.address, document, true, true, "ready", []);
           this.#lastValid.set(entry.path, { document: structuredClone(document), exists: true, fingerprint: fingerprint(document) });
           transactions[entry.index]?.[transactionSetCommitted](snapshot);
@@ -371,12 +371,12 @@ export class ExtensionStorageStore {
   }
 
   restore(
-    addressValue: PiariumExtensionStorageAddress | unknown,
+    addressValue: VarinExtensionStorageAddress | unknown,
     expectedRevision: number,
-    previousValue: PiariumExtensionStorageSnapshot | unknown,
-  ): Promise<PiariumExtensionStorageSnapshot> {
-    const address = parsePiariumExtensionStorageAddress(addressValue);
-    const previous = parsePiariumExtensionStorageSnapshot(previousValue);
+    previousValue: VarinExtensionStorageSnapshot | unknown,
+  ): Promise<VarinExtensionStorageSnapshot> {
+    const address = parseVarinExtensionStorageAddress(addressValue);
+    const previous = parseVarinExtensionStorageSnapshot(previousValue);
     if (JSON.stringify(previous.address) !== JSON.stringify(address)) throw new Error("Extension storage rollback address does not match");
     if (!previous.authoritative) throw new ExtensionStorageError("storage_read_failed", "Cannot restore non-authoritative extension storage");
     const path = this.#path(address);
@@ -407,11 +407,11 @@ export class ExtensionStorageStore {
   }
 
   async prepareMigration(
-    addressValue: PiariumExtensionStorageAddress | unknown,
+    addressValue: VarinExtensionStorageAddress | unknown,
     targetSchemaVersion: number,
     migrate: ExtensionStorageMigrator,
   ): Promise<ExtensionStorageMigrationTransaction | null> {
-    const address = parsePiariumExtensionStorageAddress(addressValue);
+    const address = parseVarinExtensionStorageAddress(addressValue);
     if (!Number.isSafeInteger(targetSchemaVersion) || targetSchemaVersion < 0) throw new Error("Extension storage schemaVersion must be non-negative");
     const previous = await this.read(address);
     if (!previous.authoritative) throw new ExtensionStorageError("storage_read_failed", "Cannot migrate stale extension storage");
@@ -425,11 +425,11 @@ export class ExtensionStorageStore {
   }
 
   async prepareWrite(
-    addressValue: PiariumExtensionStorageAddress | unknown,
+    addressValue: VarinExtensionStorageAddress | unknown,
     schemaVersion: number,
     dataValue: JsonObject,
   ): Promise<ExtensionStorageMigrationTransaction> {
-    const address = parsePiariumExtensionStorageAddress(addressValue);
+    const address = parseVarinExtensionStorageAddress(addressValue);
     if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) throw new Error("Extension storage schemaVersion must be non-negative");
     const previous = await this.read(address);
     if (!previous.authoritative) throw new ExtensionStorageError("storage_read_failed", "Cannot write stale extension storage");
@@ -442,16 +442,16 @@ export class ExtensionStorageStore {
     });
   }
 
-  #path(address: PiariumExtensionStorageAddress): string {
+  #path(address: VarinExtensionStorageAddress): string {
     const keyHash = createHash("sha256").update(address.key).digest("hex");
     return join(this.directory, address.extensionId, address.scope, `${keyHash}.json`);
   }
 
-  async #readStrict(address: PiariumExtensionStorageAddress): Promise<{ document: PiariumExtensionStorageDocument; exists: boolean }> {
+  async #readStrict(address: VarinExtensionStorageAddress): Promise<{ document: VarinExtensionStorageDocument; exists: boolean }> {
     const path = this.#path(address);
     try {
       const raw = JSON.parse(await readFile(path, "utf8")) as StoredExtensionDocument;
-      const parsed = parsePiariumExtensionStorageSnapshot({
+      const parsed = parseVarinExtensionStorageSnapshot({
         address: raw.address,
         authoritative: true,
         diagnostics: [],
@@ -464,17 +464,17 @@ export class ExtensionStorageStore {
     } catch (error) {
       if (errorCode(error) === "ENOENT") return { document: emptyDocument(), exists: false };
       throw new ExtensionStorageError(
-        error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+        error instanceof SyntaxError || error instanceof VarinExtensionContractError
           || (error instanceof Error && error.message.includes("does not match its namespace"))
           ? "storage_invalid"
           : "storage_read_failed",
-        "Failed to read Piarium extension storage",
+        "Failed to read Varin extension storage",
         { cause: error },
       );
     }
   }
 
-  async #readPreserving(address: PiariumExtensionStorageAddress): Promise<PiariumExtensionStorageSnapshot> {
+  async #readPreserving(address: VarinExtensionStorageAddress): Promise<VarinExtensionStorageSnapshot> {
     const path = this.#path(address);
     try {
       const current = await this.#readStrict(address);
@@ -502,13 +502,13 @@ export class ExtensionStorageStore {
   }
 
   #snapshot(
-    address: PiariumExtensionStorageAddress,
-    document: PiariumExtensionStorageDocument,
+    address: VarinExtensionStorageAddress,
+    document: VarinExtensionStorageDocument,
     exists: boolean,
     authoritative: boolean,
     storageState: "missing" | "ready" | "stale",
-    diagnostics: PiariumExtensionDiagnostic[],
-  ): PiariumExtensionStorageSnapshot {
+    diagnostics: VarinExtensionDiagnostic[],
+  ): VarinExtensionStorageSnapshot {
     return { address: structuredClone(address), authoritative, diagnostics, document: structuredClone(document), exists, storageState };
   }
 

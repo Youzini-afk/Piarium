@@ -1,9 +1,9 @@
 {
-  "name": "@piarium/extension-sdk",
+  "name": "@varin/extension-sdk",
   "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Framework-neutral authoring SDK for Piarium Surface and Host extensions.",
+  "description": "Framework-neutral authoring SDK for Varin Surface and Host extensions.",
   "files": [
     "dist"
   ],
@@ -21,11 +21,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "url": "https://github.com/Youzini-afk/Varin.git",
     "directory": "packages/extension-sdk"
   },
-  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-sdk",
-  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "homepage": "https://github.com/Youzini-afk/Varin/tree/main/packages/extension-sdk",
+  "bugs": "https://github.com/Youzini-afk/Varin/issues",
   "publishConfig": {
     "access": "public"
   },
@@ -39,8 +39,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-contract": "0.2.0",
-    "@piarium/extension-surface": "0.2.0"
+    "@varin/extension-contract": "0.2.0",
+    "@varin/extension-surface": "0.2.0"
   },
   "engines": {
     "node": ">=22.19.0"

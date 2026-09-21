@@ -12,7 +12,7 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { getWorktreeSetupCommands, type PiariumProjectRef } from '@/lib/project-config';
+import { getWorktreeSetupCommands, type VarinProjectRef } from '@/lib/project-config';
 import type {
   CreateMultiRunParams,
   MultiRunAgentSelection,
@@ -29,7 +29,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { useTabletStandalonePwaRuntime } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/projectMeta';
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 import { startDesktopWindowDrag } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
 
@@ -169,7 +169,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     );
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
-  const projectRef = React.useMemo<PiariumProjectRef | null>(() => {
+  const projectRef = React.useMemo<VarinProjectRef | null>(() => {
     if (selectedProject?.path) {
       return { id: selectedProject.id, path: selectedProject.path };
     }
@@ -188,7 +188,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
   const macosMajorVersion = React.useMemo(() => {
     if (typeof window === 'undefined') return null;
-    const injected = (window as unknown as { __PIARIUM_MACOS_MAJOR__?: unknown }).__PIARIUM_MACOS_MAJOR__;
+    const injected = (window as unknown as { __VARIN_MACOS_MAJOR__?: unknown }).__VARIN_MACOS_MAJOR__;
     if (typeof injected === 'number' && Number.isFinite(injected) && injected > 0) return injected;
     if (typeof navigator === 'undefined') return null;
     const match = (navigator.userAgent || '').match(/Mac OS X (\d+)[._](\d+)/);

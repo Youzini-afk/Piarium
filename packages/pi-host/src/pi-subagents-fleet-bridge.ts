@@ -6,7 +6,7 @@ import type {
 import type {
   PiFleetEntry,
   PiFleetProviderSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { BG_READ_DEADLINE_MS } from "./fleet/background-tasks-eventbus.js";
 import type { FleetProviderAdapter, PiFleetProviderResult } from "./fleet/types.js";
 
@@ -255,7 +255,7 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
     const events = this.#events;
     if (!events || this.#sessionId !== sessionId) throw new Error("Pi subagents Fleet bridge is unavailable");
     const generation = this.#generation;
-    const requestId = `piarium-fleet-${generation}-${++this.#nextRequestId}`;
+    const requestId = `varin-fleet-${generation}-${++this.#nextRequestId}`;
     const replyEvent = `${PI_SUBAGENTS_RPC_REPLY_PREFIX}${requestId}`;
     return new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -289,7 +289,7 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
         method: "status",
         params: {},
         requestId,
-        source: { extension: "piarium" },
+        source: { extension: "varin" },
         version: PI_SUBAGENTS_RPC_VERSION,
       });
     });

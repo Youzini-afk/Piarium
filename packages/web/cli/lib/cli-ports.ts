@@ -36,9 +36,9 @@ async function resolveAvailablePort(
   const occupant = await fetchSystemInfoFromPort(startPort);
   let message;
   if (occupant?.runtime === 'desktop') {
-    message = `Port ${startPort} is used by Piarium Desktop; using a free port`;
+    message = `Port ${startPort} is used by Varin Desktop; using a free port`;
   } else if (occupant?.runtime) {
-    message = `Port ${startPort} is used by an existing Piarium instance; using a free port`;
+    message = `Port ${startPort} is used by an existing Varin instance; using a free port`;
   } else {
     message = `Port ${startPort} in use; using a free port`;
   }

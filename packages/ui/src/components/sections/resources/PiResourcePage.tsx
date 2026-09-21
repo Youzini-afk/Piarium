@@ -1,6 +1,6 @@
 import React from 'react';
 import { markdown } from '@codemirror/lang-markdown';
-import type { PiResourceKind, PiResourceScope } from '@piarium/protocol';
+import type { PiResourceKind, PiResourceScope } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -76,7 +76,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
   const save = React.useCallback(async () => {
     const success = await saveResource(kind, runtimeTarget, targetKey);
-    if (success) toast.success(t('settings.piarium.resources.toast.saved'));
+    if (success) toast.success(t('settings.varin.resources.toast.saved'));
   }, [kind, runtimeTarget, saveResource, t, targetKey]);
 
   React.useEffect(() => {
@@ -92,7 +92,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
   const reload = React.useCallback(async () => {
     if (!descriptor) return;
-    if (dirty && !window.confirm(t('settings.piarium.resources.discardConfirm'))) return;
+    if (dirty && !window.confirm(t('settings.varin.resources.discardConfirm'))) return;
     resetDraft(kind);
     await selectResource(kind, runtimeTarget, targetKey, descriptor.id);
   }, [descriptor, dirty, kind, resetDraft, runtimeTarget, selectResource, t, targetKey]);
@@ -100,11 +100,11 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
   const remove = React.useCallback(async () => {
     if (!descriptor?.writable) return;
     const message = kind === 'skill'
-      ? t('settings.piarium.skills.deleteConfirm', { name: descriptor.name })
-      : t('settings.piarium.prompts.deleteConfirm', { name: descriptor.name });
+      ? t('settings.varin.skills.deleteConfirm', { name: descriptor.name })
+      : t('settings.varin.prompts.deleteConfirm', { name: descriptor.name });
     if (!window.confirm(message)) return;
     const success = await deleteResource(kind, runtimeTarget, targetKey);
-    if (success) toast.success(t('settings.piarium.resources.toast.deleted'));
+    if (success) toast.success(t('settings.varin.resources.toast.deleted'));
   }, [deleteResource, descriptor, kind, runtimeTarget, t, targetKey]);
 
   const copy = React.useCallback(async () => {
@@ -118,15 +118,15 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
     );
     if (!success) return;
     setCopying(false);
-    toast.success(t('settings.piarium.resources.toast.copied'));
+    toast.success(t('settings.varin.resources.toast.copied'));
   }, [copyName, copyNameError, copyResource, copyScope, descriptor, kind, pane.mutating, projectBlocked, runtimeTarget, t, targetKey]);
 
   const title = kind === 'prompt'
     ? t('settings.page.prompts.title')
     : t('settings.page.skills.title');
   const description = kind === 'prompt'
-    ? t('settings.piarium.prompts.description')
-    : t('settings.piarium.skills.description');
+    ? t('settings.varin.prompts.description')
+    : t('settings.varin.skills.description');
 
   if (!document || !descriptor) {
     return (
@@ -139,11 +139,11 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
             />
             <p className="mt-3 typography-ui-label text-foreground">
               {pane.loadingDocument || pane.loadingCatalog
-                ? t('settings.piarium.resources.loading')
-                : t('settings.piarium.resources.emptySelection.title')}
+                ? t('settings.varin.resources.loading')
+                : t('settings.varin.resources.emptySelection.title')}
             </p>
             <p className="mt-1 typography-meta">
-              {t('settings.piarium.resources.emptySelection.description')}
+              {t('settings.varin.resources.emptySelection.description')}
             </p>
           </div>
         </div>
@@ -180,18 +180,18 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn('rounded-full px-2 py-0.5 typography-micro', statusClass(descriptor.active ? 'success' : 'muted'))}>
               {descriptor.active
-                ? t('settings.piarium.resources.status.active')
-                : t('settings.piarium.resources.status.inactive')}
+                ? t('settings.varin.resources.status.active')
+                : t('settings.varin.resources.status.inactive')}
             </span>
             <span className={cn('rounded-full px-2 py-0.5 typography-micro', statusClass(descriptor.valid ? 'success' : 'warning'))}>
               {descriptor.valid
-                ? t('settings.piarium.resources.status.valid')
-                : t('settings.piarium.resources.status.invalid')}
+                ? t('settings.varin.resources.status.valid')
+                : t('settings.varin.resources.status.invalid')}
             </span>
             <span className={cn('rounded-full px-2 py-0.5 typography-micro', statusClass(descriptor.writable ? 'success' : 'muted'))}>
               {descriptor.writable
-                ? t('settings.piarium.resources.status.writable')
-                : t('settings.piarium.resources.status.readOnly')}
+                ? t('settings.varin.resources.status.writable')
+                : t('settings.varin.resources.status.readOnly')}
             </span>
             <span className="rounded-full bg-muted px-2 py-0.5 typography-micro text-muted-foreground">
               {descriptor.sourceInfo.scope}
@@ -201,7 +201,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
           <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
             {kind === 'prompt' ? (
               <p className="mb-1 typography-meta text-foreground">
-                {t('settings.piarium.prompts.invocation')}{' '}
+                {t('settings.varin.prompts.invocation')}{' '}
                 <code className="font-mono">
                   /{descriptor.name}{descriptor.argumentHint ? ` ${descriptor.argumentHint}` : ''}
                 </code>
@@ -210,14 +210,14 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
             <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
             <p className="mt-1 typography-micro text-muted-foreground">
               {descriptor.sourceInfo.origin} · {descriptor.sourceInfo.source}
-              {descriptor.disableModelInvocation ? ` · ${t('settings.piarium.skills.modelInvocationDisabled')}` : ''}
+              {descriptor.disableModelInvocation ? ` · ${t('settings.varin.skills.modelInvocationDisabled')}` : ''}
             </p>
           </div>
 
           {!descriptor.writable ? (
             <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning)]/10 px-3 py-2 text-[var(--status-warning)]">
               <Icon name="information" className="mt-0.5 size-4 shrink-0" />
-              <p className="typography-meta">{t('settings.piarium.resources.readOnly.description')}</p>
+              <p className="typography-meta">{t('settings.varin.resources.readOnly.description')}</p>
             </div>
           ) : null}
 
@@ -259,19 +259,19 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
       </SettingsSection>
 
       <SettingsSection
-        title={t('settings.piarium.resources.actions.title')}
+        title={t('settings.varin.resources.actions.title')}
         description={kind === 'skill'
-          ? t('settings.piarium.skills.actions.description')
-          : t('settings.piarium.prompts.actions.description')}
+          ? t('settings.varin.skills.actions.description')
+          : t('settings.varin.prompts.actions.description')}
       >
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" size="sm" disabled={pane.mutating} onClick={() => setCopying((current) => !current)}>
-              {t('settings.piarium.resources.actions.copy')}
+              {t('settings.varin.resources.actions.copy')}
             </Button>
             {descriptor.writable ? (
               <Button type="button" variant="ghost" size="sm" disabled={pane.mutating} onClick={() => void remove()} className="text-[var(--status-error)]">
-                {t('settings.piarium.resources.actions.delete')}
+                {t('settings.varin.resources.actions.delete')}
               </Button>
             ) : null}
           </div>
@@ -292,14 +292,14 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
               <Select value={copyScope} onValueChange={setCopyScope}>
                 <SelectTrigger size="settings"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="user">{t('settings.piarium.resources.scope.user')}</SelectItem>
+                  <SelectItem value="user">{t('settings.varin.resources.scope.user')}</SelectItem>
                   <SelectItem value="project" disabled={pane.catalog?.projectTrusted === false}>
                     {t('settings.common.scope.project')}
                   </SelectItem>
                 </SelectContent>
               </Select>
               <Button type="submit" size="sm" disabled={Boolean(copyNameError) || projectBlocked || pane.mutating}>
-                {t('settings.piarium.resources.actions.copy')}
+                {t('settings.varin.resources.actions.copy')}
               </Button>
             </form>
           ) : null}

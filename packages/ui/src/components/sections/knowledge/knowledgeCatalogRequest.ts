@@ -1,4 +1,4 @@
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 export type KnowledgeCatalogScope = 'workspace' | 'user';
 export type KnowledgeCatalogStatus = 'suggested' | 'accepted' | 'dismissed';

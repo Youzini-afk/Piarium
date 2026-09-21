@@ -134,8 +134,8 @@ describe('terminal runtime', () => {
   };
 
   it('rejects regular files as terminal working directories', async () => {
-    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
     const workspaceRoot = '/tmp/openchamber-terminal-test-root';
     const regularFilePath = path.join(workspaceRoot, 'not-a-directory');
     const postRoutes = new Map<string, RouteHandler>();
@@ -163,8 +163,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
-      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
+      process.env.VARIN_WORKSPACE_ROOT = workspaceRoot;
+      process.env.VARIN_WORKSPACE_LOCKDOWN = 'true';
       const createRoute = requiredRoute(postRoutes, '/api/terminal/create');
       const res = createResponse();
 
@@ -174,22 +174,22 @@ describe('terminal runtime', () => {
       expect(res.body?.error).toContain('Invalid working directory');
     } finally {
       if (previousWorkspaceRoot === undefined) {
-        delete process.env.PIARIUM_WORKSPACE_ROOT;
+        delete process.env.VARIN_WORKSPACE_ROOT;
       } else {
-        process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
+        process.env.VARIN_WORKSPACE_ROOT = previousWorkspaceRoot;
       }
       if (previousWorkspaceLockdown === undefined) {
-        delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+        delete process.env.VARIN_WORKSPACE_LOCKDOWN;
       } else {
-        process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+        process.env.VARIN_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       }
       await runtime.shutdown();
     }
   });
 
   it('rejects terminal working directories outside workspace lockdown', async () => {
-    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
     const workspaceRoot = '/tmp/openchamber-terminal-test-root';
     const postRoutes = new Map<string, RouteHandler>();
     const app = {
@@ -218,8 +218,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
-      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
+      process.env.VARIN_WORKSPACE_ROOT = workspaceRoot;
+      process.env.VARIN_WORKSPACE_LOCKDOWN = 'true';
       const createRoute = requiredRoute(postRoutes, '/api/terminal/create');
       const res = createResponse();
 
@@ -229,22 +229,22 @@ describe('terminal runtime', () => {
       expect(res.body?.error).toContain('Path is outside workspace');
     } finally {
       if (previousWorkspaceRoot === undefined) {
-        delete process.env.PIARIUM_WORKSPACE_ROOT;
+        delete process.env.VARIN_WORKSPACE_ROOT;
       } else {
-        process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
+        process.env.VARIN_WORKSPACE_ROOT = previousWorkspaceRoot;
       }
       if (previousWorkspaceLockdown === undefined) {
-        delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+        delete process.env.VARIN_WORKSPACE_LOCKDOWN;
       } else {
-        process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+        process.env.VARIN_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       }
       await runtime.shutdown();
     }
   });
 
   it('resolves workspace-relative paths for create and restart while enforcing lockdown', async () => {
-    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
     const workspaceRoot = path.resolve('/tmp/openchamber-terminal-workspace');
     const harness = createHarness({
       fs: {
@@ -257,8 +257,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
-      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
+      process.env.VARIN_WORKSPACE_ROOT = workspaceRoot;
+      process.env.VARIN_WORKSPACE_LOCKDOWN = 'true';
 
       const created = createResponse();
       await requiredRoute(harness.routes.post, '/api/terminal/create')({
@@ -285,10 +285,10 @@ describe('terminal runtime', () => {
       expect(harness.processes).toHaveLength(2);
       expect(requiredProcess(harness.processes, 1).killed).toBe(false);
     } finally {
-      if (previousWorkspaceRoot === undefined) delete process.env.PIARIUM_WORKSPACE_ROOT;
-      else process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
-      if (previousWorkspaceLockdown === undefined) delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
-      else process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+      if (previousWorkspaceRoot === undefined) delete process.env.VARIN_WORKSPACE_ROOT;
+      else process.env.VARIN_WORKSPACE_ROOT = previousWorkspaceRoot;
+      if (previousWorkspaceLockdown === undefined) delete process.env.VARIN_WORKSPACE_LOCKDOWN;
+      else process.env.VARIN_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       await harness.runtime.shutdown();
     }
   });
@@ -472,7 +472,7 @@ describe('terminal runtime', () => {
       expect(requiredProcess(harness.processes, 0).shell).toBe(launch.executable);
       expect(requiredProcess(harness.processes, 0).args).toEqual(launch.args);
       expect(launch.args).not.toContain('--init-file');
-      expect(requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID).toBeUndefined();
+      expect(requiredProcess(harness.processes, 0).options.env.VARIN_SHELL_INTEGRATION_ID).toBeUndefined();
     } finally { await harness.runtime.shutdown(); }
   });
 
@@ -490,7 +490,7 @@ describe('terminal runtime', () => {
         owner: 'user',
         shell: 'zsh',
       });
-      const firstId = requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID;
+      const firstId = requiredProcess(harness.processes, 0).options.env.VARIN_SHELL_INTEGRATION_ID;
       expect(firstId).toBe('user-zsh:1');
       requiredProcess(harness.processes, 0).emitData(
         `\u001b]633;pi;${firstId};E;old-cmd\u0007\u001b]633;pi;${firstId};C\u0007`,
@@ -504,7 +504,7 @@ describe('terminal runtime', () => {
       }, restarted);
       expect(restarted.statusCode).toBe(200);
       const second = requiredProcess(harness.processes, 1);
-      expect(second.options.env.PIARIUM_SHELL_INTEGRATION_ID).toBe('user-zsh:2');
+      expect(second.options.env.VARIN_SHELL_INTEGRATION_ID).toBe('user-zsh:2');
       second.emitData(`\u001b]633;pi;user-zsh:2;D;0\u0007`);
       expect(commands).toEqual([]);
       second.emitData(`\u001b]633;pi;user-zsh:1;E;stale\u0007\u001b]633;pi;user-zsh:1;D;0\u0007`);
@@ -1036,7 +1036,7 @@ describe('terminal runtime', () => {
         shell: 'bash',
       });
       expect(requiredProcess(harness.processes, 0).args).toContain('--init-file');
-      expect(requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID).toBe('user-bash:1');
+      expect(requiredProcess(harness.processes, 0).options.env.VARIN_SHELL_INTEGRATION_ID).toBe('user-bash:1');
       expect(harness.runtime.inspectSession('user-bash')).toMatchObject({
         integration: 'not-observed',
         owner: 'user',
@@ -1048,7 +1048,7 @@ describe('terminal runtime', () => {
       requiredProcess(harness.processes, 0).emitData('\u001b]633;E;echo alien\u0007\u001b]633;D;0\u0007');
       expect(commands).toHaveLength(0);
       expect(harness.runtime.inspectSession('user-bash')?.integration).toBe('not-observed');
-      const userId = requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID;
+      const userId = requiredProcess(harness.processes, 0).options.env.VARIN_SHELL_INTEGRATION_ID;
       requiredProcess(harness.processes, 0).emitData(
         `\u001b]633;pi;${userId};E;echo hi\u0007\u001b]633;pi;${userId};D;0\u0007`,
       );

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ThinkingLevel } from '@piarium/protocol';
+import type { ThinkingLevel } from '@varin/protocol';
 import { PiAgentSelector } from '@/components/multirun/PiAgentSelector';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';

@@ -8,7 +8,7 @@ import type {
   PiToolResultMessage,
   PiUserContent,
   PiUserMessage,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';

@@ -18,7 +18,7 @@ import {
   releasePiEditorContextOwner,
 } from '@/stores/usePiEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   EMPTY_INLINE_COMMENT_DRAFTS,
@@ -31,9 +31,9 @@ import { getMonacoLanguageBridge } from '@/lib/monaco/language-bridge-session';
 import { getFileEditorModelRegistry } from '@/lib/monaco/model-session';
 import { markMonacoPerformance } from '@/lib/monaco/performance';
 import { loadMonacoRuntime, type MonacoRuntime } from '@/lib/monaco/runtime';
-import { registerPiariumMonacoTheme } from '@/lib/monaco/theme';
+import { registerVarinMonacoTheme } from '@/lib/monaco/theme';
 import { applyMonacoEditorViewState, captureMonacoEditorViewState } from '@/lib/monaco/view-state';
-import { createPiariumMonacoVimAdapter } from '@/lib/monaco/vim-adapter';
+import { createVarinMonacoVimAdapter } from '@/lib/monaco/vim-adapter';
 import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monaco/editor-options';
 import {
   FILE_EDITOR_COMMAND_IDS,
@@ -146,7 +146,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
 
   React.useEffect(() => {
     if (!monaco) return;
-    const themeName = registerPiariumMonacoTheme(monaco, currentTheme);
+    const themeName = registerVarinMonacoTheme(monaco, currentTheme);
     monaco.editor.setTheme(themeName);
   }, [currentTheme, monaco]);
 
@@ -165,7 +165,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host || !monaco || modelSnapshot.status !== 'ready') return undefined;
-    const themeName = registerPiariumMonacoTheme(monaco, currentTheme);
+    const themeName = registerVarinMonacoTheme(monaco, currentTheme);
     applyMonacoModelSettings(modelSnapshot.model, fileEditorSettings);
     const editorInstance = monaco.editor.create(host, {
       ...createMonacoEditorOptions({
@@ -248,7 +248,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
         : model.getValueInRange(selection);
       const node = document.createElement('div');
       node.className = 'w-[min(30rem,calc(100vw-4rem))] py-1';
-      const widgetId = `piarium.inline-comment.${viewId}`;
+      const widgetId = `varin.inline-comment.${viewId}`;
       const widget: MonacoEditor.IContentWidget = {
         allowEditorOverflow: true,
         getDomNode: () => node,
@@ -279,7 +279,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
         scheduleCapture();
       }),
       editorInstance.addAction({
-        id: 'piarium.editor.addInlineComment',
+        id: 'varin.editor.addInlineComment',
         label: tRef.current('inlineComment.actions.comment'),
         contextMenuGroupId: 'navigation',
         contextMenuOrder: 20,
@@ -336,8 +336,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
         },
         options: {
           isWholeLine: true,
-          className: 'piarium-editor-inline-comment-line',
-          glyphMarginClassName: 'piarium-editor-inline-comment-glyph',
+          className: 'varin-editor-inline-comment-line',
+          glyphMarginClassName: 'varin-editor-inline-comment-glyph',
         },
       })),
     );
@@ -385,8 +385,8 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   React.useEffect(() => {
     const statusNode = vimStatusRef.current;
     if (!monaco || !editorInstance || !statusNode || fileEditorKeymap !== 'vim') return undefined;
-    const adapter = createPiariumMonacoVimAdapter({
-      commandAriaLabel: t('settings.piarium.visual.field.fileEditorKeymap'),
+    const adapter = createVarinMonacoVimAdapter({
+      commandAriaLabel: t('settings.varin.visual.field.fileEditorKeymap'),
       editor: editorInstance,
       monaco,
       onSave: () => {

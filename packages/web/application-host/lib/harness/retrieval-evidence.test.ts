@@ -4,7 +4,7 @@ import { createOutputStore } from "./output-store.js";
 import { validateRetrievalEvidence } from "./retrieval-evidence.js";
 import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
-import type { HarnessActorContext, RetrievalArtifactRef, RetrievalUrlReceipt } from "@piarium/protocol";
+import type { HarnessActorContext, RetrievalArtifactRef, RetrievalUrlReceipt } from "@varin/protocol";
 
 const actor: HarnessActorContext = {
   authorityInstanceId: "host",

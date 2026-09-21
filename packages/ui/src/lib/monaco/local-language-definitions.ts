@@ -2,7 +2,7 @@ import type { MonacoRuntime } from './runtime';
 
 const JSON_LANGUAGE_ID = 'json';
 
-export const registerPiariumTokenizationLanguages = (monaco: MonacoRuntime): void => {
+export const registerVarinTokenizationLanguages = (monaco: MonacoRuntime): void => {
   if (monaco.languages.getLanguages().some((language) => language.id === JSON_LANGUAGE_ID)) return;
   monaco.languages.register({
     id: JSON_LANGUAGE_ID,

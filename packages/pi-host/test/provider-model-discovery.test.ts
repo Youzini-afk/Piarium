@@ -10,7 +10,7 @@ import { discoverProviderModels } from "../src/provider-model-discovery.js";
 
 describe("provider model discovery", () => {
   it("supports authenticated HTTP providers on localhost without a special opt-in", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-discovery-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-discovery-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await mkdir(agentDir, { recursive: true });
@@ -82,7 +82,7 @@ describe("provider model discovery", () => {
   });
 
   it("discovers models from anonymous HTTP endpoints", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-provider-anonymous-discovery-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-provider-anonymous-discovery-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await mkdir(agentDir, { recursive: true });

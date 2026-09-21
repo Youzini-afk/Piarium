@@ -10,7 +10,7 @@ import { terminateManagedProcess, waitForManagedExit, type ManagedProcessHandle,
 
 const gunzipAsync = promisify(gunzip);
 
-/** The native servers currently owned by Piarium's on-demand provider. */
+/** The native servers currently owned by Varin's on-demand provider. */
 export type ManagedLanguageServerName = "gopls" | "rust-analyzer" | "clangd" | "marksman";
 export type ManagedLanguageServerStatus =
   | "available"
@@ -56,7 +56,7 @@ export class ManagedLanguageServerError extends Error {
 }
 
 export interface ManagedLanguageServersOptions {
-  /** Piarium's per-user data directory. No workspace or global installation is used. */
+  /** Varin's per-user data directory. No workspace or global installation is used. */
   directory: string;
   /** Rust Kernel process service adapter. It must be the production native spawn. */
   spawn: ManagedSpawn;
@@ -546,13 +546,13 @@ export function createManagedLanguageServers(options: ManagedLanguageServersOpti
       if (!runtimeOnPath("go", env, platform)) {
         current.status = "needs-runtime";
         current.command = undefined;
-        current.message = "gopls needs an existing Go toolchain (`go`) on PATH; Piarium does not install Go.";
+        current.message = "gopls needs an existing Go toolchain (`go`) on PATH; Varin does not install Go.";
         return { languageId, name: spec.name, status: current.status, message: current.message };
       }
     }
     current.status = "available";
     current.command = undefined;
-    current.message = spec.name === "gopls" ? "gopls will be installed in Piarium user data using the existing Go toolchain." : `Piarium can prepare ${spec.name} in its private user-data directory.`;
+    current.message = spec.name === "gopls" ? "gopls will be installed in Varin user data using the existing Go toolchain." : `Varin can prepare ${spec.name} in its private user-data directory.`;
     return { languageId, name: spec.name, status: current.status, message: current.message };
   };
 
@@ -629,14 +629,14 @@ export function createManagedLanguageServers(options: ManagedLanguageServersOpti
     const current = state.get(spec.name)!;
     current.status = "preparing";
     current.command = undefined;
-    current.message = `Preparing ${spec.name} ${spec.version} in Piarium user data…`;
+    current.message = `Preparing ${spec.name} ${spec.version} in Varin user data…`;
     const preparation: Preparation = { controller, waiters: 0, settled: false, promise: Promise.resolve({ command: "", args: [] }) };
     preparation.promise = (async () => {
       const local = await findLocal(spec, controller.signal);
       if (local) return { command: local, args: serverArgs(spec), ...(spec.initializationOptions ? { initializationOptions: spec.initializationOptions } : {}) };
       if (spec.name === "gopls") {
         const runtime = await resolve(platform === "win32" ? "go.exe" : "go");
-        if (!runtime) throw new ManagedLanguageServerError("needs-runtime", spec.languageIds[0]!, "gopls requires an existing Go toolchain (`go`) on PATH; Piarium does not install Go.");
+        if (!runtime) throw new ManagedLanguageServerError("needs-runtime", spec.languageIds[0]!, "gopls requires an existing Go toolchain (`go`) on PATH; Varin does not install Go.");
         return prepareGo(spec, runtime, controller.signal);
       }
       return prepareArchive(spec, controller.signal);

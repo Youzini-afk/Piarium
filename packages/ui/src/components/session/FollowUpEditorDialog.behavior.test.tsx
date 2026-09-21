@@ -2,15 +2,15 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runtimeFetch } from '@piarium/application-client';
-import type { FollowUpDefinitionView } from '@piarium/protocol';
+import { runtimeFetch } from '@varin/application-client';
+import type { FollowUpDefinitionView } from '@varin/protocol';
 import { FollowUpEditorDialog } from './FollowUpEditorDialog';
 
 const mocks = vi.hoisted(() => ({
   saved: vi.fn(), close: vi.fn(),
   state: { catalogLoaded: true, currentSessionId: 's-1', summaries: [{ id: 's-1', name: 'Experiment', firstMessage: '', cwd: '/repo', workspace: { kind: 'workspace', id: 'project' } }] },
 }));
-vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/stores/usePiSessionStore', () => ({

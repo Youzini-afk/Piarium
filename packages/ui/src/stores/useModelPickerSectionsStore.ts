@@ -29,7 +29,7 @@ export const useModelPickerSectionsStore = create<ModelPickerSectionsStore>()(
         }),
     }),
     {
-      name: 'piarium.modelPickerSections.v1',
+      name: 'varin.modelPickerSections.v1',
     },
   ),
 );

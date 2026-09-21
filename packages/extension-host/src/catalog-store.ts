@@ -2,23 +2,23 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
-  PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
-  PiariumExtensionContractError,
-  parsePiariumExtensionManifest,
-  parsePiariumExtensionCatalogDocument,
-  parsePiariumExtensionHostIdentityDocument,
-  parsePiariumExtensionInstallationRecord,
-  type PiariumExtensionCatalogDocument,
-  type PiariumExtensionCapabilityDecision,
-  type PiariumExtensionCapabilityGrant,
-  type PiariumExtensionCapabilityReference,
-  type PiariumExtensionDiagnostic,
-  type PiariumExtensionHostIdentityDocument,
-  type PiariumExtensionInstallationRecord,
-  type PiariumExtensionManifest,
-  type PiariumExtensionPreparedArtifact,
-} from "@piarium/extension-contract";
-import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
+  VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
+  VarinExtensionContractError,
+  parseVarinExtensionManifest,
+  parseVarinExtensionCatalogDocument,
+  parseVarinExtensionHostIdentityDocument,
+  parseVarinExtensionInstallationRecord,
+  type VarinExtensionCatalogDocument,
+  type VarinExtensionCapabilityDecision,
+  type VarinExtensionCapabilityGrant,
+  type VarinExtensionCapabilityReference,
+  type VarinExtensionDiagnostic,
+  type VarinExtensionHostIdentityDocument,
+  type VarinExtensionInstallationRecord,
+  type VarinExtensionManifest,
+  type VarinExtensionPreparedArtifact,
+} from "@varin/extension-contract";
+import type { VarinBuiltinExtensionDefinition } from "@varin/extension-builtins";
 import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
@@ -28,26 +28,26 @@ const LOCK_RETRY_MS = 25;
 
 interface CatalogReadState {
   authoritative: boolean;
-  diagnostics: PiariumExtensionDiagnostic[];
-  document: PiariumExtensionCatalogDocument;
+  diagnostics: VarinExtensionDiagnostic[];
+  document: VarinExtensionCatalogDocument;
   storageState: "missing" | "ready" | "stale";
 }
 
 interface LastValidCatalog {
-  document: PiariumExtensionCatalogDocument;
+  document: VarinExtensionCatalogDocument;
   fingerprint: string;
   storageState: "missing" | "ready";
 }
 
 interface CatalogMutationRead {
-  document: PiariumExtensionCatalogDocument;
+  document: VarinExtensionCatalogDocument;
   repaired?: boolean;
   storageState: "missing" | "ready";
 }
 
 interface ParsedBuiltinDefinition {
-  definition: PiariumBuiltinExtensionDefinition;
-  manifest: PiariumExtensionManifest;
+  definition: VarinBuiltinExtensionDefinition;
+  manifest: VarinExtensionManifest;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -126,16 +126,16 @@ async function acquireLock(path: string): Promise<() => Promise<void>> {
   }
 }
 
-function emptyDocument(): PiariumExtensionCatalogDocument {
+function emptyDocument(): VarinExtensionCatalogDocument {
   return {
     extensions: {},
     revision: 0,
-    schemaVersion: PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
+    schemaVersion: VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
     updatedAt: new Date(0).toISOString(),
   };
 }
 
-function cloneDocument(document: PiariumExtensionCatalogDocument): PiariumExtensionCatalogDocument {
+function cloneDocument(document: VarinExtensionCatalogDocument): VarinExtensionCatalogDocument {
   return structuredClone(document);
 }
 
@@ -151,29 +151,29 @@ function canonicalJson(value: unknown): string {
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
       .join(",")}}`;
   }
-  throw new Error("Piarium extension catalog contains a non-JSON value");
+  throw new Error("Varin extension catalog contains a non-JSON value");
 }
 
-function fingerprint(document: PiariumExtensionCatalogDocument): string {
+function fingerprint(document: VarinExtensionCatalogDocument): string {
   return createHash("sha256").update(canonicalJson(document)).digest("hex");
 }
 
-function diagnostic(code: string, message: string): PiariumExtensionDiagnostic {
+function diagnostic(code: string, message: string): VarinExtensionDiagnostic {
   return { code, message, severity: "error", timestamp: new Date().toISOString() };
 }
 
-const capabilityKey = (value: PiariumExtensionCapabilityReference): string => `${value.realm}:${value.capability}`;
+const capabilityKey = (value: VarinExtensionCapabilityReference): string => `${value.realm}:${value.capability}`;
 
-function manifestCapabilities(manifest: PiariumExtensionManifest): PiariumExtensionCapabilityReference[] {
+function manifestCapabilities(manifest: VarinExtensionManifest): VarinExtensionCapabilityReference[] {
   return (["host", "surface"] as const).flatMap((realm) => (
     (manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
   ));
 }
 
 function builtinCapabilityGrants(
-  manifest: PiariumExtensionManifest,
+  manifest: VarinExtensionManifest,
   updatedAt: string,
-): PiariumExtensionCapabilityGrant[] {
+): VarinExtensionCapabilityGrant[] {
   return manifestCapabilities(manifest).map((reference) => ({
     ...reference,
     granted: true,
@@ -183,10 +183,10 @@ function builtinCapabilityGrants(
 }
 
 function sameCapabilityGrants(
-  left: readonly PiariumExtensionCapabilityGrant[],
-  right: readonly PiariumExtensionCapabilityGrant[],
+  left: readonly VarinExtensionCapabilityGrant[],
+  right: readonly VarinExtensionCapabilityGrant[],
 ): boolean {
-  const project = (values: readonly PiariumExtensionCapabilityGrant[]) => values
+  const project = (values: readonly VarinExtensionCapabilityGrant[]) => values
     .map(({ capability, granted, manifestVersion, realm }) => ({ capability, granted, manifestVersion, realm }))
     .sort((first, second) => capabilityKey(first).localeCompare(capabilityKey(second)));
   return JSON.stringify(project(left)) === JSON.stringify(project(right));
@@ -194,10 +194,10 @@ function sameCapabilityGrants(
 
 function rawCapabilityGrantsMatch(
   value: unknown,
-  expected: readonly PiariumExtensionCapabilityGrant[],
+  expected: readonly VarinExtensionCapabilityGrant[],
 ): boolean {
   if (!Array.isArray(value)) return false;
-  const parsed: PiariumExtensionCapabilityGrant[] = [];
+  const parsed: VarinExtensionCapabilityGrant[] = [];
   for (const item of value) {
     if (
       !isRecord(item)
@@ -256,7 +256,7 @@ function repairKnownBuiltinRecords(
     nextRecord.manifest = structuredClone(manifest);
     nextRecord.resolvedVersion = manifest.version;
     nextRecord.selectedVersion = manifest.version;
-    nextRecord.source = { display: "Piarium", kind: "builtin", specifier: manifest.id };
+    nextRecord.source = { display: "Varin", kind: "builtin", specifier: manifest.id };
     const desiredGrants = builtinCapabilityGrants(
       manifest,
       typeof rawRecord.updatedAt === "string" ? rawRecord.updatedAt : now,
@@ -280,7 +280,7 @@ function repairKnownBuiltinRecords(
     : { changed, value };
 }
 
-function capabilitiesReviewed(record: PiariumExtensionInstallationRecord): boolean {
+function capabilitiesReviewed(record: VarinExtensionInstallationRecord): boolean {
   if (record.source.kind === "builtin") return true;
   const decided = new Set(record.capabilityGrants
     .filter((grant) => grant.manifestVersion === record.manifest.version)
@@ -288,9 +288,9 @@ function capabilitiesReviewed(record: PiariumExtensionInstallationRecord): boole
   return manifestCapabilities(record.manifest).every((reference) => decided.has(capabilityKey(reference)));
 }
 
-function assertCanEnable(record: PiariumExtensionInstallationRecord): void {
+function assertCanEnable(record: VarinExtensionInstallationRecord): void {
   if (!capabilitiesReviewed(record)) {
-    throw new Error(`Piarium extension capabilities require review before activation: ${record.manifest.id}`);
+    throw new Error(`Varin extension capabilities require review before activation: ${record.manifest.id}`);
   }
 }
 
@@ -319,7 +319,7 @@ export class ExtensionCatalogStore {
   readonly identityPath: string;
   readonly #lockPath: string;
   #lastValid: LastValidCatalog | null = null;
-  #identity: PiariumExtensionHostIdentityDocument | null = null;
+  #identity: VarinExtensionHostIdentityDocument | null = null;
   #queue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
@@ -330,7 +330,7 @@ export class ExtensionCatalogStore {
     this.#lockPath = join(this.directory, ".catalog.lock");
   }
 
-  getHostIdentity(): Promise<PiariumExtensionHostIdentityDocument> {
+  getHostIdentity(): Promise<VarinExtensionHostIdentityDocument> {
     return this.#serialize(async () => this.#readOrCreateIdentity());
   }
 
@@ -341,8 +341,8 @@ export class ExtensionCatalogStore {
     });
   }
 
-  upsert(recordValue: PiariumExtensionInstallationRecord, expectedRevision: number): Promise<CatalogReadState> {
-    const record = parsePiariumExtensionInstallationRecord(recordValue);
+  upsert(recordValue: VarinExtensionInstallationRecord, expectedRevision: number): Promise<CatalogReadState> {
+    const record = parseVarinExtensionInstallationRecord(recordValue);
     return this.#mutate(expectedRevision, (document) => {
       document.extensions[record.manifest.id] = record;
       return true;
@@ -360,7 +360,7 @@ export class ExtensionCatalogStore {
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if (record.desired.enabled === enabled) return false;
       if (enabled) assertCanEnable(record);
       record.desired = { enabled, revision: record.desired.revision + 1, updatedAt: now };
@@ -400,12 +400,12 @@ export class ExtensionCatalogStore {
   }
 
   reconcileBuiltins(
-    definitions: readonly PiariumBuiltinExtensionDefinition[],
+    definitions: readonly VarinBuiltinExtensionDefinition[],
     ownedPrefix: string,
   ): Promise<CatalogReadState> {
     const manifests: ParsedBuiltinDefinition[] = definitions.map((definition) => ({
       definition,
-      manifest: parsePiariumExtensionManifest(definition.manifest),
+      manifest: parseVarinExtensionManifest(definition.manifest),
     }));
     const desiredIds = new Set(manifests.map(({ manifest }) => manifest.id));
     return this.#mutateCurrent((document, now) => {
@@ -430,14 +430,14 @@ export class ExtensionCatalogStore {
             manifest: structuredClone(manifest),
             resolvedVersion: manifest.version,
             selectedVersion: manifest.version,
-            source: { display: "Piarium", kind: "builtin", specifier: manifest.id },
+            source: { display: "Varin", kind: "builtin", specifier: manifest.id },
             updatedAt: now,
           };
           changed = true;
           continue;
         }
         if (existing.source.kind !== "builtin" || existing.source.specifier !== manifest.id) {
-          throw new Error(`Piarium built-in extension ID is already owned by another source: ${manifest.id}`);
+          throw new Error(`Varin built-in extension ID is already owned by another source: ${manifest.id}`);
         }
         const nextManifest = JSON.stringify(manifest);
         const desiredGrants = builtinCapabilityGrants(manifest, now);
@@ -445,7 +445,7 @@ export class ExtensionCatalogStore {
           JSON.stringify(existing.manifest) === nextManifest
           && existing.resolvedVersion === manifest.version
           && existing.selectedVersion === manifest.version
-          && existing.source.display === "Piarium"
+          && existing.source.display === "Varin"
           && existing.candidate === undefined
           && sameCapabilityGrants(existing.capabilityGrants, desiredGrants)
         ) continue;
@@ -455,7 +455,7 @@ export class ExtensionCatalogStore {
         existing.manifest = structuredClone(manifest);
         existing.resolvedVersion = manifest.version;
         existing.selectedVersion = manifest.version;
-        existing.source = { display: "Piarium", kind: "builtin", specifier: manifest.id };
+        existing.source = { display: "Varin", kind: "builtin", specifier: manifest.id };
         existing.capabilityGrants = desiredGrants;
         delete existing.candidate;
         if (manifestChanged || artifactVersionChanged) {
@@ -469,17 +469,17 @@ export class ExtensionCatalogStore {
     }, (now) => this.#readForBuiltinReconciliation(manifests, ownedPrefix, now));
   }
 
-  selectBuiltinArtifact(candidate: PiariumExtensionPreparedArtifact): Promise<CatalogReadState> {
+  selectBuiltinArtifact(candidate: VarinExtensionPreparedArtifact): Promise<CatalogReadState> {
     return this.#mutateCurrent((document, now) => {
       const record = document.extensions[candidate.manifest.id];
       if (!record || record.source.kind !== "builtin" || record.source.specifier !== candidate.manifest.id) {
-        throw new Error(`Piarium built-in extension is not reconciled: ${candidate.manifest.id}`);
+        throw new Error(`Varin built-in extension is not reconciled: ${candidate.manifest.id}`);
       }
       if (candidate.source.kind !== "builtin" || candidate.source.specifier !== candidate.manifest.id) {
-        throw new Error(`Piarium built-in artifact source is invalid: ${candidate.manifest.id}`);
+        throw new Error(`Varin built-in artifact source is invalid: ${candidate.manifest.id}`);
       }
       if (JSON.stringify(record.manifest) !== JSON.stringify(candidate.manifest)) {
-        throw new Error(`Piarium built-in artifact manifest does not match the distribution: ${candidate.manifest.id}`);
+        throw new Error(`Varin built-in artifact manifest does not match the distribution: ${candidate.manifest.id}`);
       }
       if (
         record.integrity === candidate.integrity
@@ -498,12 +498,12 @@ export class ExtensionCatalogStore {
 
   setCapabilityGrant(
     extensionId: string,
-    grant: PiariumExtensionCapabilityGrant,
+    grant: VarinExtensionCapabilityGrant,
     expectedRevision: number,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if ((grant.realm !== "host" && grant.realm !== "surface") || typeof grant.granted !== "boolean") {
         throw new Error("Capability grant realm and granted state are invalid");
       }
@@ -527,20 +527,20 @@ export class ExtensionCatalogStore {
 
   reviewCapabilities(
     extensionId: string,
-    decisions: readonly PiariumExtensionCapabilityDecision[],
+    decisions: readonly VarinExtensionCapabilityDecision[],
     expectedRevision: number,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if (record.source.kind === "builtin") {
-        throw new Error(`Built-in Piarium extensions are managed by the distribution: ${extensionId}`);
+        throw new Error(`Built-in Varin extensions are managed by the distribution: ${extensionId}`);
       }
       const requested = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
       for (const decision of decisions) {
         const key = capabilityKey(decision);
         if (!requested.has(key)) throw new Error(`Capability was not requested by ${extensionId}: ${key}`);
-        const next: PiariumExtensionCapabilityGrant = {
+        const next: VarinExtensionCapabilityGrant = {
           ...decision,
           manifestVersion: record.manifest.version,
           updatedAt: now,
@@ -554,10 +554,10 @@ export class ExtensionCatalogStore {
     });
   }
 
-  stageCandidate(candidate: PiariumExtensionPreparedArtifact, expectedRevision: number): Promise<CatalogReadState> {
+  stageCandidate(candidate: VarinExtensionPreparedArtifact, expectedRevision: number): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[candidate.manifest.id];
-      if (!record) throw new Error(`Piarium extension is not installed: ${candidate.manifest.id}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${candidate.manifest.id}`);
       if (record.candidate?.integrity === candidate.integrity) return false;
       const selectedCapabilities = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
       const candidateCapabilities = manifestCapabilities(candidate.manifest);
@@ -582,21 +582,21 @@ export class ExtensionCatalogStore {
   reviewCandidateCapabilities(
     extensionId: string,
     candidateIntegrity: string,
-    decisions: readonly PiariumExtensionCapabilityDecision[],
+    decisions: readonly VarinExtensionCapabilityDecision[],
     expectedRevision: number,
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       const candidate = record.candidate;
       if (!candidate || candidate.integrity !== candidateIntegrity) {
-        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+        throw new Error(`Varin extension candidate is no longer current: ${extensionId}`);
       }
       const added = new Set(candidate.capabilityDelta.added.map(capabilityKey));
       for (const decision of decisions) {
         const key = capabilityKey(decision);
         if (!added.has(key)) throw new Error(`Capability is not newly requested by the candidate: ${key}`);
-        const next: PiariumExtensionCapabilityGrant = {
+        const next: VarinExtensionCapabilityGrant = {
           capability: decision.capability,
           granted: decision.granted,
           manifestVersion: candidate.manifest.version,
@@ -621,16 +621,16 @@ export class ExtensionCatalogStore {
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       const candidate = record.candidate;
       if (!candidate || candidate.integrity !== candidateIntegrity) {
-        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+        throw new Error(`Varin extension candidate is no longer current: ${extensionId}`);
       }
       if (!candidate.capabilitiesReviewed) {
-        throw new Error(`Piarium extension candidate capability changes require review: ${extensionId}`);
+        throw new Error(`Varin extension candidate capability changes require review: ${extensionId}`);
       }
       if (!candidate.applyRequested) {
-        throw new Error(`Piarium extension candidate application was not requested: ${extensionId}`);
+        throw new Error(`Varin extension candidate application was not requested: ${extensionId}`);
       }
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
@@ -652,13 +652,13 @@ export class ExtensionCatalogStore {
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       const candidate = record.candidate;
       if (!candidate || candidate.integrity !== candidateIntegrity) {
-        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+        throw new Error(`Varin extension candidate is no longer current: ${extensionId}`);
       }
       if (!candidate.capabilitiesReviewed) {
-        throw new Error(`Piarium extension candidate capability changes require review: ${extensionId}`);
+        throw new Error(`Varin extension candidate capability changes require review: ${extensionId}`);
       }
       if (candidate.applyRequested) return false;
       candidate.applyRequested = true;
@@ -674,7 +674,7 @@ export class ExtensionCatalogStore {
   ): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[extensionId];
-      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record) throw new Error(`Varin extension is not installed: ${extensionId}`);
       if (!record.candidate || record.candidate.integrity !== candidateIntegrity) return false;
       delete record.candidate;
       record.updatedAt = now;
@@ -684,7 +684,7 @@ export class ExtensionCatalogStore {
 
   async #mutate(
     expectedRevision: number,
-    mutator: (document: PiariumExtensionCatalogDocument, now: string) => boolean,
+    mutator: (document: VarinExtensionCatalogDocument, now: string) => boolean,
   ): Promise<CatalogReadState> {
     return this.#serialize(async () => {
       await mkdir(this.directory, { mode: 0o700, recursive: true });
@@ -716,7 +716,7 @@ export class ExtensionCatalogStore {
   }
 
   async #mutateCurrent(
-    mutator: (document: PiariumExtensionCatalogDocument, now: string) => boolean,
+    mutator: (document: VarinExtensionCatalogDocument, now: string) => boolean,
     reader: (now: string) => Promise<CatalogMutationRead> = () => this.#readStrictForMutation(),
   ): Promise<CatalogReadState> {
     return this.#serialize(async () => {
@@ -746,58 +746,58 @@ export class ExtensionCatalogStore {
     });
   }
 
-  async #readOrCreateIdentity(): Promise<PiariumExtensionHostIdentityDocument> {
+  async #readOrCreateIdentity(): Promise<VarinExtensionHostIdentityDocument> {
     if (this.#identity) return this.#identity;
     await mkdir(this.directory, { mode: 0o700, recursive: true });
     try {
-      this.#identity = parsePiariumExtensionHostIdentityDocument(JSON.parse(await readFile(this.identityPath, "utf8")) as unknown);
+      this.#identity = parseVarinExtensionHostIdentityDocument(JSON.parse(await readFile(this.identityPath, "utf8")) as unknown);
       return this.#identity;
     } catch (error) {
       if (errorCode(error) !== "ENOENT") {
-        const code = error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+        const code = error instanceof SyntaxError || error instanceof VarinExtensionContractError
           ? "identity_invalid"
           : "identity_read_failed";
-        throw new ExtensionCatalogStorageError(code, "Failed to read Piarium extension host identity", { cause: error });
+        throw new ExtensionCatalogStorageError(code, "Failed to read Varin extension host identity", { cause: error });
       }
     }
 
     const release = await acquireLock(this.#lockPath);
     try {
       try {
-        this.#identity = parsePiariumExtensionHostIdentityDocument(JSON.parse(await readFile(this.identityPath, "utf8")) as unknown);
+        this.#identity = parseVarinExtensionHostIdentityDocument(JSON.parse(await readFile(this.identityPath, "utf8")) as unknown);
       } catch (error) {
         if (errorCode(error) !== "ENOENT") throw error;
         this.#identity = {
           createdAt: new Date().toISOString(),
           hostId: randomUUID(),
-          schemaVersion: PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
+          schemaVersion: VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
         };
         await atomicWrite(this.identityPath, this.#identity);
       }
       return this.#identity;
     } catch (error) {
-      throw new ExtensionCatalogStorageError("identity_read_failed", "Failed to create Piarium extension host identity", { cause: error });
+      throw new ExtensionCatalogStorageError("identity_read_failed", "Failed to create Varin extension host identity", { cause: error });
     } finally {
       await release();
     }
   }
 
   async #readStrictForMutation(): Promise<{
-    document: PiariumExtensionCatalogDocument;
+    document: VarinExtensionCatalogDocument;
     storageState: "missing" | "ready";
   }> {
     try {
       return {
-        document: parsePiariumExtensionCatalogDocument(JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown),
+        document: parseVarinExtensionCatalogDocument(JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown),
         storageState: "ready",
       };
     } catch (error) {
       if (errorCode(error) === "ENOENT") return { document: emptyDocument(), storageState: "missing" };
       throw new ExtensionCatalogStorageError(
-        error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+        error instanceof SyntaxError || error instanceof VarinExtensionContractError
           ? "catalog_invalid"
           : "catalog_read_failed",
-        "Cannot mutate an unreadable Piarium extension catalog",
+        "Cannot mutate an unreadable Varin extension catalog",
         { cause: error },
       );
     }
@@ -812,17 +812,17 @@ export class ExtensionCatalogStore {
       const raw = JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown;
       const repaired = repairKnownBuiltinRecords(raw, manifests, ownedPrefix, now);
       return {
-        document: parsePiariumExtensionCatalogDocument(repaired.value),
+        document: parseVarinExtensionCatalogDocument(repaired.value),
         repaired: repaired.changed,
         storageState: "ready",
       };
     } catch (error) {
       if (errorCode(error) === "ENOENT") return { document: emptyDocument(), storageState: "missing" };
       throw new ExtensionCatalogStorageError(
-        error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+        error instanceof SyntaxError || error instanceof VarinExtensionContractError
           ? "catalog_invalid"
           : "catalog_read_failed",
-        "Cannot reconcile built-ins in an unreadable Piarium extension catalog",
+        "Cannot reconcile built-ins in an unreadable Varin extension catalog",
         { cause: error },
       );
     }
@@ -830,7 +830,7 @@ export class ExtensionCatalogStore {
 
   async #readPreservingAuthority(): Promise<CatalogReadState> {
     try {
-      const document = parsePiariumExtensionCatalogDocument(JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown);
+      const document = parseVarinExtensionCatalogDocument(JSON.parse(await readFile(this.catalogPath, "utf8")) as unknown);
       const nextFingerprint = fingerprint(document);
       if (this.#lastValid && document.revision < this.#lastValid.document.revision) {
         return this.#stale("catalog_revision_regressed", `Catalog revision regressed from ${this.#lastValid.document.revision} to ${document.revision}`);
@@ -857,17 +857,17 @@ export class ExtensionCatalogStore {
         return this.#stale("catalog_read_failed", "Current catalog storage could not be read; the last valid catalog is preserved");
       }
       throw new ExtensionCatalogStorageError(
-        error instanceof SyntaxError || error instanceof PiariumExtensionContractError
+        error instanceof SyntaxError || error instanceof VarinExtensionContractError
           ? "catalog_invalid"
           : "catalog_read_failed",
-        "Failed to read Piarium extension catalog",
+        "Failed to read Varin extension catalog",
         { cause: error },
       );
     }
   }
 
   #stateFromLastValid(): CatalogReadState {
-    if (!this.#lastValid) throw new Error("Piarium extension catalog has no valid state");
+    if (!this.#lastValid) throw new Error("Varin extension catalog has no valid state");
     return {
       authoritative: true,
       diagnostics: [],
@@ -877,7 +877,7 @@ export class ExtensionCatalogStore {
   }
 
   #stale(code: string, message: string): CatalogReadState {
-    if (!this.#lastValid) throw new Error("Piarium extension catalog has no state to preserve");
+    if (!this.#lastValid) throw new Error("Varin extension catalog has no state to preserve");
     return {
       authoritative: false,
       diagnostics: [diagnostic(code, message)],

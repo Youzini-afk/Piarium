@@ -7,7 +7,7 @@ import {
   type PackageDescriptor,
   type PiPackageScope,
   type RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +39,7 @@ import {
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
@@ -53,10 +53,10 @@ import {
 type PackageAction = 'install' | 'remove' | 'set-enabled' | 'update' | 'update-all';
 
 const PACKAGE_ACTION_SUCCESS_KEYS = {
-  install: 'settings.piarium.plugins.toast.install',
-  remove: 'settings.piarium.plugins.toast.remove',
-  update: 'settings.piarium.plugins.toast.update',
-  'update-all': 'settings.piarium.plugins.toast.updateAll',
+  install: 'settings.varin.plugins.toast.install',
+  remove: 'settings.varin.plugins.toast.remove',
+  update: 'settings.varin.plugins.toast.update',
+  'update-all': 'settings.varin.plugins.toast.updateAll',
 } satisfies Record<Exclude<PackageAction, 'set-enabled'>, I18nKey>;
 
 const packageActionLabel = (
@@ -66,20 +66,20 @@ const packageActionLabel = (
 ): string => {
   if (action === expected) {
     return expected === 'install'
-      ? t('settings.piarium.recovery.actions.installing')
+      ? t('settings.varin.recovery.actions.installing')
       : expected === 'remove'
-        ? t('settings.piarium.recovery.actions.removing')
+        ? t('settings.varin.recovery.actions.removing')
         : expected === 'update-all'
-          ? t('settings.piarium.plugins.actions.updatingAll')
-          : t('settings.piarium.recovery.actions.updating');
+          ? t('settings.varin.plugins.actions.updatingAll')
+          : t('settings.varin.recovery.actions.updating');
   }
   return expected === 'install'
-    ? t('settings.piarium.recovery.actions.install')
+    ? t('settings.varin.recovery.actions.install')
     : expected === 'remove'
-      ? t('settings.piarium.recovery.actions.remove')
+      ? t('settings.varin.recovery.actions.remove')
       : expected === 'update-all'
-        ? t('settings.piarium.plugins.actions.updateAll')
-        : t('settings.piarium.recovery.actions.update');
+        ? t('settings.varin.plugins.actions.updateAll')
+        : t('settings.varin.recovery.actions.update');
 };
 
 const PackageStatus: React.FC<{ packageInfo?: PackageDescriptor }> = ({ packageInfo }) => {
@@ -94,12 +94,12 @@ const PackageStatus: React.FC<{ packageInfo?: PackageDescriptor }> = ({ packageI
         ? 'typography-micro text-[var(--status-warning)]'
         : 'typography-micro text-muted-foreground'}>
       {configured && installed && enabled
-        ? t('settings.piarium.recovery.status.configured')
+        ? t('settings.varin.recovery.status.configured')
         : configured && !installed
-          ? t('settings.piarium.plugins.status.missing')
+          ? t('settings.varin.plugins.status.missing')
           : configured
-            ? t('settings.piarium.plugins.status.disabled')
-            : t('settings.piarium.recovery.status.notConfigured')}
+            ? t('settings.varin.plugins.status.disabled')
+            : t('settings.varin.recovery.status.notConfigured')}
     </span>
   );
 };
@@ -131,7 +131,7 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
   return (
     <SettingsSection
       settingsItem="plugins.foundation"
-      title={t('settings.piarium.plugins.foundation.title')}
+      title={t('settings.varin.plugins.foundation.title')}
       headerAction={canRestore ? (
         <Button
           type="button"
@@ -142,21 +142,21 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
           className="!font-normal"
         >
           {restoreAllBusy
-            ? t('settings.piarium.plugins.foundation.actions.restoring')
-            : t('settings.piarium.plugins.foundation.actions.restoreMissing')}
+            ? t('settings.varin.plugins.foundation.actions.restoring')
+            : t('settings.varin.plugins.foundation.actions.restoreMissing')}
         </Button>
       ) : null}
     >
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-2.5">
           <span className="typography-meta text-foreground">
-            {t('settings.piarium.plugins.foundation.actions.autoInstallNew')}
+            {t('settings.varin.plugins.foundation.actions.autoInstallNew')}
           </span>
           <Switch
             checked={status?.autoInstallNew ?? true}
             disabled={busyAction !== null || loading || status === undefined}
             onCheckedChange={onSetAutoInstallNew}
-            aria-label={t('settings.piarium.plugins.foundation.actions.autoInstallNew')}
+            aria-label={t('settings.varin.plugins.foundation.actions.autoInstallNew')}
           />
         </div>
 
@@ -165,8 +165,8 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
           const presentation = projectFoundationalPackageStatus(entry);
           const rowBusy = busyAction?.action === 'restore' && busyAction.id === integration.id;
           const actionLabel = presentation.action === 'retry'
-            ? t('settings.piarium.plugins.foundation.actions.retry')
-            : t('settings.piarium.plugins.foundation.actions.restore');
+            ? t('settings.varin.plugins.foundation.actions.retry')
+            : t('settings.varin.plugins.foundation.actions.restore');
           return (
             <div key={integration.id} className="rounded-lg border border-border/60 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -191,13 +191,13 @@ const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionPro
                     disabled={busyAction !== null || loading}
                     onClick={() => onRestore(integration.id)}
                     className="!font-normal"
-                    aria-label={t('settings.piarium.plugins.foundation.actions.itemAria', {
+                    aria-label={t('settings.varin.plugins.foundation.actions.itemAria', {
                       action: actionLabel,
                       name: integration.packageName,
                     })}
                   >
                     {rowBusy
-                      ? t('settings.piarium.plugins.foundation.actions.restoring')
+                      ? t('settings.varin.plugins.foundation.actions.restoring')
                       : actionLabel}
                   </Button>
                 ) : null}
@@ -447,7 +447,7 @@ export const PluginsPage: React.FC = () => {
     } catch (error) {
       console.error(`Failed to ${action} Pi package:`, error);
       if (isCurrent()) {
-        toast.error(t('settings.piarium.plugins.toast.failed'), {
+        toast.error(t('settings.varin.plugins.toast.failed'), {
           description: error instanceof Error ? error.message : String(error),
         });
       }
@@ -493,21 +493,21 @@ export const PluginsPage: React.FC = () => {
             (id === undefined || entry.id === id)
             && projectFoundationalPackageStatus(entry).action !== 'none'
           ));
-          toast.error(t('settings.piarium.plugins.foundation.toast.failed'), {
+          toast.error(t('settings.varin.plugins.foundation.toast.failed'), {
             ...(failed?.error ? { description: failed.error } : {}),
           });
         } else {
           toast.success(t(
             action === 'restore'
-              ? 'settings.piarium.plugins.foundation.toast.restored'
-              : 'settings.piarium.plugins.foundation.toast.autoInstallUpdated',
+              ? 'settings.varin.plugins.foundation.toast.restored'
+              : 'settings.varin.plugins.foundation.toast.autoInstallUpdated',
           ));
         }
         await refresh();
       }
     } catch (error) {
       if (isCurrent()) {
-        toast.error(t('settings.piarium.plugins.foundation.toast.failed'), {
+        toast.error(t('settings.varin.plugins.foundation.toast.failed'), {
           description: error instanceof Error ? error.message : String(error),
         });
       }
@@ -546,29 +546,29 @@ export const PluginsPage: React.FC = () => {
     recommendedExpanded
       ? 'sessions.sidebar.group.collapseAria'
       : 'sessions.sidebar.group.expandAria',
-    { label: t('settings.piarium.plugins.recommended.title') },
+    { label: t('settings.varin.plugins.recommended.title') },
   );
 
   return (
     <SettingsPageLayout
       title={t('settings.page.plugins.title')}
-      description={t('settings.piarium.plugins.description')}
+      description={t('settings.varin.plugins.description')}
       className="max-w-6xl"
       showSaveStatus={false}
     >
       <SettingsSection
         settingsItem="plugins.packages"
-        title={t('settings.piarium.plugins.configured.title')}
-        description={t('settings.piarium.plugins.configured.description')}
+        title={t('settings.varin.plugins.configured.title')}
+        description={t('settings.varin.plugins.configured.description')}
         divider={false}
       >
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-3">
           <div className="max-w-3xl">
             <p className="typography-meta text-muted-foreground">
-              {t('settings.piarium.plugins.ownership')}
+              {t('settings.varin.plugins.ownership')}
             </p>
             <p className="mt-1 typography-micro text-muted-foreground">
-              {t('settings.piarium.plugins.actions.updateAllDescription')}
+              {t('settings.varin.plugins.actions.updateAllDescription')}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -588,7 +588,7 @@ export const PluginsPage: React.FC = () => {
               disabled={isBusy || !loaded || packages.length === 0}
               onClick={() => void runPackageAction('update-all')}
               className="!font-normal"
-              title={t('settings.piarium.plugins.actions.updateAllDescription')}
+              title={t('settings.varin.plugins.actions.updateAllDescription')}
             >
               {packageActionLabel(
                 busyAction?.action === 'set-enabled' ? null : busyAction?.action ?? null,
@@ -605,14 +605,14 @@ export const PluginsPage: React.FC = () => {
               className="!font-normal gap-1.5"
             >
               <Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
-              {t('settings.piarium.recovery.actions.refresh')}
+              {t('settings.varin.recovery.actions.refresh')}
             </Button>
           </div>
         </div>
 
         {loaded && packages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center typography-ui text-muted-foreground">
-            {t('settings.piarium.plugins.configured.empty')}
+            {t('settings.varin.plugins.configured.empty')}
           </div>
         ) : null}
 
@@ -642,7 +642,7 @@ export const PluginsPage: React.FC = () => {
                     <PackageStatus packageInfo={entry} />
                     {foundationalPackage ? (
                       <span className="rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro text-primary">
-                        {t('settings.piarium.plugins.foundation.badge')}
+                        {t('settings.varin.plugins.foundation.badge')}
                       </span>
                     ) : null}
                     <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
@@ -653,7 +653,7 @@ export const PluginsPage: React.FC = () => {
                     ) : null}
                     {entry.structured ? (
                       <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
-                        {t('settings.piarium.plugins.status.structured')}
+                        {t('settings.varin.plugins.status.structured')}
                       </span>
                     ) : null}
                   </div>
@@ -672,7 +672,7 @@ export const PluginsPage: React.FC = () => {
                       entry.scope,
                       checked,
                     )}
-                    aria-label={t('settings.piarium.plugins.actions.activationAria', { name: entry.name })}
+                    aria-label={t('settings.varin.plugins.actions.activationAria', { name: entry.name })}
                   />
                   {isPiPackageUpdatable(entry.source) ? (
                     <Button
@@ -682,7 +682,7 @@ export const PluginsPage: React.FC = () => {
                       disabled={isBusy}
                       onClick={() => void runPackageAction('update', entry.source)}
                       className="!font-normal"
-                      title={t('settings.piarium.plugins.actions.updateSourceDescription')}
+                      title={t('settings.varin.plugins.actions.updateSourceDescription')}
                     >
                       {packageActionLabel(action, 'update', t)}
                     </Button>
@@ -697,7 +697,7 @@ export const PluginsPage: React.FC = () => {
                     onClick={() => openPackageConfiguration(entry)}
                     className="!font-normal"
                   >
-                    {t('settings.piarium.plugins.actions.configure')}
+                    {t('settings.varin.plugins.actions.configure')}
                   </Button>
                   <Button
                     type="button"
@@ -734,8 +734,8 @@ export const PluginsPage: React.FC = () => {
 
       <SettingsSection
         settingsItem="plugins.source"
-        title={t('settings.piarium.plugins.source.title')}
-        description={t('settings.piarium.plugins.source.description')}
+        title={t('settings.varin.plugins.source.title')}
+        description={t('settings.varin.plugins.source.description')}
       >
         <form
           className="flex flex-col gap-2 @xl:flex-row"
@@ -753,7 +753,7 @@ export const PluginsPage: React.FC = () => {
           <Input
             value={customSource}
             onChange={(event) => setCustomSource(event.target.value)}
-            placeholder={t('settings.piarium.plugins.source.placeholder')}
+            placeholder={t('settings.varin.plugins.source.placeholder')}
             disabled={isBusy}
             className="min-w-0 flex-1 font-mono"
             spellCheck={false}
@@ -781,8 +781,8 @@ export const PluginsPage: React.FC = () => {
 
       <SettingsSection
         settingsItem="plugins.recommended"
-        title={t('settings.piarium.plugins.recommended.title')}
-        description={t('settings.piarium.plugins.recommended.description')}
+        title={t('settings.varin.plugins.recommended.title')}
+        description={t('settings.varin.plugins.recommended.description')}
         headerAction={(
           <Button
             type="button"
@@ -854,7 +854,7 @@ export const PluginsPage: React.FC = () => {
                           configured.scope,
                           checked,
                         )}
-                        aria-label={t('settings.piarium.plugins.actions.activationAria', { name: configured.name })}
+                        aria-label={t('settings.varin.plugins.actions.activationAria', { name: configured.name })}
                       />
                       <Button
                         type="button"
@@ -867,8 +867,8 @@ export const PluginsPage: React.FC = () => {
                         className="!font-normal"
                       >
                         {item.workbench === 'fleet' && configured.installed
-                          ? t('settings.piarium.plugins.actions.openFleet')
-                          : t('settings.piarium.plugins.actions.configure')}
+                          ? t('settings.varin.plugins.actions.openFleet')
+                          : t('settings.varin.plugins.actions.configure')}
                       </Button>
                     </div>
                   ) : null}
@@ -878,7 +878,7 @@ export const PluginsPage: React.FC = () => {
           })}
           {loaded && missingRecommended.length === 0 ? (
             <p className="typography-meta text-[var(--status-success)]">
-              {t('settings.piarium.plugins.recommended.complete')}
+              {t('settings.varin.plugins.recommended.complete')}
             </p>
           ) : null}
         </div>

@@ -41,7 +41,7 @@ describe("root execution admission — service/registry acceptance", () => {
   });
 
   it("the real wait service cannot return into a full root pool after attention changes", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-wait-readmission-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-wait-readmission-"));
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     const controller = new AbortController();
     let pending: Promise<unknown> | undefined;
@@ -84,7 +84,7 @@ describe("root execution admission — service/registry acceptance", () => {
   });
 
   it("conversion cannot bypass admission or end the existing discussion on refusal", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-conversion-admission-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-conversion-admission-"));
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     try {
       const discussion = await registry.createThread(input("discussion"));
@@ -109,7 +109,7 @@ describe("root execution admission — service/registry acceptance", () => {
   });
 
   it("a recovered Run cannot inherit the old Run's yielded execution slot", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-recovered-admission-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-recovered-admission-"));
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     try {
       const thread = await registry.createThread(input());
@@ -128,7 +128,7 @@ describe("root execution admission — service/registry acceptance", () => {
   });
 
   it("reserves the last root slot atomically after concurrent baseline captures", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-admission-audit-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-admission-audit-"));
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     let captures = 0;
     let release!: () => void;
@@ -166,7 +166,7 @@ describe("root execution admission — service/registry acceptance", () => {
   });
 
   it("releases a captured draft when inherit input capture fails", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-inherit-cleanup-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-inherit-cleanup-"));
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     const cleanup = vi.fn(async () => undefined);
     const spawn = vi.fn();

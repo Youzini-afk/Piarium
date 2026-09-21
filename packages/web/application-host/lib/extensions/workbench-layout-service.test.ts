@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
-} from '@piarium/extension-contract';
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
+} from '@varin/extension-contract';
 import {
   createWorkbenchLayoutServiceHandler,
   registerBuiltinWorkbenchLayoutService,
 } from './workbench-layout-service.js';
-import type { HostServiceProvision } from '@piarium/extension-host';
-import type { JsonValue } from '@piarium/extension-contract';
+import type { HostServiceProvision } from '@varin/extension-host';
+import type { JsonValue } from '@varin/extension-contract';
 
 const requireObject = (value: JsonValue): Record<string, JsonValue> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected object result');
@@ -22,13 +22,13 @@ describe('built-in workbench layout service', () => {
       update: vi.fn(async (address, expectedRevision, schemaVersion, document) => ({ address, expectedRevision, schemaVersion, document })),
     };
     const handler = createWorkbenchLayoutServiceHandler(storage);
-    const read = requireObject(await handler('read', [{ profileId: 'piarium.ide', workspaceId: 'workspace-1' }]));
+    const read = requireObject(await handler('read', [{ profileId: 'varin.ide', workspaceId: 'workspace-1' }]));
     expect(read.address).toMatchObject({
-      extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+      extensionId: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
       scope: 'workspace',
     });
     await handler('write', [{
-      profileId: 'piarium.ide',
+      profileId: 'varin.ide',
       workspaceId: 'workspace-1',
       expectedRevision: 3,
       document: { schemaVersion: 1 },
@@ -46,7 +46,7 @@ describe('built-in workbench layout service', () => {
     const runtime: Parameters<typeof registerBuiltinWorkbenchLayoutService>[0] = {
       catalog: {
         snapshot: vi.fn(async () => ({
-          extensions: [{ manifest: { id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, version: '0.1.0' } }],
+          extensions: [{ manifest: { id: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, version: '0.1.0' } }],
         })),
       },
       services,
@@ -55,7 +55,7 @@ describe('built-in workbench layout service', () => {
     const dispose = await registerBuiltinWorkbenchLayoutService(runtime);
     if (!provision) throw new Error('Expected service provision');
     expect(provision.descriptor).toEqual({
-      id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+      id: VARIN_WORKBENCH_LAYOUT_SERVICE_ID,
       multiple: true,
       version: 1,
     });

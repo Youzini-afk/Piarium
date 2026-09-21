@@ -1,4 +1,4 @@
-import type { ProviderConfigDetails } from '@piarium/protocol';
+import type { ProviderConfigDetails } from '@varin/protocol';
 import { createCustomProviderFormStateFromConfig } from './customProviderForm';
 import type { CustomProviderEditableFormState } from './customProviderForm';
 

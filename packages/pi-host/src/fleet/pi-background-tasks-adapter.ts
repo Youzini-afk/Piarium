@@ -1,4 +1,4 @@
-import type { JsonValue, PiFleetActionDescriptor } from "@piarium/protocol";
+import type { JsonValue, PiFleetActionDescriptor } from "@varin/protocol";
 import { HostError } from "../errors.js";
 import {
   BG_KILL_DEADLINE_MS,
@@ -281,7 +281,7 @@ export class PiBackgroundTasksFleetAdapter implements FleetProviderAdapter {
       return Promise.reject(new Error("pi-background-tasks EventBus adapter is unavailable"));
     }
     const generation = this.#generation;
-    const requestId = `piarium-bg-${generation}-${++this.#nextRequestId}`;
+    const requestId = `varin-bg-${generation}-${++this.#nextRequestId}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);

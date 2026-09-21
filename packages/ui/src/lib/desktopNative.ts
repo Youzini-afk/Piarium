@@ -1,14 +1,14 @@
 import { hasDesktopInvoke, invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import type {
-  PiariumDesktopCommand,
-  PiariumDesktopCommandInvocation,
-  PiariumDesktopCommandResult,
-} from '@piarium/application-client';
+  VarinDesktopCommand,
+  VarinDesktopCommandInvocation,
+  VarinDesktopCommandResult,
+} from '@varin/application-client';
 
-export const invokeDesktopCommand = async <K extends PiariumDesktopCommand>(
+export const invokeDesktopCommand = async <K extends VarinDesktopCommand>(
   command: K,
-  ...invocation: PiariumDesktopCommandInvocation<K>
-): Promise<PiariumDesktopCommandResult<K> | null> => {
+  ...invocation: VarinDesktopCommandInvocation<K>
+): Promise<VarinDesktopCommandResult<K> | null> => {
   if (!hasDesktopInvoke()) {
     throw new Error('Desktop runtime is not available');
   }

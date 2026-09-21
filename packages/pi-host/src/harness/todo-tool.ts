@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { TodoUpsertResult } from "@piarium/protocol";
+import type { TodoUpsertResult } from "@varin/protocol";
 
 const TodoParams = Type.Object({
   items: Type.Array(

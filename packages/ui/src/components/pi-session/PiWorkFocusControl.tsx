@@ -1,5 +1,5 @@
 import React from 'react';
-import type { SessionSnapshot, WorkFocusId } from '@piarium/protocol';
+import type { SessionSnapshot, WorkFocusId } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import {

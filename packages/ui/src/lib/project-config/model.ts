@@ -1,40 +1,40 @@
 import type {
-  PiariumProjectAction,
-  PiariumProjectActionPlatform,
-  PiariumProjectActionsState,
-  PiariumProjectContextData,
-  PiariumProjectNotesTodos,
-  PiariumProjectPlanFileLink,
-  PiariumProjectTodoItem,
+  VarinProjectAction,
+  VarinProjectActionPlatform,
+  VarinProjectActionsState,
+  VarinProjectContextData,
+  VarinProjectNotesTodos,
+  VarinProjectPlanFileLink,
+  VarinProjectTodoItem,
 } from './types';
 
-export const PIARIUM_PROJECT_NOTES_MAX_LENGTH = 3000;
-export const PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
+export const VARIN_PROJECT_NOTES_MAX_LENGTH = 3000;
+export const VARIN_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
 const PROJECT_ACTION_NAME_MAX_LENGTH = 80;
 const PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
 const PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
 const PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
 const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
-const ACTION_PLATFORM_SET = new Set<PiariumProjectActionPlatform>(['macos', 'linux', 'windows']);
+const ACTION_PLATFORM_SET = new Set<VarinProjectActionPlatform>(['macos', 'linux', 'windows']);
 
 const trimToMaxLength = (value: string, maxLength: number): string => (
   value.length <= maxLength ? value : value.slice(0, maxLength)
 );
 
 export const sanitizeProjectNotes = (value: unknown): string => (
-  typeof value === 'string' ? trimToMaxLength(value, PIARIUM_PROJECT_NOTES_MAX_LENGTH) : ''
+  typeof value === 'string' ? trimToMaxLength(value, VARIN_PROJECT_NOTES_MAX_LENGTH) : ''
 );
 
-export const sanitizeProjectTodoItems = (value: unknown): PiariumProjectTodoItem[] => {
+export const sanitizeProjectTodoItems = (value: unknown): VarinProjectTodoItem[] => {
   if (!Array.isArray(value)) return [];
-  const sanitized: PiariumProjectTodoItem[] = [];
+  const sanitized: VarinProjectTodoItem[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     const id = typeof record.id === 'string' ? record.id.trim() : '';
     const text = trimToMaxLength(
       typeof record.text === 'string' ? record.text.trim() : '',
-      PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH,
+      VARIN_PROJECT_TODO_TEXT_MAX_LENGTH,
     );
     if (!id || !text) continue;
     sanitized.push({
@@ -49,9 +49,9 @@ export const sanitizeProjectTodoItems = (value: unknown): PiariumProjectTodoItem
   return sanitized;
 };
 
-export const sanitizeProjectPlanFileLinks = (value: unknown): PiariumProjectPlanFileLink[] => {
+export const sanitizeProjectPlanFileLinks = (value: unknown): VarinProjectPlanFileLink[] => {
   if (!Array.isArray(value)) return [];
-  const sanitized: PiariumProjectPlanFileLink[] = [];
+  const sanitized: VarinProjectPlanFileLink[] = [];
   const seenIds = new Set<string>();
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -71,13 +71,13 @@ export const sanitizeProjectPlanFileLinks = (value: unknown): PiariumProjectPlan
   return sanitized.sort((left, right) => right.createdAt - left.createdAt);
 };
 
-const sanitizeProjectActionPlatforms = (value: unknown): PiariumProjectActionPlatform[] => {
+const sanitizeProjectActionPlatforms = (value: unknown): VarinProjectActionPlatform[] => {
   if (!Array.isArray(value)) return [];
-  const result: PiariumProjectActionPlatform[] = [];
-  const seen = new Set<PiariumProjectActionPlatform>();
+  const result: VarinProjectActionPlatform[] = [];
+  const seen = new Set<VarinProjectActionPlatform>();
   for (const entry of value) {
     if (typeof entry !== 'string') continue;
-    const platform = entry.trim().toLowerCase() as PiariumProjectActionPlatform;
+    const platform = entry.trim().toLowerCase() as VarinProjectActionPlatform;
     if (!ACTION_PLATFORM_SET.has(platform) || seen.has(platform)) continue;
     seen.add(platform);
     result.push(platform);
@@ -85,9 +85,9 @@ const sanitizeProjectActionPlatforms = (value: unknown): PiariumProjectActionPla
   return result;
 };
 
-export const sanitizeProjectActions = (value: unknown): PiariumProjectAction[] => {
+export const sanitizeProjectActions = (value: unknown): VarinProjectAction[] => {
   if (!Array.isArray(value)) return [];
-  const result: PiariumProjectAction[] = [];
+  const result: VarinProjectAction[] = [];
   const seenIds = new Set<string>();
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -130,7 +130,7 @@ export const sanitizeProjectActions = (value: unknown): PiariumProjectAction[] =
 export const sanitizeProjectActionsState = (value: {
   actions?: unknown;
   primaryActionId?: unknown;
-} | null | undefined): PiariumProjectActionsState => {
+} | null | undefined): VarinProjectActionsState => {
   const actions = sanitizeProjectActions(value?.actions);
   const candidate = typeof value?.primaryActionId === 'string' ? value.primaryActionId.trim() : '';
   return {
@@ -142,7 +142,7 @@ export const sanitizeProjectActionsState = (value: {
 export const sanitizeProjectNotesAndTodos = (value: {
   notes?: unknown;
   todos?: unknown;
-} | null | undefined): PiariumProjectNotesTodos => ({
+} | null | undefined): VarinProjectNotesTodos => ({
   notes: sanitizeProjectNotes(value?.notes),
   todos: sanitizeProjectTodoItems(value?.todos),
 });
@@ -151,7 +151,7 @@ export const sanitizeProjectContextData = (value: {
   notes?: unknown;
   todos?: unknown;
   plans?: unknown;
-} | null | undefined): PiariumProjectContextData => ({
+} | null | undefined): VarinProjectContextData => ({
   ...sanitizeProjectNotesAndTodos(value),
   plans: sanitizeProjectPlanFileLinks(value?.plans),
 });

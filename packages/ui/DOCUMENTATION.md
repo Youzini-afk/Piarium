@@ -1,6 +1,6 @@
 # Shared UI architecture and conventions
 
-`@piarium/ui` is the React surface shared by Web, Electron, and mobile. It owns
+`@varin/ui` is the React surface shared by Web, Electron, and mobile. It owns
 presentation and client-side kernels, not privileged filesystem, credential, shell, or process work.
 Surface-specific packages provide `RuntimeAPIs` and host bridges; shared components consume those
 contracts without hardcoding an origin, port, desktop IPC channel, or local path.
@@ -22,7 +22,7 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
   framework-neutral Agent/editor kernel.
 
 Runtime API types and auth/fetch/URL/switch primitives are imported directly from
-`@piarium/application-client`; UI-owned forwarding modules are not part of the boundary.
+`@varin/application-client`; UI-owned forwarding modules are not part of the boundary.
 
 ## Theme and component system
 
@@ -62,7 +62,7 @@ IDE open. The Host profile document remains the sole active-shell authority; com
 refresh the return preference, while failed switches preserve it. Both controls leave work focus alone
 and actual shell changes use the existing staged transition and animation.
 
-Piarium themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
+Varin themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,
 primary describes an action, status colors describe feedback, and syntax colors remain code-specific.
 When a third-party renderer needs resolved colors, `useThemeSystem()` is the adapter; ordinary React

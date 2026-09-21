@@ -34,7 +34,7 @@ const registerModels = (services: AgentSessionServices, models: Model<string>[])
  */
 describe("frozen launch model", () => {
   it("creates the session on the caller-selected model, not the configured default", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-frozen-model-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-frozen-model-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -65,7 +65,7 @@ describe("frozen launch model", () => {
   });
 
   it("reopens a retained session on the new frozen model and records the switch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-frozen-reopen-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-frozen-reopen-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);

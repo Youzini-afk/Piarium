@@ -181,46 +181,46 @@ const startServer = (descriptor) => new LspClient(spawn(
 ));
 
 const fileNameForProvider = (providerId) => ({
-  'piarium.python-language': 'sample.py',
-  'piarium.html-language': 'sample.html',
-  'piarium.css-language': 'sample.css',
-  'piarium.json-language': 'sample.json',
-  'piarium.yaml-language': 'sample.yaml',
-  'piarium.bash-language': 'sample.sh',
+  'varin.python-language': 'sample.py',
+  'varin.html-language': 'sample.html',
+  'varin.css-language': 'sample.css',
+  'varin.json-language': 'sample.json',
+  'varin.yaml-language': 'sample.yaml',
+  'varin.bash-language': 'sample.sh',
 }[providerId]);
 
 const documentForProvider = (providerId) => ({
-  'piarium.python-language': {
+  'varin.python-language': {
     languageId: 'python',
     text: 'def greet(name: str) -> str:\n    return name\n',
     method: 'textDocument/documentSymbol',
     check: (result) => { if (!result.some((symbol) => symbol.name === 'greet')) throw new Error(`python symbols: ${JSON.stringify(result)}`); },
   },
-  'piarium.html-language': {
+  'varin.html-language': {
     languageId: 'html',
     text: '<section><h1 id="title">Hello</h1></section>\n',
     method: 'textDocument/documentSymbol',
     check: (result) => assert.ok(result.some((symbol) => symbol.name === 'section')),
   },
-  'piarium.css-language': {
+  'varin.css-language': {
     languageId: 'css',
     text: '.button { color: red; }\n',
     method: 'textDocument/documentSymbol',
     check: (result) => assert.ok(result.some((symbol) => symbol.name === '.button')),
   },
-  'piarium.json-language': {
+  'varin.json-language': {
     languageId: 'json',
-    text: '{"name":"Piarium","enabled":true}\n',
+    text: '{"name":"Varin","enabled":true}\n',
     method: 'textDocument/documentSymbol',
     check: (result) => assert.ok(result.some((symbol) => symbol.name === 'name')),
   },
-  'piarium.yaml-language': {
+  'varin.yaml-language': {
     languageId: 'yaml',
-    text: 'name: Piarium\nenabled: true\n',
+    text: 'name: Varin\nenabled: true\n',
     method: 'textDocument/documentSymbol',
     check: (result) => assert.ok(result.some((symbol) => symbol.name === 'name')),
   },
-  'piarium.bash-language': {
+  'varin.bash-language': {
     languageId: 'shellscript',
     text: 'greeting=world\necho $greeting\n',
     method: 'textDocument/hover',
@@ -230,7 +230,7 @@ const documentForProvider = (providerId) => ({
 }[providerId]);
 
 test('built-in Host entrypoint registers and runs every packaged language provider from one copied package', async () => {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), 'piarium-language-servers-'));
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'varin-language-servers-'));
   const copiedRoot = join(temporaryRoot, 'language-servers');
   await cp(languageServersRoot, copiedRoot, { recursive: true });
   const rootUri = pathToFileURL(temporaryRoot).toString();
@@ -269,12 +269,12 @@ test('built-in Host entrypoint registers and runs every packaged language provid
     assert.deepEqual(
       registrations.map(({ providerId }) => providerId),
       [
-        'piarium.python-language',
-        'piarium.html-language',
-        'piarium.css-language',
-        'piarium.json-language',
-        'piarium.yaml-language',
-        'piarium.bash-language',
+        'varin.python-language',
+        'varin.html-language',
+        'varin.css-language',
+        'varin.json-language',
+        'varin.yaml-language',
+        'varin.bash-language',
       ],
     );
     for (const registration of registrations) {

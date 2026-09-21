@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import type { HarnessActorContext, HarnessServiceMap } from "@varin/protocol";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
@@ -29,7 +29,7 @@ const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
 async function fixture(options?: { attachGit?: () => Promise<void> }) {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-virtual-write-invariants-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-virtual-write-invariants-"));
   const workspace = path.join(root, "workspace");
   const recoveryRoot = path.join(root, "recovery");
   const scratch = path.join(root, "scratch");

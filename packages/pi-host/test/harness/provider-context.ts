@@ -24,8 +24,8 @@ export function serializedToolResult(context: Context, toolName: string): string
 function isTransientRequestObservation(message: ProviderMessage): boolean {
   if (message.role !== "user") return false;
   const text = providerMessageText(message).trimStart();
-  return text.startsWith("<piarium-status")
-    || text.startsWith('<piarium-context status="unavailable"');
+  return text.startsWith("<varin-status")
+    || text.startsWith('<varin-context status="unavailable"');
 }
 
 /**
@@ -41,6 +41,6 @@ export function persistentProviderMessages(context: Context): ProviderMessage[] 
 
 export function providerRosterMessages(context: Context): ProviderMessage[] {
   return context.messages.filter((message) => (
-    message.role === "user" && providerMessageText(message).trimStart().startsWith("<piarium-status")
+    message.role === "user" && providerMessageText(message).trimStart().startsWith("<varin-status")
   ));
 }

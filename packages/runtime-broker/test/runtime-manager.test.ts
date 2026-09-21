@@ -3,14 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { HostHandshakeResult, PiRuntimeInstallation } from "@piarium/protocol";
-import type { RuntimeCandidate } from "@piarium/pi-host/discovery";
+import type { HostHandshakeResult, PiRuntimeInstallation } from "@varin/protocol";
+import type { RuntimeCandidate } from "@varin/pi-host/discovery";
 import { PiHostEntryUnavailableError } from "../src/errors.js";
 import { PiRuntimeManager } from "../src/runtime-manager.js";
 import { saveRuntimeSelection } from "../src/runtime-selection-store.js";
 
 const SYSTEM_ROOT = "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent";
-const BUNDLED_ROOT = "C:\\Piarium\\bundled\\pi";
+const BUNDLED_ROOT = "C:\\Varin\\bundled\\pi";
 const CUSTOM_ROOT = "D:\\other\\pi-coding-agent";
 const TARGET_VERSION = "0.84.1";
 
@@ -40,7 +40,7 @@ const bundledReady: RuntimeCandidate = {
   available: true,
   compatible: true,
   id: "bundled",
-  nodePath: "C:\\Piarium\\node.exe",
+  nodePath: "C:\\Varin\\node.exe",
   packageRoot: BUNDLED_ROOT,
   source: "bundled",
   version: TARGET_VERSION,
@@ -82,7 +82,7 @@ const handshakeFor = (
 });
 
 const withDataDir = async (run: (dataDir: string) => Promise<void>): Promise<void> => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-runtime-manager-"));
   try {
     await run(dataDir);
   } finally {

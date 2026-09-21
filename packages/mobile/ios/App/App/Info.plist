@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Piarium</string>
+	<string>Varin</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -32,21 +32,21 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Piarium connects to your Piarium server on the local network.</string>
+	<string>Varin connects to your Varin server on the local network.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Piarium uses the camera to scan a server pairing QR code.</string>
+	<string>Varin uses the camera to scan a server pairing QR code.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Piarium uses the microphone for voice dictation in the chat composer.</string>
+	<string>Varin uses the microphone for voice dictation in the chat composer.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 				<key>CFBundleURLName</key>
-				<string>dev.piarium.mobile.deeplink</string>
+				<string>dev.varin.mobile.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-					<string>piarium</string>
+					<string>varin</string>
 			</array>
 		</dict>
 	</array>

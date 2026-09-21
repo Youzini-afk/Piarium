@@ -114,7 +114,7 @@ export const createRecoveryFileStore = ({
   };
 
   const replaceFile = async (source: string, target: string): Promise<void> => {
-    const temporary = `${target}.piarium-recovery-${randomUUID()}.tmp`;
+    const temporary = `${target}.varin-recovery-${randomUUID()}.tmp`;
     try {
       // Reflink when the filesystem supports it (ReFS/APFS/Btrfs): the temp
       // file shares extents with the content-addressed object and CoW on write.
@@ -124,7 +124,7 @@ export const createRecoveryFileStore = ({
       } catch (error) {
         const code = (error as NodeJS.ErrnoException)?.code;
         if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'EPERM') throw error;
-        const previous = `${target}.piarium-recovery-${randomUUID()}.previous`;
+        const previous = `${target}.varin-recovery-${randomUUID()}.previous`;
         let preserved = false;
         try {
           await fsPromises.rename(target, previous);

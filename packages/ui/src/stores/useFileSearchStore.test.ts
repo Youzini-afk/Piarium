@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { switchRuntimeEndpoint } from '@piarium/application-client';
+import { switchRuntimeEndpoint } from '@varin/application-client';
 
 type Deferred<T> = {
   promise: Promise<T>;

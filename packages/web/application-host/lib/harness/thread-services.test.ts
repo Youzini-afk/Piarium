@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadKillService, createThreadMergeService, createThreadSendService, createThreadWaitService } from "./thread-services.js";
 import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
-import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
+import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@varin/protocol";
 
 const prepareIsolatedBranch = vi.fn(async () => ({
   branchId: "thread-baseline",
@@ -1673,7 +1673,7 @@ describe("thread services", () => {
       task: string;
       requestId: string;
       from: { kind: "thread"; id: string };
-      frozen: NonNullable<import("@piarium/protocol").ThreadRunFrozenConfig>;
+      frozen: NonNullable<import("@varin/protocol").ThreadRunFrozenConfig>;
     }) => ({ runId: "run-upgraded" }));
     const service = createThreadSendService({
       threadRegistry: registry,

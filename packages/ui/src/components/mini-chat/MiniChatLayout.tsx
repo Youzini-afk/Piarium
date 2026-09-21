@@ -34,7 +34,7 @@ const normalizePath = (value: string | null | undefined): string => {
 const compactPath = (value: string | null | undefined): string => {
   const path = normalizePath(value);
   if (!path) return '';
-  const home = typeof window !== 'undefined' ? normalizePath(window.__PIARIUM_HOME__) : '';
+  const home = typeof window !== 'undefined' ? normalizePath(window.__VARIN_HOME__) : '';
   if (home && path === home) return '~';
   if (home && path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   const segments = path.split('/').filter(Boolean);
@@ -59,7 +59,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const runtimeApis = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const [pinned, setPinned] = React.useState(false);
-  const macosMajor = typeof window !== 'undefined' ? window.__PIARIUM_MACOS_MAJOR__ ?? 0 : 0;
+  const macosMajor = typeof window !== 'undefined' ? window.__VARIN_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const macosHeaderSizeClass = hasMacTrafficLights
@@ -84,7 +84,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const projectLabel = project?.label?.trim()
     || project?.path.split(/[\\/]/).filter(Boolean).at(-1)
     || directoryLabel
-    || 'Piarium';
+    || 'Varin';
   const branchLabel = useGitBranchLabel(openDirectory || null);
   const stats = record?.stats;
   const contextLimit = snapshot?.model?.contextWindow ?? 0;

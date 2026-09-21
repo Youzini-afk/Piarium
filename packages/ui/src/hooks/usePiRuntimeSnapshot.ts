@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import type { PiRuntimeSnapshot } from '@varin/protocol';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
 

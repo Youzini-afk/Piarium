@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-  isPiariumExtensionId,
-  type PiariumEditorDocumentController,
-  type PiariumEditorMonacoServiceV1,
-  type PiariumEditorMonacoStateResultV1,
-  type PiariumEditorMonacoViewResultV1,
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  isVarinExtensionId,
+  type VarinEditorDocumentController,
+  type VarinEditorMonacoServiceV1,
+  type VarinEditorMonacoStateResultV1,
+  type VarinEditorMonacoViewResultV1,
 } from "../src/index.js";
 
 test("public editor contracts stay framework-neutral and version the optional Monaco service", () => {
-  assert.equal(PIARIUM_EDITOR_MONACO_SERVICE_ID, "piarium.editor.monaco");
-  assert.equal(PIARIUM_EDITOR_MONACO_SERVICE_VERSION, 1);
-  assert.equal(isPiariumExtensionId(PIARIUM_EDITOR_MONACO_SERVICE_ID), true);
+  assert.equal(VARIN_EDITOR_MONACO_SERVICE_ID, "varin.editor.monaco");
+  assert.equal(VARIN_EDITOR_MONACO_SERVICE_VERSION, 1);
+  assert.equal(isVarinExtensionId(VARIN_EDITOR_MONACO_SERVICE_ID), true);
 
-  const controller = null as PiariumEditorDocumentController | null;
-  const service = null as PiariumEditorMonacoServiceV1 | null;
-  const activeView: PiariumEditorMonacoViewResultV1 = {
+  const controller = null as VarinEditorDocumentController | null;
+  const service = null as VarinEditorMonacoServiceV1 | null;
+  const activeView: VarinEditorMonacoViewResultV1 = {
     status: "ready",
     view: {
       documentVersion: 4,
@@ -25,7 +25,7 @@ test("public editor contracts stay framework-neutral and version the optional Mo
       generation: 2,
       kind: "text",
       languageId: "typescript",
-      providerId: "piarium.builtin.text",
+      providerId: "varin.builtin.text",
       resource: { resourceId: "src/main.ts", workspaceId: "workspace" },
       selection: {
         start: { column: 1, line: 1 },
@@ -34,7 +34,7 @@ test("public editor contracts stay framework-neutral and version the optional Mo
       viewId: "view-1",
     },
   };
-  const state: PiariumEditorMonacoStateResultV1 = {
+  const state: VarinEditorMonacoStateResultV1 = {
     status: "ready",
     state: { activeViewId: "view-1", revision: 3, views: [activeView.view] },
   };

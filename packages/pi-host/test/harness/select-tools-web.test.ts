@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
-import { DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@piarium/protocol";
+import { DEFAULT_HARNESS_SETTINGS, type HarnessSettings } from "@varin/protocol";
 
 function createBridge(): HostServicesBridge {
   return new HostServicesBridge({

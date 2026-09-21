@@ -1,9 +1,9 @@
 {
-  "name": "@piarium/extension-react",
+  "name": "@varin/extension-react",
   "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Optional React 19 adapter for Piarium Surface extensions.",
+  "description": "Optional React 19 adapter for Varin Surface extensions.",
   "files": [
     "dist"
   ],
@@ -17,11 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "url": "https://github.com/Youzini-afk/Varin.git",
     "directory": "packages/extension-react"
   },
-  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-react",
-  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "homepage": "https://github.com/Youzini-afk/Varin/tree/main/packages/extension-react",
+  "bugs": "https://github.com/Youzini-afk/Varin/issues",
   "publishConfig": {
     "access": "public"
   },
@@ -34,7 +34,7 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-sdk": "0.2.0"
+    "@varin/extension-sdk": "0.2.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

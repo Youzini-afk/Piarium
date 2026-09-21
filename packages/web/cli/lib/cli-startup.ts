@@ -9,7 +9,7 @@ import { getDataDir } from './cli-paths.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
 import type { CliOptions } from './cli-types.js';
 
-const STARTUP_SERVICE_ID = 'dev.piarium.web';
+const STARTUP_SERVICE_ID = 'dev.varin.web';
 const cliDirectory = path.dirname(fileURLToPath(import.meta.url));
 const currentUserId = (): number => {
   if (typeof process.getuid !== 'function') throw new Error('User startup integration requires a POSIX user id');
@@ -38,7 +38,7 @@ function getStartupServicePaths(): StartupServicePaths {
   if (process.platform === 'linux') {
     return {
       platform: 'linux',
-      servicePath: path.join(os.homedir(), '.config', 'systemd', 'user', 'piarium.service'),
+      servicePath: path.join(os.homedir(), '.config', 'systemd', 'user', 'varin.service'),
     };
   }
   if (process.platform === 'win32') {
@@ -89,7 +89,7 @@ function getStartupEnvFilePath(): string {
 }
 
 function getMacosStartupWrapperPath(): string {
-  return path.join(getDataDir(), 'bin', 'Piarium');
+  return path.join(getDataDir(), 'bin', 'Varin');
 }
 
 function collectStartupEnv(options: CliOptions = {}): Record<string, string> {
@@ -101,13 +101,13 @@ function collectStartupEnv(options: CliOptions = {}): Record<string, string> {
 
   const uiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
   if (uiPassword) {
-    env.PIARIUM_UI_PASSWORD = uiPassword;
+    env.VARIN_UI_PASSWORD = uiPassword;
   }
   if (options.apiOnly === true) {
-    env.PIARIUM_API_ONLY = 'true';
+    env.VARIN_API_ONLY = 'true';
   }
-  if (typeof process.env.PIARIUM_DATA_DIR === 'string' && process.env.PIARIUM_DATA_DIR.trim().length > 0) {
-    env.PIARIUM_DATA_DIR = path.resolve(process.env.PIARIUM_DATA_DIR.trim());
+  if (typeof process.env.VARIN_DATA_DIR === 'string' && process.env.VARIN_DATA_DIR.trim().length > 0) {
+    env.VARIN_DATA_DIR = path.resolve(process.env.VARIN_DATA_DIR.trim());
   }
   return env;
 }
@@ -209,7 +209,7 @@ function buildMacosLaunchAgent(options: CliOptions = {}): string {
   const wrapperPath = writeMacosStartupWrapper(options);
   const args = [wrapperPath];
   const env = collectStartupEnv(options);
-  const logDir = path.join(os.homedir(), 'Library', 'Logs', 'Piarium');
+  const logDir = path.join(os.homedir(), 'Library', 'Logs', 'Varin');
   const argXml = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join('\n');
   const envXml = Object.entries(env).length > 0
     ? `  <key>EnvironmentVariables</key>\n  <dict>\n${Object.entries(env).map(([key, value]) => `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`).join('\n')}\n  </dict>\n`
@@ -245,7 +245,7 @@ function buildSystemdUserService(options: CliOptions = {}): string {
   const args = buildStartupArgs(options).map((arg) => `"${systemdEscapeArg(arg)}"`).join(' ');
   const envFilePath = getStartupEnvFilePath();
   return `[Unit]
-Description=Piarium web server
+Description=Varin web server
 After=network-online.target
 
 [Service]
@@ -290,8 +290,8 @@ function getStartupStatus(): StartupStatus {
     return { supported: true, platform: paths.platform, enabled: result.status === 0, active: null, servicePath: paths.servicePath };
   }
   if (paths.platform === 'linux') {
-    const enabledResult = runStartupCommand('systemctl', ['--user', 'is-enabled', 'piarium.service'], { allowFailure: true });
-    const activeResult = runStartupCommand('systemctl', ['--user', 'is-active', 'piarium.service'], { allowFailure: true });
+    const enabledResult = runStartupCommand('systemctl', ['--user', 'is-enabled', 'varin.service'], { allowFailure: true });
+    const activeResult = runStartupCommand('systemctl', ['--user', 'is-active', 'varin.service'], { allowFailure: true });
     const activeState = (activeResult.stdout || '').trim() || 'inactive';
     return {
       supported: true,
@@ -320,7 +320,7 @@ function enableStartupService(options: CliOptions = {}): StartupStatus {
   if (paths.platform === 'macos') {
     removeStartupEnvFile();
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
-    fs.mkdirSync(path.join(os.homedir(), 'Library', 'Logs', 'Piarium'), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.join(os.homedir(), 'Library', 'Logs', 'Varin'), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildMacosLaunchAgent(options), { mode: 0o600 });
     runStartupCommand('/bin/launchctl', ['bootout', `gui/${currentUserId()}`, paths.servicePath], { allowFailure: true });
     runStartupCommand('/bin/launchctl', ['bootstrap', `gui/${currentUserId()}`, paths.servicePath]);
@@ -333,7 +333,7 @@ function enableStartupService(options: CliOptions = {}): StartupStatus {
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildSystemdUserService(options), { mode: 0o600 });
     runStartupCommand('systemctl', ['--user', 'daemon-reload']);
-    runStartupCommand('systemctl', ['--user', 'enable', '--now', 'piarium.service']);
+    runStartupCommand('systemctl', ['--user', 'enable', '--now', 'varin.service']);
     return getStartupStatus();
   }
 
@@ -372,7 +372,7 @@ function disableStartupService(): StartupStatus {
   }
 
   if (paths.platform === 'linux') {
-    runStartupCommand('systemctl', ['--user', 'disable', '--now', 'piarium.service'], { allowFailure: true });
+    runStartupCommand('systemctl', ['--user', 'disable', '--now', 'varin.service'], { allowFailure: true });
     try { fs.unlinkSync(paths.servicePath); } catch {
     // Best-effort operation; continue when it is unavailable.
   }

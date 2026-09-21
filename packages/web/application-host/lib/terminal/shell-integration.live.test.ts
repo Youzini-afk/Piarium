@@ -5,7 +5,7 @@ import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-he
 import type { TerminalCommandRecord } from "./session-api.js";
 
 const gitBashCandidates = [
-  process.env.PIARIUM_TERMINAL_SHELL,
+  process.env.VARIN_TERMINAL_SHELL,
   "C:/Program Files/Git/bin/bash.exe",
   "C:/Program Files/Git/usr/bin/bash.exe",
 ].filter((value): value is string => typeof value === "string" && value.length > 0);
@@ -53,12 +53,12 @@ describe("live shell integration", () => {
       while (Date.now() < deadline && runtime.inspectSession("live-user")?.integration !== "ready") {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      handle.write("echo piarium-live-probe\r");
+      handle.write("echo varin-live-probe\r");
       while (Date.now() < deadline && seen.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       expect(seen[0]).toMatchObject({
-        command: expect.stringContaining("echo piarium-live-probe"),
+        command: expect.stringContaining("echo varin-live-probe"),
         owner: "user",
         integration: "osc-633",
         terminalId: "live-user",

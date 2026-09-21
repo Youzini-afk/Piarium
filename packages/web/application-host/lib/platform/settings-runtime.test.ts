@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import type { PiariumSettingsDocument } from '@piarium/settings-store';
+import type { VarinSettingsDocument } from '@varin/settings-store';
 import { createSettingsRuntime } from './settings-runtime.js';
 
 const createRuntime = async (syncPresets: (presets: unknown) => Promise<void> = async () => {}) => {
-  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'piarium-settings-runtime-'));
+  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'varin-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
     fsPromises,
     path,
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
-    sanitizeSettingsUpdate: (settings) => settings as PiariumSettingsDocument,
+    sanitizeSettingsUpdate: (settings) => settings as VarinSettingsDocument,
     mergePersistedSettings: (_current, changes) => changes,
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     formatSettingsResponse: (settings) => settings,
@@ -35,10 +35,10 @@ describe('settings runtime', () => {
   it('reads the current settings document without rewriting it', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {
-      const source = '{"themeId":"piarium-dark"}\n';
+      const source = '{"themeId":"varin-dark"}\n';
       await fsPromises.writeFile(settingsFilePath, source, 'utf8');
 
-      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ themeId: 'piarium-dark' });
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ themeId: 'varin-dark' });
       await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(source);
     } finally {
       await cleanup();
@@ -88,7 +88,7 @@ describe('settings runtime', () => {
     try {
       await runtime.persistSettings({ managedRemoteTunnelPresets: [{ id: 'one', name: 'One', hostname: 'one.test' }] });
       const current = await runtime.readSettingsFromDisk();
-      const revision = (document: PiariumSettingsDocument) => JSON.stringify(document);
+      const revision = (document: VarinSettingsDocument) => JSON.stringify(document);
       await runtime.persistSettingsCas({}, ['managedRemoteTunnelPresets'], revision(current), revision);
       expect(synchronized).toEqual([[{ id: 'one', name: 'One', hostname: 'one.test' }], undefined]);
     } finally {

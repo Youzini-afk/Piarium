@@ -1,4 +1,4 @@
-import { type PiConfigTextFormat } from "@piarium/protocol";
+import { type PiConfigTextFormat } from "@varin/protocol";
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { HostError } from "./errors.js";
 import {

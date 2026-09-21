@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { PiMessage, SessionSnapshot, SessionStats } from "@piarium/protocol";
+import type { PiMessage, SessionSnapshot, SessionStats } from "@varin/protocol";
 import { createResearchRootRuntime } from "./research-root-runtime.js";
 import { createThreadRegistry } from "./thread-registry.js";
 
@@ -89,7 +89,7 @@ describe("research root runtime", () => {
   });
 
   it("binds before forwarding execution events, reuses one root, and never tombstones the user session", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-research-root-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-research-root-"));
     dataDirs.push(dataDir);
     let registry = createThreadRegistry({ dataDir, hostId: "host" });
     let currentSnapshot = snapshot("research");

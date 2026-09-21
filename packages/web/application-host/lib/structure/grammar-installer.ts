@@ -10,7 +10,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { extract } from "tar";
-import type { LanguageSupportInstallResult } from "@piarium/application-client";
+import type { LanguageSupportInstallResult } from "@varin/application-client";
 import { MAX_USER_GRAMMAR_BYTES } from "./constants.js";
 import { treeSitterLanguageSpec } from "./languages.js";
 import type { GrammarPackManifest } from "./grammar-manifest.js";
@@ -63,7 +63,7 @@ export async function extractFilesFromTarball(
 ): Promise<Map<string, Uint8Array>> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   const wanted = new Set(paths.map(normalizeEntry));
-  const work = await mkdtemp(join(tmpdir(), "piarium-grammar-extract-"));
+  const work = await mkdtemp(join(tmpdir(), "varin-grammar-extract-"));
   const archive = join(work, "pack.tgz");
   try {
     await writeFile(archive, tarball);

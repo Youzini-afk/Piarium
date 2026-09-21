@@ -1,19 +1,19 @@
 import type {
-  PiariumApplicationSurface,
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionStaticContribution,
-  PiariumWorkbenchShellContributionDataV1,
-  PiariumWorkbenchShellSurfaceSeams,
-} from '@piarium/extension-contract';
+  VarinApplicationSurface,
+  VarinExtensionCatalogEntry,
+  VarinExtensionStaticContribution,
+  VarinWorkbenchShellContributionDataV1,
+  VarinWorkbenchShellSurfaceSeams,
+} from '@varin/extension-contract';
 import {
-  PIARIUM_DEBUG_SERVICE_ID,
-  PIARIUM_LANGUAGE_SERVICE_ID,
-  PIARIUM_TASKS_SERVICE_ID,
-  PIARIUM_TEST_SERVICE_ID,
-  checkPiariumContributionCompatibility,
-  parsePiariumWorkbenchShellContributionData,
-  resolvePiariumWorkbenchShellSurfaceSeams,
-} from '@piarium/extension-contract';
+  VARIN_DEBUG_SERVICE_ID,
+  VARIN_LANGUAGE_SERVICE_ID,
+  VARIN_TASKS_SERVICE_ID,
+  VARIN_TEST_SERVICE_ID,
+  checkVarinContributionCompatibility,
+  parseVarinWorkbenchShellContributionData,
+  resolveVarinWorkbenchShellSurfaceSeams,
+} from '@varin/extension-contract';
 
 type WorkbenchInspectorContribution = {
   generation?: number;
@@ -28,7 +28,7 @@ type WorkbenchInspectorContribution = {
 };
 
 export const describeWorkbenchContributionPlacement = (
-  contribution: Pick<PiariumExtensionStaticContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractVersion'>,
+  contribution: Pick<VarinExtensionStaticContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractVersion'>,
 ): Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractCompatibility' | 'contractVersion' | 'supportedVersions'> => {
   const next: Pick<WorkbenchInspectorContribution, 'id' | 'kind' | 'placement' | 'replacement' | 'contractCompatibility' | 'contractVersion' | 'supportedVersions'> = {
     id: contribution.id,
@@ -36,7 +36,7 @@ export const describeWorkbenchContributionPlacement = (
   };
   if (contribution.placement?.slot) next.placement = contribution.placement.slot;
   if (contribution.replacement?.target) next.replacement = contribution.replacement.target;
-  const compatibility = checkPiariumContributionCompatibility(contribution.kind, contribution.contractVersion);
+  const compatibility = checkVarinContributionCompatibility(contribution.kind, contribution.contractVersion);
   next.contractVersion = contribution.contractVersion;
   if (compatibility.status === 'supported') {
     next.contractCompatibility = 'supported';
@@ -50,7 +50,7 @@ export const describeWorkbenchContributionPlacement = (
 export type WorkbenchInspectorShellSeamSummary = {
   shellContributionId: string;
   shellExtensionId: string;
-  surface: PiariumApplicationSurface;
+  surface: VarinApplicationSurface;
   contractVersion: number | null;
   declaredReplacementTargets: readonly string[];
   declaredSlots: readonly string[];
@@ -66,8 +66,8 @@ export type WorkbenchInspectorShellSeamSummary = {
 export const describeWorkbenchShellSeams = (
   shellContributionId: string | undefined,
   shellExtensionId: string | undefined,
-  catalog: readonly PiariumExtensionCatalogEntry[],
-  surface: PiariumApplicationSurface,
+  catalog: readonly VarinExtensionCatalogEntry[],
+  surface: VarinApplicationSurface,
 ): WorkbenchInspectorShellSeamSummary | null => {
   if (!shellContributionId || !shellExtensionId) return null;
   const entry = catalog.find((candidate) => candidate.manifest.id === shellExtensionId);
@@ -75,21 +75,21 @@ export const describeWorkbenchShellSeams = (
   const contribution = entry.manifest.contributions?.find((item) => item.id === shellContributionId);
   if (!contribution) return null;
   if (!contribution.supports.includes(surface)) return null;
-  let data: PiariumWorkbenchShellContributionDataV1 | null = null;
+  let data: VarinWorkbenchShellContributionDataV1 | null = null;
   let contractValid = true;
   let contractIssues: string[] = [];
   try {
-    data = parsePiariumWorkbenchShellContributionData(contribution.data, contribution.supports);
+    data = parseVarinWorkbenchShellContributionData(contribution.data, contribution.supports);
   } catch (error) {
     contractValid = false;
     contractIssues = Array.isArray((error as { issues?: unknown }).issues)
       ? [...(error as { issues: string[] }).issues]
       : [error instanceof Error ? error.message : String(error)];
   }
-  let seams: PiariumWorkbenchShellSurfaceSeams | null = null;
+  let seams: VarinWorkbenchShellSurfaceSeams | null = null;
   if (data) {
     try {
-      seams = resolvePiariumWorkbenchShellSurfaceSeams(data, surface);
+      seams = resolveVarinWorkbenchShellSurfaceSeams(data, surface);
     } catch {
       contractValid = false;
     }
@@ -107,13 +107,13 @@ export const describeWorkbenchShellSeams = (
 };
 
 export const workbenchInspectorOwnsLanguage = (serviceId: string): boolean => (
-  serviceId === PIARIUM_LANGUAGE_SERVICE_ID
+  serviceId === VARIN_LANGUAGE_SERVICE_ID
 );
 
 export const workbenchInspectorOwnsRun = (serviceId: string): boolean => (
-  serviceId === PIARIUM_DEBUG_SERVICE_ID
-  || serviceId === PIARIUM_TEST_SERVICE_ID
-  || serviceId === PIARIUM_TASKS_SERVICE_ID
+  serviceId === VARIN_DEBUG_SERVICE_ID
+  || serviceId === VARIN_TEST_SERVICE_ID
+  || serviceId === VARIN_TASKS_SERVICE_ID
 );
 
 export const workbenchInspectorOwnsDocuments = (capability: string): boolean => (

@@ -1,6 +1,6 @@
 # Phase 2 desktop implementation
 
-Phase 2 delivers the first usable Piarium desktop shell. It is intentionally Pi-native: every live
+Phase 2 delivers the first usable Varin desktop shell. It is intentionally Pi-native: every live
 session is backed by an isolated Pi SDK worker, not a terminal transcript parser or an OpenCode
 compatibility layer.
 
@@ -8,7 +8,7 @@ compatibility layer.
 
 - Electron `43.2.0` runs with `contextIsolation`, renderer sandbox, web security, and no renderer
   Node integration.
-- Production renderer assets use the secure, standard `piarium://app` scheme rather than
+- Production renderer assets use the secure, standard `varin://app` scheme rather than
   `file://`.
 - The preload exposes named capabilities only. Renderer code never receives raw Electron IPC,
   filesystem, process, or shell APIs.

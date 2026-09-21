@@ -1,11 +1,11 @@
 import React from 'react';
 import type {
-  PiariumExtensionActualStatus,
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionCapabilityReference,
-  PiariumExtensionHostStateSnapshot,
-  PiariumExtensionServiceProviderSnapshot,
-} from '@piarium/extension-contract';
+  VarinExtensionActualStatus,
+  VarinExtensionCatalogEntry,
+  VarinExtensionCapabilityReference,
+  VarinExtensionHostStateSnapshot,
+  VarinExtensionServiceProviderSnapshot,
+} from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,29 +28,29 @@ import {
   SettingsSection,
 } from '@/components/sections/shared/SettingsSection';
 import {
-  refreshPiariumExtensionCatalog,
-  discardPiariumExtensionCandidate,
-  installPiariumExtension,
-  reloadPiariumExtensionLocalSource,
-  removePiariumExtension,
-  reviewPiariumExtensionCapabilities,
-  reviewPiariumExtensionCandidateCapabilities,
-  selectPiariumExtensionCandidate,
-  setPiariumExtensionServiceRoute,
-  setPiariumExtensionEnabled,
-  usePiariumExtensionCatalog,
+  refreshVarinExtensionCatalog,
+  discardVarinExtensionCandidate,
+  installVarinExtension,
+  reloadVarinExtensionLocalSource,
+  removeVarinExtension,
+  reviewVarinExtensionCapabilities,
+  reviewVarinExtensionCandidateCapabilities,
+  selectVarinExtensionCandidate,
+  setVarinExtensionServiceRoute,
+  setVarinExtensionEnabled,
+  useVarinExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-  resolvePiariumExtensionServiceRouting,
-  resolvePiariumWorkbenchLayout,
-  resolvePiariumWorkbenchProfile,
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+  resolveVarinExtensionServiceRouting,
+  resolveVarinWorkbenchLayout,
+  resolveVarinWorkbenchProfile,
   serviceRoutingScopeKey,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import {
   selectActiveWorkbenchProfile,
   applyWorkbenchProfile,
@@ -60,7 +60,7 @@ import {
   useSurfaceRegistrySnapshot,
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
-import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
   describeWorkbenchContributionPlacement,
@@ -81,21 +81,21 @@ import {
   subscribeMonacoExtensionInspector,
 } from '@/lib/monaco/extension-service';
 
-const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
-  active: 'settings.piarium.extensions.status.active',
-  activating: 'settings.piarium.extensions.status.activating',
-  deactivating: 'settings.piarium.extensions.status.deactivating',
-  failed: 'settings.piarium.extensions.status.failed',
-  inactive: 'settings.piarium.extensions.status.inactive',
-  loading: 'settings.piarium.extensions.status.loading',
-  resolving: 'settings.piarium.extensions.status.resolving',
-  'restart-required': 'settings.piarium.extensions.status.restartRequired',
-  'rolling-back': 'settings.piarium.extensions.status.rollingBack',
-  updating: 'settings.piarium.extensions.status.updating',
-  waiting: 'settings.piarium.extensions.status.waiting',
+const STATUS_KEYS: Readonly<Record<VarinExtensionActualStatus, I18nKey>> = {
+  active: 'settings.varin.extensions.status.active',
+  activating: 'settings.varin.extensions.status.activating',
+  deactivating: 'settings.varin.extensions.status.deactivating',
+  failed: 'settings.varin.extensions.status.failed',
+  inactive: 'settings.varin.extensions.status.inactive',
+  loading: 'settings.varin.extensions.status.loading',
+  resolving: 'settings.varin.extensions.status.resolving',
+  'restart-required': 'settings.varin.extensions.status.restartRequired',
+  'rolling-back': 'settings.varin.extensions.status.rollingBack',
+  updating: 'settings.varin.extensions.status.updating',
+  waiting: 'settings.varin.extensions.status.waiting',
 };
 
-const actualStatus = (entry: PiariumExtensionCatalogEntry): PiariumExtensionActualStatus => {
+const actualStatus = (entry: VarinExtensionCatalogEntry): VarinExtensionActualStatus => {
   if (!entry.desired.enabled) return 'inactive';
   const statuses = entry.actual.map((state) => state.status);
   for (const status of ['restart-required', 'failed', 'rolling-back', 'updating', 'deactivating', 'activating', 'loading', 'resolving', 'waiting', 'active'] as const) {
@@ -104,7 +104,7 @@ const actualStatus = (entry: PiariumExtensionCatalogEntry): PiariumExtensionActu
   return 'waiting';
 };
 
-const capabilityKey = (reference: PiariumExtensionCapabilityReference): string => (
+const capabilityKey = (reference: VarinExtensionCapabilityReference): string => (
   `${reference.realm}:${reference.capability}`
 );
 
@@ -127,7 +127,7 @@ const MonacoServiceInspectorRows: React.FC<{
   if (owners.length === 0) {
     return (
       <div className="break-all typography-micro text-muted-foreground">
-        surface-local · {PIARIUM_EDITOR_MONACO_SERVICE_ID}@{PIARIUM_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.piarium.extensions.status.inactive')}
+        surface-local · {VARIN_EDITOR_MONACO_SERVICE_ID}@{VARIN_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.varin.extensions.status.inactive')}
       </div>
     );
   }
@@ -135,7 +135,7 @@ const MonacoServiceInspectorRows: React.FC<{
     <>
       {owners.map((owner) => (
         <div key={`${owner.realmId}:${owner.entrypointId}:${owner.generation}`} className="break-all typography-micro text-muted-foreground">
-          surface-local · {PIARIUM_EDITOR_MONACO_SERVICE_ID}@{PIARIUM_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.piarium.extensions.status.active')}
+          surface-local · {VARIN_EDITOR_MONACO_SERVICE_ID}@{VARIN_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.varin.extensions.status.active')}
           {` · generation #${owner.generation} · registrations ${owner.registrationCount}`}
         </div>
       ))}
@@ -151,34 +151,34 @@ const MonacoServiceInspectorRows: React.FC<{
 };
 
 const WORKBENCH_TARGET_LABELS: Readonly<Record<string, I18nKey>> = {
-  [WORKBENCH_REPLACEMENT_TARGETS.shell]: 'settings.piarium.extensions.workbench.target.shell',
-  [WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator]: 'settings.piarium.extensions.workbench.target.navigator',
-  [WORKBENCH_REPLACEMENT_TARGETS.chatTimeline]: 'settings.piarium.extensions.workbench.target.timeline',
-  [WORKBENCH_REPLACEMENT_TARGETS.chatComposer]: 'settings.piarium.extensions.workbench.target.composer',
-  [WORKBENCH_REPLACEMENT_TARGETS.agents]: 'settings.piarium.extensions.workbench.target.agents',
-  [WORKBENCH_REPLACEMENT_TARGETS.mcp]: 'settings.piarium.extensions.workbench.target.mcp',
-  [WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer]: 'settings.piarium.extensions.workbench.target.explorer',
-  [WORKBENCH_REPLACEMENT_TARGETS.settings]: 'settings.piarium.extensions.workbench.target.settings',
-  [WORKBENCH_REPLACEMENT_TARGETS.activity]: 'settings.piarium.extensions.workbench.target.activity',
-  [WORKBENCH_REPLACEMENT_TARGETS.primarySidebar]: 'settings.piarium.extensions.workbench.target.primarySidebar',
-  [WORKBENCH_REPLACEMENT_TARGETS.editor]: 'settings.piarium.extensions.workbench.target.editor',
-  [WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar]: 'settings.piarium.extensions.workbench.target.secondarySidebar',
-  [WORKBENCH_REPLACEMENT_TARGETS.panel]: 'settings.piarium.extensions.workbench.target.panel',
-  [WORKBENCH_REPLACEMENT_TARGETS.status]: 'settings.piarium.extensions.workbench.target.status',
-  [WORKBENCH_REPLACEMENT_TARGETS.transition]: 'settings.piarium.extensions.workbench.target.transition',
+  [WORKBENCH_REPLACEMENT_TARGETS.shell]: 'settings.varin.extensions.workbench.target.shell',
+  [WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator]: 'settings.varin.extensions.workbench.target.navigator',
+  [WORKBENCH_REPLACEMENT_TARGETS.chatTimeline]: 'settings.varin.extensions.workbench.target.timeline',
+  [WORKBENCH_REPLACEMENT_TARGETS.chatComposer]: 'settings.varin.extensions.workbench.target.composer',
+  [WORKBENCH_REPLACEMENT_TARGETS.agents]: 'settings.varin.extensions.workbench.target.agents',
+  [WORKBENCH_REPLACEMENT_TARGETS.mcp]: 'settings.varin.extensions.workbench.target.mcp',
+  [WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer]: 'settings.varin.extensions.workbench.target.explorer',
+  [WORKBENCH_REPLACEMENT_TARGETS.settings]: 'settings.varin.extensions.workbench.target.settings',
+  [WORKBENCH_REPLACEMENT_TARGETS.activity]: 'settings.varin.extensions.workbench.target.activity',
+  [WORKBENCH_REPLACEMENT_TARGETS.primarySidebar]: 'settings.varin.extensions.workbench.target.primarySidebar',
+  [WORKBENCH_REPLACEMENT_TARGETS.editor]: 'settings.varin.extensions.workbench.target.editor',
+  [WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar]: 'settings.varin.extensions.workbench.target.secondarySidebar',
+  [WORKBENCH_REPLACEMENT_TARGETS.panel]: 'settings.varin.extensions.workbench.target.panel',
+  [WORKBENCH_REPLACEMENT_TARGETS.status]: 'settings.varin.extensions.workbench.target.status',
+  [WORKBENCH_REPLACEMENT_TARGETS.transition]: 'settings.varin.extensions.workbench.target.transition',
 };
 
-const SHELL_STATUS_KEYS: Readonly<Record<ReturnType<typeof resolvePiariumWorkbenchProfile>['status'], I18nKey>> = {
-  builtin: 'settings.piarium.extensions.workbench.shellStatus.builtin',
-  ready: 'settings.piarium.extensions.workbench.shellStatus.ready',
-  missing: 'settings.piarium.extensions.workbench.shellStatus.missing',
-  disabled: 'settings.piarium.extensions.workbench.shellStatus.disabled',
-  failed: 'settings.piarium.extensions.workbench.shellStatus.failed',
+const SHELL_STATUS_KEYS: Readonly<Record<ReturnType<typeof resolveVarinWorkbenchProfile>['status'], I18nKey>> = {
+  builtin: 'settings.varin.extensions.workbench.shellStatus.builtin',
+  ready: 'settings.varin.extensions.workbench.shellStatus.ready',
+  missing: 'settings.varin.extensions.workbench.shellStatus.missing',
+  disabled: 'settings.varin.extensions.workbench.shellStatus.disabled',
+  failed: 'settings.varin.extensions.workbench.shellStatus.failed',
 };
 
 const WorkbenchProfileSection: React.FC = () => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const surface = useSurfaceRegistrySnapshot();
   const workspaceId = useWorkbenchWorkspaceId();
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -187,13 +187,13 @@ const WorkbenchProfileSection: React.FC = () => {
   const [profileBusy, setProfileBusy] = React.useState(false);
   const workbench = catalog.snapshot?.workbench;
   if (!workbench?.authoritative || !catalog.snapshot) return null;
-  const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
-    surface: piariumSurfaceRuntime.surface,
+  const resolved = resolveVarinWorkbenchLayout(workbench.document, {
+    surface: varinSurfaceRuntime.surface,
     userId: 'default',
     ...(workspaceId ? { workspaceId } : {}),
   });
-  const profileResolution = resolvePiariumWorkbenchProfile(workbench.document, catalog.snapshot.catalog, {
-    surface: piariumSurfaceRuntime.surface,
+  const profileResolution = resolveVarinWorkbenchProfile(workbench.document, catalog.snapshot.catalog, {
+    surface: varinSurfaceRuntime.surface,
     userId: 'default',
     ...(workspaceId ? { workspaceId } : {}),
   });
@@ -210,7 +210,7 @@ const WorkbenchProfileSection: React.FC = () => {
     shellExtensionId: profileResolution.shellExtensionId,
     shellStatus: profileResolution.status,
     catalog: installedExtensions,
-    surface: piariumSurfaceRuntime.surface,
+    surface: varinSurfaceRuntime.surface,
     visibleContributions: surface.contributions,
   });
   const run = (operation: Promise<void>) => {
@@ -248,7 +248,7 @@ const WorkbenchProfileSection: React.FC = () => {
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const id = slug || `profile-${generated}`;
     if (workbench.document.profiles.some((candidate) => candidate.id === id)) {
-      toast.error(t('settings.piarium.extensions.workbench.profileExists'));
+      toast.error(t('settings.varin.extensions.workbench.profileExists'));
       return;
     }
     setProfileBusy(true);
@@ -264,10 +264,10 @@ const WorkbenchProfileSection: React.FC = () => {
     }
   };
   return (
-    <SettingsSection title={t('settings.piarium.extensions.workbench.title')} settingsItem="extensions.workbench">
+    <SettingsSection title={t('settings.varin.extensions.workbench.title')} settingsItem="extensions.workbench">
       <div className="space-y-3">
         <SettingsFieldRow
-          label={t('settings.piarium.extensions.workbench.profile')}
+          label={t('settings.varin.extensions.workbench.profile')}
           settingsItem="extensions.workbench.profile"
           controlClassName="w-full max-w-none"
         >
@@ -283,24 +283,24 @@ const WorkbenchProfileSection: React.FC = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Button type="button" variant="outline" size="icon" onClick={() => setCreateOpen(true)} aria-label={t('settings.piarium.extensions.workbench.createProfile')}>
+            <Button type="button" variant="outline" size="icon" onClick={() => setCreateOpen(true)} aria-label={t('settings.varin.extensions.workbench.createProfile')}>
               <Icon name="add" className="size-4" />
             </Button>
             {workbench.document.profiles.length > 1 ? (
-              <Button type="button" variant="ghost" size="icon" onClick={() => setRemoveOpen(true)} aria-label={t('settings.piarium.extensions.workbench.removeProfile')}>
+              <Button type="button" variant="ghost" size="icon" onClick={() => setRemoveOpen(true)} aria-label={t('settings.varin.extensions.workbench.removeProfile')}>
                 <Icon name="delete-bin" className="size-4" />
               </Button>
             ) : null}
           </div>
         </SettingsFieldRow>
         <SettingsFieldRow
-          label={t('settings.piarium.extensions.workbench.selectedShell')}
+          label={t('settings.varin.extensions.workbench.selectedShell')}
           settingsItem="extensions.workbench.shell"
           controlClassName="w-full max-w-none"
         >
           <div className="flex min-w-0 w-full flex-col items-start gap-2 @xl:items-end">
             <span className="typography-meta text-muted-foreground">
-              {profileResolution.shellContributionId ?? t('settings.piarium.extensions.workbench.builtin')}
+              {profileResolution.shellContributionId ?? t('settings.varin.extensions.workbench.builtin')}
               {' · '}
               {t(SHELL_STATUS_KEYS[profileResolution.status])}
             </span>
@@ -312,14 +312,14 @@ const WorkbenchProfileSection: React.FC = () => {
                 disabled={profileBusy}
                 onClick={() => { void requestProfile(resolved.profileId); }}
               >
-                {t('settings.piarium.extensions.workbench.enableAndSwitch')}
+                {t('settings.varin.extensions.workbench.enableAndSwitch')}
               </Button>
             ) : null}
           </div>
         </SettingsFieldRow>
         <div className="rounded-lg border border-border/60 px-3 py-3" data-settings-item="extensions.workbench.extensionSet">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="typography-ui-label text-foreground">{t('settings.piarium.extensions.workbench.extensionSet')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.varin.extensions.workbench.extensionSet')}</span>
             <Button
               type="button"
               size="xs"
@@ -332,7 +332,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 }).finally(() => setProfileBusy(false));
               }}
             >
-              {t('settings.piarium.extensions.workbench.applyProfile')}
+              {t('settings.varin.extensions.workbench.applyProfile')}
             </Button>
           </div>
           <div className="grid gap-2 @2xl:grid-cols-2">
@@ -352,7 +352,7 @@ const WorkbenchProfileSection: React.FC = () => {
               <label key={extensionId} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-interactive-hover px-2.5 py-2">
                 <span className="min-w-0">
                   <span className="block truncate typography-meta text-foreground">{extensionId}</span>
-                  <span className="block typography-micro text-muted-foreground">{t('settings.piarium.extensions.workbench.notInstalled')}</span>
+                  <span className="block typography-micro text-muted-foreground">{t('settings.varin.extensions.workbench.notInstalled')}</span>
                 </span>
                 <Switch
                   checked
@@ -377,7 +377,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 <div className="min-w-0">
                   <span className="typography-ui-label text-foreground">{label}</span>
                   <span className="ml-2 typography-micro text-muted-foreground">
-                    {t('settings.piarium.extensions.workbench.platformManaged')}
+                    {t('settings.varin.extensions.workbench.platformManaged')}
                   </span>
                 </div>
                 <Select
@@ -390,7 +390,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                    <SelectItem value="__builtin__">{t('settings.varin.extensions.workbench.builtin')}</SelectItem>
                     {selectedMissing ? <SelectItem value={projection.selected}>{projection.selected}</SelectItem> : null}
                     {projection.candidates.map((candidate) => (
                       <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
@@ -408,7 +408,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 <div className="min-w-0">
                   <span className="typography-ui-label text-foreground">{label}</span>
                   <span className="ml-2 typography-micro text-muted-foreground">
-                    {t('settings.piarium.extensions.workbench.dormant')}
+                    {t('settings.varin.extensions.workbench.dormant')}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -420,7 +420,7 @@ const WorkbenchProfileSection: React.FC = () => {
                     disabled={profileBusy}
                     onClick={() => run(setWorkbenchReplacementSelection(target, null, scopeOverride))}
                   >
-                    {t('settings.piarium.extensions.workbench.clearOverride')}
+                    {t('settings.varin.extensions.workbench.clearOverride')}
                   </Button>
                 </div>
               </div>
@@ -432,7 +432,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 <div className="min-w-0">
                   <span className="typography-ui-label text-foreground">{label}</span>
                   <span className="ml-2 typography-micro text-warning">
-                    {t('settings.piarium.extensions.workbench.missingSelection')}
+                    {t('settings.varin.extensions.workbench.missingSelection')}
                   </span>
                 </div>
                 <Select
@@ -445,7 +445,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                    <SelectItem value="__builtin__">{t('settings.varin.extensions.workbench.builtin')}</SelectItem>
                     <SelectItem value={projection.selected}>{projection.selected}</SelectItem>
                     {projection.candidates.map((candidate) => (
                       <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
@@ -474,7 +474,7 @@ const WorkbenchProfileSection: React.FC = () => {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                  <SelectItem value="__builtin__">{t('settings.varin.extensions.workbench.builtin')}</SelectItem>
                   {candidates.map((candidate) => (
                     <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
                       {candidate.descriptor.title ?? candidate.descriptor.id}
@@ -489,20 +489,20 @@ const WorkbenchProfileSection: React.FC = () => {
 
       <Dialog open={createOpen} onOpenChange={(open) => !profileBusy && setCreateOpen(open)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{t('settings.piarium.extensions.workbench.createProfile')}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('settings.varin.extensions.workbench.createProfile')}</DialogTitle></DialogHeader>
           <Input
             autoFocus
             value={profileName}
             onChange={(event) => setProfileName(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') void createProfile(); }}
-            placeholder={t('settings.piarium.extensions.workbench.profileName')}
+            placeholder={t('settings.varin.extensions.workbench.profileName')}
           />
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={profileBusy} onClick={() => setCreateOpen(false)}>
               {t('settings.common.actions.cancel')}
             </Button>
             <Button type="button" disabled={profileBusy || !profileName.trim()} onClick={() => { void createProfile(); }}>
-              {t('settings.piarium.extensions.workbench.createProfile')}
+              {t('settings.varin.extensions.workbench.createProfile')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -510,7 +510,7 @@ const WorkbenchProfileSection: React.FC = () => {
 
       <Dialog open={removeOpen} onOpenChange={(open) => !profileBusy && setRemoveOpen(open)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{t('settings.piarium.extensions.workbench.removeProfileNamed', { name: workbenchProfileLabel(profile, t) })}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('settings.varin.extensions.workbench.removeProfileNamed', { name: workbenchProfileLabel(profile, t) })}</DialogTitle></DialogHeader>
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={profileBusy} onClick={() => setRemoveOpen(false)}>
               {t('settings.common.actions.cancel')}
@@ -526,7 +526,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 }).finally(() => setProfileBusy(false));
               }}
             >
-              {t('settings.piarium.extensions.workbench.removeProfile')}
+              {t('settings.varin.extensions.workbench.removeProfile')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -543,7 +543,7 @@ const serviceName = (serviceId: string): string => {
 
 const ServiceRoutingSection: React.FC = () => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const [scopeKind, setScopeKind] = React.useState<'user' | 'workspace'>(currentDirectory ? 'workspace' : 'user');
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
@@ -554,7 +554,7 @@ const ServiceRoutingSection: React.FC = () => {
   if (!snapshot?.routing.authoritative) return null;
 
   const activeProviders = snapshot.services.providers.filter((provider) => provider.status === 'active');
-  const providerGroups = new Map<string, PiariumExtensionServiceProviderSnapshot[]>();
+  const providerGroups = new Map<string, VarinExtensionServiceProviderSnapshot[]>();
   for (const provider of activeProviders) {
     const key = `${provider.descriptor.id}@${provider.descriptor.version}`;
     providerGroups.set(key, [...(providerGroups.get(key) ?? []), provider]);
@@ -585,7 +585,7 @@ const ServiceRoutingSection: React.FC = () => {
     const key = `${serviceId}@${version}`;
     setBusyKey(key);
     try {
-      await setPiariumExtensionServiceRoute(serviceId, version, editableScope, providerKey);
+      await setVarinExtensionServiceRoute(serviceId, version, editableScope, providerKey);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -594,7 +594,7 @@ const ServiceRoutingSection: React.FC = () => {
   };
 
   return (
-    <SettingsSection title={t('settings.piarium.extensions.routing.title')} settingsItem="extensions.routing">
+    <SettingsSection title={t('settings.varin.extensions.routing.title')} settingsItem="extensions.routing">
       <div className="space-y-3">
         <div className="flex justify-end">
           <Select
@@ -603,9 +603,9 @@ const ServiceRoutingSection: React.FC = () => {
           >
             <SelectTrigger className="w-full @xl:w-56"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="user">{t('settings.piarium.extensions.routing.scope.user')}</SelectItem>
+              <SelectItem value="user">{t('settings.varin.extensions.routing.scope.user')}</SelectItem>
               <SelectItem value="workspace" disabled={!currentDirectory}>
-                {t('settings.piarium.extensions.routing.scope.workspace')}
+                {t('settings.varin.extensions.routing.scope.workspace')}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -623,7 +623,7 @@ const ServiceRoutingSection: React.FC = () => {
           const selected = exactRule?.providerKey ?? '__automatic__';
           const selectedMissing = selected !== '__automatic__'
             && !providers.some((provider) => provider.providerKey === selected);
-          const resolution = resolvePiariumExtensionServiceRouting({
+          const resolution = resolveVarinExtensionServiceRouting({
             candidates: providers.map((provider) => ({ providerId: provider.providerId, providerKey: provider.providerKey })),
             context: routingContext,
             document: snapshot.routing.document,
@@ -638,10 +638,10 @@ const ServiceRoutingSection: React.FC = () => {
                   ? 'typography-micro text-muted-foreground'
                   : 'typography-micro text-[var(--status-warning)]'}>
                   {resolution.status === 'resolved'
-                    ? t('settings.piarium.extensions.routing.status.ready')
+                    ? t('settings.varin.extensions.routing.status.ready')
                     : resolution.status === 'ambiguous'
-                      ? t('settings.piarium.extensions.routing.status.choose')
-                      : t('settings.piarium.extensions.routing.status.unavailable')}
+                      ? t('settings.varin.extensions.routing.status.choose')
+                      : t('settings.varin.extensions.routing.status.unavailable')}
                 </div>
               </div>
               <Select
@@ -651,9 +651,9 @@ const ServiceRoutingSection: React.FC = () => {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__automatic__">{t('settings.piarium.extensions.routing.automatic')}</SelectItem>
+                  <SelectItem value="__automatic__">{t('settings.varin.extensions.routing.automatic')}</SelectItem>
                   {selectedMissing ? (
-                    <SelectItem value={selected}>{t('settings.piarium.extensions.routing.missing')}</SelectItem>
+                    <SelectItem value={selected}>{t('settings.varin.extensions.routing.missing')}</SelectItem>
                   ) : null}
                   {providers.map((provider) => (
                     <SelectItem key={provider.providerKey} value={provider.providerKey}>
@@ -673,8 +673,8 @@ const ServiceRoutingSection: React.FC = () => {
 const ExtensionCard: React.FC<{
   busy: boolean;
   composition: ReturnType<typeof getWorkbenchCompositionInspectorSnapshot>;
-  entry: PiariumExtensionCatalogEntry;
-  hostState: PiariumExtensionHostStateSnapshot | null;
+  entry: VarinExtensionCatalogEntry;
+  hostState: VarinExtensionHostStateSnapshot | null;
   surface: ReturnType<typeof useSurfaceRegistrySnapshot>;
 }> = ({ busy, composition, entry, hostState, surface }) => {
   const { t } = useI18n();
@@ -683,7 +683,7 @@ const ExtensionCard: React.FC<{
   const [deleteData, setDeleteData] = React.useState(false);
   const status = actualStatus(entry);
   const candidate = entry.candidate;
-  const selectedCapabilities: PiariumExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
+  const selectedCapabilities: VarinExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
     (entry.manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
   ));
   const selectedDecisions = new Map(entry.capabilityGrants
@@ -695,14 +695,14 @@ const ExtensionCard: React.FC<{
   const liveSurfaceServices = surface.services.filter((item) => item.owner.extensionId === entry.manifest.id);
   const liveHostServices = hostState?.services.providers.filter((item) => item.extensionId === entry.manifest.id) ?? [];
   const monacoServiceDeclared = (entry.manifest.requires?.services ?? []).some((service) => (
-    service.id === PIARIUM_EDITOR_MONACO_SERVICE_ID
-    && service.version === PIARIUM_EDITOR_MONACO_SERVICE_VERSION
+    service.id === VARIN_EDITOR_MONACO_SERVICE_ID
+    && service.version === VARIN_EDITOR_MONACO_SERVICE_VERSION
   ));
   const catalogDiagnostics = hostState?.catalog.diagnostics.filter((item) => item.extensionId === entry.manifest.id) ?? [];
   const workspaceId = useWorkbenchWorkspaceId();
   const profileResolution = hostState?.workbench.authoritative && hostState.workbench.storageState === 'ready'
-    ? resolvePiariumWorkbenchProfile(hostState.workbench.document, hostState.catalog, {
-      surface: piariumSurfaceRuntime.surface,
+    ? resolveVarinWorkbenchProfile(hostState.workbench.document, hostState.catalog, {
+      surface: varinSurfaceRuntime.surface,
       userId: 'default',
       ...(workspaceId ? { workspaceId } : {}),
     })
@@ -712,7 +712,7 @@ const ExtensionCard: React.FC<{
     profileResolution.shellContributionId,
     profileResolution.shellExtensionId,
     hostState?.catalog.extensions ?? [],
-    piariumSurfaceRuntime.surface,
+    varinSurfaceRuntime.surface,
   ) : null;
   const activeSeamProjection = profileResolution ? projectWorkbenchSeams({
     layout: profileResolution.layout,
@@ -720,7 +720,7 @@ const ExtensionCard: React.FC<{
     shellExtensionId: profileResolution.shellExtensionId,
     shellStatus: profileResolution.status,
     catalog: hostState?.catalog.extensions ?? [],
-    surface: piariumSurfaceRuntime.surface,
+    surface: varinSurfaceRuntime.surface,
     visibleContributions: surface.contributions,
   }) : [];
   const dormantSeams = activeSeamProjection.filter((projection) => projection.status === 'dormant');
@@ -738,16 +738,16 @@ const ExtensionCard: React.FC<{
       && grant.granted
     ));
   const decisions = new Map(candidate?.capabilityGrants.map((grant) => [capabilityKey(grant), grant.granted]) ?? []);
-  const review = async (reference: PiariumExtensionCapabilityReference, granted: boolean): Promise<void> => {
+  const review = async (reference: VarinExtensionCapabilityReference, granted: boolean): Promise<void> => {
     if (!candidate) return;
-    await reviewPiariumExtensionCandidateCapabilities({
+    await reviewVarinExtensionCandidateCapabilities({
       candidateIntegrity: candidate.integrity,
       decisions: [{ ...reference, granted }],
       extensionId: entry.manifest.id,
     });
   };
-  const reviewSelected = async (reference: PiariumExtensionCapabilityReference, granted: boolean): Promise<void> => {
-    await reviewPiariumExtensionCapabilities({
+  const reviewSelected = async (reference: VarinExtensionCapabilityReference, granted: boolean): Promise<void> => {
+    await reviewVarinExtensionCapabilities({
       decisions: [{ ...reference, granted }],
       extensionId: entry.manifest.id,
     });
@@ -783,9 +783,9 @@ const ExtensionCard: React.FC<{
           checked={entry.desired.enabled}
           disabled={busy || (!entry.desired.enabled && !selectedCapabilitiesReviewed)}
           onCheckedChange={(enabled) => {
-            void setPiariumExtensionEnabled(entry.manifest.id, enabled).catch(() => undefined);
+            void setVarinExtensionEnabled(entry.manifest.id, enabled).catch(() => undefined);
           }}
-          aria-label={t('settings.piarium.extensions.actions.activationAria', {
+          aria-label={t('settings.varin.extensions.actions.activationAria', {
             name: workbenchExtensionDisplayName(entry, t),
           })}
         />
@@ -794,7 +794,7 @@ const ExtensionCard: React.FC<{
       {entry.source.kind !== 'builtin' && !entry.desired.enabled && selectedCapabilities.length > 0 ? (
         <div className="mt-3 border-t border-border/50 pt-3">
           <div className="mb-2 typography-ui-label text-foreground">
-            {t('settings.piarium.extensions.inspector.capabilities')}
+            {t('settings.varin.extensions.inspector.capabilities')}
           </div>
           <div className="space-y-2">
             {selectedCapabilities.map((reference) => {
@@ -811,7 +811,7 @@ const ExtensionCard: React.FC<{
                       disabled={busy}
                       onClick={() => { void reviewSelected(reference, false).catch(() => undefined); }}
                     >
-                      {t('settings.piarium.extensions.candidate.deny')}
+                      {t('settings.varin.extensions.candidate.deny')}
                     </Button>
                     <Button
                       type="button"
@@ -820,7 +820,7 @@ const ExtensionCard: React.FC<{
                       disabled={busy}
                       onClick={() => { void reviewSelected(reference, true).catch(() => undefined); }}
                     >
-                      {t('settings.piarium.extensions.candidate.allow')}
+                      {t('settings.varin.extensions.candidate.allow')}
                     </Button>
                   </div>
                 </div>
@@ -834,11 +834,11 @@ const ExtensionCard: React.FC<{
         <div className="mt-3 border-t border-border/50 pt-3">
           <div className="flex flex-wrap items-center gap-2 typography-meta">
             <span className="font-medium text-foreground">
-              {t('settings.piarium.extensions.candidate.title', { version: candidate.resolvedVersion })}
+              {t('settings.varin.extensions.candidate.title', { version: candidate.resolvedVersion })}
             </span>
             {candidate.capabilitiesReviewed ? (
               <span className="text-[var(--status-success)]">
-                {t('settings.piarium.extensions.candidate.reviewed')}
+                {t('settings.varin.extensions.candidate.reviewed')}
               </span>
             ) : null}
           </div>
@@ -858,7 +858,7 @@ const ExtensionCard: React.FC<{
                         disabled={busy}
                         onClick={() => { void review(reference, false).catch(() => undefined); }}
                       >
-                        {t('settings.piarium.extensions.candidate.deny')}
+                        {t('settings.varin.extensions.candidate.deny')}
                       </Button>
                       <Button
                         type="button"
@@ -867,7 +867,7 @@ const ExtensionCard: React.FC<{
                         disabled={busy}
                         onClick={() => { void review(reference, true).catch(() => undefined); }}
                       >
-                        {t('settings.piarium.extensions.candidate.allow')}
+                        {t('settings.varin.extensions.candidate.allow')}
                       </Button>
                     </div>
                   </div>
@@ -882,20 +882,20 @@ const ExtensionCard: React.FC<{
               size="xs"
               disabled={busy}
               onClick={() => {
-                void discardPiariumExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
+                void discardVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
               }}
             >
-              {t('settings.piarium.extensions.candidate.discard')}
+              {t('settings.varin.extensions.candidate.discard')}
             </Button>
             <Button
               type="button"
               size="xs"
               disabled={busy || !candidate.capabilitiesReviewed || candidate.applyRequested}
               onClick={() => {
-                void selectPiariumExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
+                void selectVarinExtensionCandidate(entry.manifest.id, candidate.integrity).catch(() => undefined);
               }}
             >
-              {t('settings.piarium.extensions.candidate.apply')}
+              {t('settings.varin.extensions.candidate.apply')}
             </Button>
           </div>
         </div>
@@ -907,20 +907,20 @@ const ExtensionCard: React.FC<{
             variant="ghost"
             size="xs"
             disabled={busy}
-            onClick={() => { void reloadPiariumExtensionLocalSource(entry.manifest.id).catch(() => undefined); }}
+            onClick={() => { void reloadVarinExtensionLocalSource(entry.manifest.id).catch(() => undefined); }}
           >
-            {t('settings.piarium.extensions.actions.reloadLocal')}
+            {t('settings.varin.extensions.actions.reloadLocal')}
           </Button>
         ) : null}
         <Button type="button" variant="ghost" size="xs" onClick={() => setInspectOpen(true)}>
-          {t('settings.piarium.extensions.actions.inspect')}
+          {t('settings.varin.extensions.actions.inspect')}
         </Button>
         {entry.source.kind !== 'builtin' ? (
           <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => {
             setDeleteData(false);
             setRemoveOpen(true);
           }}>
-            {t('settings.piarium.extensions.actions.remove')}
+            {t('settings.varin.extensions.actions.remove')}
           </Button>
         ) : null}
       </div>
@@ -932,11 +932,11 @@ const ExtensionCard: React.FC<{
           </DialogHeader>
           <div className="grid gap-4 @xl:grid-cols-2">
             <div className="space-y-2">
-              <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.runtime')}</div>
+              <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.runtime')}</div>
               <div className="space-y-1 typography-micro text-muted-foreground">
-                <div>{t('settings.piarium.extensions.inspector.version')}: {entry.selectedVersion}</div>
-                <div>{t('settings.piarium.extensions.inspector.source')}: {entry.source.kind} · {entry.source.display}</div>
-                <div>{t('settings.piarium.extensions.inspector.integrity')}: {entry.integrity ?? '—'}</div>
+                <div>{t('settings.varin.extensions.inspector.version')}: {entry.selectedVersion}</div>
+                <div>{t('settings.varin.extensions.inspector.source')}: {entry.source.kind} · {entry.source.display}</div>
+                <div>{t('settings.varin.extensions.inspector.integrity')}: {entry.integrity ?? '—'}</div>
               </div>
               {entry.actual.length > 0 ? (
                 <div className="space-y-1">
@@ -952,10 +952,10 @@ const ExtensionCard: React.FC<{
                     </div>
                   ))}
                 </div>
-              ) : <div className="typography-micro text-muted-foreground">{t('settings.piarium.extensions.inspector.noRealms')}</div>}
+              ) : <div className="typography-micro text-muted-foreground">{t('settings.varin.extensions.inspector.noRealms')}</div>}
               {catalogDiagnostics.length > 0 ? (
                 <div className="space-y-1">
-                  <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.diagnostics')}</div>
+                  <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.diagnostics')}</div>
                   {catalogDiagnostics.map((diagnostic) => (
                     <div key={`${diagnostic.code}:${diagnostic.timestamp}`} className="rounded-md bg-interactive-hover px-2.5 py-2 typography-micro text-muted-foreground">
                       <div className="text-foreground">{diagnostic.code} · {diagnostic.severity}</div>
@@ -967,7 +967,7 @@ const ExtensionCard: React.FC<{
             </div>
             <div className="space-y-3">
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.artifacts')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.artifacts')}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {entry.manifest.entrypoints?.host ? (
                     <code className="rounded bg-interactive-hover px-1.5 py-1 typography-micro">host · {entry.manifest.entrypoints.host.mode} · {entry.manifest.entrypoints.host.file}</code>
@@ -981,13 +981,13 @@ const ExtensionCard: React.FC<{
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.activeShell')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.activeShell')}</div>
                 <div className="mt-1 typography-micro text-muted-foreground">
                   {ownsActiveShell
-                    ? t('settings.piarium.extensions.inspector.ownsActiveShell')
+                    ? t('settings.varin.extensions.inspector.ownsActiveShell')
                     : profileResolution?.shellContributionId
-                      ? t('settings.piarium.extensions.inspector.activeShellId', { id: profileResolution.shellContributionId })
-                      : t('settings.piarium.extensions.inspector.none')}
+                      ? t('settings.varin.extensions.inspector.activeShellId', { id: profileResolution.shellContributionId })
+                      : t('settings.varin.extensions.inspector.none')}
                 </div>
                 {ownsActiveShell && shellSeamSummary ? (
                   <div className="mt-2 space-y-1 typography-micro text-muted-foreground">
@@ -996,30 +996,30 @@ const ExtensionCard: React.FC<{
                     ))}
                     {shellSeamSummary.declaredReplacementTargets.map((target) => (
                       <div key={`declared-target:${target}`}>
-                        {t('settings.piarium.extensions.inspector.replaces', { target })}
+                        {t('settings.varin.extensions.inspector.replaces', { target })}
                       </div>
                     ))}
                     {shellSeamSummary.declaredSlots.map((slot) => (
                       <div key={`declared-slot:${slot}`}>
-                        {t('settings.piarium.extensions.inspector.slot', { slot })}
+                        {t('settings.varin.extensions.inspector.slot', { slot })}
                       </div>
                     ))}
                     {dormantSeams.map((seam) => (
                       <div key={`dormant:${seam.target}`}>
-                        {t('settings.piarium.extensions.workbench.dormant')} · {seam.target} · {seam.selected}
+                        {t('settings.varin.extensions.workbench.dormant')} · {seam.target} · {seam.selected}
                       </div>
                     ))}
                     {mountedShellChildren.map((child) => (
                       <div key={`${child.host}:${child.hostId}:${child.contributionId}:${child.generation}`}>
                         {child.host} · {child.hostId} · {child.contributionId}
-                        {` · ${t('settings.piarium.extensions.inspector.cleanup')} #${child.generation}`}
+                        {` · ${t('settings.varin.extensions.inspector.cleanup')} #${child.generation}`}
                       </div>
                     ))}
                   </div>
                 ) : null}
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.contributions')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.contributions')}</div>
                 <div className="mt-1 space-y-1">
                   {(entry.manifest.contributions ?? []).map((contribution) => {
                     const described = describeWorkbenchContributionPlacement(contribution);
@@ -1027,10 +1027,10 @@ const ExtensionCard: React.FC<{
                     return (
                       <div key={contribution.id} className="break-all typography-micro text-muted-foreground">
                         {contribution.title ?? contribution.id} · {contribution.kind} · {live
-                          ? t('settings.piarium.extensions.status.active')
-                          : t('settings.piarium.extensions.status.inactive')}
-                        {described.placement ? ` · ${t('settings.piarium.extensions.inspector.slot', { slot: described.placement })}` : ''}
-                        {described.replacement ? ` · ${t('settings.piarium.extensions.inspector.replaces', { target: described.replacement })}` : ''}
+                          ? t('settings.varin.extensions.status.active')
+                          : t('settings.varin.extensions.status.inactive')}
+                        {described.placement ? ` · ${t('settings.varin.extensions.inspector.slot', { slot: described.placement })}` : ''}
+                        {described.replacement ? ` · ${t('settings.varin.extensions.inspector.replaces', { target: described.replacement })}` : ''}
                       </div>
                     );
                   })}
@@ -1038,10 +1038,10 @@ const ExtensionCard: React.FC<{
                     const described = describeWorkbenchContributionPlacement(item.descriptor);
                     return (
                       <div key={item.descriptor.id} className="break-all typography-micro text-muted-foreground">
-                        {item.descriptor.title ?? item.descriptor.id} · {item.descriptor.kind} · {t('settings.piarium.extensions.status.active')}
-                        {described.placement ? ` · ${t('settings.piarium.extensions.inspector.slot', { slot: described.placement })}` : ''}
-                        {described.replacement ? ` · ${t('settings.piarium.extensions.inspector.replaces', { target: described.replacement })}` : ''}
-                        {` · ${t('settings.piarium.extensions.inspector.cleanup')} #${item.owner.generation}`}
+                        {item.descriptor.title ?? item.descriptor.id} · {item.descriptor.kind} · {t('settings.varin.extensions.status.active')}
+                        {described.placement ? ` · ${t('settings.varin.extensions.inspector.slot', { slot: described.placement })}` : ''}
+                        {described.replacement ? ` · ${t('settings.varin.extensions.inspector.replaces', { target: described.replacement })}` : ''}
+                        {` · ${t('settings.varin.extensions.inspector.cleanup')} #${item.owner.generation}`}
                       </div>
                     );
                   })}
@@ -1049,25 +1049,25 @@ const ExtensionCard: React.FC<{
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.documentOwner')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.documentOwner')}</div>
                 <div className="mt-1 typography-micro text-muted-foreground">
-                  {documentOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
+                  {documentOwner ? t('settings.varin.extensions.status.active') : t('settings.varin.extensions.inspector.none')}
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.languageOwner')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.languageOwner')}</div>
                 <div className="mt-1 typography-micro text-muted-foreground">
-                  {languageOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
+                  {languageOwner ? t('settings.varin.extensions.status.active') : t('settings.varin.extensions.inspector.none')}
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.debugOwner')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.debugOwner')}</div>
                 <div className="mt-1 typography-micro text-muted-foreground">
-                  {debugOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
+                  {debugOwner ? t('settings.varin.extensions.status.active') : t('settings.varin.extensions.inspector.none')}
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.services')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.services')}</div>
                 <div className="mt-1 space-y-1">
                   {liveHostServices.map((service) => (
                     <div key={service.providerId} className="break-all typography-micro text-muted-foreground">
@@ -1076,7 +1076,7 @@ const ExtensionCard: React.FC<{
                   ))}
                   {liveSurfaceServices.map((service) => (
                     <div key={`${service.owner.realmId}:${service.descriptor.id}@${service.descriptor.version}`} className="break-all typography-micro text-muted-foreground">
-                      surface · {service.descriptor.id}@{service.descriptor.version} · {t('settings.piarium.extensions.status.active')}
+                      surface · {service.descriptor.id}@{service.descriptor.version} · {t('settings.varin.extensions.status.active')}
                     </div>
                   ))}
                   <MonacoServiceInspectorRows
@@ -1087,11 +1087,11 @@ const ExtensionCard: React.FC<{
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.dependencies')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.dependencies')}</div>
                 <div className="mt-1 space-y-1">
                   {(entry.manifest.requires?.services ?? []).map((service) => (
                     <div key={`${service.id}@${service.version}`} className="break-all typography-micro text-muted-foreground">
-                      {service.id}@{service.version}{service.optional ? ` · ${t('settings.piarium.extensions.inspector.optional')}` : ''}
+                      {service.id}@{service.version}{service.optional ? ` · ${t('settings.varin.extensions.inspector.optional')}` : ''}
                     </div>
                   ))}
                   {(entry.manifest.integrates?.piPackages ?? []).map((packageName) => (
@@ -1103,13 +1103,13 @@ const ExtensionCard: React.FC<{
                 </div>
               </div>
               <div>
-                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.capabilities')}</div>
+                <div className="typography-ui-label text-foreground">{t('settings.varin.extensions.inspector.capabilities')}</div>
                 <div className="mt-1 space-y-1">
                   {entry.capabilityGrants.map((grant) => (
                     <div key={`${grant.realm}:${grant.capability}`} className="break-all typography-micro text-muted-foreground">
                       {grant.realm}:{grant.capability} · {grant.granted
-                        ? t('settings.piarium.extensions.candidate.allow')
-                        : t('settings.piarium.extensions.candidate.deny')}
+                        ? t('settings.varin.extensions.candidate.allow')
+                        : t('settings.varin.extensions.candidate.deny')}
                     </div>
                   ))}
                   {entry.capabilityGrants.length === 0 ? <span className="typography-micro text-muted-foreground">—</span> : null}
@@ -1127,26 +1127,26 @@ const ExtensionCard: React.FC<{
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('settings.piarium.extensions.remove.title', {
+            <DialogTitle>{t('settings.varin.extensions.remove.title', {
               name: workbenchExtensionDisplayName(entry, t),
             })}</DialogTitle>
-            <DialogDescription>{t('settings.piarium.extensions.remove.storageScope')}</DialogDescription>
+            <DialogDescription>{t('settings.varin.extensions.remove.storageScope')}</DialogDescription>
           </DialogHeader>
-          <SettingsRadioGroup aria-label={t('settings.piarium.extensions.remove.dataChoice')}>
+          <SettingsRadioGroup aria-label={t('settings.varin.extensions.remove.dataChoice')}>
             <SettingsRadioOption
               selected={!deleteData}
               onSelect={() => setDeleteData(false)}
-              label={t('settings.piarium.extensions.remove.retainData')}
-              description={t('settings.piarium.extensions.remove.retainDataDescription')}
-              ariaLabel={t('settings.piarium.extensions.remove.retainData')}
+              label={t('settings.varin.extensions.remove.retainData')}
+              description={t('settings.varin.extensions.remove.retainDataDescription')}
+              ariaLabel={t('settings.varin.extensions.remove.retainData')}
               disabled={busy}
             />
             <SettingsRadioOption
               selected={deleteData}
               onSelect={() => setDeleteData(true)}
-              label={t('settings.piarium.extensions.remove.deleteData')}
-              description={t('settings.piarium.extensions.remove.deleteDataDescription')}
-              ariaLabel={t('settings.piarium.extensions.remove.deleteData')}
+              label={t('settings.varin.extensions.remove.deleteData')}
+              description={t('settings.varin.extensions.remove.deleteDataDescription')}
+              ariaLabel={t('settings.varin.extensions.remove.deleteData')}
               disabled={busy}
             />
           </SettingsRadioGroup>
@@ -1159,10 +1159,10 @@ const ExtensionCard: React.FC<{
               variant="destructive"
               disabled={busy}
               onClick={() => {
-                void removePiariumExtension(entry.manifest.id, deleteData).then(() => setRemoveOpen(false)).catch(() => undefined);
+                void removeVarinExtension(entry.manifest.id, deleteData).then(() => setRemoveOpen(false)).catch(() => undefined);
               }}
             >
-              {t('settings.piarium.extensions.actions.remove')}
+              {t('settings.varin.extensions.actions.remove')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1173,35 +1173,35 @@ const ExtensionCard: React.FC<{
 
 const ExtensionInstallSection: React.FC = () => {
   const { t } = useI18n();
-  const state = usePiariumExtensionCatalog();
+  const state = useVarinExtensionCatalog();
   const [kind, setKind] = React.useState<'git' | 'local' | 'npm'>('npm');
   const [specifier, setSpecifier] = React.useState('');
   const install = async (): Promise<void> => {
     const normalized = specifier.trim();
     if (!normalized) return;
     try {
-      await installPiariumExtension({ display: normalized, kind, specifier: normalized });
+      await installVarinExtension({ display: normalized, kind, specifier: normalized });
       setSpecifier('');
     } catch {
       // The catalog store owns the visible error state.
     }
   };
   return (
-    <SettingsSection title={t('settings.piarium.extensions.install.title')} settingsItem="extensions.install">
+    <SettingsSection title={t('settings.varin.extensions.install.title')} settingsItem="extensions.install">
       <div className="grid gap-2 @xl:grid-cols-[11rem_minmax(0,1fr)_auto]">
         <Select value={kind} onValueChange={(value) => setKind(value === 'git' || value === 'local' ? value : 'npm')}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="npm">npm</SelectItem>
             <SelectItem value="git">Git</SelectItem>
-            <SelectItem value="local">{t('settings.piarium.extensions.install.local')}</SelectItem>
+            <SelectItem value="local">{t('settings.varin.extensions.install.local')}</SelectItem>
           </SelectContent>
         </Select>
         <Input
           value={specifier}
           onChange={(event) => setSpecifier(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') void install(); }}
-          placeholder={t('settings.piarium.extensions.install.placeholder')}
+          placeholder={t('settings.varin.extensions.install.placeholder')}
         />
         <Button
           type="button"
@@ -1209,7 +1209,7 @@ const ExtensionInstallSection: React.FC = () => {
           onClick={() => { void install(); }}
         >
           {state.busyExtensionId === '__install__' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.extensions.install.action')}
+          {t('settings.varin.extensions.install.action')}
         </Button>
       </div>
     </SettingsSection>
@@ -1218,7 +1218,7 @@ const ExtensionInstallSection: React.FC = () => {
 
 export const ExtensionsPage: React.FC = () => {
   const { t } = useI18n();
-  const state = usePiariumExtensionCatalog();
+  const state = useVarinExtensionCatalog();
   const surface = useSurfaceRegistrySnapshot();
   const composition = React.useSyncExternalStore(
     subscribeWorkbenchCompositionInspector,
@@ -1240,10 +1240,10 @@ export const ExtensionsPage: React.FC = () => {
           variant="outline"
           size="sm"
           disabled={state.loading}
-          onClick={() => { void refreshPiariumExtensionCatalog().catch(() => undefined); }}
+          onClick={() => { void refreshVarinExtensionCatalog().catch(() => undefined); }}
         >
           <Icon name="refresh" className={state.loading ? 'size-4 animate-spin' : 'size-4'} />
-          {t('settings.piarium.extensions.actions.refresh')}
+          {t('settings.varin.extensions.actions.refresh')}
         </Button>
       )}
       showSaveStatus={false}
@@ -1278,7 +1278,7 @@ export const ExtensionsPage: React.FC = () => {
         </div>
         {state.snapshot?.catalog.authoritative && extensions.length === 0 && !state.loading ? (
           <div className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center typography-ui text-muted-foreground">
-            {t('settings.piarium.extensions.empty')}
+            {t('settings.varin.extensions.empty')}
           </div>
         ) : null}
       </SettingsSection>

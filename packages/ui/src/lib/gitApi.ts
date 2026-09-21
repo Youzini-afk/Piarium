@@ -36,7 +36,7 @@ export type {
   GitRebaseResult,
   MergeConflictDetails,
   CommitFileDiffResponse,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const getRuntimeGit = () => {
   return getRegisteredRuntimeAPIs()?.git ?? null;
@@ -44,7 +44,7 @@ const getRuntimeGit = () => {
 
 const requestChatForceScrollBottom = (sessionId: string) => {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('piarium:chat-force-scroll-bottom', {
+  window.dispatchEvent(new CustomEvent('varin:chat-force-scroll-bottom', {
     detail: { sessionId },
   }));
 };
@@ -55,7 +55,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   return gitHttp.checkIsGitRepository(directory);
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('@piarium/application-client').GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('@varin/application-client').GitStatus> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitStatus(directory, options);
   return gitHttp.getGitStatus(directory, options);
@@ -79,7 +79,7 @@ export async function getGitCommitSummaries(
   return result.commits;
 }
 
-export async function getGitDiff(directory: string, options: import('@piarium/application-client').GetGitDiffOptions): Promise<import('@piarium/application-client').GitDiffResponse> {
+export async function getGitDiff(directory: string, options: import('@varin/application-client').GetGitDiffOptions): Promise<import('@varin/application-client').GitDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);
   return gitHttp.getGitDiff(directory, options);
@@ -87,8 +87,8 @@ export async function getGitDiff(directory: string, options: import('@piarium/ap
 
 export async function getGitFileDiff(
   directory: string,
-  options: import('@piarium/application-client').GetGitFileDiffOptions
-): Promise<import('@piarium/application-client').GitFileDiffResponse> {
+  options: import('@varin/application-client').GetGitFileDiffOptions
+): Promise<import('@varin/application-client').GitFileDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitFileDiff(directory, options);
   return gitHttp.getGitFileDiff(directory, options);
@@ -152,19 +152,19 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   return gitHttp.isLinkedWorktree(directory);
 }
 
-export async function getGitBranches(directory: string): Promise<import('@piarium/application-client').GitBranch> {
+export async function getGitBranches(directory: string): Promise<import('@varin/application-client').GitBranch> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitBranches(directory);
   return gitHttp.getGitBranches(directory);
 }
 
-export async function deleteGitBranch(directory: string, payload: import('@piarium/application-client').GitDeleteBranchPayload): Promise<{ success: boolean }> {
+export async function deleteGitBranch(directory: string, payload: import('@varin/application-client').GitDeleteBranchPayload): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.deleteGitBranch(directory, payload);
   return gitHttp.deleteGitBranch(directory, payload);
 }
 
-export async function deleteRemoteBranch(directory: string, payload: import('@piarium/application-client').GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
+export async function deleteRemoteBranch(directory: string, payload: import('@varin/application-client').GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.deleteRemoteBranch(directory, payload);
   return gitHttp.deleteRemoteBranch(directory, payload);
@@ -210,7 +210,7 @@ export async function generateCommitMessage(
   directory: string,
   files: string[],
   options?: { zenModel?: string; providerId?: string; modelId?: string }
-): Promise<{ message: import('@piarium/application-client').GeneratedCommitMessage }> {
+): Promise<{ message: import('@varin/application-client').GeneratedCommitMessage }> {
   const startedAt = Date.now();
   void options;
 
@@ -261,7 +261,7 @@ export async function generateCommitMessage(
 export async function generatePullRequestDescription(
   directory: string,
   payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
-): Promise<import('@piarium/application-client').GeneratedPullRequestDescription> {
+): Promise<import('@varin/application-client').GeneratedPullRequestDescription> {
   const startedAt = Date.now();
 
   const commitLog = await getGitLog(directory, {
@@ -446,7 +446,7 @@ const runStructuredGenerationInActiveSession = async ({
   }
 };
 
-export async function listGitWorktrees(directory: string): Promise<import('@piarium/application-client').GitWorktreeInfo[]> {
+export async function listGitWorktrees(directory: string): Promise<import('@varin/application-client').GitWorktreeInfo[]> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.list) {
     return runtime.worktree.list(directory);
@@ -457,8 +457,8 @@ export async function listGitWorktrees(directory: string): Promise<import('@piar
 
 export async function validateGitWorktree(
   directory: string,
-  payload: import('@piarium/application-client').CreateGitWorktreePayload
-): Promise<import('@piarium/application-client').GitWorktreeValidationResult> {
+  payload: import('@varin/application-client').CreateGitWorktreePayload
+): Promise<import('@varin/application-client').GitWorktreeValidationResult> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.validate) {
     return runtime.worktree.validate(directory, payload);
@@ -471,7 +471,7 @@ export async function validateGitWorktree(
 
 export async function getGitWorktreeBootstrapStatus(
   directory: string,
-): Promise<import('@piarium/application-client').GitWorktreeBootstrapStatus> {
+): Promise<import('@varin/application-client').GitWorktreeBootstrapStatus> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.bootstrapStatus) {
     return runtime.worktree.bootstrapStatus(directory);
@@ -484,8 +484,8 @@ export async function getGitWorktreeBootstrapStatus(
 
 export async function previewGitWorktree(
   directory: string,
-  payload: import('@piarium/application-client').CreateGitWorktreePayload
-): Promise<import('@piarium/application-client').GitWorktreeCreateResult> {
+  payload: import('@varin/application-client').CreateGitWorktreePayload
+): Promise<import('@varin/application-client').GitWorktreeCreateResult> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.preview) {
     return runtime.worktree.preview(directory, payload);
@@ -498,8 +498,8 @@ export async function previewGitWorktree(
 
 export async function createGitWorktree(
   directory: string,
-  payload: import('@piarium/application-client').CreateGitWorktreePayload
-): Promise<import('@piarium/application-client').GitWorktreeCreateResult> {
+  payload: import('@varin/application-client').CreateGitWorktreePayload
+): Promise<import('@varin/application-client').GitWorktreeCreateResult> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.create) {
     return runtime.worktree.create(directory, payload);
@@ -512,7 +512,7 @@ export async function createGitWorktree(
 
 export async function deleteGitWorktree(
   directory: string,
-  payload: import('@piarium/application-client').RemoveGitWorktreePayload
+  payload: import('@varin/application-client').RemoveGitWorktreePayload
 ): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.remove) {
@@ -536,8 +536,8 @@ export const git = {
 export async function createGitCommit(
   directory: string,
   message: string,
-  options: import('@piarium/application-client').CreateGitCommitOptions = {}
-): Promise<import('@piarium/application-client').GitCommitResult> {
+  options: import('@varin/application-client').CreateGitCommitOptions = {}
+): Promise<import('@varin/application-client').GitCommitResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.createGitCommit(directory, message, options);
   return gitHttp.createGitCommit(directory, message, options);
@@ -546,7 +546,7 @@ export async function createGitCommit(
 export async function gitPush(
   directory: string,
   options: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> } = {}
-): Promise<import('@piarium/application-client').GitPushResult> {
+): Promise<import('@varin/application-client').GitPushResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitPush(directory, options);
   return gitHttp.gitPush(directory, options);
@@ -554,8 +554,8 @@ export async function gitPush(
 
 export async function gitPull(
   directory: string,
-  options: import('@piarium/application-client').GitPullOptions = {}
-): Promise<import('@piarium/application-client').GitPullResult> {
+  options: import('@varin/application-client').GitPullOptions = {}
+): Promise<import('@varin/application-client').GitPullResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.gitPull(directory, options);
   return gitHttp.gitPull(directory, options);
@@ -570,7 +570,7 @@ export async function gitFetch(
   return gitHttp.gitFetch(directory, options);
 }
 
-export async function listGitStashes(directory: string): Promise<{ stashes: import('@piarium/application-client').GitStashEntry[] }> {
+export async function listGitStashes(directory: string): Promise<{ stashes: import('@varin/application-client').GitStashEntry[] }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.listGitStashes(directory);
   return gitHttp.listGitStashes(directory);
@@ -634,8 +634,8 @@ export async function renameBranch(
 
 export async function getGitLog(
   directory: string,
-  options: import('@piarium/application-client').GitLogOptions = {}
-): Promise<import('@piarium/application-client').GitLogResponse> {
+  options: import('@varin/application-client').GitLogOptions = {}
+): Promise<import('@varin/application-client').GitLogResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitLog(directory, options);
   return gitHttp.getGitLog(directory, options);
@@ -644,7 +644,7 @@ export async function getGitLog(
 export async function getCommitFiles(
   directory: string,
   hash: string
-): Promise<import('@piarium/application-client').GitCommitFilesResponse> {
+): Promise<import('@varin/application-client').GitCommitFilesResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCommitFiles(directory, hash);
   return gitHttp.getCommitFiles(directory, hash);
@@ -655,25 +655,25 @@ export async function getCommitFileDiff(
   hash: string,
   filePath: string,
   isBinary: boolean
-): Promise<import('@piarium/application-client').CommitFileDiffResponse> {
+): Promise<import('@varin/application-client').CommitFileDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
   return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
 }
 
-export async function getGitIdentities(): Promise<import('@piarium/application-client').GitIdentityProfile[]> {
+export async function getGitIdentities(): Promise<import('@varin/application-client').GitIdentityProfile[]> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitIdentities();
   return gitHttp.getGitIdentities();
 }
 
-export async function createGitIdentity(profile: import('@piarium/application-client').GitIdentityProfile): Promise<import('@piarium/application-client').GitIdentityProfile> {
+export async function createGitIdentity(profile: import('@varin/application-client').GitIdentityProfile): Promise<import('@varin/application-client').GitIdentityProfile> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.createGitIdentity(profile);
   return gitHttp.createGitIdentity(profile);
 }
 
-export async function updateGitIdentity(id: string, updates: import('@piarium/application-client').GitIdentityProfile): Promise<import('@piarium/application-client').GitIdentityProfile> {
+export async function updateGitIdentity(id: string, updates: import('@varin/application-client').GitIdentityProfile): Promise<import('@varin/application-client').GitIdentityProfile> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.updateGitIdentity(id, updates);
   return gitHttp.updateGitIdentity(id, updates);
@@ -685,7 +685,7 @@ export async function deleteGitIdentity(id: string): Promise<void> {
   return gitHttp.deleteGitIdentity(id);
 }
 
-export async function getCurrentGitIdentity(directory: string): Promise<import('@piarium/application-client').GitIdentitySummary | null> {
+export async function getCurrentGitIdentity(directory: string): Promise<import('@varin/application-client').GitIdentitySummary | null> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCurrentGitIdentity(directory);
   return gitHttp.getCurrentGitIdentity(directory);
@@ -700,19 +700,19 @@ export async function hasLocalIdentity(directory: string): Promise<boolean> {
 export async function setGitIdentity(
   directory: string,
   profileId: string
-): Promise<{ success: boolean; profile: import('@piarium/application-client').GitIdentityProfile }> {
+): Promise<{ success: boolean; profile: import('@varin/application-client').GitIdentityProfile }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.setGitIdentity(directory, profileId);
   return gitHttp.setGitIdentity(directory, profileId);
 }
 
-export async function discoverGitCredentials(): Promise<import('@piarium/application-client').DiscoveredGitCredential[]> {
+export async function discoverGitCredentials(): Promise<import('@varin/application-client').DiscoveredGitCredential[]> {
   const runtime = getRuntimeGit();
   if (runtime?.discoverGitCredentials) return runtime.discoverGitCredentials();
   return gitHttp.discoverGitCredentials();
 }
 
-export async function getGlobalGitIdentity(): Promise<import('@piarium/application-client').GitIdentitySummary | null> {
+export async function getGlobalGitIdentity(): Promise<import('@varin/application-client').GitIdentitySummary | null> {
   const runtime = getRuntimeGit();
   if (runtime?.getGlobalGitIdentity) return runtime.getGlobalGitIdentity();
   return gitHttp.getGlobalGitIdentity();
@@ -724,7 +724,7 @@ export async function getRemoteUrl(directory: string, remote?: string): Promise<
   return gitHttp.getRemoteUrl(directory, remote);
 }
 
-export async function getRemotes(directory: string): Promise<import('@piarium/application-client').GitRemote[]> {
+export async function getRemotes(directory: string): Promise<import('@varin/application-client').GitRemote[]> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getRemotes(directory);
   return gitHttp.getRemotes(directory);
@@ -732,7 +732,7 @@ export async function getRemotes(directory: string): Promise<import('@piarium/ap
 
 export async function removeRemote(
   directory: string,
-  payload: import('@piarium/application-client').GitRemoveRemotePayload
+  payload: import('@varin/application-client').GitRemoveRemotePayload
 ): Promise<{ success: boolean }> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.removeRemote(directory, payload);
@@ -742,7 +742,7 @@ export async function removeRemote(
 export async function rebase(
   directory: string,
   options: { onto: string }
-): Promise<import('@piarium/application-client').GitRebaseResult> {
+): Promise<import('@varin/application-client').GitRebaseResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.rebase(directory, options);
   return gitHttp.rebase(directory, options);
@@ -757,7 +757,7 @@ export async function abortRebase(directory: string): Promise<{ success: boolean
 export async function merge(
   directory: string,
   options: { branch: string }
-): Promise<import('@piarium/application-client').GitMergeResult> {
+): Promise<import('@varin/application-client').GitMergeResult> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.merge(directory, options);
   return gitHttp.merge(directory, options);
@@ -766,7 +766,7 @@ export async function merge(
 export async function checkoutCommit(
   directory: string,
   hash: string
-): Promise<import('@piarium/application-client').CheckoutCommitResponse> {
+): Promise<import('@varin/application-client').CheckoutCommitResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.checkoutCommit(directory, hash);
   return gitHttp.checkoutCommit(directory, hash);
@@ -775,7 +775,7 @@ export async function checkoutCommit(
 export async function cherryPick(
   directory: string,
   hash: string
-): Promise<import('@piarium/application-client').CherryPickResponse> {
+): Promise<import('@varin/application-client').CherryPickResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.cherryPick(directory, hash);
   return gitHttp.cherryPick(directory, hash);
@@ -784,7 +784,7 @@ export async function cherryPick(
 export async function revertCommit(
   directory: string,
   hash: string
-): Promise<import('@piarium/application-client').RevertCommitResponse> {
+): Promise<import('@varin/application-client').RevertCommitResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.revertCommit(directory, hash);
   return gitHttp.revertCommit(directory, hash);
@@ -795,7 +795,7 @@ export async function resetToCommit(
   hash: string,
   mode: 'soft' | 'mixed' | 'hard',
   force?: boolean
-): Promise<import('@piarium/application-client').ResetToCommitResponse> {
+): Promise<import('@varin/application-client').ResetToCommitResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.resetToCommit(directory, hash, mode, force);
   return gitHttp.resetToCommit(directory, hash, mode, force);
@@ -834,7 +834,7 @@ export async function stashPop(directory: string): Promise<{ success: boolean }>
   return gitHttp.stashPop(directory);
 }
 
-export async function getConflictDetails(directory: string): Promise<import('@piarium/application-client').MergeConflictDetails> {
+export async function getConflictDetails(directory: string): Promise<import('@varin/application-client').MergeConflictDetails> {
   const runtime = getRuntimeGit();
   if (runtime?.getConflictDetails) return runtime.getConflictDetails(directory);
   return gitHttp.getConflictDetails(directory);

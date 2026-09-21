@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Piarium Mobile</title>
+    <title>Varin Mobile</title>
 
     <script>
       // Blocking script: resolve the theme and paint the correct background BEFORE first
@@ -15,7 +15,7 @@
       // theme the app itself persisted to localStorage; no server involved.
       (function () {
         try {
-          var storedTheme = JSON.parse(localStorage.getItem('piarium.theme.v1') || 'null');
+          var storedTheme = JSON.parse(localStorage.getItem('varin.theme.v1') || 'null');
           var themeMode = storedTheme && storedTheme.mode;
           var isDark;
 

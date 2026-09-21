@@ -35,13 +35,13 @@ const normalizeBaseUrl = (value: string | null | undefined): string => {
 
 const readInjectedApiBaseUrl = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __PIARIUM_API_BASE_URL__?: string }).__PIARIUM_API_BASE_URL__;
+  const injected = (window as typeof window & { __VARIN_API_BASE_URL__?: string }).__VARIN_API_BASE_URL__;
   return normalizeBaseUrl(injected);
 };
 
 const readInjectedLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  const injected = (window as typeof window & { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__;
+  const injected = (window as typeof window & { __VARIN_LOCAL_ORIGIN__?: string }).__VARIN_LOCAL_ORIGIN__;
   return normalizeBaseUrl(injected);
 };
 
@@ -101,8 +101,8 @@ const withUrlAuth = (urlValue: string): string => {
 
   const url = ABSOLUTE_URL_PATTERN.test(urlValue)
     ? new URL(urlValue)
-    : new URL(urlValue, 'http://piarium.local');
-  url.searchParams.set('piarium_url_token', token);
+    : new URL(urlValue, 'http://varin.local');
+  url.searchParams.set('varin_url_token', token);
   if (ABSOLUTE_URL_PATTERN.test(urlValue)) return url.toString();
   return `${url.pathname}${url.search}${url.hash}`;
 };
@@ -123,10 +123,10 @@ const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: Runti
   const localOrigin = readInjectedLocalOrigin();
   if (!localOrigin) return null;
   try {
-    const proxy = new URL(`/api/piarium/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
+    const proxy = new URL(`/api/varin/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
     proxy.searchParams.set('url', targetUrl);
     const localToken = getLocalRuntimeUrlAuthTokenSync(localOrigin);
-    if (localToken) proxy.searchParams.set('piarium_url_token', localToken);
+    if (localToken) proxy.searchParams.set('varin_url_token', localToken);
     if (kind === 'ws') {
       proxy.protocol = proxy.protocol === 'https:' ? 'wss:' : 'ws:';
       return toWebSocketUrl(proxy.toString(), config);

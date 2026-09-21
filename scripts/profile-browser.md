@@ -1,6 +1,6 @@
 # Browser performance capture
 
-Start Piarium locally, then run:
+Start Varin locally, then run:
 
 ```bash
 bun run profile:browser
@@ -8,7 +8,7 @@ bun run profile:browser
 
 The command opens an isolated Chrome profile. On the first run, complete any
 login or setup in that window, prepare the sessions and screen you want to
-measure, then return to the terminal and press Enter. Use Piarium normally
+measure, then return to the terminal and press Enter. Use Varin normally
 for the next 60 seconds.
 
 Google Chrome is selected first on macOS, with Chrome Canary and Chromium as
@@ -44,7 +44,7 @@ Useful options:
 ```bash
 bun run profile:browser -- --duration 120
 bun run profile:browser -- --url http://localhost:4173
-bun run profile:browser -- --output /tmp/piarium-profile
+bun run profile:browser -- --output /tmp/varin-profile
 bun run profile:browser -- --reload --no-prompt --duration 60
 ```
 

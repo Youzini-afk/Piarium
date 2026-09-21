@@ -4,7 +4,7 @@ import type {
   DocumentSurfaceWriteChange,
   DocumentSurfaceWritePathResult,
   DocumentSurfaceWriteResult,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type {
   DirtyBufferPublication,
   DocumentSurfaceOperationRequest,

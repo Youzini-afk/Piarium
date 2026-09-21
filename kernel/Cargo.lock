@@ -815,31 +815,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
-name = "piarium-kernel"
-version = "0.1.0"
-dependencies = [
- "base64",
- "fs2",
- "globset",
- "grep-matcher",
- "grep-regex",
- "hex",
- "ignore",
- "libc",
- "portable-pty",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "streaming-iterator",
- "thiserror 2.0.20",
- "tree-sitter",
- "uuid",
- "wasmparser",
- "windows-sys",
-]
-
-[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1323,6 +1298,31 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "varin-kernel"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "fs2",
+ "globset",
+ "grep-matcher",
+ "grep-regex",
+ "hex",
+ "ignore",
+ "libc",
+ "portable-pty",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "streaming-iterator",
+ "thiserror 2.0.20",
+ "tree-sitter",
+ "uuid",
+ "wasmparser",
+ "windows-sys",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
-import type { JsonValue } from '@piarium/extension-contract';
-import type { HostCapabilityCallContext } from '@piarium/extension-host';
+import type { JsonValue } from '@varin/extension-contract';
+import type { HostCapabilityCallContext } from '@varin/extension-host';
 
 export interface CapabilityInvocationContext {
   owner?: HostCapabilityCallContext['owner'] | undefined;

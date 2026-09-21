@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { registerHarnessContextRoutes } from "./context-routes.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-harness-context-routes");
+const TEST_DIR = join(tmpdir(), "varin-harness-context-routes");
 
 describe("harness context routes", () => {
   let store: KnowledgeStore;

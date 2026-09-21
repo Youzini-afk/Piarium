@@ -1,4 +1,4 @@
-import type { JsonValue } from '@piarium/extension-contract';
+import type { JsonValue } from '@varin/extension-contract';
 
 import { listEditorGroups } from './groups';
 import {

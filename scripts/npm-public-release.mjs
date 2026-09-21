@@ -71,7 +71,7 @@ const packageRelease = async (tag, outputArgument) => {
     });
   }
 
-  const smokeRoot = await mkdtemp(path.join(os.tmpdir(), 'piarium-npm-smoke-'));
+  const smokeRoot = await mkdtemp(path.join(os.tmpdir(), 'varin-npm-smoke-'));
   try {
     run('npm', ['init', '--yes'], { cwd: smokeRoot });
     run('npm', [
@@ -79,22 +79,22 @@ const packageRelease = async (tag, outputArgument) => {
       ...artifacts.map(({ tarball }) => path.join(output, tarball)),
     ], { cwd: smokeRoot });
     const imports = [
-      '@piarium/extension-contract',
-      '@piarium/extension-surface',
-      '@piarium/extension-sdk',
-      '@piarium/extension-sdk/testing',
-      '@piarium/extension-react',
-      '@piarium/extension-cli',
+      '@varin/extension-contract',
+      '@varin/extension-surface',
+      '@varin/extension-sdk',
+      '@varin/extension-sdk/testing',
+      '@varin/extension-react',
+      '@varin/extension-cli',
     ];
     run('node', ['--input-type=module', '--eval', `for (const id of ${JSON.stringify(imports)}) await import(id);`], { cwd: smokeRoot });
     const sample = path.join(smokeRoot, 'sample-extension');
-    const cli = path.join(smokeRoot, 'node_modules', '@piarium', 'extension-cli', 'dist', 'cli.js');
+    const cli = path.join(smokeRoot, 'node_modules', '@varin', 'extension-cli', 'dist', 'cli.js');
     const cliRun = (args) => {
       const result = spawnSync(process.execPath, [cli, ...args], { cwd: smokeRoot, env: process.env, stdio: 'inherit' });
       if (result.error) throw result.error;
-      if (result.status !== 0) throw new Error(`piarium-extension ${args.join(' ')} exited with code ${result.status}`);
+      if (result.status !== 0) throw new Error(`varin-extension ${args.join(' ')} exited with code ${result.status}`);
     };
-    cliRun(['init', sample, '--id', 'dev.piarium.release-smoke', '--name', 'Release Smoke']);
+    cliRun(['init', sample, '--id', 'dev.varin.release-smoke', '--name', 'Release Smoke']);
     cliRun(['build', sample]);
     cliRun(['check', sample]);
     cliRun(['test', sample]);
@@ -102,18 +102,18 @@ const packageRelease = async (tag, outputArgument) => {
     // Also smoke a shell template project to verify the shell composition
     // contract (mountReplacement, mountSlot, disposer) is exercised.
     const shellSample = path.join(smokeRoot, 'shell-extension');
-    cliRun(['init', shellSample, '--id', 'dev.piarium.shell-smoke', '--name', 'Shell Smoke', '--template', 'shell']);
+    cliRun(['init', shellSample, '--id', 'dev.varin.shell-smoke', '--name', 'Shell Smoke', '--template', 'shell']);
     cliRun(['build', shellSample]);
     cliRun(['check', shellSample]);
     cliRun(['test', shellSample]);
     const generated = JSON.parse(await readFile(path.join(sample, 'package.json'), 'utf8'));
-    for (const dependency of ['@piarium/extension-contract', '@piarium/extension-sdk']) {
+    for (const dependency of ['@varin/extension-contract', '@varin/extension-sdk']) {
       if (generated.dependencies?.[dependency] !== release.version) {
         throw new Error(`Generated project uses ${dependency}@${generated.dependencies?.[dependency]}, expected ${release.version}`);
       }
     }
-    if (generated.devDependencies?.['@piarium/extension-cli'] !== release.version) {
-      throw new Error(`Generated project uses the wrong @piarium/extension-cli version`);
+    if (generated.devDependencies?.['@varin/extension-cli'] !== release.version) {
+      throw new Error(`Generated project uses the wrong @varin/extension-cli version`);
     }
   } finally {
     await rm(smokeRoot, { force: true, recursive: true });
@@ -121,7 +121,7 @@ const packageRelease = async (tag, outputArgument) => {
 
   const manifest = {
     artifacts,
-    repository: 'Youzini-afk/Piarium',
+    repository: 'Youzini-afk/Varin',
     schemaVersion: 1,
     sourceCommit: gitCommit(),
     tag,

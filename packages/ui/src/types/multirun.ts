@@ -1,4 +1,4 @@
-import type { PiAgentInvocationDescriptor } from '@piarium/protocol';
+import type { PiAgentInvocationDescriptor } from '@varin/protocol';
 
 interface MultiRunModelSelection {
   providerID: string;

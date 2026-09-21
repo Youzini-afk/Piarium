@@ -1,7 +1,7 @@
 import type {
   FoundationalPiPackageStatusEntry,
   FoundationalPiPackageStatusSnapshot,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import type { I18nKey } from '@/lib/i18n';
 
 export type FoundationalPackageAction = 'restore' | 'retry' | 'none';
@@ -14,18 +14,18 @@ export interface FoundationalPackagePresentation {
 }
 
 const FOUNDATION_STATUS_KEYS = {
-  actionRequired: 'settings.piarium.plugins.foundation.status.actionRequired',
-  configuredBroken: 'settings.piarium.plugins.foundation.status.configuredBroken',
-  disabled: 'settings.piarium.plugins.foundation.status.disabled',
-  enabled: 'settings.piarium.plugins.foundation.status.enabled',
-  failedRetryable: 'settings.piarium.plugins.foundation.status.failedRetryable',
-  incompatible: 'settings.piarium.plugins.foundation.status.incompatible',
-  missing: 'settings.piarium.plugins.foundation.status.missing',
-  policySkipped: 'settings.piarium.plugins.foundation.status.policySkipped',
-  sourceConflict: 'settings.piarium.plugins.foundation.status.sourceConflict',
-  suppressed: 'settings.piarium.plugins.foundation.status.suppressed',
-  unknown: 'settings.piarium.plugins.foundation.status.unknown',
-  working: 'settings.piarium.plugins.foundation.status.working',
+  actionRequired: 'settings.varin.plugins.foundation.status.actionRequired',
+  configuredBroken: 'settings.varin.plugins.foundation.status.configuredBroken',
+  disabled: 'settings.varin.plugins.foundation.status.disabled',
+  enabled: 'settings.varin.plugins.foundation.status.enabled',
+  failedRetryable: 'settings.varin.plugins.foundation.status.failedRetryable',
+  incompatible: 'settings.varin.plugins.foundation.status.incompatible',
+  missing: 'settings.varin.plugins.foundation.status.missing',
+  policySkipped: 'settings.varin.plugins.foundation.status.policySkipped',
+  sourceConflict: 'settings.varin.plugins.foundation.status.sourceConflict',
+  suppressed: 'settings.varin.plugins.foundation.status.suppressed',
+  unknown: 'settings.varin.plugins.foundation.status.unknown',
+  working: 'settings.varin.plugins.foundation.status.working',
 } as const satisfies Record<string, I18nKey>;
 
 /**
@@ -87,13 +87,13 @@ export const foundationalSnapshotStatusKey = (
 ): I18nKey => {
   switch (state) {
     case 'running':
-      return 'settings.piarium.plugins.foundation.state.running';
+      return 'settings.varin.plugins.foundation.state.running';
     case 'ready':
-      return 'settings.piarium.plugins.foundation.state.ready';
+      return 'settings.varin.plugins.foundation.state.ready';
     case 'degraded':
-      return 'settings.piarium.plugins.foundation.state.degraded';
+      return 'settings.varin.plugins.foundation.state.degraded';
     default:
-      return 'settings.piarium.plugins.foundation.state.idle';
+      return 'settings.varin.plugins.foundation.state.idle';
   }
 };
 

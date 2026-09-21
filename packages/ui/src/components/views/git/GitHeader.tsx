@@ -27,7 +27,7 @@ import type {
   GitRemoteComparison,
   GitHubPullRequest,
   GitHubChecksSummary,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;

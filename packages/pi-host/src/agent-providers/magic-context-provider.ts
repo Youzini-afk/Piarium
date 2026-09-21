@@ -6,7 +6,7 @@ import {
   type PiAgentDescriptor,
   type PiAgentProviderDescriptor,
   type PiAgentStatus,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { agentProviderEntityId } from "./identity.js";
 import type {

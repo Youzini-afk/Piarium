@@ -1,5 +1,5 @@
 export interface WindowInitScriptTarget {
-  __piariumInitScript?: string | null | undefined;
+  __varinInitScript?: string | null | undefined;
   isDestroyed?(): boolean;
 }
 
@@ -15,6 +15,6 @@ export const updateWindowInitScript = (
     return false;
   }
 
-  browserWindow.__piariumInitScript = initScript;
+  browserWindow.__varinInitScript = initScript;
   return true;
 };

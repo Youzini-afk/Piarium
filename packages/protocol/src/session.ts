@@ -1,12 +1,12 @@
 import type { JsonValue, ThinkingLevel } from "./types.js";
 
-export const PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION = 1 as const;
-export const PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE = "piarium.recovery.navigation/v1";
+export const VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION = 1 as const;
+export const VARIN_RECOVERY_NAVIGATION_MARKER_TYPE = "varin.recovery.navigation/v1";
 
 export interface PiRecoveryNavigationMarkerData {
   expectedLeafId: string | null;
   operationId: string;
-  schemaVersion: typeof PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION;
+  schemaVersion: typeof VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION;
   targetId: string | null;
   targetLeafId: string | null;
 }

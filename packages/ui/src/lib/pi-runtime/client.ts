@@ -3,20 +3,20 @@ import {
   WebSocketRuntimeTransport,
   type RuntimeTransport,
   type RuntimeWebSocket,
-} from '@piarium/runtime-client';
+} from '@varin/runtime-client';
 import {
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type HostHandshakeResult,
   type HostMode,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
-import { refreshRuntimeUrlAuthToken } from '@piarium/application-client';
+import { refreshRuntimeUrlAuthToken } from '@varin/application-client';
 import {
   getRuntimeApiBaseUrl,
   getRuntimeKey,
   subscribeRuntimeEndpointWillChange,
-} from '@piarium/application-client';
-import { getRuntimeUrlResolver } from '@piarium/application-client';
+} from '@varin/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
 
 export interface PiRuntimeConnection {
   client: PiRuntimeClient;
@@ -53,7 +53,7 @@ export const createPiRuntimeConnection = async (
     const refreshAuth = options.refreshAuth ?? refreshRuntimeUrlAuthToken;
     await refreshAuth(getRuntimeApiBaseUrl() || undefined);
     const url = options.resolveWebSocketUrl?.()
-      ?? getRuntimeUrlResolver().websocket('/api/piarium/runtime/ws');
+      ?? getRuntimeUrlResolver().websocket('/api/varin/runtime/ws');
     transport = new WebSocketRuntimeTransport({
       url,
       webSocketFactory: options.openSocket ?? ((socketUrl, protocols) =>
@@ -68,10 +68,10 @@ export const createPiRuntimeConnection = async (
   try {
     await client.connect();
     const handshake = await client.handshake({
-      clientName: options.clientName ?? 'piarium-ui',
+      clientName: options.clientName ?? 'varin-ui',
       clientVersion: options.clientVersion ?? '0.1.0',
       mode: options.mode ?? defaultMode(),
-      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+      protocolVersions: [VARIN_PROTOCOL_VERSION],
     });
     return {
       client,

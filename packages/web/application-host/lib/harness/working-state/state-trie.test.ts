@@ -220,7 +220,7 @@ describe("persisted Merkle map sharing", () => {
   });
 
   it("serializes path maps as trie refs into a shared node pool and reopens identically", async () => {
-    const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-trie-store-"));
+    const root = await fs.mkdtemp(path.join(tmpdir(), "varin-trie-store-"));
     cleanup.push(root);
     const workspace = path.join(root, "workspace");
     const recoveryRoot = path.join(root, "recovery");

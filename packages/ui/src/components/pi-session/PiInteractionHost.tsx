@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,

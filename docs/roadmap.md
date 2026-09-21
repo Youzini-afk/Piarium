@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B rebrand planned at D-313 before Stage F (D-312)
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) next
 
 Last updated: 2026-09-21
 
@@ -21,7 +21,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 6 | Recovery UX and ecosystem integrations | Complete |
 | 7 | Windows release | Complete |
 | 8 | OpenChamber upstream capability absorption | Complete |
-| 9 | Piarium extension platform | Complete |
+| 9 | Varin extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
@@ -29,7 +29,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
 | S | Conversational settings and Agent administration | Complete (D-306–D-311): owner-backed catalog/actions, session-bound authenticated Surfaces, typed operations, per-owner compound updates and product Skills |
 | W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
-| B | Varin product-wide rebrand | Accepted design (D-313), not implemented; clean cutover of product, owned identities and distribution, without old-name compatibility; before F |
+| B | Varin product-wide rebrand | Source, product assets, build/distribution configuration and GitHub repository switched (D-313); first new-brand publication pending; no old-name compatibility |
 | F | Fast Decision Models and progressive retrieval | Accepted design (D-312), not implemented: shared capability/binding, first Jev adapter, source selection and iterative exploration in `explore`; follows B |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
@@ -117,8 +117,9 @@ Stage B follows S/W and is specified in [varin-rebrand-design.md](varin-rebrand-
 B0–B4 cover the naming map, package/runtime/storage cutover, product identity and assets, distribution/docs,
 and focused closure. The new brand is Varin; there are no existing-user compatibility requirements, so
 old aliases, fallback paths, dual writes and migration helpers are excluded. Actual Pi dependencies,
-developer assets and historical attribution remain intact. Repository and external publishing resources
-are targets pending implementation, not already available endpoints. Stage B precedes the unimplemented F.
+developer assets and historical attribution remain intact. The repository is now `Youzini-afk/Varin`;
+new npm packages and release assets have not been published. Source/build/startup evidence and these
+distribution boundaries are recorded in harness status. Stage F is the next implementation stage.
 
 Stage F follows B and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
 F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
@@ -202,7 +203,7 @@ the retained Electron boundary, not as the current desktop specification.
 - The prototype validated conversation-only, files-only, combined restore, checkpoint, undo/redo,
   transaction, and crash-safety semantics.
 - Its complete-workspace and shadow-Git implementation was removed rather than kept as a second
-  recovery authority. Production recovery now uses the selected `piarium.workspace-recovery@5`
+  recovery authority. Production recovery now uses the selected `varin.workspace-recovery@5`
   Host service and its affected-file journal; optional Pi recovery packages retain only their own
   independent commands, configuration, and history.
 
@@ -211,21 +212,21 @@ acceptance is owned by [native-workspace-recovery-design.md](native-workspace-re
 
 ## Phase 4 — OpenChamber fork product base (complete)
 
-- Import the clean `Youzini-afk/openchamber` fork snapshot into Piarium with provenance and MIT
+- Import the clean `Youzini-afk/openchamber` fork snapshot into Varin with provenance and MIT
   attribution; keep every source fork worktree read-only.
 - Preserve custom providers, remote/cloud access, workspace security, archive restore, delayed child
   sessions, session UX, Electron/web/mobile/VS Code surfaces, and reviewed fork customizations.
 - Adopt the mature build and product shell without copying tracked secrets, obsolete release
-  identities, or OpenCode branding into Piarium artifacts.
+  identities, or OpenCode branding into Varin artifacts.
 - Keep the connected Capacitor iOS/Android implementation and remove the unused parallel Expo/React
   Native tree and dependencies.
 
-Acceptance: the imported product shell builds in Piarium and fork-specific regression coverage is
+Acceptance: the imported product shell builds in Varin and fork-specific regression coverage is
 retained before engine surgery begins.
 
 ## Phase 5 — Direct Pi-native engine migration (complete)
 
-This phase replaced the imported OpenCode engine with Piarium-owned Pi contracts. The architectural
+This phase replaced the imported OpenCode engine with Varin-owned Pi contracts. The architectural
 result is specified in [architecture.md](architecture.md); the source and non-regression contract is
 [openchamber-pi-migration.md](openchamber-pi-migration.md). The entries below are the delivery
 record, kept at full detail because each one names an ownership decision that is still binding.
@@ -235,7 +236,7 @@ record, kept at full detail because each one names an ownership decision that is
   and bounded shutdown lifecycle. The authenticated WebSocket gateway now shares that broker with
   web/desktop/mobile, validates every public method, routes per-worker event sequences, and works
   through the existing encrypted relay allowlist. Protocol v1 now projects Pi session trees,
-  messages, stream deltas, models, and provider-owned auth prompts/events into stable Piarium DTOs;
+  messages, stream deltas, models, and provider-owned auth prompts/events into stable Varin DTOs;
   SDK callbacks, signatures, and credentials remain worker-private. Pi-native user/project/operator
   provider configuration, scoped deletion, credential provenance, and credential-safe model discovery
   are implemented behind the same runtime boundary.
@@ -246,7 +247,7 @@ record, kept at full detail because each one names an ownership decision that is
 - Implemented unrestricted scoped plugin settings, extension-owned JSON/JSONC configuration
   documents, and Pi custom-component snapshots. Pi-native conversation rollback preserves
   text/images. Combined rollback, checkpoints, undo/redo, retention, and crash reconciliation now
-  use the selected `piarium.workspace-recovery@5` Host service and affected-file journal. The
+  use the selected `varin.workspace-recovery@5` Host service and affected-file journal. The
   full-workspace shadow-Git prototype and the interim plugin-delegated recovery bridge are not in the
   production authority path; `pi-workspace-history` and `pi-wtf` remain optional independent Pi packages.
 - Implemented Pi-native desktop first-launch and local recovery readiness. Both negotiate the real
@@ -274,7 +275,7 @@ record, kept at full detail because each one names an ownership decision that is
   discovery no longer require the OpenCode SyncProvider. No production application root mounts that
   provider. Pi commands are discovered from live sessions or an in-memory
   workspace catalog, so extension, prompt-template, skill, and recovery-plugin updates appear
-  without Piarium-owned copies.
+  without Varin-owned copies.
 - Implemented: terminal selections, pull-request comments/check failures, merge conflicts, and
   worktree-integration conflicts now seed the active Pi composer or create a Pi session in the
   required directory. Visible text and hidden instructions travel through Pi's native prompt
@@ -286,15 +287,15 @@ record, kept at full detail because each one names an ownership decision that is
   session-scoped Pi context; whole files become explicit readable path context. Pi session events
   now drive one completion/error attention state shared by background-session indicators, session
   switchers, and mobile widget snapshots, and opening a session clears that state.
-- Implemented a coherent Piarium product identity across the Windows installer, Electron AUMID,
-  native/PWA titles, updater feed, `piarium://` deep links, `piarium-ui://` packaged origin,
+- Implemented a coherent Varin product identity across the Windows installer, Electron AUMID,
+  native/PWA titles, updater feed, `varin://` deep links, `varin-ui://` packaged origin,
   authentication device labels, translations, and generated icon assets. The retained cube motif
-  now carries Piarium's own π mark rather than the upstream OpenCode mark.
+  now carries Varin's own π mark rather than the upstream OpenCode mark.
 - Implemented Pi-native scheduled execution end to end: the scheduler creates a Pi session,
   selects its Pi provider/model/thinking level, and dispatches either a Pi extension command or
   agent prompt. The editor and run-now navigation use the same Pi catalog/session contract; legacy
   OpenCode agent variants, permission policy, goal token ceiling, and session IDs were removed.
-- Implemented: all four production UI roots now use Piarium protocol DTOs without importing the
+- Implemented: all four production UI roots now use Varin protocol DTOs without importing the
   OpenCode SDK. The unreachable SDK client, complete sync/optimistic state graph, old chat composer,
   turn projector, session sidebar, compiled test remnants, Vite aliases, dependency entries, and
   lockfile package were removed together. Pi Skills autocomplete was reattached to the live Pi
@@ -304,32 +305,32 @@ record, kept at full detail because each one names an ownership decision that is
   persistence, and obsolete UI code are no longer part of the production graph.
 - Implemented: cloud delivery now builds one canonical production workspace containing Web,
   protocol, runtime broker, and the bundled Pi host. The application image installs native
-  dependencies on its target architecture and runs on a Piarium-owned multi-architecture runtime
+  dependencies on its target architecture and runs on a Varin-owned multi-architecture runtime
   base with the fork's complete development toolbelt, plus a slim runtime without language
   toolchains. CI publishes digest-linked slim and toolbelt base/application images and performs a
-  real bundled-host health smoke on both. Compose defaults to the slim image and uses Piarium-owned
+  real bundled-host health smoke on both. Compose defaults to the slim image and uses Varin-owned
   paths and state.
   SSH deployment verifies a content-addressed archive, installs into an immutable release, switches
   `current` atomically, waits for a ready bundled Pi runtime, and automatically restores the last
   healthy release on failure. No cloud path installs, configures, or probes an OpenCode runtime.
-- Implemented: About now reads the server's real `piariumVersion`, links to the Piarium repository,
+- Implemented: About now reads the server's real `varinVersion`, links to the Varin repository,
   and no longer probes or displays a nonexistent OpenCode upgrade endpoint. The unreachable
   OpenCode upgrade toast, its persisted preferences, and its Web settings API shim were removed;
-  Piarium application updates and the independent PWA install prompt remain intact.
-- Implemented: managed Git worktrees now live below Piarium's own data directory and use the
-  canonical Piarium path-based project ID plus `piarium/<name>` default branches. Worktree setup
+  Varin application updates and the independent PWA install prompt remain intact.
+- Implemented: managed Git worktrees now live below Varin's own data directory and use the
+  canonical Varin path-based project ID plus `varin/<name>` default branches. Worktree setup
   no longer writes `.git/opencode`, OpenCode project JSON, or `opencode.db`; Git itself is the
-  authoritative registry and the Piarium UI passes the configured setup command explicitly.
+  authoritative registry and the Varin UI passes the configured setup command explicitly.
 - Implemented: both reachable file trees now use the required cross-runtime `FilesAPI` directly;
   the unreachable OpenCode directory-list fallback and the server's `.opencode/plans` missing-path
   exception were removed. Web list mapping and the server directory-list contract are tested.
-- Implemented: project onboarding and directory selection now use Piarium runtime capabilities end
+- Implemented: project onboarding and directory selection now use Varin runtime capabilities end
   to end. `FilesAPI` resolves the active host home, lists directories, and explicitly creates new
   project directories outside the current workspace; `GitAPI` clones with the selected identity on
   Web/Electron/mobile and VS Code. The reachable directory dialog no longer calls `opencodeClient`
   or assembles private filesystem routes.
 - Implemented: About, the desktop Help menu, and the runtime-status shortcut now open one production
-  Piarium diagnostics surface. It reports the negotiated Pi handshake, `/health`, package/resource/
+  Varin diagnostics surface. It reports the negotiated Pi handshake, `/health`, package/resource/
   agent-provider diagnostics, fleet/recovery availability, and project/session state without reading
   OpenCode SDK endpoints or copying provider settings, package source URLs, message bodies, or fleet
   goals. The old invisible OpenCode status dialog and `window.__opencodeDebug` entry point were removed.
@@ -348,7 +349,7 @@ any plugin. Current native-ownership and adapter boundaries live in
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
   application settings. Optional `pi-workspace-history` and `pi-wtf` packages remain manageable
-  through Pi's native package operations without being installed, invoked, or reported as Piarium's
+  through Pi's native package operations without being installed, invoked, or reported as Varin's
   recovery authority.
 - Implemented: replace the imported OpenCode plugin registry/file editor with a single Pi-native
   package manager. It lists configured sources, updates one or all packages, removes packages, and
@@ -359,7 +360,7 @@ any plugin. Current native-ownership and adapter boundaries live in
   startup never repairs, reinstalls, or activates them on behalf of native recovery.
 - Implemented: connect timeline recovery to the selected policy with Pi entry IDs. Conversation
   navigation remains Pi-native; combined file recovery uses affected-path checkpoints from
-  `piarium.builtin.recovery`, with cross-surface dirty-buffer fencing, operation-level workspace
+  `varin.builtin.recovery`, with cross-surface dirty-buffer fencing, operation-level workspace
   leases, confirmed-conflict fingerprints, crash compensation, and configurable retention.
 - Implemented: put native recovery status, checkpoint/history storage, retention, undo/redo, and
   attention-required operations in the right sidebar/settings while retaining the Pi timeline's
@@ -419,8 +420,8 @@ any plugin. Current native-ownership and adapter boundaries live in
   child of that agent directory. Runtime availability is `memory-insights` command presence only.
 - Implemented: `pi-rtk-optimizer@0.9.0` is recommended and adapted through its one strict-JSON
   agent-root authority after its entry point and exact `rtk` command registration were verified on
-  Piarium's bundled Pi at the time (`0.84.1`). Its upstream peer declaration still stops at Pi 0.80,
-  but Piarium does not maintain a fork or old-Pi compatibility layer. Command presence proves
+  Varin's bundled Pi at the time (`0.84.1`). Its upstream peer declaration still stops at Pi 0.80,
+  but Varin does not maintain a fork or old-Pi compatibility layer. Command presence proves
   extension loading only, not availability of the external RTK binary.
 - Implemented: Agents, Commands, Prompts, Skills, Pi Packages, and Plugin Settings now observe one
   ownership model. Agents exposes provider-owned source/package/invocation facts without inventing
@@ -441,7 +442,7 @@ any plugin. Current native-ownership and adapter boundaries live in
   reconnect/auth/logout/enable/disable command orchestration, and the plugin-owned read-only
   `configCatalog/v1` effective server projection. MCP settings appear only for an installed adapter;
   the split page lists each effective server once on the left and edits an explicit revisioned native
-  source on the right. Piarium never merges adapter sources in the renderer, and the catalog excludes
+  source on the right. Varin never merges adapter sources in the renderer, and the catalog excludes
   arguments, environment, headers, tokens, OAuth, and URL credential material. Desktop header and
   mobile controls consume the same public status/command path; the old OpenCode MCP stores, draft
   editor, and OAuth callback route are removed. Each native source keeps a structured,
@@ -472,12 +473,12 @@ Windows x64 and ARM64 ship as required release assets from matching native runne
 discovery, install planning, the installer graph, and the packaging smoke path are done. Packaging
 commands and signing live in [packages/electron/README.md](../packages/electron/README.md).
 
-- Implemented: Electron's Node mode hosts the compiled Piarium Host bootstrap and broker; running the
+- Implemented: Electron's Node mode hosts the compiled Varin Host bootstrap and broker; running the
   desktop shell requires no separate Node download. Windows product/installer identity and GitHub
-  updater metadata target `Youzini-afk/Piarium`.
+  updater metadata target `Youzini-afk/Varin`.
 - Implemented: desktop starts without forcing a Pi warmup. The Runtime Manager discovers user-global,
   standalone, source, and explicit custom Pi installations; probes the real package root and Host
-  handshake; and activates a successful selection without restarting Piarium. Existing sessions stay
+  handshake; and activates a successful selection without restarting Varin. Existing sessions stay
   on their owning generation while new work moves to the selected generation.
 - Implemented: installation planning prefers the package manager that owns an existing Pi, otherwise
   detected npm/Bun/pnpm, and otherwise a verified standalone payload when the distribution supplies
@@ -532,10 +533,10 @@ Acceptance: every adopted capability names its authoritative owner, preserves fo
 it is still required, and has no production dependency on OpenCode or a duplicate compatibility
 implementation.
 
-## Phase 9 — Piarium extension platform (complete)
+## Phase 9 — Varin extension platform (complete)
 
 The complete target architecture is specified in
-[piarium-extension-platform.md](piarium-extension-platform.md). Piarium extensions are a separate
+[varin-extension-platform.md](varin-extension-platform.md). Varin extensions are a separate
 product/runtime from Pi packages: the former extend the workbench and application host, while the
 latter continue to extend Pi through Pi's own `PackageManager` and extension runner.
 
@@ -554,7 +555,7 @@ Delivery is split into complete platform slices without reducing the target cust
    dependencies, provider selection, crash isolation, and multi-window host state;
 5. Implemented isolated iframe/Worker and explicitly trusted-native modes with truthful physical
    unload, capability boundaries, and restart semantics;
-6. Implemented maintained Pi integration adapters as separate built-in Piarium extensions while Pi
+6. Implemented maintained Pi integration adapters as separate built-in Varin extensions while Pi
    Packages and Pi Plugin Settings retain independent lifecycle and native authority;
 7. Implemented replaceable navigator, chat, panel, layout, and workbench shell contributions plus
    revisioned workbench/distribution profiles and the fixed recovery path;
@@ -569,7 +570,7 @@ Delivery is split into complete platform slices without reducing the target cust
 
 Acceptance: managed or isolated extensions enable and disable without a document reload; failed
 activation/update leaves no partial effects and preserves the previous generation; Pi package and
-Piarium extension lifecycle/configuration remain independent; every shared contract has explicit
+Varin extension lifecycle/configuration remain independent; every shared contract has explicit
 Web, Electron, VS Code, hosted-mobile, Capacitor, and headless behavior; the recovery kernel can
 always enter safe mode with non-kernel extensions disabled.
 ## Phase 10 — Composable workbench and IDE Workbench (delivered)
@@ -578,21 +579,21 @@ The current architecture, product decisions, and ownership contract are specifie
 [composable-workbench.md](composable-workbench.md). Historical delivery slices remain in this
 roadmap only; the architecture document intentionally does not preserve their numbering.
 
-This phase turned Piarium from a fixed agent workspace into a workspace platform whose entire UI can
-be recomposed or replaced by Piarium extensions, and delivered two first-party working shapes on top
+This phase turned Varin from a fixed agent workspace into a workspace platform whose entire UI can
+be recomposed or replaced by Varin extensions, and delivered two first-party working shapes on top
 of it:
 
 - **Agent Workspace** — sessions, tasks, Fleet, context, and recovery at the center.
 - **IDE Workbench** — projects, editors, search, Git, terminal, diagnostics, and debugging at the
   center, with the agent as a first-class dockable panel.
 
-Neither is a hard-coded mode. Both are ordinary first-party Piarium extensions selected through a
+Neither is a hard-coded mode. Both are ordinary first-party Varin extensions selected through a
 Workbench Profile. There is no global `ideMode`/`agentMode` branch, no second application, and no
 fork of Code OSS. The unified editor platform now gives desktop/Web Agent and IDE one shared Monaco
 path, while mobile and embedded editors keep a lightweight CodeMirror adapter; the Document Registry
 and Host authorities delivered here stay unchanged. See
 [unified-file-editor-platform.md](unified-file-editor-platform.md). Pi Packages and Pi Plugin Settings
-keep their independent lifecycle and native authority and are not folded into the Piarium extension
+keep their independent lifecycle and native authority and are not folded into the Varin extension
 lifecycle.
 
 Stable identities established by this phase:
@@ -600,25 +601,25 @@ Stable identities established by this phase:
 | Identity | Value |
 | --- | --- |
 | Agent profile | `default`, label `Agent` |
-| IDE profile | `piarium.ide`, label `IDE` |
-| Agent Workspace extension | `piarium.builtin.agent-workspace` |
-| IDE Workbench extension | `piarium.builtin.ide-workbench` |
+| IDE profile | `varin.ide`, label `IDE` |
+| Agent Workspace extension | `varin.builtin.agent-workspace` |
+| IDE Workbench extension | `varin.builtin.ide-workbench` |
 | Declared shell surfaces | Agent: web, desktop, mobile. IDE: web, desktop only |
-| IDE layout service | `piarium.workbench.layout` v1 |
-| Profile document schema | `PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1` |
+| IDE layout service | `varin.workbench.layout` v1 |
+| Profile document schema | `VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION = 1` |
 
 Each built-in shell contribution is its extension ID suffixed with `.shell`.
 
 ### Delivered slices
 
-1. **Workbench composition foundation.** `@piarium/extension-contract` is the single owner of the
+1. **Workbench composition foundation.** `@varin/extension-contract` is the single owner of the
    workbench seams: replacement targets (including `workbench.shell`, `activity`, `primary-sidebar`,
    `editor`, `secondary-sidebar`, `panel`, `status` alongside the existing agent-era targets),
    contribution slots, and editor/debug/test/task context keys. The profile document carries a
    revision and every mutation is `expectedRevision`-checked. Layout layers merge
    `distribution → user → workspace`; profile selection now resolves `user → active` (D-298). Shell
    state is reported truthfully as one of `builtin`, `disabled`, `failed`, `missing`, or `ready`.
-   `@piarium/extension-host` persists the document, the Web application host serves it, and the UI
+   `@varin/extension-host` persists the document, the Web application host serves it, and the UI
    stages a candidate shell and only commits the selection after it mounts, so a failed or superseded
    candidate leaves the previous shell active. Profile selection never silently changes the desired
    extension set.
@@ -647,7 +648,7 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
    the sidebar tree and the shared editor area with no second document or tab model, and legacy open
    paths migrate once into the kernel.
 5. **Agent Workspace as a built-in extension.** The existing default workspace was re-registered as
-   an ordinary built-in Piarium extension contributing a shell, rather than remaining the hard-coded
+   an ordinary built-in Varin extension contributing a shell, rather than remaining the hard-coded
    application root.
 6. **Official IDE Workbench profile.** The IDE shell ships as a built-in extension declaring web and
    desktop support only; mobile and VS Code deliberately do not claim it. Its layout is a versioned
@@ -659,7 +660,7 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
 7. **Search and language services.** Streaming workspace content search and a host-owned language
    service supervisor (JSON-RPC transport, provider registry, capability gating, fixture server) landed
    in the application host. Desktop/Web now project its rich DTO through Monaco, while the first-party
-   TypeScript/JavaScript server is a lazy, disableable brokered Piarium extension with immutable assets
+   TypeScript/JavaScript server is a lazy, disableable brokered Varin extension with immutable assets
    rather than a supervisor hardcode. Failures are typed and distinguishable —
    `failed`, `untrusted`, `stale-completion`, `unsupported` — stale diagnostic versions are dropped,
    and hidden views start no language servers.
@@ -669,8 +670,8 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
    DocumentsAPI watches, and patch accept/reject writes go through expected-revision writes so an
    agent edit cannot silently overwrite a dirty buffer.
 9. **Public Workbench SDK.** The workbench authoring surface was exposed through the existing
-   published packages — `@piarium/extension-sdk` (plus its testing entry), `@piarium/extension-react`,
-   and `@piarium/extension-cli` project templates — rather than by adding another package. Authoring
+   workspace packages — `@varin/extension-sdk` (plus its testing entry), `@varin/extension-react`,
+   and `@varin/extension-cli` project templates — rather than by adding another package. Authoring
    documentation, runnable examples, and a public-state Extension Inspector in Extensions settings
    shipped with it, localized across every shipped locale.
 10. **Run, debug, and test workbench.** The application host owns task processes, test providers, and
@@ -680,7 +681,7 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
     when hidden. Agent attachments may quote a test failure or stack frame as prompt text but never
     confer process, debug, or test-runner capability.
 11. **VS Code Companion transition.** With the official IDE covering the editor path on Web and
-    Electron, the VS Code extension was reduced to a companion: it opens and focuses Piarium, sends
+    Electron, the VS Code extension was reduced to a companion: it opens and focuses Varin, sends
     editor context, switches sessions, and keeps the workspace bridge. The parallel Settings panel,
     session editor tabs, and agent-management shell were removed rather than maintained as a second
     product UI. Run, debug, and test remain truthfully `absent`/`unsupported` there, and the official
@@ -713,14 +714,14 @@ perform no background work; language, debug, and test results are provider-isola
 results rejected and project trust enforced at the host; and no Pi plugin private state is copied
 into the renderer.
 
-The next composability slice is [Piarium Motion and replaceable transition scenes](piarium-motion-platform.md).
+The next composability slice is [Varin Motion and replaceable transition scenes](varin-motion-platform.md).
 It does not define a fixed page-element schema: complete Shells continue to own their information
 architecture and internal animation, while Core owns only cross-owner staging, authoritative handoff,
 failure recovery, and the first-paint bootstrap boundary.
 
 The public Transition Scene contract and its first runtime consumer are delivered. The default cube
-scene is an enabled-by-default built-in Piarium extension selected through `workbench.transition`,
-while a complete external scene can replace it without importing Piarium's product React tree. The
+scene is an enabled-by-default built-in Varin extension selected through `workbench.transition`,
+while a complete external scene can replace it without importing Varin's product React tree. The
 remaining Motion work is the pre-React bootstrap projection and the optional generic service for
 Shell-owned local motion; neither introduces fixed page-element names.
 
@@ -735,8 +736,8 @@ environment-specific omissions are recorded in that design document rather than 
 ledger.
 
 UI dependency-boundary and extension-contract governance is complete. Current ownership is recorded in
-[architecture.md](architecture.md), [piarium-extension-authoring.md](piarium-extension-authoring.md),
-and the [`@piarium/application-client` README](../packages/application-client/README.md); executable
+[architecture.md](architecture.md), [varin-extension-authoring.md](varin-extension-authoring.md),
+and the [`@varin/application-client` README](../packages/application-client/README.md); executable
 conformance remains in the package tests and architecture checks.
 
 ## Agent harness — Phase 2/3/3b (2026-09-03)
@@ -757,7 +758,7 @@ conformance remains in the package tests and architecture checks.
   placeholder vector mode (dim=8), single-writer queue, cascade delete,
   retention. 17 tests. **Wired**: lazy per-workspace store opening in
   `index.ts`, `getKnowledgeStoreForSession` resolver.
-- **2.2 Zone 2 assembly**: `piarium-context` message template with budget
+- **2.2 Zone 2 assembly**: `varin-context` message template with budget
   folding (`lib/harness/zone2.ts`). 13 tests. **Wired**: `zone2-extension.ts`
   in pi-host hooks `before_agent_start`, requests `zone2.assemble` via
   bridge, returns custom message. 1s timeout (critical path).
@@ -773,7 +774,7 @@ conformance remains in the package tests and architecture checks.
   (`lib/harness/todo-tool.ts`). 12 tests. **Wired**: `todo-tool.ts` in
   pi-host calls `todo.upsert` via bridge, registered in `selectHarnessTools`.
   e2e: 1 test (todo → bridge → router → service → store).
-- **2.6 Compaction**: `piarium-compaction` summary with non-stacking
+- **2.6 Compaction**: `varin-compaction` summary with non-stacking
   guarantee, re-injection (`lib/harness/compaction.ts`). 10 tests.
   **Wired**: `compaction-extension.ts` in pi-host hooks
   `session_before_compact` (5s timeout) + `session_compact`. e2e: 2 tests
@@ -846,7 +847,7 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   integration, transcript slice ("steps") wiring to memory agent
   blocksSnapshot, progress/decisions/errors blocks extraction.
 - **3.6 Role catalog**: Six roles, team prompt, slot-based resolution.
-  Moved to `@piarium/protocol/harness-roles.ts` so pi-host can build the
+  Moved to `@varin/protocol/harness-roles.ts` so pi-host can build the
   team prompt and reject unconfigured roles; `lib/harness/roles.ts`
   re-exports it. `frontend` uses its own `models.frontend` slot (§9.2.2).
   14 tests. **Wired**: `dispatch` lists only resolved roles in its
@@ -873,7 +874,7 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   SessionHost. Only ordinary complete asks may be auto-allowed; high-risk,
   unknown, or incomplete evidence never reaches the model, and failures ask.
 - **3b.3 Dual-track cleanup**: `@gotgenes/pi-permission-system` is no longer
-  foundational and its Piarium-specific service yield, settings/composer/status
+  foundational and its Varin-specific service yield, settings/composer/status
   bridge, and compatibility path are removed. The foundational manifest now
   contains only the maintained MCP adapter.
 

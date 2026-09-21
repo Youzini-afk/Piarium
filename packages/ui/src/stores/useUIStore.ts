@@ -7,9 +7,9 @@ import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { getRuntimeKey } from '@piarium/application-client';
-import type { TerminalShell } from '@piarium/application-client';
-import type { RecoveryPreference } from '@piarium/protocol';
+import { getRuntimeKey } from '@varin/application-client';
+import type { TerminalShell } from '@varin/application-client';
+import type { RecoveryPreference } from '@varin/protocol';
 import {
   DEFAULT_FILE_EDITOR_SETTINGS,
   normalizeFileEditorSettings,
@@ -485,7 +485,7 @@ interface UIStore {
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
   isAboutDialogOpen: boolean;
-  isPiariumDiagnosticsDialogOpen: boolean;
+  isVarinDiagnosticsDialogOpen: boolean;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
@@ -653,7 +653,7 @@ interface UIStore {
   toggleHelpDialog: () => void;
   setHelpDialogOpen: (open: boolean) => void;
   setAboutDialogOpen: (open: boolean) => void;
-  setPiariumDiagnosticsDialogOpen: (open: boolean) => void;
+  setVarinDiagnosticsDialogOpen: (open: boolean) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
@@ -816,7 +816,7 @@ export const useUIStore = create<UIStore>()(
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
         isAboutDialogOpen: false,
-        isPiariumDiagnosticsDialogOpen: false,
+        isVarinDiagnosticsDialogOpen: false,
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
@@ -1514,8 +1514,8 @@ export const useUIStore = create<UIStore>()(
           set({ isAboutDialogOpen: open });
         },
 
-        setPiariumDiagnosticsDialogOpen: (open) => {
-          set({ isPiariumDiagnosticsDialogOpen: open });
+        setVarinDiagnosticsDialogOpen: (open) => {
+          set({ isVarinDiagnosticsDialogOpen: open });
         },
 
         setSessionCreateDialogOpen: (open) => {
@@ -2231,7 +2231,7 @@ export const useUIStore = create<UIStore>()(
         },
       }),
       {
-        name: 'piarium.ui.v1',
+        name: 'varin.ui.v1',
         storage: createDeferredSafeJSONStorage(),
         merge: (persisted, current) => {
           const saved = persisted && typeof persisted === 'object'
@@ -2348,7 +2348,7 @@ export const useUIStore = create<UIStore>()(
       }
     ),
     {
-      name: 'piarium-ui'
+      name: 'varin-ui'
     }
   )
 );

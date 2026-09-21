@@ -146,13 +146,13 @@ export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][
     if (shouldEncodeHeaderValue(key, value)) {
       entries.push([key, encodeURIComponent(value)]);
       dirty = true;
-      if (key.toLowerCase() === 'x-piarium-directory') encodedDirectoryHint = true;
+      if (key.toLowerCase() === 'x-varin-directory') encodedDirectoryHint = true;
     } else {
       entries.push([key, value]);
     }
   }
   if (encodedDirectoryHint) {
-    entries.push(['x-piarium-directory-encoding', 'uri']);
+    entries.push(['x-varin-directory-encoding', 'uri']);
   }
   return dirty ? entries : undefined;
 };

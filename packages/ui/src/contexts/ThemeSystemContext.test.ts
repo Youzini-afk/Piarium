@@ -17,7 +17,7 @@ const installWindow = (search: string, matchMediaDark: boolean, parentTheme?: un
         search,
       },
       matchMedia: () => ({ matches: matchMediaDark }),
-      parent: parentTheme === undefined ? null : { __piariumEmbeddedThemeBootstrap: parentTheme },
+      parent: parentTheme === undefined ? null : { __varinEmbeddedThemeBootstrap: parentTheme },
     },
   });
 };
@@ -70,7 +70,7 @@ describe('ThemeSystemProvider embedded bootstrap', () => {
 
     publishEmbeddedThemeBootstrap(currentTheme);
 
-    expect((globalThis.window as unknown as { __piariumEmbeddedThemeBootstrap?: unknown })
-      .__piariumEmbeddedThemeBootstrap).toBe(currentTheme);
+    expect((globalThis.window as unknown as { __varinEmbeddedThemeBootstrap?: unknown })
+      .__varinEmbeddedThemeBootstrap).toBe(currentTheme);
   });
 });

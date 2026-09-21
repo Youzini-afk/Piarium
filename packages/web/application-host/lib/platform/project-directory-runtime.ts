@@ -91,8 +91,8 @@ export const createProjectDirectoryRuntime = (dependencies: ProjectDirectoryDepe
   };
 
   const requestedDirectories = (req: ProjectDirectoryRequest): string[] => {
-    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-piarium-directory') : null;
-    const headerEncoding = typeof req.get === 'function' ? req.get('x-piarium-directory-encoding') : null;
+    const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-varin-directory') : null;
+    const headerEncoding = typeof req.get === 'function' ? req.get('x-varin-directory-encoding') : null;
     const headerDirectory = rawHeaderDirectory ? safeDecodeMarkedURIComponent(rawHeaderDirectory, headerEncoding) : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]

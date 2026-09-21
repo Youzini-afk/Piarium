@@ -5,17 +5,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createUpdateCommand } from './commands-update.js';
 
-async function withTempPiariumDataDir(fn: (directory: string) => Promise<void>): Promise<void> {
-  const previous = process.env.PIARIUM_DATA_DIR;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-update-test-'));
-  process.env.PIARIUM_DATA_DIR = dir;
+async function withTempVarinDataDir(fn: (directory: string) => Promise<void>): Promise<void> {
+  const previous = process.env.VARIN_DATA_DIR;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-update-test-'));
+  process.env.VARIN_DATA_DIR = dir;
   try {
     return await fn(dir);
   } finally {
     if (typeof previous === 'string') {
-      process.env.PIARIUM_DATA_DIR = previous;
+      process.env.VARIN_DATA_DIR = previous;
     } else {
-      delete process.env.PIARIUM_DATA_DIR;
+      delete process.env.VARIN_DATA_DIR;
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -23,7 +23,7 @@ async function withTempPiariumDataDir(fn: (directory: string) => Promise<void>):
 
 describe('update command', () => {
   it('uses the package-manager helpers on the update-available path', async () => {
-    await withTempPiariumDataDir(async () => {
+    await withTempVarinDataDir(async () => {
       const originalWrite = process.stdout.write;
       process.stdout.write = vi.fn(() => true);
       const executeUpdate = vi.fn(() => ({ success: true, exitCode: 0 }));

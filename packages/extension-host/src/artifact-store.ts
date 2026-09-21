@@ -16,23 +16,23 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import type { BuildOptions, Metafile } from "esbuild";
 import {
-  PIARIUM_EXTENSION_MANIFEST_FILE,
-  assertPiariumApplicationVersion,
-  assertPiariumExtensionManifestCompatibility,
-  isPiariumExtensionId,
-  parsePiariumExtensionManifest,
-  type PiariumExtensionAssetPayload,
-  type PiariumExtensionPreparedArtifact,
-  type PiariumExtensionManagedEntrypointPayload,
-  type PiariumExtensionManifest,
-  type PiariumExtensionPackageSource,
-} from "@piarium/extension-contract";
+  VARIN_EXTENSION_MANIFEST_FILE,
+  assertVarinApplicationVersion,
+  assertVarinExtensionManifestCompatibility,
+  isVarinExtensionId,
+  parseVarinExtensionManifest,
+  type VarinExtensionAssetPayload,
+  type VarinExtensionPreparedArtifact,
+  type VarinExtensionManagedEntrypointPayload,
+  type VarinExtensionManifest,
+  type VarinExtensionPackageSource,
+} from "@varin/extension-contract";
 import {
   createDefaultExtensionPackageSourceRegistry,
   resolveNpmLaunchTarget,
   runExtensionSourceCommand,
   type ExtensionSourceCommandRunner,
-  type PiariumExtensionPackageSourceRegistry,
+  type VarinExtensionPackageSourceRegistry,
 } from "./package-sources.js";
 
 const INDEX_FILE = "artifact-index.json";
@@ -53,7 +53,7 @@ interface ArtifactIndex {
   entrypoints: Record<string, ArtifactEntrypointRecord>;
   files: Record<string, ArtifactFileRecord>;
   host?: { module: string };
-  manifest: PiariumExtensionManifest;
+  manifest: VarinExtensionManifest;
   schemaVersion: 1;
 }
 
@@ -68,8 +68,8 @@ export interface ExtensionArtifactStoreOptions {
   builtinRoots?: ReadonlyMap<string, string> | Record<string, string>;
   buildModule?: ExtensionModuleBuilder;
   dataDir: string;
-  packageSources?: PiariumExtensionPackageSourceRegistry;
-  piariumVersion: string;
+  packageSources?: VarinExtensionPackageSourceRegistry;
+  varinVersion: string;
   run?: ExtensionSourceCommandRunner;
 }
 
@@ -94,7 +94,7 @@ const canonicalJson = (value: unknown): string => {
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
       .join(",")}}`;
   }
-  throw new Error("Piarium extension artifact index contains a non-JSON value");
+  throw new Error("Varin extension artifact index contains a non-JSON value");
 };
 
 const artifactIntegrityForIndex = (index: Omit<ArtifactIndex, "artifactIntegrity">): string => sha256(canonicalJson(index));
@@ -144,10 +144,10 @@ const assertSafeTree = async (root: string): Promise<void> => {
       const path = join(directory, entry.name);
       const info = await lstat(path);
       if (info.isSymbolicLink()) {
-        throw new Error(`Piarium extension packages cannot contain symbolic links: ${toLogicalPath(relative(root, path))}`);
+        throw new Error(`Varin extension packages cannot contain symbolic links: ${toLogicalPath(relative(root, path))}`);
       }
       if (info.isDirectory()) await visit(path);
-      else if (!info.isFile()) throw new Error(`Unsupported Piarium extension package entry: ${toLogicalPath(relative(root, path))}`);
+      else if (!info.isFile()) throw new Error(`Unsupported Varin extension package entry: ${toLogicalPath(relative(root, path))}`);
     }
   };
   await visit(root);
@@ -159,8 +159,8 @@ const shouldCopyPackagePath = (sourceRoot: string, path: string): boolean => {
     && !logical.startsWith(".git/")
     && logical !== "node_modules"
     && !logical.startsWith("node_modules/")
-    && logical !== ".piarium-runtime"
-    && !logical.startsWith(".piarium-runtime/");
+    && logical !== ".varin-runtime"
+    && !logical.startsWith(".varin-runtime/");
 };
 
 const walkFiles = async (root: string): Promise<string[]> => {
@@ -170,7 +170,7 @@ const walkFiles = async (root: string): Promise<string[]> => {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await visit(path);
       else if (entry.isFile()) files.push(toLogicalPath(relative(root, path)));
-      else throw new Error(`Immutable Piarium extension artifact contains an unsupported entry: ${path}`);
+      else throw new Error(`Immutable Varin extension artifact contains an unsupported entry: ${path}`);
     }
   };
   await visit(root);
@@ -193,51 +193,51 @@ const assertExactKeys = (record: Record<string, unknown>, expected: readonly str
 };
 
 const parseIndex = (value: unknown): ArtifactIndex => {
-  if (!isRecord(value)) throw new Error("Piarium extension artifact index is invalid");
+  if (!isRecord(value)) throw new Error("Varin extension artifact index is invalid");
   const hasHost = value.host !== undefined;
   assertExactKeys(
     value,
     hasHost
       ? ["artifactIntegrity", "entrypoints", "files", "host", "manifest", "schemaVersion"]
       : ["artifactIntegrity", "entrypoints", "files", "manifest", "schemaVersion"],
-    "Piarium extension artifact index",
+    "Varin extension artifact index",
   );
   if (value.schemaVersion !== 1 || typeof value.artifactIntegrity !== "string" || !INTEGRITY_PATTERN.test(value.artifactIntegrity)) {
-    throw new Error("Piarium extension artifact index header is invalid");
+    throw new Error("Varin extension artifact index header is invalid");
   }
-  const manifest = parsePiariumExtensionManifest(value.manifest);
+  const manifest = parseVarinExtensionManifest(value.manifest);
   if (!isRecord(value.files) || !isRecord(value.entrypoints)) {
-    throw new Error("Piarium extension artifact index contents are invalid");
+    throw new Error("Varin extension artifact index contents are invalid");
   }
 
   const files: Record<string, ArtifactFileRecord> = {};
   for (const [logicalPath, rawFile] of Object.entries(value.files)) {
     if (!LOGICAL_PATH_PATTERN.test(logicalPath) || logicalPath === INDEX_FILE || !isRecord(rawFile)) {
-      throw new Error(`Piarium extension artifact file record is invalid: ${logicalPath}`);
+      throw new Error(`Varin extension artifact file record is invalid: ${logicalPath}`);
     }
-    assertExactKeys(rawFile, ["contentType", "integrity"], `Piarium extension artifact file record ${logicalPath}`);
+    assertExactKeys(rawFile, ["contentType", "integrity"], `Varin extension artifact file record ${logicalPath}`);
     if (typeof rawFile.contentType !== "string" || rawFile.contentType.trim().length === 0
       || typeof rawFile.integrity !== "string" || !INTEGRITY_PATTERN.test(rawFile.integrity)) {
-      throw new Error(`Piarium extension artifact file record is invalid: ${logicalPath}`);
+      throw new Error(`Varin extension artifact file record is invalid: ${logicalPath}`);
     }
     files[logicalPath] = { contentType: rawFile.contentType, integrity: rawFile.integrity };
   }
 
   const entrypoints: Record<string, ArtifactEntrypointRecord> = {};
   for (const [entrypointId, rawEntrypoint] of Object.entries(value.entrypoints)) {
-    if (!isPiariumExtensionId(entrypointId) || !isRecord(rawEntrypoint)) {
-      throw new Error(`Piarium extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
+    if (!isVarinExtensionId(entrypointId) || !isRecord(rawEntrypoint)) {
+      throw new Error(`Varin extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
     }
-    assertExactKeys(rawEntrypoint, ["module", "styles"], `Piarium extension artifact Surface entrypoint ${entrypointId}`);
+    assertExactKeys(rawEntrypoint, ["module", "styles"], `Varin extension artifact Surface entrypoint ${entrypointId}`);
     if (typeof rawEntrypoint.module !== "string" || !LOGICAL_PATH_PATTERN.test(rawEntrypoint.module)
       || !Array.isArray(rawEntrypoint.styles)
       || rawEntrypoint.styles.some((style) => typeof style !== "string" || !LOGICAL_PATH_PATTERN.test(style))) {
-      throw new Error(`Piarium extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
+      throw new Error(`Varin extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
     }
     const styles = rawEntrypoint.styles as string[];
     if (new Set(styles).size !== styles.length || !files[rawEntrypoint.module]
       || styles.some((style) => !files[style])) {
-      throw new Error(`Piarium extension artifact Surface entrypoint files are invalid: ${entrypointId}`);
+      throw new Error(`Varin extension artifact Surface entrypoint files are invalid: ${entrypointId}`);
     }
     entrypoints[entrypointId] = { module: rawEntrypoint.module, styles: [...styles] };
   }
@@ -246,23 +246,23 @@ const parseIndex = (value: unknown): ArtifactIndex => {
     .map((entrypoint) => entrypoint.id)
     .sort();
   if (JSON.stringify(Object.keys(entrypoints).sort()) !== JSON.stringify(executableEntrypoints)) {
-    throw new Error("Piarium extension artifact Surface entrypoint mapping does not match its manifest snapshot");
+    throw new Error("Varin extension artifact Surface entrypoint mapping does not match its manifest snapshot");
   }
 
   let host: ArtifactIndex["host"];
   if (hasHost) {
-    if (!isRecord(value.host)) throw new Error("Piarium extension artifact Host entrypoint record is invalid");
-    assertExactKeys(value.host, ["module"], "Piarium extension artifact Host entrypoint");
+    if (!isRecord(value.host)) throw new Error("Varin extension artifact Host entrypoint record is invalid");
+    assertExactKeys(value.host, ["module"], "Varin extension artifact Host entrypoint");
     if (typeof value.host.module !== "string" || !LOGICAL_PATH_PATTERN.test(value.host.module) || !files[value.host.module]) {
-      throw new Error("Piarium extension artifact Host entrypoint file is invalid");
+      throw new Error("Varin extension artifact Host entrypoint file is invalid");
     }
     host = { module: value.host.module };
   }
   if (Boolean(host) !== Boolean(manifest.entrypoints?.host)) {
-    throw new Error("Piarium extension artifact Host entrypoint mapping does not match its manifest snapshot");
+    throw new Error("Varin extension artifact Host entrypoint mapping does not match its manifest snapshot");
   }
-  if (!files[`package/${PIARIUM_EXTENSION_MANIFEST_FILE}`]) {
-    throw new Error("Piarium extension artifact manifest file is missing from its index");
+  if (!files[`package/${VARIN_EXTENSION_MANIFEST_FILE}`]) {
+    throw new Error("Varin extension artifact manifest file is missing from its index");
   }
   return {
     artifactIntegrity: value.artifactIntegrity,
@@ -274,9 +274,9 @@ const parseIndex = (value: unknown): ArtifactIndex => {
   };
 };
 
-const readManifest = async (sourceRoot: string): Promise<PiariumExtensionManifest> => {
-  const raw = JSON.parse(await readFile(join(sourceRoot, PIARIUM_EXTENSION_MANIFEST_FILE), "utf8")) as unknown;
-  return parsePiariumExtensionManifest(raw);
+const readManifest = async (sourceRoot: string): Promise<VarinExtensionManifest> => {
+  const raw = JSON.parse(await readFile(join(sourceRoot, VARIN_EXTENSION_MANIFEST_FILE), "utf8")) as unknown;
+  return parseVarinExtensionManifest(raw);
 };
 
 const hasDependencies = async (sourceRoot: string): Promise<boolean> => {
@@ -293,17 +293,17 @@ const hasDependencies = async (sourceRoot: string): Promise<boolean> => {
 export class ExtensionArtifactStore {
   readonly dataDir: string;
   readonly directory: string;
-  readonly piariumVersion: string;
+  readonly varinVersion: string;
   readonly #build: ExtensionModuleBuilder;
   readonly #builtinRoots: ReadonlyMap<string, string>;
-  readonly #packageSources: PiariumExtensionPackageSourceRegistry;
+  readonly #packageSources: VarinExtensionPackageSourceRegistry;
   readonly #run: ExtensionSourceCommandRunner;
 
   constructor(options: ExtensionArtifactStoreOptions) {
     this.dataDir = resolve(options.dataDir);
     this.directory = join(this.dataDir, "extensions", "artifacts", "sha256");
-    this.piariumVersion = options.piariumVersion;
-    assertPiariumApplicationVersion(this.piariumVersion);
+    this.varinVersion = options.varinVersion;
+    assertVarinApplicationVersion(this.varinVersion);
     this.#build = options.buildModule ?? buildModuleWithEsbuild;
     this.#run = options.run ?? runExtensionSourceCommand;
     const builtinRootEntries = options.builtinRoots instanceof Map
@@ -332,7 +332,7 @@ export class ExtensionArtifactStore {
     artifactRoot: string;
     distributionFingerprint: string;
     fingerprintFile: string;
-    manifest: PiariumExtensionManifest;
+    manifest: VarinExtensionManifest;
   }): Promise<boolean> {
     if (!/^[A-Za-z0-9._-]+$/.test(input.fingerprintFile)
       || !/^sha256-[0-9a-f]{64}$/.test(input.distributionFingerprint)) return false;
@@ -349,24 +349,24 @@ export class ExtensionArtifactStore {
     }
   }
 
-  async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionPreparedArtifact> {
-    const temporaryRoot = await mkdtemp(join(tmpdir(), "piarium-extension-"));
+  async prepare(source: VarinExtensionPackageSource, signal?: AbortSignal): Promise<VarinExtensionPreparedArtifact> {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "varin-extension-"));
     const materializedSourceRoot = join(temporaryRoot, "source");
     const artifactRoot = join(temporaryRoot, "artifact");
     try {
       const sourceRoot = await this.#packageSources.materialize(source, materializedSourceRoot, signal);
       await assertSafeTree(sourceRoot);
       const manifest = await readManifest(sourceRoot);
-      assertPiariumExtensionManifestCompatibility(manifest, this.piariumVersion);
+      assertVarinExtensionManifestCompatibility(manifest, this.varinVersion);
       if (!(await exists(join(sourceRoot, "node_modules"))) && await hasDependencies(sourceRoot)) {
         if (source.kind === "local") {
           throw new Error(
-            `Local Piarium extension dependencies are not installed: ${source.display}. Run npm install in the extension project before reloading it. Piarium will not modify the working tree.`,
+            `Local Varin extension dependencies are not installed: ${source.display}. Run npm install in the extension project before reloading it. Varin will not modify the working tree.`,
           );
         }
         if (source.kind === "builtin") {
           throw new Error(
-            `Built-in Piarium extension dependencies are missing from its read-only distribution: ${source.display}. Rebuild the bundled extension package before using it.`,
+            `Built-in Varin extension dependencies are missing from its read-only distribution: ${source.display}. Rebuild the bundled extension package before using it.`,
           );
         }
         const npm = await resolveNpmLaunchTarget();
@@ -405,7 +405,7 @@ export class ExtensionArtifactStore {
           bundle: true,
           entryPoints: [resolve(sourceRoot, entrypoint.file)],
           format: isolated ? "iife" : "cjs",
-          ...(isolated ? { globalName: "PiariumIsolatedModule" } : {}),
+          ...(isolated ? { globalName: "VarinIsolatedModule" } : {}),
           loader: {
             ".gif": "file",
             ".jpeg": "file",
@@ -498,8 +498,8 @@ export class ExtensionArtifactStore {
     artifactRoot: string,
     artifactIntegrity: string,
     logicalPath: string,
-    expectedManifest?: PiariumExtensionManifest,
-  ): Promise<PiariumExtensionAssetPayload> {
+    expectedManifest?: VarinExtensionManifest,
+  ): Promise<VarinExtensionAssetPayload> {
     const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
     const { bytes, record } = await this.#readVerifiedFile(root, index, logicalPath);
     return {
@@ -515,12 +515,12 @@ export class ExtensionArtifactStore {
     artifactRoot: string,
     artifactIntegrity: string,
     entrypointId: string,
-    expectedManifest?: PiariumExtensionManifest,
-  ): Promise<PiariumExtensionManagedEntrypointPayload> {
+    expectedManifest?: VarinExtensionManifest,
+  ): Promise<VarinExtensionManagedEntrypointPayload> {
     const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
     const entrypoint = index.entrypoints[entrypointId];
     if (!entrypoint) throw new Error(`Managed Surface entrypoint is not present in the artifact: ${entrypointId}`);
-    const readPayload = async (logicalPath: string): Promise<PiariumExtensionAssetPayload> => {
+    const readPayload = async (logicalPath: string): Promise<VarinExtensionAssetPayload> => {
       const { bytes, record } = await this.#readVerifiedFile(root, index, logicalPath);
       return {
         artifactIntegrity,
@@ -540,7 +540,7 @@ export class ExtensionArtifactStore {
   async resolveBrokeredHostEntrypoint(
     artifactRoot: string,
     artifactIntegrity: string,
-    expectedManifest?: PiariumExtensionManifest,
+    expectedManifest?: VarinExtensionManifest,
   ): Promise<BrokeredHostEntrypointArtifact> {
     const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
     if (!index.host) throw new Error("Host entrypoint is not present in the artifact");
@@ -556,7 +556,7 @@ export class ExtensionArtifactStore {
   async #readVerifiedIndex(
     artifactRoot: string,
     artifactIntegrity: string,
-    expectedManifest?: PiariumExtensionManifest,
+    expectedManifest?: VarinExtensionManifest,
     verifyAllFiles = false,
   ): Promise<{ index: ArtifactIndex; root: string }> {
     const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
@@ -570,22 +570,22 @@ export class ExtensionArtifactStore {
     };
     const canonicalIntegrity = artifactIntegrityForIndex(indexContent);
     if (canonicalIntegrity !== index.artifactIntegrity || index.artifactIntegrity !== artifactIntegrity) {
-      throw new Error("Piarium extension artifact canonical index integrity no longer matches its content address");
+      throw new Error("Varin extension artifact canonical index integrity no longer matches its content address");
     }
-    const manifestLogicalPath = `package/${PIARIUM_EXTENSION_MANIFEST_FILE}`;
+    const manifestLogicalPath = `package/${VARIN_EXTENSION_MANIFEST_FILE}`;
     const { bytes: manifestBytes } = await this.#readVerifiedFile(root, index, manifestLogicalPath);
-    const artifactManifest = parsePiariumExtensionManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown);
+    const artifactManifest = parseVarinExtensionManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown);
     if (canonicalJson(artifactManifest) !== canonicalJson(index.manifest)) {
-      throw new Error("Piarium extension artifact manifest file does not match its authenticated index snapshot");
+      throw new Error("Varin extension artifact manifest file does not match its authenticated index snapshot");
     }
     if (expectedManifest && canonicalJson(expectedManifest) !== canonicalJson(index.manifest)) {
-      throw new Error("Piarium extension artifact manifest snapshot no longer matches the catalog record");
+      throw new Error("Varin extension artifact manifest snapshot no longer matches the catalog record");
     }
     if (verifyAllFiles) {
       const actualFiles = (await walkFiles(root)).filter((logicalPath) => logicalPath !== INDEX_FILE);
       const indexedFiles = Object.keys(index.files).sort();
       if (JSON.stringify(actualFiles) !== JSON.stringify(indexedFiles)) {
-        throw new Error("Piarium extension artifact files do not match its authenticated index");
+        throw new Error("Varin extension artifact files do not match its authenticated index");
       }
       await Promise.all(indexedFiles.map((logicalPath) => this.#readVerifiedFile(root, index, logicalPath)));
     }
@@ -598,23 +598,23 @@ export class ExtensionArtifactStore {
     logicalPath: string,
   ): Promise<{ bytes: Buffer; path: string; record: ArtifactFileRecord }> {
     const record = index.files[logicalPath];
-    if (!record) throw new Error(`Piarium extension artifact does not contain asset: ${logicalPath}`);
+    if (!record) throw new Error(`Varin extension artifact does not contain asset: ${logicalPath}`);
     const path = resolve(root, ...logicalPath.split("/"));
     const relativePath = relative(root, path);
     if (!relativePath || relativePath.startsWith("..") || resolve(root, relativePath) !== path) {
-      throw new Error("Piarium extension asset path escapes its immutable artifact");
+      throw new Error("Varin extension asset path escapes its immutable artifact");
     }
     const info = await lstat(path);
-    if (!info.isFile()) throw new Error(`Piarium extension artifact asset is not an immutable file: ${logicalPath}`);
+    if (!info.isFile()) throw new Error(`Varin extension artifact asset is not an immutable file: ${logicalPath}`);
     const bytes = await readFile(path);
-    if (sha256(bytes) !== record.integrity) throw new Error(`Piarium extension asset integrity failed: ${logicalPath}`);
+    if (sha256(bytes) !== record.integrity) throw new Error(`Varin extension asset integrity failed: ${logicalPath}`);
     return { bytes, path, record };
   }
 
   async #assertArtifactRoot(artifactRoot: string, artifactIntegrity: string): Promise<string> {
     const expected = join(this.directory, artifactIntegrity.slice("sha256-".length));
     const [actualRoot, actualExpected] = await Promise.all([realpath(artifactRoot), realpath(expected)]);
-    if (actualRoot !== actualExpected) throw new Error("Piarium extension artifact path does not match its content address");
+    if (actualRoot !== actualExpected) throw new Error("Varin extension artifact path does not match its content address");
     return actualRoot;
   }
 }

@@ -6,7 +6,7 @@ import { GrammarStoreUnreadableError, createGrammarStore, grammarIntegrityOf } f
 
 describe("createGrammarStore", () => {
   it("stores wasm by sha256 and removes unused blobs", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-grammar-store-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-grammar-store-"));
     const store = createGrammarStore(dataDir, () => "2026-09-07T00:00:00.000Z");
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const integrity = grammarIntegrityOf(bytes);
@@ -21,7 +21,7 @@ describe("createGrammarStore", () => {
   });
 
   it("keeps the tags query with the grammar and drops it on remove", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-grammar-store-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-grammar-store-"));
     const store = createGrammarStore(dataDir);
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const tags = new TextEncoder().encode("(function_declaration) @definition.function");
@@ -39,7 +39,7 @@ describe("createGrammarStore", () => {
   });
 
   it("treats an unreadable index as an error instead of an empty store", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-grammar-store-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-grammar-store-"));
     const store = createGrammarStore(dataDir);
     const bytes = new Uint8Array([7, 7, 7]);
     const integrity = grammarIntegrityOf(bytes);
@@ -54,7 +54,7 @@ describe("createGrammarStore", () => {
   });
 
   it("reports a missing index as an empty store", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-grammar-store-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-grammar-store-"));
     const store = createGrammarStore(dataDir);
     expect(store.has("python")).toBe(false);
     expect(store.idsBySource("manifest")).toEqual([]);

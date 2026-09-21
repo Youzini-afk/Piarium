@@ -1,6 +1,6 @@
 # Notifications module
 
-Piarium notifications are driven by the Pi runtime broker. The web server does not
+Varin notifications are driven by the Pi runtime broker. The web server does not
 subscribe to OpenCode session or event endpoints.
 
 ## Runtime flow
@@ -14,7 +14,7 @@ subscribe to OpenCode session or event endpoints.
 4. `push-runtime.js` handles Web Push; `apns-runtime.js` handles native iOS push.
 
 `createGlobalUiEventBroadcaster()` is deliberately SSE-only. Pi runtime WebSocket
-traffic uses `/api/piarium/runtime/ws` and must not be mixed with notification
+traffic uses `/api/varin/runtime/ws` and must not be mixed with notification
 delivery.
 
 ## Files

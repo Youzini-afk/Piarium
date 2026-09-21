@@ -68,15 +68,15 @@ export const verifyExtractedPayload = ({
   root,
   targetArchitecture,
 }) => {
-  const desktopPath = path.join(root, 'piarium.desktop');
+  const desktopPath = path.join(root, 'varin.desktop');
   if (!fs.existsSync(desktopPath)) throw new Error(`Missing desktop entry: ${desktopPath}`);
   const desktop = fs.readFileSync(desktopPath, 'utf8');
-  for (const entry of ['Name=Piarium', 'Icon=piarium', 'StartupWMClass=piarium']) {
+  for (const entry of ['Name=Varin', 'Icon=varin', 'StartupWMClass=varin']) {
     if (!desktop.split(/\r?\n/).includes(entry)) throw new Error(`Desktop identity mismatch: missing ${entry}`);
   }
   if (!/^Exec=AppRun(?:\s|$)/m.test(desktop)) throw new Error('Desktop identity mismatch: expected AppImage AppRun entrypoint');
 
-  assertElfArchitecture(path.join(root, 'piarium'), targetArchitecture, 'Electron executable');
+  assertElfArchitecture(path.join(root, 'varin'), targetArchitecture, 'Electron executable');
 
   const unpackedModules = path.join(root, 'resources', 'app.asar.unpacked', 'node_modules');
   if (!fs.existsSync(unpackedModules)) throw new Error(`Missing unpacked native modules: ${unpackedModules}`);
@@ -87,7 +87,7 @@ export const verifyExtractedPayload = ({
     return normalizedPath.includes(`/prebuilds/linux-${targetArchitecture}/`)
       || normalizedPath.endsWith(`/prebuilds/linux-${targetArchitecture}.node`);
   });
-  assertElfArchitecture(path.join(root, 'resources/kernel/piarium-kernel'), targetArchitecture, 'Rust kernel');
+  assertElfArchitecture(path.join(root, 'resources/kernel/varin-kernel'), targetArchitecture, 'Rust kernel');
   const triviumName = 'triviumdb.linux-' + targetArchitecture + '-gnu.node';
   if (!nativeModules.some(modulePath => path.basename(modulePath) === triviumName)) throw new Error('Missing packaged native module: ' + triviumName);
   for (const requiredName of REQUIRED_NATIVE_MODULES) {
@@ -101,7 +101,7 @@ export const verifyExtractedPayload = ({
 
 const findAppImage = (version, architecture) => {
   const suffix = linuxAppImageArchSuffix(architecture);
-  const expected = path.join(electronRoot, 'dist', `Piarium-${version}-linux-${suffix}.AppImage`);
+  const expected = path.join(electronRoot, 'dist', `Varin-${version}-linux-${suffix}.AppImage`);
   if (!fs.existsSync(expected)) throw new Error(`Linux AppImage not found: ${expected}`);
   return expected;
 };
@@ -122,11 +122,11 @@ const extractAppImage = (appImagePath, destination) => {
 
 const main = () => {
   const rootPackage = readJson(path.join(workspaceRoot, 'package.json'));
-  const target = normalizeTargetArchitecture(process.env.PIARIUM_TARGET_ARCH || process.arch).node;
+  const target = normalizeTargetArchitecture(process.env.VARIN_TARGET_ARCH || process.arch).node;
   const appImagePath = process.argv[2] ? path.resolve(process.argv[2]) : findAppImage(rootPackage.version, target);
   assertElfArchitecture(appImagePath, target, 'AppImage');
 
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-appimage-'));
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-appimage-'));
   try {
     const result = verifyExtractedPayload({
       root: extractAppImage(appImagePath, temporaryDirectory),

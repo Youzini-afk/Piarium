@@ -8,8 +8,8 @@
  * `unavailable`; nothing here fakes an install, login, or connection.
  */
 
-import type { SettingsCatalogEntry } from '@piarium/application-client';
-import type { SettingsActionResult } from '@piarium/protocol';
+import type { SettingsCatalogEntry } from '@varin/application-client';
+import type { SettingsActionResult } from '@varin/protocol';
 import { HarnessServiceError } from './service-error.js';
 import type { AppPersistOutcome, SettingsServiceCaller } from './settings-service.js';
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
-import { createEvent, type EventEnvelope } from "@piarium/protocol";
+import { createEvent, type EventEnvelope } from "@varin/protocol";
 import { PiHostClient } from "../src/host-client.js";
 import { classifyWorkerEventIdentity } from "../src/runtime-broker.js";
 

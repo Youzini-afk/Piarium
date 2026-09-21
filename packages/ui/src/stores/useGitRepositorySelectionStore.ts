@@ -36,7 +36,7 @@ export const useGitRepositorySelectionStore = create<GitRepositorySelectionState
       },
     }),
     {
-      name: 'piarium.gitRepositorySelection.v1',
+      name: 'varin.gitRepositorySelection.v1',
       storage: createDeferredSafeJSONStorage(),
       partialize: (state) => ({ repositoryByWorkspace: state.repositoryByWorkspace }),
       merge: (persistedState, currentState) => {

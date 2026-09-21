@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { editor, IDisposable } from 'monaco-editor/editor';
 
 import type {
-  PiariumDebugEvent,
-  PiariumTestEvent,
+  VarinDebugEvent,
+  VarinTestEvent,
   WorkspaceDebugAPI,
   WorkspaceTasksAPI,
   WorkspaceTestAPI,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { bindRunDebugServices, resetRunDebugServices } from '@/lib/run-debug/session';
 import {
   createRunDebugEditorAdapter,
@@ -73,8 +73,8 @@ class FakeEditor {
 }
 
 const createServices = () => {
-  let debugListener: ((event: PiariumDebugEvent) => void) | undefined;
-  let testListener: ((event: PiariumTestEvent) => void) | undefined;
+  let debugListener: ((event: VarinDebugEvent) => void) | undefined;
+  let testListener: ((event: VarinTestEvent) => void) | undefined;
   const breakpointRequests: Parameters<WorkspaceDebugAPI['setBreakpoints']>[0][] = [];
   const subscriptions = { tasks: 0, debug: 0, tests: 0 };
   const tasks: WorkspaceTasksAPI = {
@@ -159,9 +159,9 @@ const createServices = () => {
   return {
     apis: { tasks, debug, tests },
     breakpointRequests,
-    debugEvent: (event: PiariumDebugEvent) => debugListener?.(event),
+    debugEvent: (event: VarinDebugEvent) => debugListener?.(event),
     subscriptions,
-    testEvent: (event: PiariumTestEvent) => testListener?.(event),
+    testEvent: (event: VarinTestEvent) => testListener?.(event),
   };
 };
 

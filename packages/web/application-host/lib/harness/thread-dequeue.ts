@@ -1,4 +1,4 @@
-import type { Thread, ThreadParent, ThreadRun } from "@piarium/protocol";
+import type { Thread, ThreadParent, ThreadRun } from "@varin/protocol";
 import { ThreadAdmissionError, type ThreadRegistry, type ThreadRegistryOptions } from "./thread-registry.js";
 import type { ThreadRuntime } from "./thread-runtime.js";
 

@@ -5,10 +5,10 @@ import type { Theme } from '@/types/theme';
 const tokenColor = (color: string): string => color.replace(/^#/, '').slice(0, 6);
 
 export const monacoThemeName = (theme: Theme): string => (
-  `piarium-${theme.metadata.id.replace(/[^a-zA-Z0-9_-]+/g, '-')}`
+  `varin-${theme.metadata.id.replace(/[^a-zA-Z0-9_-]+/g, '-')}`
 );
 
-export const createPiariumMonacoTheme = (theme: Theme): editor.IStandaloneThemeData => {
+export const createVarinMonacoTheme = (theme: Theme): editor.IStandaloneThemeData => {
   const base = theme.colors.syntax.base;
   const tokens = theme.colors.syntax.tokens ?? {};
   const highlights = theme.colors.syntax.highlights ?? {};
@@ -97,11 +97,11 @@ export const createPiariumMonacoTheme = (theme: Theme): editor.IStandaloneThemeD
   };
 };
 
-export const registerPiariumMonacoTheme = (
+export const registerVarinMonacoTheme = (
   monaco: typeof import('monaco-editor/editor'),
   theme: Theme,
 ): string => {
   const name = monacoThemeName(theme);
-  monaco.editor.defineTheme(name, createPiariumMonacoTheme(theme));
+  monaco.editor.defineTheme(name, createVarinMonacoTheme(theme));
   return name;
 };

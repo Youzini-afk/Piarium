@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-const BUNDLE_ID = 'dev.piarium.mobile';
+const BUNDLE_ID = 'dev.varin.mobile';
 const DEFAULT_DEVICE = 'iPhone 17 Pro';
 
 const run = (command, args, options = {}) => {

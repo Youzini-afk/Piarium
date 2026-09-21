@@ -101,7 +101,7 @@ export interface ContextPreparationOptions {
   /** Undefined means Pi's default, so the total-input planning target applies. */
   getExplicitKeepRecentTokens?: () => number | undefined;
   /** Publish native raw retention after an actual compaction or branch navigation. */
-  onRetention?: (params: import("@piarium/protocol").ContextRetentionParams) => void | Promise<void>;
+  onRetention?: (params: import("@varin/protocol").ContextRetentionParams) => void | Promise<void>;
   /** Per-request injection seam forwarded to the request boundary (D-300). */
   inject?: ContextRequestBoundaryOptions["inject"];
   onFailure?: (phase: "prepare" | "commit", message: string) => void;

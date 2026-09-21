@@ -15,7 +15,7 @@ Usage: deploy-cloud-runtime.sh \
   [--api-only]
 
 The environment file is sourced on the remote host and should contain secrets
-such as PIARIUM_UI_PASSWORD. Secrets are never accepted as command arguments.
+such as VARIN_UI_PASSWORD. Secrets are never accepted as command arguments.
 EOF
 }
 
@@ -143,7 +143,7 @@ if [[ "$ARCHIVE_INPUT" = /* ]]; then
 else
   ARCHIVE="${ROOT}/${ARCHIVE_INPUT}"
 fi
-ENV_FILE="$(expand_home_path "${ENV_FILE_INPUT:-~/.config/piarium/deploy.env}")"
+ENV_FILE="$(expand_home_path "${ENV_FILE_INPUT:-~/.config/varin/deploy.env}")"
 
 for command_name in bun id node stat tar; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -155,7 +155,7 @@ done
 node --input-type=module -e '
   const [major, minor] = process.versions.node.split(".").map(Number);
   if (major < 22 || (major === 22 && minor < 19)) {
-    console.error(`Piarium requires Node.js >=22.19.0; found ${process.versions.node}`);
+    console.error(`Varin requires Node.js >=22.19.0; found ${process.versions.node}`);
     process.exit(1);
   }
 '
@@ -177,29 +177,29 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
-PIARIUM_DATA_DIR="$(expand_home_path "${DATA_DIR_INPUT:-${PIARIUM_DATA_DIR:-~/.config/piarium}}")"
-export PIARIUM_DATA_DIR
-export PIARIUM_HOST="$BIND_HOST"
-export PIARIUM_PORT="$PORT"
+VARIN_DATA_DIR="$(expand_home_path "${DATA_DIR_INPUT:-${VARIN_DATA_DIR:-~/.config/varin}}")"
+export VARIN_DATA_DIR
+export VARIN_HOST="$BIND_HOST"
+export VARIN_PORT="$PORT"
 export NODE_ENV=production
 if [[ "$API_ONLY" = "true" ]]; then
-  export PIARIUM_API_ONLY=true
+  export VARIN_API_ONLY=true
 else
-  unset PIARIUM_API_ONLY || true
+  unset VARIN_API_ONLY || true
 fi
 
 case "$BIND_HOST" in
   127.0.0.1|localhost|::1) ;;
   *)
-    if [[ -z "${PIARIUM_UI_PASSWORD:-}" ]]; then
-      echo "PIARIUM_UI_PASSWORD must be set in ${ENV_FILE} before binding Piarium to ${BIND_HOST}." >&2
+    if [[ -z "${VARIN_UI_PASSWORD:-}" ]]; then
+      echo "VARIN_UI_PASSWORD must be set in ${ENV_FILE} before binding Varin to ${BIND_HOST}." >&2
       exit 1
     fi
     ;;
 esac
 
-mkdir -p "$ROOT/incoming" "$ROOT/releases" "$ROOT/cache/bun" "$PIARIUM_DATA_DIR"
-chmod 700 "$PIARIUM_DATA_DIR" 2>/dev/null || true
+mkdir -p "$ROOT/incoming" "$ROOT/releases" "$ROOT/cache/bun" "$VARIN_DATA_DIR"
+chmod 700 "$VARIN_DATA_DIR" 2>/dev/null || true
 
 DEPLOY_LOCK_FILE="${ROOT}/.deploy.lock"
 DEPLOY_LOCK_HELD="false"
@@ -240,13 +240,13 @@ acquire_deploy_lock() {
 
     owner_pid="$(cat "$DEPLOY_LOCK_FILE" 2>/dev/null || true)"
     if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
-      echo "Another Piarium deployment is already running for ${ROOT} (pid ${owner_pid})." >&2
+      echo "Another Varin deployment is already running for ${ROOT} (pid ${owner_pid})." >&2
       exit 1
     fi
     rm -f "$DEPLOY_LOCK_FILE"
   done
 
-  echo "Unable to acquire the Piarium deployment lock for ${ROOT}." >&2
+  echo "Unable to acquire the Varin deployment lock for ${ROOT}." >&2
   exit 1
 }
 
@@ -335,14 +335,14 @@ else
     cd "$RELEASE_DIR"
     node --input-type=module -e '
       import { createRequire } from "node:module";
-      const broker = await import("./packages/web/node_modules/@piarium/runtime-broker/dist/index.js");
+      const broker = await import("./packages/web/node_modules/@varin/runtime-broker/dist/index.js");
       const hostEntry = broker.resolveBundledPiHostEntry();
       if (!hostEntry) throw new Error("Pi host entry could not be resolved");
       const require = createRequire(new URL("./packages/web/package.json", import.meta.url));
       require.resolve("sherpa-onnx-node");
-      const builtins = await import("./packages/web/node_modules/@piarium/extension-builtins/dist/index.js");
-      if (!Array.isArray(builtins.PIARIUM_BUNDLED_LANGUAGE_SERVERS)) {
-        throw new Error("Piarium extension builtins are unavailable");
+      const builtins = await import("./packages/web/node_modules/@varin/extension-builtins/dist/index.js");
+      if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) {
+        throw new Error("Varin extension builtins are unavailable");
       }
       console.log(`Verified Pi host: ${hostEntry}`);
     '
@@ -401,8 +401,8 @@ start_runtime() {
     args+=(--api-only)
   fi
   (
-    export PIARIUM_RELEASE_ID
-    PIARIUM_RELEASE_ID="$(basename "$runtime_dir")"
+    export VARIN_RELEASE_ID
+    VARIN_RELEASE_ID="$(basename "$runtime_dir")"
     run_cli "$runtime_dir" "${args[@]}"
   )
 }
@@ -420,15 +420,15 @@ wait_for_health() {
   if [[ "$health_host" == *:* ]]; then
     health_host="[${health_host}]"
   fi
-  PIARIUM_HEALTH_URL="http://${health_host}:${PORT}/health" \
-  PIARIUM_EXPECTED_VERSION="$expected_version" \
-  PIARIUM_EXPECTED_RELEASE_ID="$expected_release_id" \
-  PIARIUM_HEALTH_TIMEOUT_SECONDS="$HEALTH_TIMEOUT_SECONDS" \
+  VARIN_HEALTH_URL="http://${health_host}:${PORT}/health" \
+  VARIN_EXPECTED_VERSION="$expected_version" \
+  VARIN_EXPECTED_RELEASE_ID="$expected_release_id" \
+  VARIN_HEALTH_TIMEOUT_SECONDS="$HEALTH_TIMEOUT_SECONDS" \
   node --input-type=module <<'NODE'
-const url = process.env.PIARIUM_HEALTH_URL;
-const expectedVersion = process.env.PIARIUM_EXPECTED_VERSION;
-const expectedReleaseId = process.env.PIARIUM_EXPECTED_RELEASE_ID;
-const timeoutMs = Number(process.env.PIARIUM_HEALTH_TIMEOUT_SECONDS) * 1000;
+const url = process.env.VARIN_HEALTH_URL;
+const expectedVersion = process.env.VARIN_EXPECTED_VERSION;
+const expectedReleaseId = process.env.VARIN_EXPECTED_RELEASE_ID;
+const timeoutMs = Number(process.env.VARIN_HEALTH_TIMEOUT_SECONDS) * 1000;
 const deadline = Date.now() + timeoutMs;
 let lastError = 'no response';
 
@@ -439,12 +439,12 @@ while (Date.now() < deadline) {
     if (
       response.ok
       && body.status === 'ok'
-      && body.piariumVersion === expectedVersion
+      && body.varinVersion === expectedVersion
       && body.releaseId === expectedReleaseId
       && body.piRuntime?.ready === true
       && body.piRuntime?.source === 'bundled'
     ) {
-      console.log(`Piarium ${body.piariumVersion} is healthy with bundled Pi ${body.piRuntime.piVersion}.`);
+      console.log(`Varin ${body.varinVersion} is healthy with bundled Pi ${body.piRuntime.piVersion}.`);
       process.exit(0);
     }
     lastError = `status=${response.status} body=${JSON.stringify(body)}`;
@@ -454,23 +454,23 @@ while (Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
-console.error(`Piarium health check timed out: ${lastError}`);
+console.error(`Varin health check timed out: ${lastError}`);
 process.exit(1);
 NODE
 }
 
 print_daemon_log_tail() {
-  local log_dir="${PIARIUM_DATA_DIR}/logs"
-  local log_file="${log_dir}/piarium-${PORT}.log"
+  local log_dir="${VARIN_DATA_DIR}/logs"
+  local log_file="${log_dir}/varin-${PORT}.log"
   if [[ ! -f "$log_file" ]]; then
-    log_file="$(ls -t "${log_dir}"/piarium-*.log 2>/dev/null | head -1 || true)"
+    log_file="$(ls -t "${log_dir}"/varin-*.log 2>/dev/null | head -1 || true)"
   fi
   if [[ -n "$log_file" && -f "$log_file" ]]; then
-    echo "---- Piarium daemon log tail (${log_file}) ----" >&2
+    echo "---- Varin daemon log tail (${log_file}) ----" >&2
     tail -n 120 "$log_file" >&2 || true
-    echo "---- end Piarium daemon log tail ----" >&2
+    echo "---- end Varin daemon log tail ----" >&2
   else
-    echo "No Piarium daemon log found under ${log_dir}." >&2
+    echo "No Varin daemon log found under ${log_dir}." >&2
   fi
 }
 
@@ -480,7 +480,7 @@ rollback() {
   trap - ERR
   set +e
   if [[ "$ROLLBACK_REQUIRED" = "true" ]]; then
-    echo "New Piarium release failed; rolling back." >&2
+    echo "New Varin release failed; rolling back." >&2
     print_daemon_log_tail
     if [[ "$CANDIDATE_START_ATTEMPTED" = "true" ]]; then
       stop_runtime "$RELEASE_DIR"
@@ -493,9 +493,9 @@ rollback() {
       fi
       if [[ "$PREVIOUS_RUNTIME_STOPPED" = "true" ]]; then
         if ! start_runtime "$PREVIOUS_TARGET"; then
-          echo "warning: failed to restart the previous Piarium runtime" >&2
+          echo "warning: failed to restart the previous Varin runtime" >&2
         elif [[ -n "$PREVIOUS_VERSION" ]] && ! wait_for_health "$PREVIOUS_VERSION" "$(basename "$PREVIOUS_TARGET")"; then
-          echo "warning: the previous Piarium runtime did not become healthy during rollback" >&2
+          echo "warning: the previous Varin runtime did not become healthy during rollback" >&2
         fi
       fi
     elif [[ "$CURRENT_LINK_SWITCHED" = "true" ]]; then
@@ -513,7 +513,7 @@ fi
 
 if [[ "$PREVIOUS_TARGET" = "$RELEASE_DIR" ]] && wait_for_health "$EXPECTED_VERSION" "$RELEASE_ID"; then
   rm -f "$ARCHIVE"
-  echo "Piarium cloud deployment is already active: ${RELEASE_DIR}"
+  echo "Varin cloud deployment is already active: ${RELEASE_DIR}"
   exit 0
 fi
 
@@ -551,4 +551,4 @@ if [[ -n "$PREVIOUS_TARGET" && "$PREVIOUS_TARGET" != "$RELEASE_DIR" ]]; then
 fi
 
 rm -f "$ARCHIVE"
-echo "Piarium cloud deployment is active: ${RELEASE_DIR}"
+echo "Varin cloud deployment is active: ${RELEASE_DIR}"

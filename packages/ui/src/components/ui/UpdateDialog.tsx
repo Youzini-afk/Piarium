@@ -13,7 +13,7 @@ import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -32,7 +32,7 @@ interface UpdateDialogProps {
   runtimeType?: 'desktop' | 'web' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Varin/releases';
 
 type ChangelogSection = {
   version: string;
@@ -124,7 +124,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await runtimeFetch('/api/piarium/update-install', {
+    const response = await runtimeFetch('/api/varin/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -163,7 +163,7 @@ async function waitForUpdateApplied(
 ): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await runtimeFetch('/api/piarium/update-check', {
+      const response = await runtimeFetch('/api/varin/update-check', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -221,7 +221,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const isWebRuntime = runtimeType === 'web';
   const isMobileRuntime = runtimeType === 'mobile';
   const isDesktopRestarting = !isWebRuntime && !isMobileRuntime && restarting;
-  const updateCommand = info?.updateCommand || 'piarium update';
+  const updateCommand = info?.updateCommand || 'varin update';
 
   // Reset state when dialog closes
   useEffect(() => {

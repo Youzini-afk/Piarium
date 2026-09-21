@@ -5,7 +5,7 @@ import type {
   ThreadResultHistoryReleaseParams,
   ThreadResultHistoryReleaseResult,
   ThreadResultRetentionReason,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';

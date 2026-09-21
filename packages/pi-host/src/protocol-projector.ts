@@ -30,7 +30,7 @@ import type {
   PiUserContent,
   ProviderAuthEvent,
   ProviderAuthPrompt,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { toJsonValue } from "./json.js";
 
 type CompactionResult = NonNullable<

@@ -72,7 +72,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
   const options: CliOptions = {
     port: DEFAULT_PORT,
     host: undefined,
-    uiPassword: process.env.PIARIUM_UI_PASSWORD || undefined,
+    uiPassword: process.env.VARIN_UI_PASSWORD || undefined,
     json: false,
     all: false,
     follow: true,
@@ -578,10 +578,10 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
 
 function showHelp(): void {
   console.log(`
- Piarium - A native desktop and web workspace for the Pi coding agent
+ Varin - A native desktop and web workspace for the Pi coding agent
 
 USAGE:
-  piarium [COMMAND] [OPTIONS]
+  varin [COMMAND] [OPTIONS]
 
 COMMANDS:
   serve          Start the web server (daemon default)
@@ -589,12 +589,12 @@ COMMANDS:
   restart        Stop and start the server
   status         Show server status
   schedule       Manage scheduled tasks
-  session        Create, inspect, and read Piarium sessions
+  session        Create, inspect, and read Varin sessions
   models         Show default and favorite models
   projects       Show configured projects and IDs
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
-  logs           Tail Piarium logs
+  logs           Tail Varin logs
   connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
 
@@ -613,32 +613,32 @@ OPTIONS:
   -v, --version           Show version
 
 ENVIRONMENT:
-  PIARIUM_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
-  PIARIUM_UI_PASSWORD      Alternative to --ui-password flag
-  PIARIUM_API_ONLY         Set to true/1 to start API routes only
-  PIARIUM_DATA_DIR         Override Piarium data directory
-  PIARIUM_AGENT_DIR        Override the Pi agent configuration directory
+  VARIN_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
+  VARIN_UI_PASSWORD      Alternative to --ui-password flag
+  VARIN_API_ONLY         Set to true/1 to start API routes only
+  VARIN_DATA_DIR         Override Varin data directory
+  VARIN_AGENT_DIR        Override the Pi agent configuration directory
   PI_CODING_AGENT_DIR     Native Pi agent configuration directory
 
 EXAMPLES:
-  piarium                    # Start in daemon mode on default port 3000 (or free port)
-  piarium --port 8080        # Start on port 8080 (daemon)
-  piarium --lan --port 3002  # Start on LAN at 0.0.0.0:3002
-  piarium serve --foreground # Start in foreground (for systemd Type=simple)
-  piarium connect-url --port 3000 --qr
-  piarium connect-url --server https://piarium.example.com
-  piarium startup enable     # Start Piarium at user login
-  piarium tunnel help        # Show tunnel lifecycle help
-  piarium logs               # Follow logs for latest running instance
+  varin                    # Start in daemon mode on default port 3000 (or free port)
+  varin --port 8080        # Start on port 8080 (daemon)
+  varin --lan --port 3002  # Start on LAN at 0.0.0.0:3002
+  varin serve --foreground # Start in foreground (for systemd Type=simple)
+  varin connect-url --port 3000 --qr
+  varin connect-url --server https://varin.example.com
+  varin startup enable     # Start Varin at user login
+  varin tunnel help        # Show tunnel lifecycle help
+  varin logs               # Follow logs for latest running instance
 `);
 }
 
 function showStartupHelp(): void {
   console.log(`
- Piarium Startup Commands
+ Varin Startup Commands
 
 USAGE:
-  piarium startup <SUBCOMMAND> [OPTIONS]
+  varin startup <SUBCOMMAND> [OPTIONS]
 
 SUBCOMMANDS:
   status      Show startup integration status
@@ -655,23 +655,23 @@ OPTIONS:
   -q, --quiet             Suppress non-essential output
 
 EXAMPLES:
-  piarium startup enable
-  piarium startup enable --port 3000
-  piarium startup enable --port 3000 --api-only --host 0.0.0.0
-  piarium startup status --json
+  varin startup enable
+  varin startup enable --port 3000
+  varin startup enable --port 3000 --api-only --host 0.0.0.0
+  varin startup status --json
 `);
 }
 
 function showConnectUrlHelp(): void {
   console.log(`
- Piarium Connect URL
+ Varin Connect URL
 
 USAGE:
-  piarium connect-url [OPTIONS]
+  varin connect-url [OPTIONS]
 
 DESCRIPTION:
-  Generate a piarium:// connection link for adding this server to another
-  Piarium app. If no server is running on the selected port, it starts one.
+  Generate a varin:// connection link for adding this server to another
+  Varin app. If no server is running on the selected port, it starts one.
 
 OPTIONS:
   -p, --port <port>       Server port to use or start (default: ${DEFAULT_PORT})
@@ -684,7 +684,7 @@ OPTIONS:
                           so the link works away from the local network. The
                           device prefers the direct connection when reachable;
                           the instance brings the relay up on its own. Set
-                          PIARIUM_RELAY_URL to use a self-hosted relay.
+                          VARIN_RELAY_URL to use a self-hosted relay.
   --name <label>          Label saved with the remote client token
   --ui-password <value>   Protect browser access when UI routes are enabled
   --api-only              Start in headless/API-only mode when starting
@@ -694,10 +694,10 @@ OPTIONS:
   -h, --help              Show this help
 
 EXAMPLES:
-  piarium connect-url --port 3000 --qr
-  piarium connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr
-  piarium connect-url --server https://piarium.example.com --name Workstation
-  piarium connect-url --relay --name "My laptop"
+  varin connect-url --port 3000 --qr
+  varin connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr
+  varin connect-url --server https://varin.example.com --name Workstation
+  varin connect-url --relay --name "My laptop"
 `);
 }
 
@@ -706,7 +706,7 @@ function showTunnelHelp(): void {
  Tunnel Lifecycle Commands
 
 USAGE:
-  piarium tunnel <SUBCOMMAND> [OPTIONS]
+  varin tunnel <SUBCOMMAND> [OPTIONS]
 
 SUBCOMMANDS:
   help        Show this tunnel help
@@ -719,7 +719,7 @@ SUBCOMMANDS:
   profile     Manage saved managed-remote profiles
 
 COMMON OPTIONS:
-  -p, --port              Target Piarium instance port
+  -p, --port              Target Varin instance port
   --host                  Bind address when auto-starting an instance
   --lan                   Bind to 0.0.0.0 when auto-starting an instance
   --ui-password [password] Protect browser UI when auto-starting an instance (generates one when omitted)
@@ -749,36 +749,36 @@ OUTPUT OPTIONS:
   --json                  Output machine-readable JSON
 
 BEHAVIOR NOTES:
-  - One active tunnel per Piarium instance.
+  - One active tunnel per Varin instance.
   - Starting a different mode/provider replaces the current tunnel and revokes old connect links/sessions.
   - Connect links are one-time; generating a new link revokes the previous unused link.
 
 PROFILE USAGE:
-  piarium tunnel profile list [--provider <id>] [--json]
-  piarium tunnel profile show --name <name> [--provider <id>] [--json]
-  piarium tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token <token> [--force] [--json]
-  piarium tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token-file <path> [--force] [--json]
-  piarium tunnel profile remove --name <name> [--provider <id>] [--json]
+  varin tunnel profile list [--provider <id>] [--json]
+  varin tunnel profile show --name <name> [--provider <id>] [--json]
+  varin tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token <token> [--force] [--json]
+  varin tunnel profile add --provider <id> --mode managed-remote --name <name> --hostname <host> --token-file <path> [--force] [--json]
+  varin tunnel profile remove --name <name> [--provider <id>] [--json]
 
 SHELL COMPLETION:
-  piarium tunnel completion bash   Generate Bash completion script
-  piarium tunnel completion zsh    Generate Zsh completion script
-  piarium tunnel completion fish   Generate Fish completion script
+  varin tunnel completion bash   Generate Bash completion script
+  varin tunnel completion zsh    Generate Zsh completion script
+  varin tunnel completion fish   Generate Fish completion script
 
 EXAMPLES:
-  piarium tunnel providers
-  piarium tunnel ready --provider cloudflare
-  piarium tunnel doctor --provider cloudflare
-  piarium tunnel status
-  piarium tunnel start --qr
-  piarium tunnel start --profile prod-main
-  piarium tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
-  piarium tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
-  piarium tunnel start --dry-run --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
-  echo "$TOKEN" | piarium tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-stdin
-  piarium tunnel profile list --provider cloudflare
-  piarium tunnel profile list --json --show-secrets
-  piarium tunnel stop --port 3000
+  varin tunnel providers
+  varin tunnel ready --provider cloudflare
+  varin tunnel doctor --provider cloudflare
+  varin tunnel status
+  varin tunnel start --qr
+  varin tunnel start --profile prod-main
+  varin tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+  varin tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+  varin tunnel start --dry-run --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+  echo "$TOKEN" | varin tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-stdin
+  varin tunnel profile list --provider cloudflare
+  varin tunnel profile list --json --show-secrets
+  varin tunnel stop --port 3000
 `);
 }
 
@@ -786,9 +786,9 @@ function generateCompletionScript(shell: unknown): string | null {
   const normalized = typeof shell === 'string' ? shell.trim().toLowerCase() : '';
 
   if (normalized === 'bash') {
-    return `# Bash completion for piarium tunnel
-# Add to ~/.bashrc: eval "$(piarium tunnel completion bash)"
-_piarium_tunnel() {
+    return `# Bash completion for varin tunnel
+# Add to ~/.bashrc: eval "$(varin tunnel completion bash)"
+_varin_tunnel() {
   local cur prev commands tunnel_commands profile_commands common_flags start_flags
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
@@ -829,16 +829,16 @@ _piarium_tunnel() {
   COMPREPLY=( $(compgen -W "\${common_flags}" -- "\${cur}") )
   return 0
 }
-complete -F _piarium_tunnel piarium
+complete -F _varin_tunnel varin
 `;
   }
 
   if (normalized === 'zsh') {
-    return `#compdef piarium
-# Zsh completion for piarium tunnel
-# Add to ~/.zshrc: eval "$(piarium tunnel completion zsh)"
+    return `#compdef varin
+# Zsh completion for varin tunnel
+# Add to ~/.zshrc: eval "$(varin tunnel completion zsh)"
 
-_piarium() {
+_varin() {
   local -a commands tunnel_commands profile_commands
 
   commands=(
@@ -851,7 +851,7 @@ _piarium() {
     'models:Show default and favorite models'
     'projects:Show configured projects and IDs'
     'tunnel:Tunnel lifecycle commands'
-    'logs:Tail Piarium logs'
+    'logs:Tail Varin logs'
     'update:Check for and install updates'
   )
 
@@ -898,44 +898,44 @@ _piarium() {
   esac
 }
 
-compdef _piarium piarium
+compdef _varin varin
 `;
   }
 
   if (normalized === 'fish') {
-    return `# Fish completion for piarium tunnel
-# Save to ~/.config/fish/completions/piarium.fish
+    return `# Fish completion for varin tunnel
+# Save to ~/.config/fish/completions/varin.fish
 
-complete -c piarium -n '__fish_use_subcommand' -a 'serve' -d 'Start the web server'
-complete -c piarium -n '__fish_seen_subcommand_from serve' -l foreground -d 'Run in foreground (for systemd/process managers)'
-complete -c piarium -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in foreground (alias for --foreground)'
-complete -c piarium -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
-complete -c piarium -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
-complete -c piarium -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
-complete -c piarium -n '__fish_use_subcommand' -a 'tunnel' -d 'Tunnel lifecycle commands'
-complete -c piarium -n '__fish_use_subcommand' -a 'logs' -d 'Tail logs'
-complete -c piarium -n '__fish_use_subcommand' -a 'update' -d 'Check for updates'
+complete -c varin -n '__fish_use_subcommand' -a 'serve' -d 'Start the web server'
+complete -c varin -n '__fish_seen_subcommand_from serve' -l foreground -d 'Run in foreground (for systemd/process managers)'
+complete -c varin -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in foreground (alias for --foreground)'
+complete -c varin -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
+complete -c varin -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
+complete -c varin -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
+complete -c varin -n '__fish_use_subcommand' -a 'tunnel' -d 'Tunnel lifecycle commands'
+complete -c varin -n '__fish_use_subcommand' -a 'logs' -d 'Tail logs'
+complete -c varin -n '__fish_use_subcommand' -a 'update' -d 'Check for updates'
 
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'help' -d 'Show tunnel help'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'providers' -d 'Show providers'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'ready' -d 'Check readiness'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'doctor' -d 'Run diagnostics'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'status' -d 'Show tunnel status'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'start' -d 'Start a tunnel'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'stop' -d 'Stop tunnel'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'profile' -d 'Manage profiles'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'completion' -d 'Generate completions'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'help' -d 'Show tunnel help'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'providers' -d 'Show providers'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'ready' -d 'Check readiness'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'doctor' -d 'Run diagnostics'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'status' -d 'Show tunnel status'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'start' -d 'Start a tunnel'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'stop' -d 'Stop tunnel'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'profile' -d 'Manage profiles'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'completion' -d 'Generate completions'
 
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l provider -d 'Provider id'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l mode -d 'Tunnel mode'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l profile -d 'Profile name'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l config -d 'Config path'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token -d 'Token'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-file -d 'Token file path'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-stdin -d 'Read token from stdin'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l hostname -d 'Hostname'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l dry-run -d 'Validate without applying'
-complete -c piarium -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l qr -d 'Show QR code'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l provider -d 'Provider id'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l mode -d 'Tunnel mode'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l profile -d 'Profile name'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l config -d 'Config path'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token -d 'Token'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-file -d 'Token file path'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-stdin -d 'Read token from stdin'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l hostname -d 'Hostname'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l dry-run -d 'Validate without applying'
+complete -c varin -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l qr -d 'Show QR code'
 `;
   }
 

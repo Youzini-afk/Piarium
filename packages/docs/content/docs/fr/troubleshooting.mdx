@@ -7,22 +7,22 @@ description: Problèmes courants d’installation et d’exécution, avec des co
 
 Un accroc ? Trouvez le symptôme ci-dessous et essayez le correctif.
 
-## La commande Piarium quitte ou ne démarre pas
+## La commande Varin quitte ou ne démarre pas
 
 - confirmez Node.js `>=22.19` (Node.js 24 est la base de développement prise en charge)
 - depuis une copie source, exécutez `bun run dev` ou `bun run start:web`
-- si vous avez une CLI publiée, exécutez `piarium --version` et réinstallez si besoin
+- si vous avez une CLI publiée, exécutez `varin --version` et réinstallez si besoin
 
 ## L’UI web n’est pas joignable
 
 - depuis une copie source, lisez le terminal qui a lancé `bun run dev`
-- si vous avez une CLI publiée, consultez les journaux serveur avec `piarium logs`
+- si vous avez une CLI publiée, consultez les journaux serveur avec `varin logs`
 - vérifiez le port actif (le développement utilise l’URL Vite ; le serveur par défaut est `3000`)
 - ouvrez d’abord `http://localhost:3000` directement avant de tester les liens de tunnel
 
 ## Le lien distant / tunnel ne fonctionne pas
 
-- exécutez `piarium tunnel status --all` quand la CLI est installée
+- exécutez `varin tunnel status --all` quand la CLI est installée
 - redémarrez le tunnel depuis la même instance / le même port
 - régénérez le lien de connexion si le jeton précédent a déjà été utilisé
 

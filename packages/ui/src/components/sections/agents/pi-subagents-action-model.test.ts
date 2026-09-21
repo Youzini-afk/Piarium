@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { JsonValue, PiAgentDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { JsonValue, PiAgentDescriptor, RuntimeContextTarget } from '@varin/protocol';
 import {
   buildPiSubagentsDefinitionConfig,
   createPiSubagentsDefinitionDraft,

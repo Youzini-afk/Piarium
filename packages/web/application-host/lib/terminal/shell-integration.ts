@@ -3,7 +3,7 @@
  * Command text and exit codes come only from those sequences — never from
  * prompt painting or raw PTY text.
  *
- * Piarium only accepts frames tagged with this session integration id
+ * Varin only accepts frames tagged with this session integration id
  * (`pi;<terminalId>:<generation>;<body>`). Other OSC 133/633 or ordinary
  * program output is ignored. The tag is source-bound observation, not an
  * unforgeable security identity.
@@ -34,11 +34,11 @@ export type ShellIntegrationStatus = "not-observed" | "ready";
 const OSC_START = /\u001b\](?:133|633);/u;
 const ST_OR_BEL = /\u0007|\u001b\\|\u009c/u;
 
-export const piariumShellIntegrationId = (terminalId: string, generation: number): string => (
+export const varinShellIntegrationId = (terminalId: string, generation: number): string => (
   `${terminalId}:${generation}`
 );
 
-export const formatPiariumOscFrame = (integrationId: string, body: string): string => (
+export const formatVarinOscFrame = (integrationId: string, body: string): string => (
   `\u001b]633;pi;${integrationId};${body}\u0007`
 );
 
@@ -89,7 +89,7 @@ export const parseShellIntegrationBody = (body: string): ShellIntegrationSequenc
   return null;
 };
 
-export const parsePiariumShellIntegrationBody = (
+export const parseVarinShellIntegrationBody = (
   raw: string,
   expectedId: string,
 ): ShellIntegrationSequence | null => {
@@ -118,7 +118,7 @@ const consumeOscChunk = (
     const end = rest.search(ST_OR_BEL);
     if (end < 0) return { pending: input.slice(absolute), sequences };
     const terminator = rest[end] === "\u001b" ? 2 : 1;
-    const parsed = parsePiariumShellIntegrationBody(rest.slice(0, end), expectedId);
+    const parsed = parseVarinShellIntegrationBody(rest.slice(0, end), expectedId);
     if (parsed) sequences.push(parsed);
     cursor = bodyStart + end + terminator;
   }
@@ -143,7 +143,7 @@ export function createShellIntegrationParser(options: {
   let startedAt: number | undefined;
   let awaitingFinish = false;
 
-  const expectedId = (): string => piariumShellIntegrationId(options.terminalId, generation);
+  const expectedId = (): string => varinShellIntegrationId(options.terminalId, generation);
 
   const finish = (exitCode: number, endedAt: number): TerminalCommandObservation | null => {
     if (!awaitingFinish || typeof command !== "string" || command.length === 0) {

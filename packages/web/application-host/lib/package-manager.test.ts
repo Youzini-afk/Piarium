@@ -58,15 +58,15 @@ describe('checkForUpdates', () => {
     fetchMock = createFetchMock();
     originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    originalUpdateApiUrl = process.env.PIARIUM_UPDATE_API_URL;
-    process.env.PIARIUM_UPDATE_API_URL = 'https://updates.piarium.test/v1/update/check';
+    originalUpdateApiUrl = process.env.VARIN_UPDATE_API_URL;
+    process.env.VARIN_UPDATE_API_URL = 'https://updates.varin.test/v1/update/check';
     setPackageManagerSpawnSyncForTest(vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })));
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    if (originalUpdateApiUrl === undefined) delete process.env.PIARIUM_UPDATE_API_URL;
-    else process.env.PIARIUM_UPDATE_API_URL = originalUpdateApiUrl;
+    if (originalUpdateApiUrl === undefined) delete process.env.VARIN_UPDATE_API_URL;
+    else process.env.VARIN_UPDATE_API_URL = originalUpdateApiUrl;
     setPackageManagerSpawnSyncForTest(null);
   });
 
@@ -74,7 +74,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=true when both API and npm confirm a newer version', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: true,
         json: async () => ({
           latestVersion: '1.10.0',
@@ -98,11 +98,11 @@ describe('checkForUpdates', () => {
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
     expect(result.currentVersion).toBe('1.9.10');
-    expect(result.updateCommand).toBe('piarium update');
+    expect(result.updateCommand).toBe('varin update');
   });
 
-  it('uses no legacy hosted update service when a Piarium API is not configured', async () => {
-    delete process.env.PIARIUM_UPDATE_API_URL;
+  it('uses no legacy hosted update service when a Varin API is not configured', async () => {
+    delete process.env.VARIN_UPDATE_API_URL;
     fetchMock.when('registry.npmjs.org', {
       ok: true,
       json: async () => ({ 'dist-tags': { latest: '1.9.10' } }),
@@ -120,7 +120,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false when API claims update but npm has same version', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: true,
         json: async () => ({
           latestVersion: '1.10.0',
@@ -142,7 +142,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false when npm only has a prerelease of the current version', async () => {
     fetchMock
-      .when('updates.piarium.test', Promise.reject(new Error('Network error')))
+      .when('updates.varin.test', Promise.reject(new Error('Network error')))
       .when('registry.npmjs.org', {
         ok: true,
         json: async () => ({
@@ -157,7 +157,7 @@ describe('checkForUpdates', () => {
 
   it('accepts electron desktop update claims without npm cross-checking', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: true,
         json: async () => ({
           latestVersion: '1.10.0',
@@ -189,29 +189,29 @@ describe('checkForUpdates', () => {
 
   it('resolves an Android APK asset when the update API returns an AAB', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: true,
         json: async () => ({
           latestVersion: '1.10.0',
           updateAvailable: true,
-          downloadUrl: 'https://github.com/Youzini-afk/Piarium/releases/download/v1.10.0/Piarium-1.10.0-42-android.aab',
+          downloadUrl: 'https://github.com/Youzini-afk/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.aab',
         }),
       })
-      .when('api.github.com/repos/Youzini-afk/Piarium/releases/tags/v1.10.0', {
+      .when('api.github.com/repos/Youzini-afk/Varin/releases/tags/v1.10.0', {
         ok: true,
         json: async () => ({
           assets: [
             {
-              name: 'Piarium-1.10.0-42-android.aab',
-              browser_download_url: 'https://downloads.example/Piarium-1.10.0-42-android.aab',
+              name: 'Varin-1.10.0-42-android.aab',
+              browser_download_url: 'https://downloads.example/Varin-1.10.0-42-android.aab',
             },
             {
               name: 'app-release.apk',
               browser_download_url: 'https://downloads.example/app-release.apk',
             },
             {
-              name: 'Piarium-1.10.0-42-android.apk',
-              browser_download_url: 'https://downloads.example/Piarium-1.10.0-42-android.apk',
+              name: 'Varin-1.10.0-42-android.apk',
+              browser_download_url: 'https://downloads.example/Varin-1.10.0-42-android.apk',
             },
           ],
         }),
@@ -223,12 +223,12 @@ describe('checkForUpdates', () => {
       currentVersion: '1.9.10',
     });
 
-    expect(result.downloadUrl).toBe('https://downloads.example/Piarium-1.10.0-42-android.apk');
+    expect(result.downloadUrl).toBe('https://downloads.example/Varin-1.10.0-42-android.apk');
   });
 
   it('keeps a direct Android APK URL from the update API', async () => {
-    const apkUrl = 'https://github.com/Youzini-afk/Piarium/releases/download/v1.10.0/Piarium-1.10.0-42-android.apk';
-    fetchMock.when('updates.piarium.test', {
+    const apkUrl = 'https://github.com/Youzini-afk/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.apk';
+    fetchMock.when('updates.varin.test', {
       ok: true,
       json: async () => ({
         latestVersion: '1.10.0',
@@ -249,7 +249,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false when API claims update but npm is behind', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: true,
         json: async () => ({
           latestVersion: '1.10.0',
@@ -272,7 +272,7 @@ describe('checkForUpdates', () => {
   // --- Scenario: API says no update, npm agrees ---
 
   it('returns available=false when API says no update and versions match', async () => {
-    fetchMock.when('updates.piarium.test', {
+    fetchMock.when('updates.varin.test', {
       ok: true,
       json: async () => ({
         latestVersion: '1.9.10',
@@ -289,7 +289,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=true from npm fallback when API is unreachable and npm has newer version', async () => {
     fetchMock
-      .when('updates.piarium.test', Promise.reject(new Error('Network error')))
+      .when('updates.varin.test', Promise.reject(new Error('Network error')))
       .when('registry.npmjs.org', {
         ok: true,
         json: async () => ({
@@ -309,7 +309,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false from npm fallback when API is unreachable and versions match', async () => {
     fetchMock
-      .when('updates.piarium.test', Promise.reject(new Error('Network error')))
+      .when('updates.varin.test', Promise.reject(new Error('Network error')))
       .when('registry.npmjs.org', {
         ok: true,
         json: async () => ({
@@ -326,7 +326,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false when API returns non-ok status and versions match on npm', async () => {
     fetchMock
-      .when('updates.piarium.test', {
+      .when('updates.varin.test', {
         ok: false,
         status: 500,
         json: async () => ({}),
@@ -347,7 +347,7 @@ describe('checkForUpdates', () => {
 
   it('returns available=false when both sources are unreachable', async () => {
     fetchMock
-      .when('updates.piarium.test', Promise.reject(new Error('Network error')))
+      .when('updates.varin.test', Promise.reject(new Error('Network error')))
       .when('registry.npmjs.org', Promise.reject(new Error('Registry unreachable')));
 
     const result = await checkForUpdates({ currentVersion: '1.9.10' });

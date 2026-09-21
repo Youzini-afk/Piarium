@@ -1,5 +1,5 @@
 import { statfs } from "node:fs/promises";
-import type { HarnessWorktreeBudget, Thread, ThreadOccupancy, ThreadSpaceMeasurement, WorkspaceThreadSpace } from "@piarium/protocol";
+import type { HarnessWorktreeBudget, Thread, ThreadOccupancy, ThreadSpaceMeasurement, WorkspaceThreadSpace } from "@varin/protocol";
 import type { RecoveryState, WorkingStateRootStore } from "./types.js";
 
 export const mergeHashMaps = (

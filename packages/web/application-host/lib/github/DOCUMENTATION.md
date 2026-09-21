@@ -2,7 +2,7 @@
 
 ## Purpose
 
-- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for Piarium.
+- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for Varin.
 - From user perspective, this is the layer that lets the app know which PR belongs to a local branch and keeps that UI feeling current.
 
 ## Entrypoints and structure
@@ -46,10 +46,10 @@
 
 ## Auth storage and config
 
-- Auth storage: the platform Piarium data directory (`~/.config/piarium/github-auth.json` on Linux)
+- Auth storage: the platform Varin data directory (`~/.config/varin/github-auth.json` on Linux)
 - Writes are atomic and file mode is `0o600`.
-- Client ID resolution order: `PIARIUM_GITHUB_CLIENT_ID` -> `settings.json` -> default.
-- Scope resolution order: `PIARIUM_GITHUB_SCOPES` -> `settings.json` -> default.
+- Client ID resolution order: `VARIN_GITHUB_CLIENT_ID` -> `settings.json` -> default.
+- Scope resolution order: `VARIN_GITHUB_SCOPES` -> `settings.json` -> default.
 - Account id resolution order: explicit `accountId` -> user login -> user id -> token prefix.
 
 ## PR integration overview
@@ -88,7 +88,7 @@
 
 ## Persistence
 
-- PR state is persisted in local storage under `piarium.githubPrStatus.v1`.
+- PR state is persisted in local storage under `varin.githubPrStatus.v1`.
 - Persisted fields include status, timestamps, identity, and resolved remote.
 - Runtime-only details are not persisted.
 - Persisted entries expire after 12 hours.

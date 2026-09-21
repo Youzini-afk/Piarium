@@ -1,4 +1,4 @@
-import type { GitStatus } from '@piarium/application-client';
+import type { GitStatus } from '@varin/application-client';
 
 export const TREE_INDENT_PX = 14;
 

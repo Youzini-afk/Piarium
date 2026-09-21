@@ -199,7 +199,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
           throw new ContextCapacityError("The prepared context boundary no longer belongs to the active branch");
         }
         const preview = buildSessionContext([...branch, {
-          type: "compaction", id: "piarium-context-preview", parentId: session.sessionManager.getLeafId(),
+          type: "compaction", id: "varin-context-preview", parentId: session.sessionManager.getLeafId(),
           timestamp: new Date().toISOString(), summary: result.summary,
           firstKeptEntryId: result.firstKeptEntryId, tokensBefore: before,
         }]);
@@ -253,7 +253,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
               delivered = true;
               if (delivery.retained) {
                 const id = session.sessionManager.appendCustomMessageEntry(
-                  "piarium-context", delivery.retained.content, false, delivery.retained.details,
+                  "varin-context", delivery.retained.content, false, delivery.retained.details,
                 );
                 const entry = session.sessionManager.getEntry(id);
                 if (!entry) throw new Error("Pi did not retain the delivered environment observations");

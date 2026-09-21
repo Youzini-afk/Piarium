@@ -11,7 +11,7 @@ const context = undefined as never;
 
 describe("surface-aware native find and ls", () => {
   it("lists a nested dirty-only virtual directory and finds its file", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-virtual-"));
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-virtual-"));
     const bridge = {
       request: async (_method: string, params: { path: string; pattern?: string }) => ({
         status: "ready" as const,
@@ -38,7 +38,7 @@ describe("surface-aware native find and ls", () => {
   });
 
   it("lists only the working-branch overlay when the Host marks exclusive authority", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-branch-"));
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-branch-"));
     await writeFile(path.join(root, "parent-live.ts"), "live\n", "utf8");
     const bridge = {
       request: async () => ({
@@ -65,7 +65,7 @@ describe("surface-aware native find and ls", () => {
   });
 
   it("delegates an unrelated disk directory to native ls", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-disk-"));
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-disk-"));
     await writeFile(path.join(root, "disk.txt"), "disk\n", "utf8");
     const bridge = {
       request: async () => ({ status: "disk" as const }),
@@ -79,7 +79,7 @@ describe("surface-aware native find and ls", () => {
   });
 
   it("keeps native directories and bracketed filenames while merging fixed paths", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-merge-"));
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-merge-"));
     await writeFile(path.join(root, "[disk].ts"), "disk\n", "utf8");
     const bridge = {
       request: async () => ({
@@ -109,7 +109,7 @@ describe("surface-aware native find and ls", () => {
   });
 
   it("retains Pi's byte truncation details after merging a large overlay", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "piarium-find-ls-truncate-"));
+    const root = await mkdtemp(path.join(tmpdir(), "varin-find-ls-truncate-"));
     const entries = [
       { path: ".", kind: "directory" as const },
       ...Array.from({ length: 800 }, (_, index) => ({

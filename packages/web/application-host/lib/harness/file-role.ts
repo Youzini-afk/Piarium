@@ -6,7 +6,7 @@
  * persisted role would need its own invalidation.
  */
 
-import type { ExploreQueryDomain, HarnessFileRole, HarnessFileRoleGround } from "@piarium/protocol";
+import type { ExploreQueryDomain, HarnessFileRole, HarnessFileRoleGround } from "@varin/protocol";
 
 export type ExploreFileRole = HarnessFileRole;
 export type FileRoleGround = HarnessFileRoleGround;

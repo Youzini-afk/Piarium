@@ -57,8 +57,8 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
   return document.execCommand('copy');
 };
 
-const MENU_ACTION_EVENT = 'piarium:menu-action';
-const CHECK_FOR_UPDATES_EVENT = 'piarium:check-for-updates';
+const MENU_ACTION_EVENT = 'varin:menu-action';
+const CHECK_FOR_UPDATES_EVENT = 'varin:check-for-updates';
 
 type DesktopBridgeGlobal = {
   listen?: (
@@ -104,7 +104,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
-  const setPiariumDiagnosticsDialogOpen = useUIStore((s) => s.setPiariumDiagnosticsDialogOpen);
+  const setVarinDiagnosticsDialogOpen = useUIStore((s) => s.setVarinDiagnosticsDialogOpen);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
@@ -274,7 +274,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
         }
 
         case 'copy': {
-          const copyEvent = new Event('piarium:copy', { cancelable: true });
+          const copyEvent = new Event('varin:copy', { cancelable: true });
           const wasHandled = !window.dispatchEvent(copyEvent);
           if (!wasHandled) {
             void copyCurrentSelectionFallback();
@@ -331,7 +331,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           break;
 
         case 'show-diagnostics': {
-          setPiariumDiagnosticsDialogOpen(true);
+          setVarinDiagnosticsDialogOpen(true);
           break;
         }
       }
@@ -342,7 +342,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
       navigateSession,
       setAboutDialogOpen,
       setCommandPaletteOpen,
-      setPiariumDiagnosticsDialogOpen,
+      setVarinDiagnosticsDialogOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,
@@ -353,7 +353,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+    const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
     if (typeof desktop?.listen === 'function') {
       // Electron emits both IPC and an injected DOM event for the same native
       // action. The IPC effect below owns desktop actions so they run once.
@@ -380,14 +380,14 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
+    const desktop = (window as unknown as { __VARIN_DESKTOP__?: DesktopBridgeGlobal }).__VARIN_DESKTOP__;
     const listen = desktop?.listen;
     if (typeof listen !== 'function') return;
 
     let unlistenMenu: null | (() => void | Promise<void>) = null;
     let unlistenUpdate: null | (() => void | Promise<void>) = null;
 
-    listen('piarium:menu-action', (evt) => {
+    listen('varin:menu-action', (evt) => {
       const action = evt?.payload;
       if (typeof action !== 'string') return;
       handleAction(action as MenuAction);
@@ -399,7 +399,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
         // ignore
       });
 
-    listen('piarium:check-for-updates', () => {
+    listen('varin:check-for-updates', () => {
       handleCheckForUpdates();
     })
       .then((fn) => {

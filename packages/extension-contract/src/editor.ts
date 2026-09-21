@@ -1,13 +1,13 @@
 import type { JsonValue } from "./types.js";
 
 /** A zero-based UTF-16 code-unit edit against one captured document version. */
-export interface PiariumEditorDocumentEdit {
+export interface VarinEditorDocumentEdit {
   from: number;
   insert: string;
   to: number;
 }
 
-export interface PiariumEditorDocumentSnapshot {
+export interface VarinEditorDocumentSnapshot {
   baseRevision: string | null;
   content: string;
   dirty: boolean;
@@ -17,57 +17,57 @@ export interface PiariumEditorDocumentSnapshot {
   status: "binary" | "conflict" | "deleted" | "error" | "missing" | "ready" | "unsupported-encoding";
 }
 
-export type PiariumEditorDocumentApplyEditsResult =
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "applied" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "conflict" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "invalid-range" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "overlapping-ranges" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "stale" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "unsupported" };
+export type VarinEditorDocumentApplyEditsResult =
+  | { snapshot: VarinEditorDocumentSnapshot; status: "applied" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "conflict" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "invalid-range" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "overlapping-ranges" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "stale" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "unsupported" };
 
-export type PiariumEditorDocumentUpdateResult =
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "updated" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "conflict" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "stale" }
-  | { snapshot: PiariumEditorDocumentSnapshot; status: "unsupported" };
+export type VarinEditorDocumentUpdateResult =
+  | { snapshot: VarinEditorDocumentSnapshot; status: "updated" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "conflict" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "stale" }
+  | { snapshot: VarinEditorDocumentSnapshot; status: "unsupported" };
 
 /**
  * Stable document authority supplied to a custom editor mount. Implementations are framework-neutral;
  * views must not retain a second dirty/conflict or persistence authority.
  */
-export interface PiariumEditorDocumentController {
+export interface VarinEditorDocumentController {
   applyEdits(
-    edits: readonly PiariumEditorDocumentEdit[],
+    edits: readonly VarinEditorDocumentEdit[],
     expectedDocumentVersion: number,
-  ): Promise<PiariumEditorDocumentApplyEditsResult>;
-  getSnapshot(): PiariumEditorDocumentSnapshot;
-  replaceContent(content: string, expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
-  save(expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
+  ): Promise<VarinEditorDocumentApplyEditsResult>;
+  getSnapshot(): VarinEditorDocumentSnapshot;
+  replaceContent(content: string, expectedDocumentVersion: number): Promise<VarinEditorDocumentUpdateResult>;
+  save(expectedDocumentVersion: number): Promise<VarinEditorDocumentUpdateResult>;
   subscribe(listener: () => void): () => void;
 }
 
-export interface PiariumEditorMonacoPositionV1 {
+export interface VarinEditorMonacoPositionV1 {
   /** One-based editor column. */
   column: number;
   /** One-based editor line. */
   line: number;
 }
 
-export interface PiariumEditorMonacoRangeV1 {
-  end: PiariumEditorMonacoPositionV1;
-  start: PiariumEditorMonacoPositionV1;
+export interface VarinEditorMonacoRangeV1 {
+  end: VarinEditorMonacoPositionV1;
+  start: VarinEditorMonacoPositionV1;
 }
 
 /** A normalized selection range; direction is not part of the v1 serialized subset. */
-export type PiariumEditorMonacoSelectionV1 = PiariumEditorMonacoRangeV1;
+export type VarinEditorMonacoSelectionV1 = VarinEditorMonacoRangeV1;
 
-export interface PiariumEditorMonacoViewRequestV1 {
+export interface VarinEditorMonacoViewRequestV1 {
   expectedDocumentVersion?: number;
   expectedViewGeneration?: number;
   viewId?: string;
 }
 
-export interface PiariumEditorMonacoViewSnapshotV1 {
+export interface VarinEditorMonacoViewSnapshotV1 {
   documentVersion: number;
   focused: boolean;
   generation: number;
@@ -78,117 +78,117 @@ export interface PiariumEditorMonacoViewSnapshotV1 {
     resourceId: string;
     workspaceId: string;
   };
-  selection: PiariumEditorMonacoSelectionV1 | null;
+  selection: VarinEditorMonacoSelectionV1 | null;
   viewId: string;
 }
 
-export interface PiariumEditorMonacoStateSnapshotV1 {
+export interface VarinEditorMonacoStateSnapshotV1 {
   activeViewId: string | null;
   /** Monotonic Surface-local revision for view registration, focus, model, and selection changes. */
   revision: number;
-  views: PiariumEditorMonacoViewSnapshotV1[];
+  views: VarinEditorMonacoViewSnapshotV1[];
 }
 
-export interface PiariumEditorMonacoWaitForStateRequestV1 {
+export interface VarinEditorMonacoWaitForStateRequestV1 {
   afterRevision: number;
 }
 
-export type PiariumEditorMonacoAbsentReasonV1 =
+export type VarinEditorMonacoAbsentReasonV1 =
   | "provider-inactive"
   | "registration-unavailable"
   | "view-unavailable";
 
-export type PiariumEditorMonacoStaleReasonV1 =
+export type VarinEditorMonacoStaleReasonV1 =
   | "document-version-changed"
   | "owner-generation-changed"
   | "view-generation-changed"
   | "view-unavailable";
 
-export type PiariumEditorMonacoUnsupportedReasonV1 =
+export type VarinEditorMonacoUnsupportedReasonV1 =
   | "action-unavailable"
   | "operation-unavailable";
 
-export type PiariumEditorMonacoFailureResultV1 =
-  | { reason: PiariumEditorMonacoAbsentReasonV1; status: "absent" }
-  | { reason: PiariumEditorMonacoStaleReasonV1; status: "stale" }
-  | { reason: PiariumEditorMonacoUnsupportedReasonV1; status: "unsupported" };
+export type VarinEditorMonacoFailureResultV1 =
+  | { reason: VarinEditorMonacoAbsentReasonV1; status: "absent" }
+  | { reason: VarinEditorMonacoStaleReasonV1; status: "stale" }
+  | { reason: VarinEditorMonacoUnsupportedReasonV1; status: "unsupported" };
 
-export type PiariumEditorMonacoViewResultV1 =
-  | { status: "ready"; view: PiariumEditorMonacoViewSnapshotV1 }
-  | PiariumEditorMonacoFailureResultV1;
+export type VarinEditorMonacoViewResultV1 =
+  | { status: "ready"; view: VarinEditorMonacoViewSnapshotV1 }
+  | VarinEditorMonacoFailureResultV1;
 
-export type PiariumEditorMonacoStateResultV1 =
-  | { state: PiariumEditorMonacoStateSnapshotV1; status: "ready" }
-  | PiariumEditorMonacoFailureResultV1;
+export type VarinEditorMonacoStateResultV1 =
+  | { state: VarinEditorMonacoStateSnapshotV1; status: "ready" }
+  | VarinEditorMonacoFailureResultV1;
 
-export type PiariumEditorMonacoOperationResultV1 =
-  | PiariumEditorMonacoFailureResultV1
+export type VarinEditorMonacoOperationResultV1 =
+  | VarinEditorMonacoFailureResultV1
   | {
       registrationId?: string;
       status: "ready";
-      view?: PiariumEditorMonacoViewSnapshotV1;
+      view?: VarinEditorMonacoViewSnapshotV1;
     };
 
 /** Declarative decoration data. It contains no Monaco object, DOM node, or callback. */
-export interface PiariumEditorMonacoDecorationV1 {
+export interface VarinEditorMonacoDecorationV1 {
   className?: string;
   glyphMarginClassName?: string;
   inlineClassName?: string;
   isWholeLine?: boolean;
-  range: PiariumEditorMonacoRangeV1;
+  range: VarinEditorMonacoRangeV1;
 }
 
-export interface PiariumEditorMonacoRevealRequestV1 extends PiariumEditorMonacoViewRequestV1 {
-  range: PiariumEditorMonacoRangeV1;
+export interface VarinEditorMonacoRevealRequestV1 extends VarinEditorMonacoViewRequestV1 {
+  range: VarinEditorMonacoRangeV1;
 }
 
-export interface PiariumEditorMonacoSetSelectionRequestV1 extends PiariumEditorMonacoViewRequestV1 {
-  range: PiariumEditorMonacoRangeV1;
+export interface VarinEditorMonacoSetSelectionRequestV1 extends VarinEditorMonacoViewRequestV1 {
+  range: VarinEditorMonacoRangeV1;
 }
 
-export interface PiariumEditorMonacoExecuteActionRequestV1 extends PiariumEditorMonacoViewRequestV1 {
+export interface VarinEditorMonacoExecuteActionRequestV1 extends VarinEditorMonacoViewRequestV1 {
   actionId: string;
   args?: JsonValue;
 }
 
-export interface PiariumEditorMonacoSetDecorationsRequestV1 extends PiariumEditorMonacoViewRequestV1 {
-  decorations: PiariumEditorMonacoDecorationV1[];
+export interface VarinEditorMonacoSetDecorationsRequestV1 extends VarinEditorMonacoViewRequestV1 {
+  decorations: VarinEditorMonacoDecorationV1[];
   /** Extension-chosen ID scoped to the injected activation owner. */
   sourceId: string;
 }
 
-export interface PiariumEditorMonacoClearDecorationsRequestV1 {
+export interface VarinEditorMonacoClearDecorationsRequestV1 {
   sourceId: string;
 }
 
-export type PiariumEditorMonacoMaybePromise<T> = T | Promise<T>;
+export type VarinEditorMonacoMaybePromise<T> = T | Promise<T>;
 
-/** Serializable, owner-scoped subset of the optional `piarium.editor.monaco` Surface service. */
-export interface PiariumEditorMonacoServiceV1 {
+/** Serializable, owner-scoped subset of the optional `varin.editor.monaco` Surface service. */
+export interface VarinEditorMonacoServiceV1 {
   clearDecorations(
-    request: PiariumEditorMonacoClearDecorationsRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
+    request: VarinEditorMonacoClearDecorationsRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
   executeAction(
-    request: PiariumEditorMonacoExecuteActionRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
+    request: VarinEditorMonacoExecuteActionRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
   focus(
-    request?: PiariumEditorMonacoViewRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
-  getActiveView(): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoViewResultV1>;
-  getState(): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoStateResultV1>;
+    request?: VarinEditorMonacoViewRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
+  getActiveView(): VarinEditorMonacoMaybePromise<VarinEditorMonacoViewResultV1>;
+  getState(): VarinEditorMonacoMaybePromise<VarinEditorMonacoStateResultV1>;
   getView(
-    request?: PiariumEditorMonacoViewRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoViewResultV1>;
+    request?: VarinEditorMonacoViewRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoViewResultV1>;
   reveal(
-    request: PiariumEditorMonacoRevealRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
+    request: VarinEditorMonacoRevealRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
   setDecorations(
-    request: PiariumEditorMonacoSetDecorationsRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
+    request: VarinEditorMonacoSetDecorationsRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
   setSelection(
-    request: PiariumEditorMonacoSetSelectionRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoOperationResultV1>;
+    request: VarinEditorMonacoSetSelectionRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoOperationResultV1>;
   waitForState(
-    request: PiariumEditorMonacoWaitForStateRequestV1,
-  ): PiariumEditorMonacoMaybePromise<PiariumEditorMonacoStateResultV1>;
+    request: VarinEditorMonacoWaitForStateRequestV1,
+  ): VarinEditorMonacoMaybePromise<VarinEditorMonacoStateResultV1>;
 }

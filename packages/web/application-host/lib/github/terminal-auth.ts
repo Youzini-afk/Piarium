@@ -28,11 +28,11 @@ const getPaths = ({ homeDir = os.homedir(), authFilePath }: {
   const home = normalizeHomeDir(homeDir);
   const dataDir = authFilePath
     ? path.dirname(path.resolve(authFilePath))
-    : path.join(home, '.config', 'piarium');
+    : path.join(home, '.config', 'varin');
 
   return {
     ghConfigPath: path.join(home, '.config', 'gh', 'hosts.yml'),
-    helperPath: path.join(dataDir, 'bin', 'git-credential-piarium-github.cjs'),
+    helperPath: path.join(dataDir, 'bin', 'git-credential-varin-github.cjs'),
   };
 };
 
@@ -190,7 +190,7 @@ export function installTerminalGitHubAuth({
 }: TerminalAuthOptions = {}) {
   getActiveToken(auth);
 
-  const resolvedAuthFilePath = authFilePath || path.join(normalizeHomeDir(homeDir), '.config', 'piarium', 'github-auth.json');
+  const resolvedAuthFilePath = authFilePath || path.join(normalizeHomeDir(homeDir), '.config', 'varin', 'github-auth.json');
   const { ghConfigPath, helperPath } = getPaths({ homeDir, authFilePath: resolvedAuthFilePath });
 
   writeGhHosts({ auth, ghConfigPath });

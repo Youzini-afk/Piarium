@@ -28,7 +28,7 @@ import { createBashTool } from "../../src/harness/bash-tool.js";
 import { createGrepTool } from "../../src/harness/grep-tool.js";
 import { createDiagnosticsTool, createGetOutputTool } from "../../src/harness/output-tools.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { DiagnosticItem } from "@piarium/protocol";
+import type { DiagnosticItem } from "@varin/protocol";
 import type { DiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-service.js";
 import { createIsolatedTerminalSessionApi } from "../../../web/application-host/lib/terminal/isolated-session-api.test-helper.js";
 
@@ -156,7 +156,7 @@ describe("harness e2e integration", () => {
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
-      // Node is part of every supported Piarium runtime and keeps this test on
+      // Node is part of every supported Varin runtime and keeps this test on
       // the selected interpreter instead of nesting PowerShell inside Git Bash.
       const sleepCmd = "node -e \"setTimeout(() => console.log('done'), 2000)\"";
       const bgText = await executeTool(bashTool, { command: sleepCmd, waitMs: 500 });
@@ -234,7 +234,7 @@ describe("harness e2e integration", () => {
   });
 
   it("grep disabled in settings → selectHarnessTools omits grep; default includes it", async () => {
-    const { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS } = await import("@piarium/protocol");
+    const { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS } = await import("@varin/protocol");
     const { selectHarnessTools } = await import("../../src/harness/select-tools.js");
 
     // Build a minimal fake bridge + deps for selectHarnessTools

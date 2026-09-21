@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import type { PiariumSettingsDocument } from "@piarium/settings-store";
-import type { PiSettingsSnapshot } from "@piarium/protocol";
+import type { VarinSettingsDocument } from "@varin/settings-store";
+import type { PiSettingsSnapshot } from "@varin/protocol";
 import { createSettingsService, settingsDocumentRevision, type ClientSurfaceBridge, type SettingsActionOperationStore, type SettingsServiceDeps } from "./settings-service.js";
 import type { SettingsActionRegistry } from "./settings-actions.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -24,21 +24,21 @@ interface PiFixture {
 function makePiSnapshot(fixture: PiFixture): PiSettingsSnapshot {
   return {
     global: fixture.global as PiSettingsSnapshot["global"],
-    globalRevision: settingsDocumentRevision(fixture.global as PiariumSettingsDocument),
+    globalRevision: settingsDocumentRevision(fixture.global as VarinSettingsDocument),
     project: fixture.project as PiSettingsSnapshot["project"],
-    projectRevision: settingsDocumentRevision(fixture.project as PiariumSettingsDocument),
+    projectRevision: settingsDocumentRevision(fixture.project as VarinSettingsDocument),
     projectTrusted: fixture.projectTrusted,
   };
 }
 
-function basePersistFactory(getApp: () => PiariumSettingsDocument, setApp: (doc: PiariumSettingsDocument) => void) {
+function basePersistFactory(getApp: () => VarinSettingsDocument, setApp: (doc: VarinSettingsDocument) => void) {
   return async (changes: Record<string, unknown>, removals: readonly string[], expectedRevision: string | undefined) => {
     const appDocument = getApp();
     const revision = settingsDocumentRevision(appDocument);
     if (expectedRevision !== undefined && expectedRevision !== revision) {
       return { conflict: true, revision, document: appDocument };
     }
-    const next: PiariumSettingsDocument = structuredClone(appDocument);
+    const next: VarinSettingsDocument = structuredClone(appDocument);
     for (const [key, value] of Object.entries(changes)) {
       next[key] = value;
     }
@@ -51,7 +51,7 @@ function basePersistFactory(getApp: () => PiariumSettingsDocument, setApp: (doc:
 }
 
 function baseDeps() {
-  let appDocument: PiariumSettingsDocument = {};
+  let appDocument: VarinSettingsDocument = {};
   const pi: PiFixture = { global: {}, project: {}, projectTrusted: true, updates: [] };
   const deps: SettingsServiceDeps = {
     readAppSettings: async () => structuredClone(appDocument),
@@ -71,7 +71,7 @@ function baseDeps() {
 }
 
 function fixture(overrides: {
-  app?: PiariumSettingsDocument;
+  app?: VarinSettingsDocument;
   pi?: Partial<PiFixture>;
   onChanged?: SettingsServiceDeps["onChanged"];
   clientSurfaces?: ClientSurfaceBridge;
@@ -79,7 +79,7 @@ function fixture(overrides: {
   actionOperations?: SettingsActionOperationStore;
 } = {}) {
   const base = baseDeps();
-  let appDocument: PiariumSettingsDocument = overrides.app ?? base.getApp();
+  let appDocument: VarinSettingsDocument = overrides.app ?? base.getApp();
   const pi: PiFixture = {
     global: overrides.pi?.global ?? base.pi.global,
     project: overrides.pi?.project ?? base.pi.project,

@@ -4,7 +4,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>Piarium Extension Recovery</title>
+  <title>Varin Extension Recovery</title>
   <style>
     :root { color-scheme: dark; font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #101010; color: #ededed; }
     * { box-sizing: border-box; }
@@ -39,7 +39,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
   <main>
     <header>
       <div>
-        <h1>Piarium Extension Recovery</h1>
+        <h1>Varin Extension Recovery</h1>
         <p>This host-owned page remains available when the main workbench or an extension cannot start.</p>
       </div>
       <button id="disable-all" class="danger" type="button">Disable all extensions</button>
@@ -83,8 +83,8 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
         const empty = document.createElement('div');
         empty.className = 'empty';
         empty.textContent = snapshot?.storageState === 'missing'
-          ? 'No Piarium extension catalog has been created on this host.'
-          : 'No Piarium extensions are installed on this host.';
+          ? 'No Varin extension catalog has been created on this host.'
+          : 'No Varin extensions are installed on this host.';
         list.append(empty);
       } else {
         for (const extension of snapshot.extensions) {
@@ -120,7 +120,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
             toggle.disabled = true;
             setStatus('Updating ' + extension.manifest.id + '…');
             try {
-              const payload = await request('/api/piarium/extensions/v1/extensions/' + encodeURIComponent(extension.manifest.id) + '/enabled', {
+              const payload = await request('/api/varin/extensions/v1/extensions/' + encodeURIComponent(extension.manifest.id) + '/enabled', {
                 method: 'PATCH',
                 body: JSON.stringify({ enabled: !extension.desired.enabled, expectedRevision: snapshot.revision }),
               });
@@ -148,7 +148,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
     const load = async () => {
       setStatus('Loading extension catalog…');
       try {
-        const payload = await request('/api/piarium/extensions/v1/catalog');
+        const payload = await request('/api/varin/extensions/v1/catalog');
         if (payload.status !== 'ready') throw new Error(payload.error?.message || 'Catalog unavailable');
         snapshot = payload.snapshot;
         setStatus(snapshot.authoritative ? '' : 'Showing the last valid catalog because current storage could not be read.', snapshot.authoritative ? '' : 'warning');
@@ -163,7 +163,7 @@ export const renderExtensionRecoveryPage = () => `<!doctype html>
       disableAll.disabled = true;
       setStatus('Disabling all extensions…');
       try {
-        const payload = await request('/api/piarium/extensions/v1/disable-all', {
+        const payload = await request('/api/varin/extensions/v1/disable-all', {
           method: 'POST',
           body: JSON.stringify({ expectedRevision: snapshot.revision }),
         });

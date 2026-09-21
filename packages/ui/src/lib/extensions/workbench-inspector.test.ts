@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiariumExtensionCatalogEntry, PiariumExtensionStaticContribution } from '@piarium/extension-contract';
+import type { VarinExtensionCatalogEntry, VarinExtensionStaticContribution } from '@varin/extension-contract';
 import {
-  PIARIUM_DEBUG_SERVICE_ID,
-  PIARIUM_LANGUAGE_SERVICE_ID,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_SLOTS,
-} from '@piarium/extension-contract';
+  VARIN_DEBUG_SERVICE_ID,
+  VARIN_LANGUAGE_SERVICE_ID,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+  VARIN_WORKBENCH_SLOTS,
+} from '@varin/extension-contract';
 import {
   describeWorkbenchContributionPlacement,
   describeWorkbenchShellSeams,
@@ -15,26 +15,26 @@ import {
   workbenchInspectorOwnsRun,
 } from './workbench-inspector';
 
-const shellEntry = (overrides?: Partial<PiariumExtensionStaticContribution>): PiariumExtensionCatalogEntry => ({
+const shellEntry = (overrides?: Partial<VarinExtensionStaticContribution>): VarinExtensionCatalogEntry => ({
   manifest: {
     schemaVersion: 1,
     id: 'dev.example.shell',
     version: '1.0.0',
-    engines: { piarium: '*' },
+    engines: { varin: '*' },
     contributions: [{
       contractVersion: 1,
       data: {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: {
-            replacementTargets: [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor],
-            slots: [PIARIUM_WORKBENCH_SLOTS.editorActions],
+            replacementTargets: [VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor],
+            slots: [VARIN_WORKBENCH_SLOTS.editorActions],
           },
         },
       },
       id: 'dev.example.shell.entry',
       kind: 'shell',
-      replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+      replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
       supports: ['web'],
       ...overrides,
     }],
@@ -55,13 +55,13 @@ describe('workbench inspector summaries', () => {
       id: 'dev.example.view',
       kind: 'view',
       contractVersion: 1,
-      placement: { slot: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, order: 10 },
+      placement: { slot: VARIN_WORKBENCH_SLOTS.primarySidebarViews, order: 10 },
     })).toEqual({
       id: 'dev.example.view',
       kind: 'view',
       contractVersion: 1,
       contractCompatibility: 'supported',
-      placement: PIARIUM_WORKBENCH_SLOTS.primarySidebarViews,
+      placement: VARIN_WORKBENCH_SLOTS.primarySidebarViews,
     });
     expect(describeWorkbenchContributionPlacement({
       id: 'dev.example.shell',
@@ -83,8 +83,8 @@ describe('workbench inspector summaries', () => {
   });
 
   test('identifies document and language owners from public service and capability ids', () => {
-    expect(workbenchInspectorOwnsLanguage(PIARIUM_LANGUAGE_SERVICE_ID)).toBe(true);
-    expect(workbenchInspectorOwnsRun(PIARIUM_DEBUG_SERVICE_ID)).toBe(true);
+    expect(workbenchInspectorOwnsLanguage(VARIN_LANGUAGE_SERVICE_ID)).toBe(true);
+    expect(workbenchInspectorOwnsRun(VARIN_DEBUG_SERVICE_ID)).toBe(true);
     expect(workbenchInspectorOwnsDocuments('workspace.documents')).toBe(true);
     expect(workbenchInspectorOwnsDocuments('workspace.search')).toBe(false);
   });
@@ -97,8 +97,8 @@ describe('workbench inspector summaries', () => {
       'web',
     );
     expect(summary).not.toBeNull();
-    expect(summary?.declaredReplacementTargets).toEqual([PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor]);
-    expect(summary?.declaredSlots).toEqual([PIARIUM_WORKBENCH_SLOTS.editorActions]);
+    expect(summary?.declaredReplacementTargets).toEqual([VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor]);
+    expect(summary?.declaredSlots).toEqual([VARIN_WORKBENCH_SLOTS.editorActions]);
     expect(summary?.contractValid).toBe(true);
     expect(summary?.contractIssues).toEqual([]);
   });

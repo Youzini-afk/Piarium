@@ -2,14 +2,14 @@ import {
   SETTINGS_CATALOG,
   isCatalogEntryAvailable,
   type SettingsCatalogContext,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta, getSettingsPageMetadata } from './metadata';
 
 /**
  * Settings search derives its item table from the shared catalog in
- * `@piarium/application-client` (D-306). The same descriptors drive the
+ * `@varin/application-client` (D-306). The same descriptors drive the
  * agent-facing settings directory, so a setting searchable here is the same
  * identity an agent can read/update through `settings_*` tools.
  */

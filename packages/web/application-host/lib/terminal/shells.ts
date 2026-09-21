@@ -56,7 +56,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
 
   const defaultCandidates = (): Array<string | undefined> => platform === 'win32'
     ? [
-        env.PIARIUM_TERMINAL_SHELL,
+        env.VARIN_TERMINAL_SHELL,
         env.SHELL,
         env.ComSpec,
         path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
@@ -64,7 +64,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
         'powershell.exe',
         'cmd.exe',
       ]
-    : [env.PIARIUM_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
+    : [env.VARIN_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
 
   const resolveCandidates = (candidates: unknown[]): string[] => {
     const seen = new Set<string>();
@@ -93,7 +93,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
 
     const candidates = platform === 'win32'
       ? [...defaultCandidates(), ...TERMINAL_SHELL_IDS]
-      : [env.PIARIUM_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
+      : [env.VARIN_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
     const autoExecutable = resolveCandidates(defaultCandidates())[0] ?? null;
     const byId = new Map<TerminalShellPreference, TerminalShellDescriptor>([
       ['auto', {

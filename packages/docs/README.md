@@ -1,8 +1,8 @@
 English | [简体中文](README.zh-CN.md)
 
-# Piarium Docs Source
+# Varin Docs Source
 
-This package is the source of truth for Piarium public docs content.
+This package is the source of truth for Varin public docs content.
 **English is the default language and source locale.**
 
 ## Layout

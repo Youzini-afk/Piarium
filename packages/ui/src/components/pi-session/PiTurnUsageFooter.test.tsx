@@ -5,7 +5,7 @@ import type {
   PiAssistantMessage,
   PiSessionMessageEntry,
   PiUsage,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { I18nProvider } from '@/lib/i18n';
 import { PiTurnUsageFooter } from './PiTurnUsageFooter';
 

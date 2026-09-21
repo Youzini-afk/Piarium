@@ -3,11 +3,11 @@ import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 // Keep KaTeX and its fonts in the same lazy boundary as the full Markdown
 // renderer. Importing the stylesheet from TypeScript lets Vite resolve its
-// font assets without making them part of every Piarium entry point.
+// font assets without making them part of every Varin entry point.
 import 'katex/dist/katex.min.css';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -92,7 +92,7 @@ const useExternalLinkInteractions = ({
         return;
       }
 
-      if (anchor.getAttribute('data-piarium-file-link') === 'true') {
+      if (anchor.getAttribute('data-varin-file-link') === 'true') {
         return;
       }
 
@@ -149,10 +149,10 @@ interface MarkdownRendererProps {
   onContentChange?: (reason?: ContentChangeReason) => void;
 }
 
-const FILE_LINK_SELECTOR = '[data-piarium-file-link="true"]';
-const BLOCK_PATH_TOKEN_ATTR = 'data-piarium-block-path-token';
+const FILE_LINK_SELECTOR = '[data-varin-file-link="true"]';
+const BLOCK_PATH_TOKEN_ATTR = 'data-varin-block-path-token';
 const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
-const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-piarium-block-paths-scanned';
+const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-varin-block-paths-scanned';
 // Matches `path[:line[:col]]` or `path:start-end` inside shell/grep-style
 // output. The regex is defined in `./fileReferenceParser`; the inline-code
 // pipeline reads full text content rather than using this regex.
@@ -252,12 +252,12 @@ const extractPathCandidateFromElement = (element: HTMLElement): string => {
 
 // Walks text nodes inside `<pre><code>` subtrees and wraps any substring that
 // looks like a `path[:line[:col]]` reference in a span carrying
-// `data-piarium-block-path-token`. `annotateFileLinks` then promotes those
+// `data-varin-block-path-token`. `annotateFileLinks` then promotes those
 // spans into clickable file links via the same existing pipeline used for
 // inline code (parseFileReference → fileReferenceExists → openFileReference).
 //
 // Idempotent: each `<code>` node is marked with
-// `data-piarium-block-paths-scanned` once processed so the walk is not
+// `data-varin-block-paths-scanned` once processed so the walk is not
 // repeated on the same element. When the renderer replaces the `<code>` subtree
 // (e.g. on content change during streaming), the new element lacks the marker and
 // will be rescanned on the next mutation-observer callback.
@@ -437,9 +437,9 @@ const useFileReferenceInteractions = ({
     const fileReferencesEnabled = enabled && !isMobileSurfaceRuntime();
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
-      candidate.removeAttribute('data-piarium-file-link');
-      candidate.removeAttribute('data-piarium-file-ref');
-      candidate.removeAttribute('data-piarium-file-path');
+      candidate.removeAttribute('data-varin-file-link');
+      candidate.removeAttribute('data-varin-file-ref');
+      candidate.removeAttribute('data-varin-file-path');
       if (candidate.getAttribute('title') === 'Open file') {
         candidate.removeAttribute('title');
       }
@@ -522,9 +522,9 @@ const useFileReferenceInteractions = ({
             return;
           }
 
-          candidate.setAttribute('data-piarium-file-link', 'true');
-          candidate.setAttribute('data-piarium-file-ref', latestRawCandidate);
-          candidate.setAttribute('data-piarium-file-path', latestResolved.resolvedPath);
+          candidate.setAttribute('data-varin-file-link', 'true');
+          candidate.setAttribute('data-varin-file-ref', latestRawCandidate);
+          candidate.setAttribute('data-varin-file-path', latestResolved.resolvedPath);
           candidate.setAttribute('title', 'Open file');
           if (candidate.tagName.toLowerCase() !== 'a') {
             candidate.setAttribute('role', 'button');
@@ -535,7 +535,7 @@ const useFileReferenceInteractions = ({
     };
 
     const openFileReference = async (sourceElement: HTMLElement) => {
-      const raw = sourceElement.getAttribute('data-piarium-file-ref') || extractPathCandidateFromElement(sourceElement);
+      const raw = sourceElement.getAttribute('data-varin-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
         return;
@@ -584,7 +584,7 @@ const useFileReferenceInteractions = ({
       }
 
       const target = event.target;
-      if (!(target instanceof HTMLElement) || target.getAttribute('data-piarium-file-link') !== 'true') {
+      if (!(target instanceof HTMLElement) || target.getAttribute('data-varin-file-link') !== 'true') {
         return;
       }
 

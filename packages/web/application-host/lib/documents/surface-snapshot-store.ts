@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentInputContext } from '@piarium/protocol';
+import type { AgentInputContext } from '@varin/protocol';
 
 export interface SurfaceSnapshotResource {
   baseRevision: string | null;

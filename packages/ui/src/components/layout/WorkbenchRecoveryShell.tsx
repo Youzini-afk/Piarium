@@ -1,22 +1,22 @@
 import React from 'react';
-import type { PiariumWorkbenchResolvedProfile } from '@piarium/extension-contract';
+import type { VarinWorkbenchResolvedProfile } from '@varin/extension-contract';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
-  usePiariumExtensionCatalog,
+  useVarinExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const WorkbenchRecoveryShell: React.FC<{
-  resolved: PiariumWorkbenchResolvedProfile;
+  resolved: VarinWorkbenchResolvedProfile;
   workspaceId?: string;
 }> = ({ resolved, workspaceId }) => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [busy, setBusy] = React.useState(false);

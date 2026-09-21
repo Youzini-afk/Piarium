@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DocumentRegistry } from '@piarium/ui/lib/documents/registry';
-import type { DocumentsAPI } from '@piarium/application-client';
+import { DocumentRegistry } from '@varin/ui/lib/documents/registry';
+import type { DocumentsAPI } from '@varin/application-client';
 import { createDocumentAuthority, type DocumentAuthority } from '../application-host/lib/documents/authority.js';
 import { createNativeAuthorityTestRuntime } from '../application-host/lib/kernel/native-authority.test-helper.js';
 import { IntegrationCoordinator } from '../application-host/lib/harness/working-state/integration-coordinator.js';
@@ -59,7 +59,7 @@ afterEach(async () => {
 
 describe('surface Integration vertical path', () => {
   it('applies and undoes disk and editor targets together after the editor becomes clean', async () => {
-    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-surface-vertical-'));
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-surface-vertical-'));
     roots.push(root);
     const workspace = path.join(root, 'workspace');
     const dataDir = path.join(root, 'data');

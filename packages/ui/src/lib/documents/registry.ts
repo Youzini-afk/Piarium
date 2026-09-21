@@ -1,18 +1,18 @@
 import type {
   DocumentsAPI,
-  PiariumDirtyStateBarrierEvent,
-  PiariumDocumentSurfaceOperationEvent,
-  PiariumDocumentSurfaceOperationPayload,
-  PiariumDocumentSurfaceOperationResourceResult,
-  PiariumDocumentReadResult,
-  PiariumResourceReference,
-  PiariumWorkspaceFileEvent,
+  VarinDirtyStateBarrierEvent,
+  VarinDocumentSurfaceOperationEvent,
+  VarinDocumentSurfaceOperationPayload,
+  VarinDocumentSurfaceOperationResourceResult,
+  VarinDocumentReadResult,
+  VarinResourceReference,
+  VarinWorkspaceFileEvent,
   Subscription,
-} from '@piarium/application-client';
-import { DocumentsError } from '@piarium/application-client';
-import { parseAgentInputContext, type AgentInputContext } from '@piarium/protocol';
+} from '@varin/application-client';
+import { DocumentsError } from '@varin/application-client';
+import { parseAgentInputContext, type AgentInputContext } from '@varin/protocol';
 import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
-import { getRuntimeEndpointGeneration } from '@piarium/application-client';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
 import { requireWorkspaceEpoch } from './mutation-token';
 import { getDocumentRecoverySessionId } from './recovery-session';
@@ -186,7 +186,7 @@ const emptyRecord = (
   externalSource: null,
 });
 
-const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): DocumentRecord => {
+const applyRead = (record: DocumentRecord, result: VarinDocumentReadResult): DocumentRecord => {
   if (result.status === 'missing') {
     if (record.baseRevision !== null) {
       const ancestorContent = record.conflict?.ancestorContent ?? record.baseContent;
@@ -1131,7 +1131,7 @@ export class DocumentRegistry {
     });
   }
 
-  private async handleDirtyStateBarrier(event: PiariumDirtyStateBarrierEvent): Promise<void> {
+  private async handleDirtyStateBarrier(event: VarinDirtyStateBarrierEvent): Promise<void> {
     const existing = this.dirtyBarriers.get(event.barrierId);
     if (event.action === 'release') {
       if (existing) {
@@ -1177,7 +1177,7 @@ export class DocumentRegistry {
     }
   }
 
-  handleWatchEvent(event: PiariumWorkspaceFileEvent, resetWorkspaceId?: string): void {
+  handleWatchEvent(event: VarinWorkspaceFileEvent, resetWorkspaceId?: string): void {
     if (event.kind === 'reset') {
       const records = [...this.records.values()].filter((record) => (
         !resetWorkspaceId || record.identity.workspaceId === resetWorkspaceId
@@ -1468,10 +1468,10 @@ export class DocumentRegistry {
     this.watches.set(workspaceId, subscription);
   }
 
-  private async handleSurfaceOperation(event: PiariumDocumentSurfaceOperationEvent): Promise<void> {
+  private async handleSurfaceOperation(event: VarinDocumentSurfaceOperationEvent): Promise<void> {
     if (!this.documents.readSurfaceOperation || !this.documents.completeSurfaceOperation) return;
     const owner = this.surfaceOwner();
-    let payload: PiariumDocumentSurfaceOperationPayload;
+    let payload: VarinDocumentSurfaceOperationPayload;
     try {
       payload = await this.documents.readSurfaceOperation({
         ...owner,
@@ -1482,12 +1482,12 @@ export class DocumentRegistry {
       this.reportJournalFailure(error);
       return;
     }
-    const failed = (message: string): PiariumDocumentSurfaceOperationResourceResult[] => payload.targets.map((target) => ({
+    const failed = (message: string): VarinDocumentSurfaceOperationResourceResult[] => payload.targets.map((target) => ({
       resource: target.resource,
       status: 'failed',
       message,
     }));
-    let resources: PiariumDocumentSurfaceOperationResourceResult[];
+    let resources: VarinDocumentSurfaceOperationResourceResult[];
     try {
       resources = await this.executeSurfaceOperation(payload);
     } catch (error) {
@@ -1507,13 +1507,13 @@ export class DocumentRegistry {
   }
 
   private async executeSurfaceOperation(
-    payload: PiariumDocumentSurfaceOperationPayload,
-  ): Promise<PiariumDocumentSurfaceOperationResourceResult[]> {
+    payload: VarinDocumentSurfaceOperationPayload,
+  ): Promise<VarinDocumentSurfaceOperationResourceResult[]> {
     const existingUndoGroup = payload.action === 'apply'
       ? this.workspaceEditUndoGroups.get(payload.operationId)
       : undefined;
     const existingByPath = new Map(existingUndoGroup?.documents.map((document) => [document.identity.resourceId, document]) ?? []);
-    const records: Array<{ target: PiariumDocumentSurfaceOperationPayload['targets'][number]; record: DocumentRecord; hash: string }> = [];
+    const records: Array<{ target: VarinDocumentSurfaceOperationPayload['targets'][number]; record: DocumentRecord; hash: string }> = [];
     for (const target of payload.targets) {
       const record = this.records.get(documentKey(target.resource));
       const hash = record ? await bufferHash(record.buffer) : '';
@@ -1633,9 +1633,9 @@ export class DocumentRegistry {
   }
 
   private async surfaceOperationFailures(
-    payload: PiariumDocumentSurfaceOperationPayload,
+    payload: VarinDocumentSurfaceOperationPayload,
     message: string,
-  ): Promise<PiariumDocumentSurfaceOperationResourceResult[]> {
+  ): Promise<VarinDocumentSurfaceOperationResourceResult[]> {
     return Promise.all(payload.targets.map(async (target) => {
       const record = this.records.get(documentKey(target.resource));
       return {
@@ -1841,4 +1841,4 @@ export class DocumentRegistry {
   }
 }
 
-export const asResource = (identity: DocumentIdentity): PiariumResourceReference => identity;
+export const asResource = (identity: DocumentIdentity): VarinResourceReference => identity;

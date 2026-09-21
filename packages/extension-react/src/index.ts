@@ -1,59 +1,59 @@
 import { createElement, createContext, useContext, type ComponentType, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
-  PiariumManagedSurfaceContext,
-  PiariumShellMountContext,
-  PiariumShellMountImplementation,
-  PiariumSurfaceMountImplementation,
-  PiariumWorkbenchCompositionHost,
-  PiariumTransitionSceneMountProps,
-  PiariumTransitionSceneFrameV1,
-} from "@piarium/extension-sdk";
+  VarinManagedSurfaceContext,
+  VarinShellMountContext,
+  VarinShellMountImplementation,
+  VarinSurfaceMountImplementation,
+  VarinWorkbenchCompositionHost,
+  VarinTransitionSceneMountProps,
+  VarinTransitionSceneFrameV1,
+} from "@varin/extension-sdk";
 
-export interface PiariumReactContribution<TProps extends object = Record<string, unknown>>
-  extends PiariumSurfaceMountImplementation<TProps> {
+export interface VarinReactContribution<TProps extends object = Record<string, unknown>>
+  extends VarinSurfaceMountImplementation<TProps> {
   Component: ComponentType<TProps>;
   framework: "react-19";
   props?: Partial<TProps>;
 }
 
-export interface PiariumReactReplacementProps {
+export interface VarinReactReplacementProps {
   target: string;
 }
 
-export type PiariumReactReplacementContribution = PiariumReactContribution<PiariumReactReplacementProps>;
-export type PiariumReactTransitionSceneContribution = PiariumReactContribution<PiariumTransitionSceneMountProps>;
+export type VarinReactReplacementContribution = VarinReactContribution<VarinReactReplacementProps>;
+export type VarinReactTransitionSceneContribution = VarinReactContribution<VarinTransitionSceneMountProps>;
 
-export interface PiariumReactShellProps {
-  workbench: PiariumWorkbenchCompositionHost;
+export interface VarinReactShellProps {
+  workbench: VarinWorkbenchCompositionHost;
 }
 
-export interface PiariumReactShellContribution extends PiariumShellMountImplementation<PiariumReactShellProps> {
-  Component: ComponentType<PiariumReactShellProps>;
+export interface VarinReactShellContribution extends VarinShellMountImplementation<VarinReactShellProps> {
+  Component: ComponentType<VarinReactShellProps>;
   framework: "react-19";
 }
 
-const WorkbenchCompositionHostContext = createContext<PiariumWorkbenchCompositionHost | null>(null);
+const WorkbenchCompositionHostContext = createContext<VarinWorkbenchCompositionHost | null>(null);
 
 /**
  * Access the composition host supplied to a managed Shell mount.
  * Returns `null` when the component is rendered outside a Shell mount
  * (e.g. in tests or isolated previews).
  */
-export const useWorkbenchCompositionHost = (): PiariumWorkbenchCompositionHost | null => (
+export const useWorkbenchCompositionHost = (): VarinWorkbenchCompositionHost | null => (
   useContext(WorkbenchCompositionHostContext)
 );
 
 export const WorkbenchCompositionHostProvider = WorkbenchCompositionHostContext.Provider;
 
 export const defineReactReplacement = (
-  Component: ComponentType<PiariumReactReplacementProps>,
-): PiariumReactReplacementContribution => defineReactContribution(Component);
+  Component: ComponentType<VarinReactReplacementProps>,
+): VarinReactReplacementContribution => defineReactContribution(Component);
 
 export const defineReactContribution = <TProps extends object>(
   Component: ComponentType<TProps>,
   props?: Partial<TProps>,
-): PiariumReactContribution<TProps> => ({
+): VarinReactContribution<TProps> => ({
   Component,
   framework: "react-19",
   ...(props ? { props } : {}),
@@ -76,11 +76,11 @@ export const defineReactContribution = <TProps extends object>(
 });
 
 export const defineReactShell = (
-  Component: ComponentType<PiariumReactShellProps>,
-): PiariumReactShellContribution => ({
+  Component: ComponentType<VarinReactShellProps>,
+): VarinReactShellContribution => ({
   Component,
   framework: "react-19",
-  mount: (container, context: PiariumShellMountContext<PiariumReactShellProps>) => {
+  mount: (container, context: VarinShellMountContext<VarinReactShellProps>) => {
     const workbench = context.workbench;
     const root = createRoot(container, {
       onUncaughtError: (error) => context.reportError(error),
@@ -105,18 +105,18 @@ export const defineReactShell = (
 export const defineReactView = defineReactContribution;
 export const defineReactEditor = defineReactContribution;
 export const defineReactTransitionScene = (
-  Component: ComponentType<PiariumTransitionSceneMountProps>,
-): PiariumReactTransitionSceneContribution => defineReactContribution(Component);
+  Component: ComponentType<VarinTransitionSceneMountProps>,
+): VarinReactTransitionSceneContribution => defineReactContribution(Component);
 
-export const usePiariumTransitionScene = (
-  transition: PiariumTransitionSceneMountProps["transition"],
-): PiariumTransitionSceneFrameV1 => useSyncExternalStore(
+export const useVarinTransitionScene = (
+  transition: VarinTransitionSceneMountProps["transition"],
+): VarinTransitionSceneFrameV1 => useSyncExternalStore(
   transition.subscribe,
   transition.getSnapshot,
   transition.getSnapshot,
 );
 
-export const ownReactRoot = (context: PiariumManagedSurfaceContext, root: Root): Root => {
+export const ownReactRoot = (context: VarinManagedSurfaceContext, root: Root): Root => {
   context.onDispose(() => root.unmount());
   return root;
 };

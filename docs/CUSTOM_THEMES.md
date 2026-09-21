@@ -1,18 +1,18 @@
 # Custom Themes
 
-Piarium supports user-defined themes. Drop a JSON file into the Piarium data directory's `themes`
+Varin supports user-defined themes. Drop a JSON file into the Varin data directory's `themes`
 folder and reload it without restarting the application.
 
 ## Quick start
 
 1. Create the themes directory:
    ```bash
-   mkdir -p ~/.config/piarium/themes
+   mkdir -p ~/.config/varin/themes
    ```
 
 2. Create a theme JSON file (e.g., `my-theme.json`) with the format below.
 
-3. In Piarium: **Settings → Appearance → Reload themes**.
+3. In Varin: **Settings → Appearance → Reload themes**.
 
 4. Select your theme from the dropdown.
 
@@ -43,12 +43,12 @@ Custom palettes retain their explicit surface, component and font overrides.
 
 | Platform | Default path |
 |----------|--------------|
-| Windows | `%APPDATA%\Piarium\themes\` |
-| macOS | `~/Library/Application Support/Piarium/themes/` |
-| Linux | `${XDG_CONFIG_HOME:-~/.config}/piarium/themes/` |
+| Windows | `%APPDATA%\Varin\themes\` |
+| macOS | `~/Library/Application Support/Varin/themes/` |
+| Linux | `${XDG_CONFIG_HOME:-~/.config}/varin/themes/` |
 
-When `PIARIUM_DATA_DIR` is set, the authoritative location on every platform is
-`$PIARIUM_DATA_DIR/themes`. The server process that owns the current application host reads this
+When `VARIN_DATA_DIR` is set, the authoritative location on every platform is
+`$VARIN_DATA_DIR/themes`. The server process that owns the current application host reads this
 directory; a remote browser or mobile client does not read themes from its own device.
 
 ## Theme format
@@ -58,7 +58,7 @@ directory; a remote browser or mobile client does not read themes from its own d
   "metadata": {
     "id": "my-custom-theme",
     "name": "My Custom Theme",
-    "description": "A custom theme for Piarium",
+    "description": "A custom theme for Varin",
     "version": "1.0.0",
     "variant": "dark",
     "tags": ["dark", "custom"]

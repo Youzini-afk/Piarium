@@ -6,7 +6,7 @@ import {
   defineTool,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { HostEventData } from "@piarium/protocol";
+import type { HostEventData } from "@varin/protocol";
 import type { HostServicesBridge } from "./harness/host-services-bridge.js";
 import { withToolExecutionResources } from "./harness/tool-execution-resources.js";
 
@@ -90,7 +90,7 @@ interface JournaledExecutionOptions<TResult> {
 }
 
 export function formatSurfaceWriteResult(
-  result: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>,
+  result: Exclude<import("@varin/protocol").DocumentSurfaceWriteResult, { status: "disk" }>,
   fallbackPath: string,
   action: "write" | "edit" | "delete" | "apply_patch",
 ): string {
@@ -159,8 +159,8 @@ export async function trySurfaceWrite(
   label?: "write" | "edit" | "delete" | "apply_patch",
 ): Promise<"disk" | {
   text: string;
-  status: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["status"];
-  results: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["results"];
+  status: Exclude<import("@varin/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["status"];
+  results: Exclude<import("@varin/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["results"];
 }> {
   const result = await bridge.request(
     "document.surfaceWrite",

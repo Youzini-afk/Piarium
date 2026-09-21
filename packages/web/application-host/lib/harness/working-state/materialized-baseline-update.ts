@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ThreadBaselineUpdate, ThreadWorktree } from "@piarium/protocol";
+import type { ThreadBaselineUpdate, ThreadWorktree } from "@varin/protocol";
 import { sameState } from "../../recovery/journal-files.js";
 import {
   applyDurableFileOperation,

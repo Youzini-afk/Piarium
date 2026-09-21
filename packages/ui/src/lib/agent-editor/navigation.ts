@@ -1,7 +1,7 @@
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench } from '@/lib/workbench/editors/session';
 import { createLegacyTextEditorViewState } from '@/lib/workbench/editors/view-state-core';

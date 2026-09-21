@@ -1,36 +1,36 @@
 import {
-  PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
-  type PiariumExtensionActualState,
-  type PiariumExtensionCatalogEntry,
-  type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionCandidateCapabilityReviewRequest,
-  type PiariumExtensionCapabilityGrant,
-  type PiariumExtensionCapabilityReviewRequest,
-  type PiariumExtensionInstallationRecord,
-  type PiariumExtensionPreparedArtifact,
-} from "@piarium/extension-contract";
-import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
+  VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
+  type VarinExtensionActualState,
+  type VarinExtensionCatalogEntry,
+  type VarinExtensionCatalogSnapshot,
+  type VarinExtensionCandidateCapabilityReviewRequest,
+  type VarinExtensionCapabilityGrant,
+  type VarinExtensionCapabilityReviewRequest,
+  type VarinExtensionInstallationRecord,
+  type VarinExtensionPreparedArtifact,
+} from "@varin/extension-contract";
+import type { VarinBuiltinExtensionDefinition } from "@varin/extension-builtins";
 import { ExtensionCatalogStaleStateError } from "./errors.js";
 import { ExtensionCatalogStore, type CatalogReadState } from "./catalog-store.js";
 
-function actualKey(extensionId: string, state: PiariumExtensionActualState): string {
+function actualKey(extensionId: string, state: VarinExtensionActualState): string {
   return `${extensionId}\0${state.realmKind}\0${state.realmId}\0${state.entrypointId}`;
 }
 
 export class ApplicationExtensionCatalog {
   readonly store: ExtensionCatalogStore;
-  readonly #actual = new Map<string, { extensionId: string; state: PiariumExtensionActualState }>();
+  readonly #actual = new Map<string, { extensionId: string; state: VarinExtensionActualState }>();
 
   constructor(options: { dataDir: string; store?: ExtensionCatalogStore }) {
     this.store = options.store ?? new ExtensionCatalogStore(options.dataDir);
   }
 
-  async snapshot(): Promise<PiariumExtensionCatalogSnapshot> {
+  async snapshot(): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([this.store.getHostIdentity(), this.store.read()]);
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async upsert(record: PiariumExtensionInstallationRecord, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async upsert(record: VarinExtensionInstallationRecord, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.upsert(record, expectedRevision),
@@ -38,7 +38,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async remove(extensionId: string, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async remove(extensionId: string, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.remove(extensionId, expectedRevision),
@@ -47,7 +47,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setEnabled(extensionId, enabled, expectedRevision),
@@ -55,7 +55,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async setAllEnabled(enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async setAllEnabled(enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setAllEnabled(enabled, expectedRevision),
@@ -63,7 +63,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async setEnabledSet(extensionIds: readonly string[], expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async setEnabledSet(extensionIds: readonly string[], expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setEnabledSet(extensionIds, expectedRevision),
@@ -72,9 +72,9 @@ export class ApplicationExtensionCatalog {
   }
 
   async reconcileBuiltins(
-    definitions: readonly PiariumBuiltinExtensionDefinition[],
+    definitions: readonly VarinBuiltinExtensionDefinition[],
     ownedPrefix: string,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.reconcileBuiltins(definitions, ownedPrefix),
@@ -84,9 +84,9 @@ export class ApplicationExtensionCatalog {
 
   async setCapabilityGrant(
     extensionId: string,
-    grant: PiariumExtensionCapabilityGrant,
+    grant: VarinExtensionCapabilityGrant,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setCapabilityGrant(extensionId, grant, expectedRevision),
@@ -95,8 +95,8 @@ export class ApplicationExtensionCatalog {
   }
 
   async reviewCapabilities(
-    request: PiariumExtensionCapabilityReviewRequest,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+    request: VarinExtensionCapabilityReviewRequest,
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.reviewCapabilities(request.extensionId, request.decisions, request.expectedRevision),
@@ -104,7 +104,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async stageCandidate(candidate: PiariumExtensionPreparedArtifact, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async stageCandidate(candidate: VarinExtensionPreparedArtifact, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.stageCandidate(candidate, expectedRevision),
@@ -112,7 +112,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async selectBuiltinArtifact(candidate: PiariumExtensionPreparedArtifact): Promise<PiariumExtensionCatalogSnapshot> {
+  async selectBuiltinArtifact(candidate: VarinExtensionPreparedArtifact): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.selectBuiltinArtifact(candidate),
@@ -121,8 +121,8 @@ export class ApplicationExtensionCatalog {
   }
 
   async reviewCandidateCapabilities(
-    request: PiariumExtensionCandidateCapabilityReviewRequest,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+    request: VarinExtensionCandidateCapabilityReviewRequest,
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.reviewCandidateCapabilities(
@@ -139,7 +139,7 @@ export class ApplicationExtensionCatalog {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision),
@@ -151,7 +151,7 @@ export class ApplicationExtensionCatalog {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.requestCandidateApplication(extensionId, candidateIntegrity, expectedRevision),
@@ -163,7 +163,7 @@ export class ApplicationExtensionCatalog {
     extensionId: string,
     candidateIntegrity: string,
     expectedRevision: number,
-  ): Promise<PiariumExtensionCatalogSnapshot> {
+  ): Promise<VarinExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.discardCandidate(extensionId, candidateIntegrity, expectedRevision),
@@ -171,7 +171,7 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void> {
+  async reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void> {
     const snapshot = await this.snapshot();
     if (state.hostId !== snapshot.hostId) throw new ExtensionCatalogStaleStateError("Actual state belongs to another application host");
     const entry = snapshot.extensions.find((item) => item.manifest.id === extensionId);
@@ -187,10 +187,10 @@ export class ApplicationExtensionCatalog {
     this.#actual.set(key, { extensionId, state: structuredClone(state) });
   }
 
-  #publicSnapshot(hostId: string, read: CatalogReadState): PiariumExtensionCatalogSnapshot {
+  #publicSnapshot(hostId: string, read: CatalogReadState): VarinExtensionCatalogSnapshot {
     const extensions = Object.values(read.document.extensions)
       .sort((left, right) => left.manifest.id.localeCompare(right.manifest.id))
-      .map<PiariumExtensionCatalogEntry>((record) => {
+      .map<VarinExtensionCatalogEntry>((record) => {
         const actual = [...this.#actual.values()]
           .filter((value) => (
             value.extensionId === record.manifest.id
@@ -235,7 +235,7 @@ export class ApplicationExtensionCatalog {
       hostId,
       loadedAt: new Date().toISOString(),
       revision: read.document.revision,
-      schemaVersion: PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
+      schemaVersion: VARIN_EXTENSION_CATALOG_SCHEMA_VERSION,
       storageState: read.storageState,
     };
   }

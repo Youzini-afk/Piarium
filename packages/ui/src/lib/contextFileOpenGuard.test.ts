@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@piarium/application-client';
+import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
 import { validateContextFileOpen } from './contextFileOpenGuard';
 
-const resource = (resourceId: string): PiariumResourceReference => ({
+const resource = (resourceId: string): VarinResourceReference => ({
   workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   resourceId,
 });
@@ -23,7 +23,7 @@ const documentsApi = (content: string | null): DocumentsAPI => ({
       encoding: 'utf-8',
       bom: false,
       byteLength: content.length,
-    } satisfies PiariumDocumentReadResult;
+    } satisfies VarinDocumentReadResult;
   },
   write: async () => ({ status: 'written', revision: 'd1_1', byteLength: 0 }),
   move: async () => ({ status: 'missing', resource: resource('x') }),

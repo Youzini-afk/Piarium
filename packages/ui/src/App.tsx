@@ -32,15 +32,15 @@ import {
   resolveDesktopWorkspaceView,
 } from '@/lib/desktopWorkspaceView';
 import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
-import type { PiRuntimeSnapshot } from '@piarium/protocol';
+import type { PiRuntimeSnapshot } from '@varin/protocol';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { AboutDialog } from '@/components/ui/AboutDialog';
-import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
+import { VarinDiagnosticsDialog } from '@/components/ui/VarinDiagnosticsDialog';
 import { WorkspaceEditReviewDialog } from '@/components/workbench/WorkspaceEditReviewDialog';
 import { AgentEditorCoordinator } from '@/components/workbench/AgentEditorCoordinator';
 import { RunDebugCoordinator } from '@/components/workbench/RunDebugCoordinator';
@@ -49,7 +49,7 @@ import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
@@ -58,7 +58,7 @@ import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime
 import { PiAppEffects } from '@/apps/PiAppEffects';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
@@ -81,12 +81,12 @@ const OnboardingScreen = lazyWithChunkRecovery(() =>
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
-  const setPiariumDiagnosticsDialogOpen = useUIStore((s) => s.setPiariumDiagnosticsDialogOpen);
+  const setVarinDiagnosticsDialogOpen = useUIStore((s) => s.setVarinDiagnosticsDialogOpen);
   return (
     <AboutDialog
       open={isAboutDialogOpen}
       onOpenChange={setAboutDialogOpen}
-      onOpenDiagnostics={() => setPiariumDiagnosticsDialogOpen(true)}
+      onOpenDiagnostics={() => setVarinDiagnosticsDialogOpen(true)}
     />
   );
 };
@@ -200,7 +200,7 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     markStartupTrace('App:mounted');
     if (startupTraceEnabled()) {
-      console.info('[startup-trace] enabled. Run console.table(window.__PIARIUM_STARTUP_TRACE__) after startup.');
+      console.info('[startup-trace] enabled. Run console.table(window.__VARIN_STARTUP_TRACE__) after startup.');
     }
   }, []);
 
@@ -247,10 +247,10 @@ function App({ apis }: AppProps) {
   }, []);
 
   // Agent-originated settings writes (D-306): the Host broadcasts
-  // piarium:settings-changed after the owning authority persists; refresh the
+  // varin:settings-changed after the owning authority persists; refresh the
   // shared document so UI state never sits on a stale copy.
   React.useEffect(() => {
-    return subscribePiariumEvents((event) => {
+    return subscribeVarinEvents((event) => {
       if (event.type !== 'settings-changed' || event.owner !== 'app') return;
       invalidateSettingsCache();
       void syncDesktopSettings();
@@ -261,7 +261,7 @@ function App({ apis }: AppProps) {
     const state = usePiSessionStore.getState();
     if (state.catalogLoaded || state.catalogLoading) return;
     void state.loadCatalog().catch((catalogError) => {
-      console.warn('[Piarium] failed to load the Pi session catalog:', catalogError);
+      console.warn('[Varin] failed to load the Pi session catalog:', catalogError);
     });
   }, [runtimeEndpointEpoch]);
 
@@ -315,7 +315,7 @@ function App({ apis }: AppProps) {
       return;
     }
     void state.loadCatalog().catch((catalogError) => {
-      console.warn('[Piarium] failed to load the Pi session catalog after the runtime became ready:', catalogError);
+      console.warn('[Varin] failed to load the Pi session catalog after the runtime became ready:', catalogError);
     });
   }, [isDesktopRuntime, runtimeSnapshot?.status, runtimeEndpointEpoch]);
 
@@ -428,7 +428,7 @@ function App({ apis }: AppProps) {
       }
 
       const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== 'piarium:embedded-visibility') {
+      if (data?.type !== 'varin:embedded-visibility') {
         return;
       }
 
@@ -436,16 +436,16 @@ function App({ apis }: AppProps) {
     };
 
     const scopedWindow = window as unknown as {
-      __piariumSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
+      __varinSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
     };
 
-    scopedWindow.__piariumSetEmbeddedVisibility = applyVisibility;
+    scopedWindow.__varinSetEmbeddedVisibility = applyVisibility;
     window.addEventListener('message', handleMessage);
 
     return () => {
       window.removeEventListener('message', handleMessage);
-      if (scopedWindow.__piariumSetEmbeddedVisibility === applyVisibility) {
-        delete scopedWindow.__piariumSetEmbeddedVisibility;
+      if (scopedWindow.__varinSetEmbeddedVisibility === applyVisibility) {
+        delete scopedWindow.__varinSetEmbeddedVisibility;
       }
     };
   }, [embeddedSessionChat]);
@@ -502,8 +502,8 @@ function App({ apis }: AppProps) {
       });
     };
 
-    window.addEventListener('piarium:open-session', handler as EventListener);
-    return () => window.removeEventListener('piarium:open-session', handler as EventListener);
+    window.addEventListener('varin:open-session', handler as EventListener);
+    return () => window.removeEventListener('varin:open-session', handler as EventListener);
   }, [embeddedSessionChat]);
 
   // Native tray/menu "new session" requests carry optional project and cwd
@@ -526,13 +526,13 @@ function App({ apis }: AppProps) {
       });
     };
 
-    window.addEventListener('piarium:open-draft-session', handler as EventListener);
-    return () => window.removeEventListener('piarium:open-draft-session', handler as EventListener);
+    window.addEventListener('varin:open-draft-session', handler as EventListener);
+    return () => window.removeEventListener('varin:open-draft-session', handler as EventListener);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    (window as unknown as { __piariumStartupDiagnostics?: unknown }).__piariumStartupDiagnostics = {
+    (window as unknown as { __varinStartupDiagnostics?: unknown }).__varinStartupDiagnostics = {
       bootView,
       catalogError: piRuntimeError,
       catalogLoaded: piCatalogLoaded,
@@ -560,8 +560,8 @@ function App({ apis }: AppProps) {
     if (isSwitchingDirectory && desktopWorkspaceView !== 'runtime-setup') return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
-    (window as unknown as { __piariumAppReady?: boolean }).__piariumAppReady = true;
-    window.dispatchEvent(new Event('piarium:app-ready'));
+    (window as unknown as { __varinAppReady?: boolean }).__varinAppReady = true;
+    window.dispatchEvent(new Event('varin:app-ready'));
   }, [bootView, desktopWorkspaceView, isDesktopRuntime, isSwitchingDirectory, runtimeReady]);
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
@@ -579,7 +579,7 @@ function App({ apis }: AppProps) {
   useTraySync({ enabled: !embeddedSessionChat });
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
-  // The Rust backend sets window.__PIARIUM_DESKTOP_BOOT_OUTCOME__ once the
+  // The Rust backend sets window.__VARIN_DESKTOP_BOOT_OUTCOME__ once the
   // sidecar reaches a stable state. We poll with exponential backoff to handle
   // potential race conditions during startup and config writes.
   React.useEffect(() => {
@@ -650,7 +650,7 @@ function App({ apis }: AppProps) {
     try {
       await usePiSessionStore.getState().loadCatalog();
     } catch (catalogError) {
-      console.warn('[Piarium] failed to load the Pi session catalog after selecting a runtime:', catalogError);
+      console.warn('[Varin] failed to load the Pi session catalog after selecting a runtime:', catalogError);
     }
     setBootView((current) => current?.screen === 'main' ? current : { screen: 'main' });
   }, []);
@@ -765,7 +765,7 @@ function App({ apis }: AppProps) {
                 <>
                   <WorkbenchTransitionOverlay />
                   <AboutDialogWrapper />
-                  <PiariumDiagnosticsDialog />
+                  <VarinDiagnosticsDialog />
                 </>
               )}
             </div>

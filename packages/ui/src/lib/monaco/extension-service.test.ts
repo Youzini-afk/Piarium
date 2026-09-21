@@ -63,7 +63,7 @@ describe('Monaco extension service', () => {
       getDocumentVersion: () => 0,
       identity: { workspaceId: 'workspace-1', resourceId: 'src/main.ts' },
       kind: 'text',
-      providerId: 'piarium.builtin.text',
+      providerId: 'varin.builtin.text',
       viewId: 'view-1',
     });
     const external = createMonacoExtensionExternalService(owner) as unknown as {
@@ -114,7 +114,7 @@ describe('Monaco extension service', () => {
       getDocumentVersion: () => 0,
       identity: { workspaceId: 'workspace-1', resourceId: 'src/main.ts' },
       kind: 'text',
-      providerId: 'piarium.builtin.text',
+      providerId: 'varin.builtin.text',
       viewId: 'view-1',
     });
     const external = createMonacoExtensionExternalService(owner) as unknown as {

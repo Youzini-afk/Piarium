@@ -12,7 +12,7 @@ const firstClient = <Client>(clients: Client[]): Client => {
 };
 
 const createRuntime = async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-remote-clients-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-remote-clients-test-'));
   const storePath = path.join(dir, 'remote-clients.json');
   const runtime = createRemoteClientAuthRuntime({
     fsPromises: fs,
@@ -28,7 +28,7 @@ describe('remote client auth runtime', () => {
     const { dir, runtime } = await createRuntime();
     try {
       const created = await runtime.createClient({ label: 'Laptop' });
-      expect(created.token.startsWith('piarium_client_')).toBe(true);
+      expect(created.token.startsWith('varin_client_')).toBe(true);
       expect(created.client.label).toBe('Laptop');
 
       const listed = await runtime.listClients();
@@ -130,7 +130,7 @@ describe('remote client auth runtime', () => {
       expect(await runtime.hasActiveRelayClients()).toBe(false);
 
       const relayed = await runtime.authenticateBearerToken(created.token, {
-        headers: { 'x-piarium-relay-connection': 'connection-1' },
+        headers: { 'x-varin-relay-connection': 'connection-1' },
       });
       expect(relayed?.client.usesRelay).toBe(true);
       expect(await runtime.hasActiveRelayClients()).toBe(true);

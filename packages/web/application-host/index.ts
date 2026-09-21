@@ -22,8 +22,8 @@ import {
   ApplicationExtensionCatalog,
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
-} from '@piarium/extension-host';
-import { PIARIUM_BUNDLED_LANGUAGE_SERVERS } from '@piarium/extension-builtins';
+} from '@varin/extension-host';
+import { VARIN_BUNDLED_LANGUAGE_SERVERS } from '@varin/extension-builtins';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
 import { createManagedRootAdmission } from './lib/kernel/managed-root-admission.js';
 import { createKernelProcessService } from './lib/kernel/process-service.js';
@@ -99,7 +99,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
@@ -194,7 +194,7 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
-import { PiRuntimeBrokerError, PiRuntimeLifecycle } from '@piarium/runtime-broker';
+import { PiRuntimeBrokerError, PiRuntimeLifecycle } from '@varin/runtime-broker';
 import {
   attachPiSessionExecutionAdmission,
   createWebPiRuntimeBroker,
@@ -213,11 +213,11 @@ import {
   registerServerStatusRoutes,
 } from './lib/platform/core-routes.js';
 import { createPlatformEnvironmentRuntime } from './lib/platform/environment-runtime.js';
-import { resolvePiariumDataDir } from './lib/platform/data-paths.js';
+import { resolveVarinDataDir } from './lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from './lib/platform/inherited-env.js';
 import { pathLooksUserConfigured, mergePathValues } from './lib/platform/path-utils.js';
 import { createProjectDirectoryRuntime } from './lib/platform/project-directory-runtime.js';
-import { registerPiariumRoutes } from './lib/platform/piarium-routes.js';
+import { registerVarinRoutes } from './lib/platform/varin-routes.js';
 import { createPlatformRoutesRuntime } from './lib/platform/routes-runtime.js';
 import { runCliEntryIfMain } from './lib/platform/cli-entry-runtime.js';
 import { createServerStartupRuntime } from './lib/platform/server-startup-runtime.js';
@@ -252,7 +252,7 @@ const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
-const DESKTOP_NOTIFY_PREFIX = '[PiariumDesktopNotify] ';
+const DESKTOP_NOTIFY_PREFIX = '[VarinDesktopNotify] ';
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
 const errorMessage = (error: unknown): string => (
@@ -276,45 +276,45 @@ const isEnvFlagDisabled = (value: unknown): boolean => {
   return value.trim() === '0' || value.trim().toLowerCase() === 'false';
 };
 
-const PIARIUM_VERSION = (() => {
+const VARIN_VERSION = (() => {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
     if (typeof pkg?.version === 'string' && pkg.version.trim()) return pkg.version.trim();
     throw new Error('package.json does not declare a version');
   } catch (error) {
-    throw new Error(`Unable to resolve the Piarium Web application version: ${errorMessage(error)}`);
+    throw new Error(`Unable to resolve the Varin Web application version: ${errorMessage(error)}`);
   }
 })();
 
-const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
-const PIARIUM_USER_CONFIG_ROOT = PIARIUM_DATA_DIR;
-const PIARIUM_USER_THEMES_DIR = path.join(PIARIUM_USER_CONFIG_ROOT, 'themes');
-const PIARIUM_PROJECTS_CONFIG_DIR = path.join(PIARIUM_USER_CONFIG_ROOT, 'projects');
-const SETTINGS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'settings.json');
-const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'push-subscriptions.json');
-const MOBILE_DEVICES_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'mobile-devices.json');
-const APNS_TOKENS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'apns-tokens.json');
-const REMOTE_CLIENTS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'remote-clients.json');
-const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'client-pairing-sessions.json');
-const MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
-const LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-named-tunnels.json');
+const VARIN_DATA_DIR = resolveVarinDataDir(process);
+const VARIN_USER_CONFIG_ROOT = VARIN_DATA_DIR;
+const VARIN_USER_THEMES_DIR = path.join(VARIN_USER_CONFIG_ROOT, 'themes');
+const VARIN_PROJECTS_CONFIG_DIR = path.join(VARIN_USER_CONFIG_ROOT, 'projects');
+const SETTINGS_FILE_PATH = path.join(VARIN_DATA_DIR, 'settings.json');
+const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(VARIN_DATA_DIR, 'push-subscriptions.json');
+const MOBILE_DEVICES_FILE_PATH = path.join(VARIN_DATA_DIR, 'mobile-devices.json');
+const APNS_TOKENS_FILE_PATH = path.join(VARIN_DATA_DIR, 'apns-tokens.json');
+const REMOTE_CLIENTS_FILE_PATH = path.join(VARIN_DATA_DIR, 'remote-clients.json');
+const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(VARIN_DATA_DIR, 'client-pairing-sessions.json');
+const MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(VARIN_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
+const LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(VARIN_DATA_DIR, 'cloudflare-named-tunnels.json');
 
 const shouldSkipApiCompression = (): boolean => {
-  if (isEnvFlagEnabled(process.env.PIARIUM_SKIP_API_COMPRESSION)) return true;
-  if (isEnvFlagEnabled(process.env.PIARIUM_COMPRESS_API)) return false;
-  if (isEnvFlagDisabled(process.env.PIARIUM_COMPRESS_API)) return true;
-  return process.env.PIARIUM_RUNTIME === 'desktop';
+  if (isEnvFlagEnabled(process.env.VARIN_SKIP_API_COMPRESSION)) return true;
+  if (isEnvFlagEnabled(process.env.VARIN_COMPRESS_API)) return false;
+  if (isEnvFlagDisabled(process.env.VARIN_COMPRESS_API)) return true;
+  return process.env.VARIN_RUNTIME === 'desktop';
 };
 
 const SSE_PATHS = new Set([
   '/api/notifications/stream',
-  '/api/piarium/events',
-  '/api/piarium/runtime-manager/events',
-  '/api/piarium/realtime-proxy/sse',
+  '/api/varin/events',
+  '/api/varin/runtime-manager/events',
+  '/api/varin/realtime-proxy/sse',
 ]);
 
 const shouldSkipCompression = (req: Request, res: Response): boolean => {
-  if (process.env.PIARIUM_RUNTIME === 'desktop') return true;
+  if (process.env.VARIN_RUNTIME === 'desktop') return true;
   const acceptsSse = (value: unknown): boolean => Array.isArray(value)
     ? value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'))
     : typeof value === 'string' && value.toLowerCase().includes('text/event-stream');
@@ -426,7 +426,7 @@ const { updateSettingsOnDisk, persistSettings } = settingsRuntime;
 const themeRuntime = createThemeRuntime({
   fsPromises,
   path,
-  themesDir: PIARIUM_USER_THEMES_DIR,
+  themesDir: VARIN_USER_THEMES_DIR,
   maxThemeJsonBytes: MAX_THEME_JSON_BYTES,
   logger: console,
 });
@@ -479,9 +479,9 @@ const {
 } = apnsRuntime;
 
 const uiNotificationClients = new Set<Response>();
-const uiPiariumEventClients = new Set<Response>();
-const desktopNotifyEnabled = process.env.PIARIUM_DESKTOP_NOTIFY === 'true'
-  || process.env.PIARIUM_RUNTIME === 'desktop';
+const uiVarinEventClients = new Set<Response>();
+const desktopNotifyEnabled = process.env.VARIN_DESKTOP_NOTIFY === 'true'
+  || process.env.VARIN_RUNTIME === 'desktop';
 let broadcastGlobalUiEvent: ReturnType<typeof createGlobalUiEventBroadcaster> | null = null;
 const notificationEmitterRuntime = createNotificationEmitterRuntime({
   process,
@@ -501,7 +501,7 @@ const clientSurfaceBridge = createClientSurfaceBridge({
   isSessionLive: (sessionId) => isPiSessionLive(sessionId),
 });
 const magicPromptRuntime = createMagicPromptRuntime({
-  filePath: path.join(PIARIUM_DATA_DIR, 'magic-prompts.json'),
+  filePath: path.join(VARIN_DATA_DIR, 'magic-prompts.json'),
   fsPromises,
   path,
 });
@@ -514,16 +514,16 @@ const sessionRuntime = createPiSessionRuntime({ broadcastEvent: broadcastGlobalU
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
-  projectsDirPath: PIARIUM_PROJECTS_CONFIG_DIR,
+  projectsDirPath: VARIN_PROJECTS_CONFIG_DIR,
 });
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   listProjects: async () => sanitizeProjects((await readSettingsFromDisk()).projects || []) ?? [],
   emitTaskRunEvent: (event) => {
-    for (const client of uiPiariumEventClients) {
+    for (const client of uiVarinEventClients) {
       try {
         writeSseEvent(client, {
-          type: 'piarium:scheduled-task-ran',
+          type: 'varin:scheduled-task-ran',
           properties: {
             projectId: event.projectID,
             taskId: event.taskID,
@@ -533,7 +533,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
           },
         });
       } catch {
-        uiPiariumEventClients.delete(client);
+        uiVarinEventClients.delete(client);
       }
     }
   },
@@ -644,7 +644,7 @@ const bootstrapRuntime = createServerBootstrapRuntime({
   registerTtsRoutes,
   registerNotificationRoutes,
   registerMobileRoutes,
-  registerPiariumRoutes,
+  registerVarinRoutes,
   express,
 });
 const platformRoutesRuntime = createPlatformRoutesRuntime({ clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS });
@@ -679,19 +679,19 @@ const extractAssistantText = (messages: unknown): string => {
 };
 
 async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerController> {
-  if (server?.listening) throw new Error('Piarium server is already running');
+  if (server?.listening) throw new Error('Varin server is already running');
   isShuttingDown = false;
   const port = typeof options.port === 'number' && Number.isFinite(options.port) && options.port >= 0
     ? Math.trunc(options.port)
     : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : undefined;
-  const configuredBindHost = host || process.env.PIARIUM_HOST?.trim() || '127.0.0.1';
+  const configuredBindHost = host || process.env.VARIN_HOST?.trim() || '127.0.0.1';
   const effectiveBindHost = normalizeBindHost(configuredBindHost);
   if (!effectiveBindHost) throw new Error(getInvalidBindHostErrorMessage(configuredBindHost));
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
-    : typeof process.env.PIARIUM_UI_PASSWORD === 'string'
-      ? process.env.PIARIUM_UI_PASSWORD
+    : typeof process.env.VARIN_UI_PASSWORD === 'string'
+      ? process.env.VARIN_UI_PASSWORD
       : null;
   if (
     isNetworkExposedBindHost(effectiveBindHost)
@@ -710,7 +710,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
-  const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.PIARIUM_API_ONLY);
+  const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.VARIN_API_ONLY);
   const attachSignals = options.attachSignals !== false;
   const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : undefined;
   const startupTunnelRequest = (
@@ -736,17 +736,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         })
       : null;
 
-  console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
+  console.log(`Starting Varin on port ${port === 0 ? 'auto' : port}`);
   const app = express();
   const extensionCatalog = options.extensionCatalog
     || options.extensionRuntime?.catalog
-    || new ApplicationExtensionCatalog({ dataDir: PIARIUM_DATA_DIR });
+    || new ApplicationExtensionCatalog({ dataDir: VARIN_DATA_DIR });
   const extensionPackages = options.extensionPackages
     || options.extensionRuntime?.packages
     || new ExtensionPackageManager({
     catalog: extensionCatalog,
-    dataDir: PIARIUM_DATA_DIR,
-    piariumVersion: PIARIUM_VERSION,
+    dataDir: VARIN_DATA_DIR,
+    varinVersion: VARIN_VERSION,
   });
   let extensionRuntime = options.extensionRuntime || null;
   const ownsExtensionRuntime = !extensionRuntime;
@@ -756,14 +756,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     next();
   });
   app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
-  const packagedClientOrigins = new Set(['piarium-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost']);
+  const packagedClientOrigins = new Set(['varin-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost']);
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
     if (packagedClientOrigins.has(origin) || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Piarium-Application-Token,X-Piarium-Directory,X-Piarium-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Varin-Application-Token,X-Varin-Directory,X-Varin-Directory-Encoding');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') return res.status(204).end();
@@ -829,16 +829,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const sayTTSCapability = detectSayTtsCapability(process);
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
-    piariumVersion: PIARIUM_VERSION,
-    runtimeName: process.env.PIARIUM_RUNTIME || 'web',
+    varinVersion: VARIN_VERSION,
+    runtimeName: process.env.VARIN_RUNTIME || 'web',
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot: () => {
       const handshake = currentPiRuntimeHandshake();
       return {
         apiOnly,
-        ...(process.env.PIARIUM_RELEASE_ID?.trim()
-          ? { releaseId: process.env.PIARIUM_RELEASE_ID.trim() }
+        ...(process.env.VARIN_RELEASE_ID?.trim()
+          ? { releaseId: process.env.VARIN_RELEASE_ID.trim() }
           : {}),
         piRuntime: {
           ready: Boolean(handshake),
@@ -860,7 +860,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           : { ready: false, epoch: null, version: null, protocolVersion: null },
       };
     },
-    verboseRequestLogs: isEnvFlagEnabled(process.env.PIARIUM_VERBOSE_REQUEST_LOGS),
+    verboseRequestLogs: isEnvFlagEnabled(process.env.VARIN_VERBOSE_REQUEST_LOGS),
     uiPassword,
     tunnelAuthController,
     remoteClientAuthRuntime,
@@ -876,7 +876,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getServerId: () => relayServiceInstance?.getServerId() ?? Promise.resolve(null),
     getServerPort: activePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
-    getServerLabel: () => os.hostname()?.trim() || 'Piarium',
+    getServerLabel: () => os.hostname()?.trim() || 'Varin',
     readSettingsFromDisk,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -899,7 +899,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     path,
     server,
     __dirname,
-    piariumDataDir: PIARIUM_DATA_DIR,
+    varinDataDir: VARIN_DATA_DIR,
     modelsDevApiUrl: MODELS_DEV_API_URL,
     modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL_MS,
     mobileDeviceStore,
@@ -915,7 +915,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isRequestOriginAllowed,
   });
 
-  const requirePiRuntime = options.requirePiRuntime ?? process.env.PIARIUM_RUNTIME !== 'desktop';
+  const requirePiRuntime = options.requirePiRuntime ?? process.env.VARIN_RUNTIME !== 'desktop';
   type PiWriterTracker = ReturnType<typeof createPiWorkspaceWriterTracker>;
   type RecoveryTurnCoordinator = ReturnType<typeof createRecoveryTurnCoordinator>;
   type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
@@ -932,8 +932,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return recoveryTurnCoordinator?.admit(request) ?? piWriterTracker.admit(request);
   };
   const piRuntimeBrokerFactory = options.createPiRuntimeBroker || ((brokerOptions: HostPiRuntimeBrokerFactoryOptions) => createWebPiRuntimeBroker({
-    agentDir: process.env.PIARIUM_AGENT_DIR,
-    clientVersion: PIARIUM_VERSION,
+    agentDir: process.env.VARIN_AGENT_DIR,
+    clientVersion: VARIN_VERSION,
     cwd: process.cwd(),
     // The official Host always provides SSRF-guarded web.fetch. Reader-model
     // execution stays inside pi-host so it uses the session's credential and
@@ -968,9 +968,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
     admitPiSessionExecution,
   );
-  const standalonePayloadDir = options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD;
+  const standalonePayloadDir = options.standalonePayloadDir || process.env.VARIN_PI_STANDALONE_PAYLOAD;
   piRuntimeLifecycle = options.piRuntimeLifecycle || new PiRuntimeLifecycle({
-    dataDir: PIARIUM_DATA_DIR,
+    dataDir: VARIN_DATA_DIR,
     createBroker: (brokerOptions) => createPiRuntimeBroker(brokerOptions),
     ...(options.hostEntry ? { hostEntry: options.hostEntry } : {}),
     ...(standalonePayloadDir
@@ -1016,19 +1016,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
-      brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@piarium/extension-host'))),
+      brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@varin/extension-host'))),
       catalog: extensionCatalog,
-      dataDir: PIARIUM_DATA_DIR,
+      dataDir: VARIN_DATA_DIR,
       packages: extensionPackages,
-      piariumVersion: PIARIUM_VERSION,
+      varinVersion: VARIN_VERSION,
     });
   }
   kernelClient = createKernelClient({
     hostId: extensionRuntime.services.hostId,
-    storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
-    buildVersion: PIARIUM_VERSION,
-    kernelBuildIdentity: PIARIUM_VERSION,
-    onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
+    storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
+    buildVersion: VARIN_VERSION,
+    kernelBuildIdentity: VARIN_VERSION,
+    onExit: (error) => console.error('[VarinKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
   const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number; runId?: string }>();
@@ -1036,7 +1036,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
-    storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
+    storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveActor: async (workspaceId, purpose, hint) => {
       const maintenance = hint?.capabilities?.some((capability) => (
@@ -1128,7 +1128,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSettings: readSettingsFromDisk,
     getWorkspaceRoot: () => workspaceConfig.root,
   });
-  const configuredDirtyBarrierTimeout = process.env.PIARIUM_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '';
+  const configuredDirtyBarrierTimeout = process.env.VARIN_DIRTY_BARRIER_TIMEOUT_MS?.trim() ?? '';
   const dirtyBarrierTimeoutMs = /^\d+$/.test(configuredDirtyBarrierTimeout)
     ? Number(configuredDirtyBarrierTimeout)
     : undefined;
@@ -1136,7 +1136,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
-    dataDir: PIARIUM_DATA_DIR,
+    dataDir: VARIN_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
     onMutation: (event) => observeKnowledgeDocumentMutation(event),
@@ -1233,7 +1233,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!engine) {
       engine = createWorkspaceRecoveryEngine({
         authorityId: extensionRuntime.services.hostId,
-        dataDir: PIARIUM_DATA_DIR,
+        dataDir: VARIN_DATA_DIR,
         documents: documentsAuthority,
         durableRecoveryStore: kernelRecoveryStore,
         sessionNavigation: recoverySessionNavigation,
@@ -1250,7 +1250,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return engine;
   };
   const foundationalRecoveryEngine = recoveryEngineForOwner({
-    owner: { extensionId: 'piarium.builtin.recovery' },
+    owner: { extensionId: 'varin.builtin.recovery' },
   });
   documentsAuthority.bindDurableMutationStorage((workspaceId, operation) => (
     foundationalRecoveryEngine.withWorkspaceStorage(
@@ -1286,22 +1286,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       registry: threadRegistry,
       admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
     })(cwd),
-    onError: (error) => console.error("[PiariumProcess]", error.message),
+    onError: (error) => console.error("[VarinProcess]", error.message),
   });
   // Installation programs are Host-owned tooling. They receive only this
   // private resource root; editor/agent LSP processes still use their workspace.
   const languageToolProcesses = createKernelProcessService({
     client: kernelClient,
     resolveIdentity: async (cwd) => {
-      const canonicalRoot = await canonicalizePathIdentity(path.join(PIARIUM_DATA_DIR, 'language-servers'));
+      const canonicalRoot = await canonicalizePathIdentity(path.join(VARIN_DATA_DIR, 'language-servers'));
       const canonicalCwd = await canonicalizePathIdentity(cwd);
       if (!isPathWithinRoot(canonicalCwd, canonicalRoot)) throw new Error('Language tool preparation escaped its private directory');
       const workspaceId = `language-tools:${extensionRuntime.services.hostId}`;
       return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
     },
   });
-  const managedLanguageServers = createManagedLanguageServers({ directory: PIARIUM_DATA_DIR, spawn: languageToolProcesses.spawn });
-  const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`piarium.managed.${languageId}`, languageId]));
+  const managedLanguageServers = createManagedLanguageServers({ directory: VARIN_DATA_DIR, spawn: languageToolProcesses.spawn });
+  const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`varin.managed.${languageId}`, languageId]));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: ({ languageId }) => extensionRuntime.activateForEvent('workspace-match', { languageId }),
     prepareProvider: (providerId, root, signal) => {
@@ -1313,7 +1313,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     pathModule: path,
     env: process.env,
     // Workspaces become executable only after their canonical root is an
-    // explicit Piarium project/directory grant. The same Host guard owns file
+    // explicit Varin project/directory grant. The same Host guard owns file
     // authority, so renderer or extension input cannot expand this boundary.
     isTrusted: workspaceRootGuard,
   });
@@ -1331,21 +1331,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Host-internal — the same trust level as the native process host — so a
   // detached reconciler can inspect, stop and collect jobs after restarts.
   const broadcastResearchFacts = (workspaceId: string, fact: 'attempt' | 'machine' | 'source' | 'followup') => {
-    for (const client of uiPiariumEventClients) {
+    for (const client of uiVarinEventClients) {
       try {
         writeSseEvent(client, {
-          type: 'piarium:harness-experiment-changed',
+          type: 'varin:harness-experiment-changed',
           properties: { workspaceId, fact },
         });
       } catch {
-        uiPiariumEventClients.delete(client);
+        uiVarinEventClients.delete(client);
       }
     }
   };
   let managedRemoteTargets: ManagedRemoteTargetRegistry | null = null;
   const resourceService = createResourceService({
     client: kernelClient,
-    onError: (error) => console.error("[PiariumResource]", error.message),
+    onError: (error) => console.error("[VarinResource]", error.message),
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'machine'),
     onCapacityAvailable: (workspaceId) => experimentService.refreshQueue(workspaceId),
     refreshTargets: (workspaceId) => managedRemoteTargets?.refresh(workspaceId),
@@ -1355,7 +1355,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     resources: resourceService,
-    onError: (error) => console.error("[PiariumManagedRemote]", error.message),
+    onError: (error) => console.error("[VarinManagedRemote]", error.message),
   });
   managedRemoteTargets = createManagedRemoteTargetRegistry({
     coordinatorHostId: extensionRuntime.services.hostId,
@@ -1367,10 +1367,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // reconcile inspects and re-polls rather than resubmitting.
     onTargetReachable: (workspaceId) => {
       void experimentService.ensureReconciled(workspaceId).catch((error: unknown) => {
-        console.error("[PiariumManagedTarget] Post-reconnect reconcile failed:", errorMessage(error));
+        console.error("[VarinManagedTarget] Post-reconnect reconcile failed:", errorMessage(error));
       });
     },
-    onError: (error) => console.error("[PiariumManagedTarget]", error.message),
+    onError: (error) => console.error("[VarinManagedTarget]", error.message),
   });
   const sourceService = createSourceService({
     client: kernelClient,
@@ -1381,7 +1381,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resources: resourceService,
     sources: sourceService,
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
-    onError: (error) => console.error("[PiariumExperiment]", error.message),
+    onError: (error) => console.error("[VarinExperiment]", error.message),
     onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
     resolveBackend: (ctx, machineId, machine, caller) => managedRemoteTargets!.resolveBackend(ctx, machineId, machine, caller),
   });
@@ -1465,28 +1465,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return null;
     },
     onChanged: (change) => {
-      for (const client of uiPiariumEventClients) {
+      for (const client of uiVarinEventClients) {
         try {
           writeSseEvent(client, {
-            type: 'piarium:settings-changed',
+            type: 'varin:settings-changed',
             properties: change,
           });
         } catch {
-          uiPiariumEventClients.delete(client);
+          uiVarinEventClients.delete(client);
         }
       }
     },
   });
-  void managedRemoteExecution.reconcile().catch((error) => console.error("[PiariumManagedRemote]", error.message));
+  void managedRemoteExecution.reconcile().catch((error) => console.error("[VarinManagedRemote]", error.message));
   // Seed product skills into the user-scope resource root. Managed-marker
   // semantics keep user edits authoritative — see product-skills.ts.
   try {
     const seeded = seedProductSkills(resolvePiAgentDir());
     if (seeded.seeded.length || seeded.updated.length) {
-      console.log(`[PiariumSkills] seeded ${seeded.seeded.length}, updated ${seeded.updated.length} product skills`);
+      console.log(`[VarinSkills] seeded ${seeded.seeded.length}, updated ${seeded.updated.length} product skills`);
     }
   } catch (error) {
-    console.warn('[PiariumSkills] seeding skipped:', error instanceof Error ? error.message : error);
+    console.warn('[VarinSkills] seeding skipped:', error instanceof Error ? error.message : error);
   }
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
@@ -1502,8 +1502,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       workspaceId: string,
       receipt: import('./lib/harness/web-fetch-receipt.js').WebFetchReceiptDraft,
       markdown: string,
-    ) => Promise<import('@piarium/protocol').RetrievalUrlReceipt>;
-    syncThread?: (workspaceId: string, thread: import('@piarium/protocol').Thread) => Promise<void>;
+    ) => Promise<import('@varin/protocol').RetrievalUrlReceipt>;
+    syncThread?: (workspaceId: string, thread: import('@varin/protocol').Thread) => Promise<void>;
   } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
@@ -1562,14 +1562,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const sessionSnapshots = new Map<string, Record<string, unknown>>();
   const threadRegistry = createThreadRegistry({
-    dataDir: PIARIUM_DATA_DIR,
+    dataDir: VARIN_DATA_DIR,
     hostId,
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
       broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-thread-changed',
+        type: 'varin:harness-thread-changed',
         properties: { workspaceId, parent, thread, activeRun },
       });
       if (retrievalEvidenceAccess.syncThread) {
@@ -1581,13 +1581,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       if (thread.lifecycle === 'archived') {
         void followUpService.settleTarget(workspaceId, { kind: 'thread', id: thread.id }).catch((error: unknown) => {
-          console.error('[PiariumFollowUp] Archive settle failed:', errorMessage(error));
+          console.error('[VarinFollowUp] Archive settle failed:', errorMessage(error));
         });
       }
     },
     onThreadDone: (workspaceId, parent, threadId, report) => {
       broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-thread-done',
+        type: 'varin:harness-thread-done',
         properties: { workspaceId, parent, threadId, report },
       });
     },
@@ -1611,7 +1611,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       followUpService.settleTarget(workspaceId, { kind: 'thread', id: threadId })
         .then(() => undefined)
         .catch((error: unknown) => {
-          console.error('[PiariumFollowUp] Thread-removal settle failed:', errorMessage(error));
+          console.error('[VarinFollowUp] Thread-removal settle failed:', errorMessage(error));
         })
     ),
   });
@@ -1632,7 +1632,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const canonical = async (value: string) => normalize(await fs.promises.realpath(value).catch(() => path.resolve(value)));
       const observed = await canonical(candidate);
       for (const rootName of ['worktrees', 'thread-scratch']) {
-        const applicationRoot = await canonical(path.join(PIARIUM_DATA_DIR, rootName));
+        const applicationRoot = await canonical(path.join(VARIN_DATA_DIR, rootName));
         const applicationRelative = path.relative(applicationRoot, observed);
         if (applicationRelative
           && !applicationRelative.startsWith('..')
@@ -1642,7 +1642,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }
       }
       if (path.basename(observed).toLowerCase() !== 'worktrees'
-        || path.basename(path.dirname(observed)).toLowerCase() !== '.piarium') return false;
+        || path.basename(path.dirname(observed)).toLowerCase() !== '.varin') return false;
       const workspaceRoot = path.dirname(path.dirname(observed));
       try {
         const identity = await documentsAuthority.resolveWorkspace({ path: workspaceRoot });
@@ -1674,7 +1674,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     createScratch: async (sourceRoot, threadId) => {
       const workspaceKey = crypto.createHash('sha256').update(path.resolve(sourceRoot)).digest('hex');
-      const managedRoot = path.join(PIARIUM_DATA_DIR, 'thread-scratch', workspaceKey);
+      const managedRoot = path.join(VARIN_DATA_DIR, 'thread-scratch', workspaceKey);
       await fs.promises.mkdir(managedRoot, { recursive: true });
       return { path: path.join(managedRoot, threadId), managedRoot };
     },
@@ -2231,7 +2231,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return supervisor.readExecutionOutput(executionId, offset, length);
     },
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
-    onError: (error) => console.error('[PiariumFollowUp]', error.message),
+    onError: (error) => console.error('[VarinFollowUp]', error.message),
   });
   // Rebuild follow-up observers for every workspace that owns durable
   // definitions. The kernel record store enumerates them directly — recovery
@@ -2240,10 +2240,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   void (async () => {
     for (const workspaceId of await followUpService.definitionWorkspaces()) {
       await followUpService.reconcile(workspaceId).catch((error) => {
-        console.error(`[PiariumFollowUp] Reconcile failed for ${workspaceId}:`, errorMessage(error));
+        console.error(`[VarinFollowUp] Reconcile failed for ${workspaceId}:`, errorMessage(error));
       });
     }
-  })().catch((error) => console.error('[PiariumFollowUp] Reconcile failed:', errorMessage(error)));
+  })().catch((error) => console.error('[VarinFollowUp] Reconcile failed:', errorMessage(error)));
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
     void threadRuntime!.invalidateIntegrationPreviews(workspaceId, resourceIds).catch((error: unknown) => {
       console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
@@ -2323,7 +2323,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getSuggestionSettings: knowledgeSuggestionSettingsForSession,
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-knowledge-changed',
+        type: 'varin:harness-knowledge-changed',
         properties: { sessionId, scope },
       });
     },
@@ -2335,7 +2335,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getUserStore: getUserKnowledgeStore,
     onKnowledgeChanged: ({ scope, workspaceId }) => {
       broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-knowledge-changed',
+        type: 'varin:harness-knowledge-changed',
         properties: { scope, ...(workspaceId ? { workspaceId } : {}) },
       });
     },
@@ -2387,7 +2387,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const pending = knowledgeStoreLoads.get(workspaceId);
     if (pending) return pending;
     const loading = openWorkspaceKnowledge({
-      dataDir: PIARIUM_DATA_DIR,
+      dataDir: VARIN_DATA_DIR,
       hostId,
       workspaceId,
       embedding: null, // Authority .tdb stays placeholder-dim; knowledge vectors are derived (D-196)
@@ -2398,7 +2398,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       onBlocksChanged: (sessionId) => {
         broadcastGlobalUiEvent?.({
-          type: 'piarium:harness-blocks-changed',
+          type: 'varin:harness-blocks-changed',
           properties: { workspaceId, sessionId },
         });
       },
@@ -2442,7 +2442,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (userKnowledgeStore) return userKnowledgeStore;
     if (!userKnowledgeStoreLoad) {
       userKnowledgeStoreLoad = openUserKnowledgeStore({
-        dataDir: PIARIUM_DATA_DIR,
+        dataDir: VARIN_DATA_DIR,
         hostId,
         embedding: null,
         onKnowledgeChanged: (ids) => {
@@ -2491,7 +2491,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   } catch (error) {
     console.error('[LanguageSupport] Grammar pack manifest is unusable:', errorMessage(error));
   }
-  const grammarStore = createGrammarStore(PIARIUM_DATA_DIR);
+  const grammarStore = createGrammarStore(VARIN_DATA_DIR);
   const grammarInstaller = createGrammarInstaller({
     store: grammarStore,
     manifest: grammarManifest,
@@ -2507,7 +2507,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     installer: grammarInstaller,
     prepareServer: (languageId, root, signal) => managedLanguageServers.ensure(languageId, root, signal),
     serverInfo: (languageId) => {
-      const bundled = PIARIUM_BUNDLED_LANGUAGE_SERVERS.find((server) => server.languageIds.includes(languageId));
+      const bundled = VARIN_BUNDLED_LANGUAGE_SERVERS.find((server) => server.languageIds.includes(languageId));
       if (bundled) return { status: 'bundled', name: bundled.name };
       const { status, name, message } = managedLanguageServers.inspect(languageId);
       return { status, ...(name ? { name } : {}), ...(message ? { message } : {}) };
@@ -2538,15 +2538,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const semanticRuntimeHolder: { current?: ReturnType<typeof createWorkspaceSemanticRuntime> } = {};
   const localSemanticComponent = createLocalSemanticComponentManager({
-    dataDir: PIARIUM_DATA_DIR,
-    version: PIARIUM_VERSION,
-    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR })),
+    dataDir: VARIN_DATA_DIR,
+    version: VARIN_VERSION,
+    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR })),
   });
-  const localEmbedder = createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR });
+  const localEmbedder = createLocalMinilmEmbedder({ dataDir: VARIN_DATA_DIR });
   const semanticScheduler = createEmbedScheduler();
   const semanticVectorCache = createVectorCache();
   const semanticRuntime = createWorkspaceSemanticRuntime({
-    dataDir: PIARIUM_DATA_DIR,
+    dataDir: VARIN_DATA_DIR,
     hostId,
     documents: documentsAuthority,
     structureSource,
@@ -2569,7 +2569,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   knowledgeVectors = createKnowledgeVectorRuntime({
-    dataDir: PIARIUM_DATA_DIR,
+    dataDir: VARIN_DATA_DIR,
     hostId,
     scheduler: semanticScheduler,
     cache: semanticVectorCache,
@@ -2829,7 +2829,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     rerankExploreViews: semanticRuntime.rerankExploreViews,
     permissionAudit: (record) => {
       broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-permission-decision',
+        type: 'varin:harness-permission-decision',
         properties: record,
       });
     },
@@ -2899,7 +2899,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         settings: await knowledgeSuggestionSettingsForSession(sessionId),
         onChanged: () => {
           broadcastGlobalUiEvent?.({
-            type: 'piarium:harness-knowledge-changed',
+            type: 'varin:harness-knowledge-changed',
             properties: { sessionId, scope: 'workspace', ...(owningWorkspaceId ? { workspaceId: owningWorkspaceId } : {}) },
           });
         },
@@ -2996,7 +2996,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return toJsonValue(result ?? null);
   });
   await extensionRuntime.start().catch((error) => {
-    console.warn('[Piarium Extensions] Host reconciliation failed:', error?.message || error);
+    console.warn('[Varin Extensions] Host reconciliation failed:', error?.message || error);
   });
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   // Scheduled runs report the real session outcome, not the dispatch receipt:
@@ -3083,7 +3083,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         kind: complete ? 'completion' : 'error',
         sessionId,
         tag: `pi-goal-${sessionId}`,
-        title: sessionNames.get(sessionId) || (complete ? 'Piarium goal complete' : 'Piarium goal needs attention'),
+        title: sessionNames.get(sessionId) || (complete ? 'Varin goal complete' : 'Varin goal needs attention'),
       });
     },
   });
@@ -3197,7 +3197,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const goal = recordOf(features.goal);
       if (goal.status === 'active') return;
       const body = extractAssistantText(agentEvent.messages) || 'Pi finished the current task.';
-      const title = sessionNames.get(sessionId) || 'Piarium task complete';
+      const title = sessionNames.get(sessionId) || 'Varin task complete';
       await sendPiSessionNotification({
         title,
         body,
@@ -3224,7 +3224,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     updateSettingsOnDisk,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({
-      lockFilePath: path.join(PIARIUM_DATA_DIR, 'relay-host.lock'),
+      lockFilePath: path.join(VARIN_DATA_DIR, 'relay-host.lock'),
       fs,
       process,
     }),
@@ -3256,10 +3256,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
     fileSearch: catalogFileSearch,
     contentSearch: workspaceContentSearch,
-    piariumDataDir: PIARIUM_DATA_DIR,
-    piariumUserConfigRoot: PIARIUM_USER_CONFIG_ROOT,
-    piariumVersion: PIARIUM_VERSION,
-    runtimeName: process.env.PIARIUM_RUNTIME || 'web',
+    varinDataDir: VARIN_DATA_DIR,
+    varinUserConfigRoot: VARIN_USER_CONFIG_ROOT,
+    varinVersion: VARIN_VERSION,
+    runtimeName: process.env.VARIN_RUNTIME || 'web',
     serverStartedAt,
     remoteClientAuthRuntime,
     __dirname,
@@ -3279,7 +3279,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     piRuntimeLifecycle,
     ...(typeof options.pickPiPackageRoot === 'function' ? { pickPiPackageRoot: options.pickPiPackageRoot } : {}),
     ...(typeof options.openFilesystemPath === 'function' ? { openFilesystemPath: options.openFilesystemPath } : {}),
-    getPiariumEventClients: () => uiPiariumEventClients,
+    getVarinEventClients: () => uiVarinEventClients,
     writeSseEvent,
     surfaceBridge: clientSurfaceBridge,
     resolveAuthContext: uiAuthController.resolveAuthContext,
@@ -3353,7 +3353,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
-    dictationModelsDir: path.join(PIARIUM_USER_CONFIG_ROOT, 'speech-models'),
+    dictationModelsDir: path.join(VARIN_USER_CONFIG_ROOT, 'speech-models'),
     documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
@@ -3408,7 +3408,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
-      for (const error of processShutdownErrors) console.error('[PiariumKernel] Native process shutdown incomplete:', errorMessage(error));
+      for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
@@ -3419,7 +3419,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await semanticRuntime.dispose();
       await symbolGraphRuntime.dispose();
       await nativeCompute.dispose();
-      await kernelStorageAdapter.dispose().catch((error) => console.error('[PiariumKernel] Failed to revoke storage grants:', errorMessage(error)));
+      await kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
@@ -3460,7 +3460,7 @@ export {
   gracefulShutdown,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
-  resolvePiariumDataDir,
+  resolveVarinDataDir,
   clearAppImageArgv0FromProcessEnv,
   pathLooksUserConfigured,
   mergePathValues,

@@ -1,6 +1,6 @@
 export type MobileLayoutPreference = 'default' | 'new';
 
-const MOBILE_LAYOUT_PREFERENCE_KEY = 'piarium.mobileLayout.v1';
+const MOBILE_LAYOUT_PREFERENCE_KEY = 'varin.mobileLayout.v1';
 
 const normalizeMobileLayoutPreference = (value: unknown): MobileLayoutPreference => {
   // 'new' is the default; only an explicit 'default' (the legacy/"Old" layout)

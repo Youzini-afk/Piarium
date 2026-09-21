@@ -1,17 +1,17 @@
 ---
 title: Túneles
-description: Expón Piarium de forma segura para acceso remoto y móvil.
+description: Expón Varin de forma segura para acceso remoto y móvil.
 ---
 
 # Túneles
 
-Un túnel es un enlace público a tu Piarium, para que puedas acceder a él desde un navegador corriente en otra red. Usa `piarium tunnel` para crear uno para una instancia en marcha.
+Un túnel es un enlace público a tu Varin, para que puedas acceder a él desde un navegador corriente en otra red. Usa `varin tunnel` para crear uno para una instancia en marcha.
 
 > Conectar tus **propios dispositivos** (la app móvil, otro escritorio) normalmente no necesita un túnel: [vincúlalos](/es/connect-devices/) y deja que el [Private Relay](/es/private-relay/), cifrado de extremo a extremo, se encargue del acceso fuera de casa sin configuración.
 
 ## Requisitos previos
 
-Piarium inicia el CLI del proveedor de túnel en tu máquina. Instala primero el proveedor que quieras usar:
+Varin inicia el CLI del proveedor de túnel en tu máquina. Instala primero el proveedor que quieras usar:
 
 ```bash
 brew install cloudflared
@@ -26,35 +26,35 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Inicio rápido
 
-1. Inicia Piarium:
+1. Inicia Varin:
 
 ```bash
-piarium
+varin
 ```
 
-Si omites este paso, `piarium tunnel start` puede iniciar automáticamente un servidor CLI. Al hacerlo, puedes pasar opciones del servidor como `--port`, `--host`, `--lan`, `--ui-password` y `--api-only`.
+Si omites este paso, `varin tunnel start` puede iniciar automáticamente un servidor CLI. Al hacerlo, puedes pasar opciones del servidor como `--port`, `--host`, `--lan`, `--ui-password` y `--api-only`.
 
 2. Inicia un túnel de Cloudflare:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode quick
+varin tunnel start --provider cloudflare --mode quick
 ```
 
 O inicia un túnel de Ngrok:
 
 ```bash
-piarium tunnel start --provider ngrok --mode quick
+varin tunnel start --provider ngrok --mode quick
 ```
 
 3. Comprueba el estado:
 
 ```bash
-piarium tunnel status
+varin tunnel status
 ```
 
-Cuando el túnel está activo, `status` muestra una URL pública. Ábrela, o escanea el código QR, para acceder a Piarium desde cualquier lugar.
+Cuando el túnel está activo, `status` muestra una URL pública. Ábrela, o escanea el código QR, para acceder a Varin desde cualquier lugar.
 
-Por defecto, Piarium imprime un código QR en sesiones TTY interactivas. Usa `--qr` para forzar la salida del QR, o `--no-qr` para desactivarla.
+Por defecto, Varin imprime un código QR en sesiones TTY interactivas. Usa `--qr` para forzar la salida del QR, o `--no-qr` para desactivarla.
 
 ## Proveedores
 
@@ -68,7 +68,7 @@ Por defecto, Piarium imprime un código QR en sesiones TTY interactivas. Usa `--
 Usa un token + nombre de host gestionados por Cloudflare:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+varin tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
 ```
 
 ### Gestionado local
@@ -76,7 +76,7 @@ piarium tunnel start --provider cloudflare --mode managed-remote --token-file ~/
 Usa una configuración local de `cloudflared`:
 
 ```bash
-piarium tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+varin tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 ```
 
 ## Perfiles (managed-remote)
@@ -84,29 +84,29 @@ piarium tunnel start --provider cloudflare --mode managed-local --config ~/.clou
 Guarda un perfil reutilizable:
 
 ```bash
-piarium tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+varin tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
 ```
 
 Inicia usando el perfil guardado:
 
 ```bash
-piarium tunnel start --profile prod-main
+varin tunnel start --profile prod-main
 ```
 
 ## Comandos útiles
 
 ```bash
-piarium tunnel providers
-piarium tunnel ready --provider cloudflare
-piarium tunnel ready --provider ngrok
-piarium tunnel doctor --provider cloudflare
-piarium tunnel doctor --provider ngrok
-piarium tunnel stop --port 3000
+varin tunnel providers
+varin tunnel ready --provider cloudflare
+varin tunnel ready --provider ngrok
+varin tunnel doctor --provider cloudflare
+varin tunnel doctor --provider ngrok
+varin tunnel stop --port 3000
 ```
 
 ## Notas de comportamiento
 
-- un único túnel activo por instancia de Piarium (puerto)
+- un único túnel activo por instancia de Varin (puerto)
 - iniciar un nuevo modo/proveedor en la misma instancia reemplaza el túnel anterior
 - generar un nuevo enlace de conexión revoca el anterior sin usar
 - el autoarranque del túnel conserva flags del servidor como `--ui-password` y `--api-only` en los ajustes de instancia usados por reinicios y actualizaciones
@@ -116,5 +116,5 @@ piarium tunnel stop --port 3000
 - [Conectar un dispositivo](/es/connect-devices/) — vincula tus propios dispositivos sin una URL pública
 - [Seguridad](/es/security/) — protege la interfaz antes de exponerla
 - [Túneles de escritorio](/es/desktop-tunnels/) — configuración de túneles en la app de escritorio sin iniciar desde CLI
-- [PWA y acceso móvil](/es/mobile/) — accede a Piarium desde tu teléfono
+- [PWA y acceso móvil](/es/mobile/) — accede a Varin desde tu teléfono
 - [Resolución de problemas](/es/troubleshooting/) — si el enlace del túnel no funciona

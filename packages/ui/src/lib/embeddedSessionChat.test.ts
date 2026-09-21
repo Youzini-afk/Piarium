@@ -14,16 +14,16 @@ describe('embedded session chat URL helpers', () => {
       directory: '/tmp/project',
       readOnly: true,
       basePath: '/app',
-      origin: 'https://piarium.test',
+      origin: 'https://varin.test',
     });
 
-    expect(url).toBe('https://piarium.test/app?surface=desktop&piPanel=session-chat&piSessionId=child-123&piReadOnly=1&piDirectory=%2Ftmp%2Fproject');
+    expect(url).toBe('https://varin.test/app?surface=desktop&piPanel=session-chat&piSessionId=child-123&piReadOnly=1&piDirectory=%2Ftmp%2Fproject');
     expect(url).not.toContain('sessionId=');
     expect(url).not.toContain('directory=');
     expect(url).not.toContain('readOnly=');
   });
 
-  test('parses Piarium-owned embedded session chat params', () => {
+  test('parses Varin-owned embedded session chat params', () => {
     const config = readEmbeddedSessionChatConfigFromSearch('?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject&piReadOnly=1');
 
     expect(config).toEqual({

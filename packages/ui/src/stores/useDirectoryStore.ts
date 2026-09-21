@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getDesktopHomeDirectory } from '@/lib/desktop';
-import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -119,8 +119,8 @@ const getHomeDirectory = () => {
     if (cachedHomeDirectory) return cachedHomeDirectory;
 
     const desktopHome =
-      (typeof window.__PIARIUM_HOME__ === 'string' && window.__PIARIUM_HOME__.length > 0
-        ? window.__PIARIUM_HOME__
+      (typeof window.__VARIN_HOME__ === 'string' && window.__VARIN_HOME__.length > 0
+        ? window.__VARIN_HOME__
         : null);
 
     if (desktopHome && desktopHome.length > 0) {

@@ -43,14 +43,14 @@ const execute = (intent: DeepLinkIntent): boolean => {
       void openPiSessionFromNavigation({
         directory: intent.directory ?? null,
         sessionId: intent.sessionId,
-      }).catch((error) => console.warn('[Piarium] failed to open deep-linked Pi session:', error));
+      }).catch((error) => console.warn('[Varin] failed to open deep-linked Pi session:', error));
       return true;
 
     case 'new-session':
       void startPiSessionDraftFromNavigation({
         directory: intent.directory ?? null,
         projectId: intent.projectId ?? null,
-      }).catch((error) => console.warn('[Piarium] failed to start deep-linked Pi session draft:', error));
+      }).catch((error) => console.warn('[Varin] failed to start deep-linked Pi session draft:', error));
       return true;
 
     case 'sessions':
@@ -98,7 +98,7 @@ export const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
   flush();
 };
 
-/** Convenience: parse a raw `piarium://…` URL and apply it. No-op for unrecognised URLs. */
+/** Convenience: parse a raw `varin://…` URL and apply it. No-op for unrecognised URLs. */
 export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   const intent = parseDeepLink(raw);
   if (intent) {

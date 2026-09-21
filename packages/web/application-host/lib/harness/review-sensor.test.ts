@@ -10,7 +10,7 @@ import {
 } from "./review-sensor.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { resolvePresets } from "./presets.js";
-import type { ModelSelection } from "@piarium/protocol";
+import type { ModelSelection } from "@varin/protocol";
 
 const mainModel: ModelSelection = { providerId: "anthropic", modelId: "claude-sonnet-4" };
 const workspaceId = "workspace-1";

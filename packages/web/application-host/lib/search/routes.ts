@@ -124,7 +124,7 @@ export const registerWorkspaceSearchRoutes = (app: Express, {
 
   app.post('/api/workspace/search/content', requireAuth, async (req, res) => {
     const body = readBody(req);
-    const generation = Number.parseInt(String(req.headers['x-piarium-generation'] ?? ''), 10);
+    const generation = Number.parseInt(String(req.headers['x-varin-generation'] ?? ''), 10);
     const controller = new AbortController();
     const onClose = () => {
       if (!res.writableEnded) controller.abort();

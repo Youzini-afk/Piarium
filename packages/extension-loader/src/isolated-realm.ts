@@ -1,9 +1,9 @@
 import type {
   JsonValue,
-  PiariumContextValue,
-  PiariumExtensionAssetPayload,
-  PiariumExtensionStaticContribution,
-} from "@piarium/extension-contract";
+  VarinContextValue,
+  VarinExtensionAssetPayload,
+  VarinExtensionStaticContribution,
+} from "@varin/extension-contract";
 
 interface IsolatedContributionImplementationBase {
   readonly realmId: string;
@@ -27,12 +27,12 @@ export type IsolatedContributionImplementation =
 export interface IsolatedRealmActivationContext {
   callCapability(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
   callService(serviceId: string, version: number, providerId: string | undefined, method: string, args: JsonValue[]): Promise<JsonValue>;
-  contribute(descriptor: PiariumExtensionStaticContribution, implementation: IsolatedContributionImplementation): void;
+  contribute(descriptor: VarinExtensionStaticContribution, implementation: IsolatedContributionImplementation): void;
   deleteContext(key: string): boolean;
   grantedCapabilities: readonly string[];
   hasService(serviceId: string, version: number, providerId?: string): boolean;
-  readAsset(path: string): Promise<PiariumExtensionAssetPayload>;
-  setContext(key: string, value: PiariumContextValue): boolean;
+  readAsset(path: string): Promise<VarinExtensionAssetPayload>;
+  setContext(key: string, value: VarinContextValue): boolean;
 }
 
 export interface IsolatedRealmIdentity {
@@ -114,7 +114,7 @@ const bootstrapSource = (nonce: string): string => `
       port.close();
       return;
     }
-    if (message.type === 'message') globalThis.dispatchEvent(new MessageEvent('piarium-message', { data: message.value }));
+    if (message.type === 'message') globalThis.dispatchEvent(new MessageEvent('varin-message', { data: message.value }));
   };
   const begin = async (nextPort, grants) => {
     if (port) return;
@@ -122,7 +122,7 @@ const bootstrapSource = (nonce: string): string => `
     port.onmessage = handlePortMessage;
     port.start?.();
     send({ type: 'hello', nonce, version: ${ISOLATED_REALM_PROTOCOL_VERSION} });
-    const moduleValue = globalThis.PiariumIsolatedModule || {};
+    const moduleValue = globalThis.VarinIsolatedModule || {};
     const candidate = moduleValue.default || moduleValue;
     const activate = typeof candidate === 'function' ? candidate : candidate.activate;
     if (typeof activate !== 'function') throw new Error('Isolated Surface module must export activate or a default extension definition');
@@ -158,7 +158,7 @@ const bootstrapSource = (nonce: string): string => `
   };
   const receiveInit = (event) => {
     const message = event.data;
-    if (!message || message.type !== 'piarium-isolated-init' || message.version !== ${ISOLATED_REALM_PROTOCOL_VERSION} || message.nonce !== nonce || !event.ports?.[0]) return;
+    if (!message || message.type !== 'varin-isolated-init' || message.version !== ${ISOLATED_REALM_PROTOCOL_VERSION} || message.nonce !== nonce || !event.ports?.[0]) return;
     globalThis.removeEventListener('message', receiveInit);
     void begin(event.ports[0], Array.isArray(message.grants) ? message.grants : []).catch((error) => {
       try { send({ type: 'fatal', error: error instanceof Error ? error.message : String(error) }); } catch {}
@@ -174,7 +174,7 @@ for (const name of ['fetch', 'WebSocket', 'EventSource', 'WebTransport', 'import
   if (!(name in globalThis)) continue;
   Object.defineProperty(globalThis, name, {
     configurable: false,
-    value: () => { throw new Error('Ambient network access is unavailable in an isolated Piarium realm; use a granted capability'); },
+    value: () => { throw new Error('Ambient network access is unavailable in an isolated Varin realm; use a granted capability'); },
     writable: false,
   });
 }`;
@@ -249,13 +249,13 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
       rejectReady(new Error(event.message || "Isolated Worker failed to start"));
       this.dispose("worker failed");
     }, { once: true });
-    this.#worker.postMessage({ type: "piarium-isolated-init", version: ISOLATED_REALM_PROTOCOL_VERSION, nonce: this.#nonce, grants: this.#activation?.grantedCapabilities ?? [] }, [port]);
+    this.#worker.postMessage({ type: "varin-isolated-init", version: ISOLATED_REALM_PROTOCOL_VERSION, nonce: this.#nonce, grants: this.#activation?.grantedCapabilities ?? [] }, [port]);
   }
 
   #startIframe(port: MessagePort, rejectReady: (error: Error) => void): void {
     if (typeof document === "undefined") throw new Error("This Surface does not support isolated iframes");
     const iframe = document.createElement("iframe");
-    iframe.dataset.piariumIsolatedRealm = this.#identity.realmId;
+    iframe.dataset.varinIsolatedRealm = this.#identity.realmId;
     iframe.sandbox.add("allow-scripts");
     iframe.setAttribute("aria-hidden", "true");
     iframe.style.cssText = "position:fixed;width:0;height:0;border:0;visibility:hidden";
@@ -269,7 +269,7 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
         return;
       }
       iframe.contentWindow.postMessage({
-        type: "piarium-isolated-init",
+        type: "varin-isolated-init",
         version: ISOLATED_REALM_PROTOCOL_VERSION,
         nonce: this.#nonce,
         grants: this.#activation?.grantedCapabilities ?? [],
@@ -315,7 +315,7 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
         return;
       }
       try {
-        this.#activation.contribute(message.descriptor as PiariumExtensionStaticContribution, this.#implementation(message.viewId ?? "main"));
+        this.#activation.contribute(message.descriptor as VarinExtensionStaticContribution, this.#implementation(message.viewId ?? "main"));
       } catch (error) {
         rejectReady(error instanceof Error ? error : new Error(String(error)));
         this.dispose("contribution rejected");

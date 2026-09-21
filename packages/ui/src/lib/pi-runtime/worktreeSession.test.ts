@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionSnapshot } from '@piarium/protocol';
+import type { SessionSnapshot } from '@varin/protocol';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   createPiWorktreeSessionWithRuntime,
@@ -7,14 +7,14 @@ import {
 } from './worktreeSession';
 
 const worktree: WorktreeMetadata = {
-  branch: 'piarium-work',
+  branch: 'varin-work',
   headState: 'branch',
-  label: 'piarium-work',
-  name: 'piarium-work',
-  path: 'D:/repo/.worktrees/piarium-work',
+  label: 'varin-work',
+  name: 'varin-work',
+  path: 'D:/repo/.worktrees/varin-work',
   projectDirectory: 'D:/repo',
   source: 'sdk',
-  worktreeRoot: 'D:/repo/.worktrees/piarium-work',
+  worktreeRoot: 'D:/repo/.worktrees/varin-work',
   worktreeSource: 'created-for-session',
   worktreeStatus: 'ready',
 };
@@ -43,7 +43,7 @@ const runtime = (
   checkIsGitRepository: async () => true,
   createSession: async () => session,
   createWorktree: async () => worktree,
-  generateBranchName: () => 'piarium-work',
+  generateBranchName: () => 'varin-work',
   getActiveProject: () => ({ id: 'project', path: 'D:/repo' }),
   removeWorktree: async () => undefined,
   shouldWaitForBootstrap: async () => false,
@@ -66,12 +66,12 @@ describe('Pi worktree session orchestration', () => {
     }));
 
     expect(result).toEqual({
-      branch: 'piarium-work',
+      branch: 'varin-work',
       path: worktree.path,
       sessionId: 'pi-session',
     });
     expect(calls).toEqual([
-      'worktree:project:piarium-work',
+      'worktree:project:varin-work',
       `session:project:${worktree.path}`,
     ]);
   });

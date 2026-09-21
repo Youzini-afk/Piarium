@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiResourceDescriptor } from '@piarium/protocol';
+import type { PiResourceDescriptor } from '@varin/protocol';
 import {
   createPiResourceStarter,
   diagnosticsForPiResource,

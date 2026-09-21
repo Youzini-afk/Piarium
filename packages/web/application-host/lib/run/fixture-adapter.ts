@@ -20,7 +20,7 @@ const server = createDapServer({
     const request = asRecord(params);
     if (method === 'initialize') {
       generation += 1;
-      if (process.env.PIARIUM_DAP_FIXTURE_CRASH === '1') {
+      if (process.env.VARIN_DAP_FIXTURE_CRASH === '1') {
         setImmediate(() => process.exit(17));
       }
       return {

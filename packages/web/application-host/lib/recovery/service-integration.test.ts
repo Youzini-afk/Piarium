@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createWorkspaceRecoveryAPI } from '@piarium/extension-contract';
-import { ApplicationExtensionRuntime } from '@piarium/extension-host';
+import { createWorkspaceRecoveryAPI } from '@varin/extension-contract';
+import { ApplicationExtensionRuntime } from '@varin/extension-host';
 import {
   createDocumentAuthorityHarness,
   type DocumentAuthorityHarness,
@@ -29,11 +29,11 @@ afterEach(async () => {
 
 describe('Web Application Host workspace recovery service', () => {
   it('invokes the built-in provider through the generic extension service path', async () => {
-    runtimeDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-recovery-service-'));
+    runtimeDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-recovery-service-'));
     const activeRuntime = await ApplicationExtensionRuntime.create({
       brokerScript: fileURLToPath(new URL('../../../../extension-host/broker/broker-child.mjs', import.meta.url)),
       dataDir: runtimeDataDir,
-      piariumVersion: '1.2.3',
+      varinVersion: '1.2.3',
     });
     runtime = activeRuntime;
     const activeHarness = await createDocumentAuthorityHarness({ hostId: activeRuntime.services.hostId });

@@ -1,37 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  defaultPiariumWorkbenchProfileDocument,
-  inspectPiariumWorkbenchShell,
-  migratePiariumWorkbenchProfileDocument,
-  parsePiariumWorkbenchLayoutLayer,
-  parsePiariumWorkbenchProfileApplyRequest,
-  parsePiariumWorkbenchProfileDocument,
-  parsePiariumWorkbenchShellContributionData,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-  PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
-  PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-  PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL,
-  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
-  PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
-  PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
-  PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL,
-  PIARIUM_WORKBENCH_CONTEXT_KEYS,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-  PIARIUM_WORKBENCH_SLOTS,
-  resolvePiariumWorkbenchLayout,
-  resolvePiariumWorkbenchLayoutForProfile,
-  resolvePiariumWorkbenchProfile,
-  resolvePiariumWorkbenchShellSurfaceSeams,
+  defaultVarinWorkbenchProfileDocument,
+  inspectVarinWorkbenchShell,
+  migrateVarinWorkbenchProfileDocument,
+  parseVarinWorkbenchLayoutLayer,
+  parseVarinWorkbenchProfileApplyRequest,
+  parseVarinWorkbenchProfileDocument,
+  parseVarinWorkbenchShellContributionData,
+  VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+  VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES,
+  VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  VARIN_BUILTIN_IDE_WORKBENCH_SURFACES,
+  VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
+  VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL,
+  VARIN_WORKBENCH_IDE_PROFILE_ID,
+  VARIN_WORKBENCH_IDE_PROFILE_LABEL,
+  VARIN_WORKBENCH_RESEARCH_PROFILE_ID,
+  VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL,
+  VARIN_WORKBENCH_CONTEXT_KEYS,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+  VARIN_WORKBENCH_SLOTS,
+  resolveVarinWorkbenchLayout,
+  resolveVarinWorkbenchLayoutForProfile,
+  resolveVarinWorkbenchProfile,
+  resolveVarinWorkbenchShellSurfaceSeams,
 } from "../src/index.js";
 
 test("workbench profile resolution layers distribution, user, and workspace without dropping missing references", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.layouts = [
     {
       profileId: "default",
@@ -58,7 +58,7 @@ test("workbench profile resolution layers distribution, user, and workspace with
       surface: "web",
     },
   ];
-  const resolved = resolvePiariumWorkbenchLayout(parsePiariumWorkbenchProfileDocument(document), {
+  const resolved = resolveVarinWorkbenchLayout(parseVarinWorkbenchProfileDocument(document), {
     surface: "web",
     userId: "default",
     workspaceId: "/workspace",
@@ -74,38 +74,38 @@ test("workbench profile resolution layers distribution, user, and workspace with
 });
 
 test("workbench profile selection is user-scoped while workspace layers remain project-scoped", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  document.profileSelections.users.default = PIARIUM_WORKBENCH_IDE_PROFILE_ID;
-  const resolved = resolvePiariumWorkbenchLayout(document, {
+  const document = defaultVarinWorkbenchProfileDocument();
+  document.profileSelections.users.default = VARIN_WORKBENCH_IDE_PROFILE_ID;
+  const resolved = resolveVarinWorkbenchLayout(document, {
     surface: "web",
     userId: "default",
     workspaceId: "/workspace",
   });
-  assert.equal(resolved.profileId, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+  assert.equal(resolved.profileId, VARIN_WORKBENCH_IDE_PROFILE_ID);
 
-  const candidate = resolvePiariumWorkbenchLayoutForProfile(document, {
+  const candidate = resolveVarinWorkbenchLayoutForProfile(document, {
     surface: "web",
     userId: "default",
     workspaceId: "/workspace",
-  }, PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
-  assert.equal(candidate.profileId, PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
-  assert.equal(document.profileSelections.users.default, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+  }, VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
+  assert.equal(candidate.profileId, VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
+  assert.equal(document.profileSelections.users.default, VARIN_WORKBENCH_IDE_PROFILE_ID);
 });
 
 test("legacy workspace profile selections are discarded during document parsing", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  const parsed = parsePiariumWorkbenchProfileDocument({
+  const document = defaultVarinWorkbenchProfileDocument();
+  const parsed = parseVarinWorkbenchProfileDocument({
     ...document,
     profileSelections: {
       users: {},
-      workspaces: { "/legacy": PIARIUM_WORKBENCH_IDE_PROFILE_ID },
+      workspaces: { "/legacy": VARIN_WORKBENCH_IDE_PROFILE_ID },
     },
   });
   assert.deepEqual(parsed.profileSelections, { users: {} });
 });
 
 test("workbench profile documents reject duplicate layer and contribution identities", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   const layer = {
     profileId: "default",
     references: [
@@ -118,18 +118,18 @@ test("workbench profile documents reject duplicate layer and contribution identi
     surface: "web",
   };
   document.layouts = [layer as never];
-  assert.throws(() => parsePiariumWorkbenchProfileDocument(document), /duplicate contribution IDs/);
+  assert.throws(() => parseVarinWorkbenchProfileDocument(document), /duplicate contribution IDs/);
 });
 
 test("workbench profiles retain explicit extension sets and validate apply revisions", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.profiles[0] = {
     ...document.profiles[0]!,
     extensionIds: ["dev.example.alpha", "dev.example.beta"],
   };
-  const parsed = parsePiariumWorkbenchProfileDocument(document);
+  const parsed = parseVarinWorkbenchProfileDocument(document);
   assert.deepEqual(parsed.profiles[0]?.extensionIds, ["dev.example.alpha", "dev.example.beta"]);
-  assert.deepEqual(parsePiariumWorkbenchProfileApplyRequest({
+  assert.deepEqual(parseVarinWorkbenchProfileApplyRequest({
     expectedCatalogRevision: 7,
     profileId: "default",
   }), {
@@ -137,7 +137,7 @@ test("workbench profiles retain explicit extension sets and validate apply revis
     profileId: "default",
   });
   assert.throws(
-    () => parsePiariumWorkbenchProfileDocument({
+    () => parseVarinWorkbenchProfileDocument({
       ...document,
       profiles: [{ ...document.profiles[0], extensionIds: ["dev.example.alpha", "dev.example.alpha"] }],
     }),
@@ -169,7 +169,7 @@ const catalogEntry = (options: {
   desired: { enabled: options.enabled, revision: 1, updatedAt: "2026-08-20T00:00:00.000Z" },
   installedAt: "2026-08-20T00:00:00.000Z",
   manifest: {
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     id: options.extensionId,
     schemaVersion: 1 as const,
     version: "1.0.0",
@@ -188,37 +188,37 @@ const catalogEntry = (options: {
 });
 
 test("workbench slot and replacement target constants are valid contribution IDs", () => {
-  for (const id of [...Object.values(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS), ...Object.values(PIARIUM_WORKBENCH_SLOTS)]) {
-    parsePiariumWorkbenchLayoutLayer({
-      profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+  for (const id of [...Object.values(VARIN_WORKBENCH_REPLACEMENT_TARGETS), ...Object.values(VARIN_WORKBENCH_SLOTS)]) {
+    parseVarinWorkbenchLayoutLayer({
+      profileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
       references: [{ contributionId: id }],
       replacementSelections: { [id]: id },
       scope: "distribution",
-      scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+      scopeId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
       surface: "web",
     });
   }
 });
 
 test("workbench profile resolution inspects shell availability without mutating enablement", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.profiles.push({ id: "studio", label: "Studio" });
   document.layouts = [{
     profileId: "studio",
     references: [],
-    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.shell" },
+    replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.shell" },
     scope: "distribution",
     scopeId: "studio",
     surface: "web",
   }];
   const context = { surface: "web" as const, userId: "default" };
   const original = structuredClone(document);
-  const builtin = resolvePiariumWorkbenchProfile(document, [], context);
+  const builtin = resolveVarinWorkbenchProfile(document, [], context);
   assert.equal(builtin.status, "builtin");
-  assert.equal(builtin.profileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(builtin.profileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
 
-  const candidate = resolvePiariumWorkbenchLayoutForProfile(document, context, "studio");
-  assert.equal(candidate.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.shell");
+  const candidate = resolveVarinWorkbenchLayoutForProfile(document, context, "studio");
+  assert.equal(candidate.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.shell");
   assert.deepEqual(document, original);
 
   const extensions = [catalogEntry({
@@ -226,24 +226,24 @@ test("workbench profile resolution inspects shell availability without mutating 
     contributionId: "dev.example.shell",
     extensionId: "dev.example.workbench",
   })];
-  assert.equal(inspectPiariumWorkbenchShell(candidate.replacementSelections, extensions, "web").status, "disabled");
+  assert.equal(inspectVarinWorkbenchShell(candidate.replacementSelections, extensions, "web").status, "disabled");
   assert.equal(extensions[0]?.desired.enabled, false);
 
   document.profileSelections.users.default = "studio";
-  const disabled = resolvePiariumWorkbenchProfile(document, extensions, context);
+  const disabled = resolveVarinWorkbenchProfile(document, extensions, context);
   assert.equal(disabled.status, "disabled");
   assert.equal(disabled.shellExtensionId, "dev.example.workbench");
 
   extensions[0]!.desired.enabled = true;
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, context).status, "ready");
+  assert.equal(resolveVarinWorkbenchProfile(document, extensions, context).status, "ready");
   extensions[0]!.actual = catalogEntry({
     enabled: true,
     failed: true,
     contributionId: "dev.example.shell",
     extensionId: "dev.example.workbench",
   }).actual;
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, context).status, "failed");
-  assert.equal(inspectPiariumWorkbenchShell(
+  assert.equal(resolveVarinWorkbenchProfile(document, extensions, context).status, "failed");
+  assert.equal(inspectVarinWorkbenchShell(
     candidate.replacementSelections,
     extensions,
     "web",
@@ -252,7 +252,7 @@ test("workbench profile resolution inspects shell availability without mutating 
       realmIds: ["another-surface"],
     },
   ).status, "ready");
-  assert.equal(inspectPiariumWorkbenchShell(
+  assert.equal(inspectVarinWorkbenchShell(
     candidate.replacementSelections,
     extensions,
     "web",
@@ -261,57 +261,57 @@ test("workbench profile resolution inspects shell availability without mutating 
       realmIds: ["surface"],
     },
   ).status, "failed");
-  assert.equal(resolvePiariumWorkbenchProfile(document, [], context).status, "missing");
+  assert.equal(resolveVarinWorkbenchProfile(document, [], context).status, "missing");
 });
 
 test("default Agent profile seeds the official shell on web, desktop, and mobile", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
-  assert.equal(document.profiles[0]?.label, PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL);
+  const document = defaultVarinWorkbenchProfileDocument();
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(document.profiles[0]?.label, VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL);
   assert.equal(document.revision, 0);
-  const agentLayouts = document.layouts.filter((layer) => layer.profileId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  const agentLayouts = document.layouts.filter((layer) => layer.profileId === VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
   assert.deepEqual(
     agentLayouts.map((layer) => layer.surface).sort(),
-    [...PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES].sort(),
+    [...VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES].sort(),
   );
-  for (const surface of PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES) {
-    const resolved = resolvePiariumWorkbenchLayout(document, { surface, userId: "default" });
+  for (const surface of VARIN_BUILTIN_AGENT_WORKSPACE_SURFACES) {
+    const resolved = resolveVarinWorkbenchLayout(document, { surface, userId: "default" });
     assert.equal(
-      resolved.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell],
-      PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+      resolved.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell],
+      VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
     );
   }
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), false);
 });
 
 test("distribution includes an optional IDE profile without making it active", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  const document = defaultVarinWorkbenchProfileDocument();
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
   assert.ok(document.profiles.some((profile) => (
-    profile.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID && profile.label === PIARIUM_WORKBENCH_IDE_PROFILE_LABEL
+    profile.id === VARIN_WORKBENCH_IDE_PROFILE_ID && profile.label === VARIN_WORKBENCH_IDE_PROFILE_LABEL
   )));
-  for (const surface of PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES) {
-    const resolved = resolvePiariumWorkbenchLayoutForProfile(document, { surface, userId: "default" }, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+  for (const surface of VARIN_BUILTIN_IDE_WORKBENCH_SURFACES) {
+    const resolved = resolveVarinWorkbenchLayoutForProfile(document, { surface, userId: "default" }, VARIN_WORKBENCH_IDE_PROFILE_ID);
     assert.equal(
-      resolved.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell],
-      PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+      resolved.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell],
+      VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
     );
   }
-  const mobileIde = resolvePiariumWorkbenchLayoutForProfile(
+  const mobileIde = resolveVarinWorkbenchLayoutForProfile(
     document,
     { surface: "mobile", userId: "default" },
-    PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    VARIN_WORKBENCH_IDE_PROFILE_ID,
   );
-  assert.equal(mobileIde.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
+  assert.equal(mobileIde.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
 });
 
 test("distribution includes the Research profile and shell on every supported surface", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   assert.ok(document.profiles.some((profile) => (
-    profile.id === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID
-    && profile.label === PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL
+    profile.id === VARIN_WORKBENCH_RESEARCH_PROFILE_ID
+    && profile.label === VARIN_WORKBENCH_RESEARCH_PROFILE_LABEL
   )));
-  const researchLayouts = document.layouts.filter((layer) => layer.profileId === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
+  const researchLayouts = document.layouts.filter((layer) => layer.profileId === VARIN_WORKBENCH_RESEARCH_PROFILE_ID);
   assert.deepEqual(
     researchLayouts.map((layer) => layer.surface).sort(),
     ["desktop", "mobile", "web"],
@@ -319,102 +319,102 @@ test("distribution includes the Research profile and shell on every supported su
 });
 
 test("migrates missing IDE profiles without changing the active Agent selection", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  document.profiles = document.profiles.filter((profile) => profile.id !== PIARIUM_WORKBENCH_IDE_PROFILE_ID);
-  document.layouts = document.layouts.filter((layer) => layer.profileId !== PIARIUM_WORKBENCH_IDE_PROFILE_ID);
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
-  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
-  assert.ok(document.profiles.some((profile) => profile.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID));
+  const document = defaultVarinWorkbenchProfileDocument();
+  document.profiles = document.profiles.filter((profile) => profile.id !== VARIN_WORKBENCH_IDE_PROFILE_ID);
+  document.layouts = document.layouts.filter((layer) => layer.profileId !== VARIN_WORKBENCH_IDE_PROFILE_ID);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), true);
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.ok(document.profiles.some((profile) => profile.id === VARIN_WORKBENCH_IDE_PROFILE_ID));
   const web = document.layouts.find((layer) => (
-    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
+    layer.profileId === VARIN_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
   ));
-  assert.equal(web?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
+  assert.equal(web?.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), false);
 });
 
 test("migrates the legacy Default profile onto Agent Workspace without clobbering a chosen shell", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  document.profiles[0] = { id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: "Default" };
+  const document = defaultVarinWorkbenchProfileDocument();
+  document.profiles[0] = { id: VARIN_WORKBENCH_DEFAULT_PROFILE_ID, label: "Default" };
   document.layouts = [{
-    profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+    profileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
     references: [],
-    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.community.shell" },
+    replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.community.shell" },
     scope: "distribution",
-    scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+    scopeId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID,
     surface: "web",
   }];
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
-  assert.equal(document.profiles[0]?.label, PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), true);
+  assert.equal(document.profiles[0]?.label, VARIN_WORKBENCH_DEFAULT_PROFILE_LABEL);
   const shellByProfileSurface = Object.fromEntries(document.layouts.map((layer) => (
-    [`${layer.profileId}:${layer.surface}`, layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]]
+    [`${layer.profileId}:${layer.surface}`, layer.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]]
   )));
-  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:web`], "dev.example.community.shell");
-  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:desktop`], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
-  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:mobile`], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
-  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_IDE_PROFILE_ID}:web`], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
-  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_IDE_PROFILE_ID}:desktop`], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_DEFAULT_PROFILE_ID}:web`], "dev.example.community.shell");
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_DEFAULT_PROFILE_ID}:desktop`], VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_DEFAULT_PROFILE_ID}:mobile`], VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_IDE_PROFILE_ID}:web`], VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${VARIN_WORKBENCH_IDE_PROFILE_ID}:desktop`], VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), false);
 });
 
 test("migrates missing Agent shells without replacing a chosen IDE shell", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.layouts = [{
-    profileId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    profileId: VARIN_WORKBENCH_IDE_PROFILE_ID,
     references: [],
-    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.community.ide" },
+    replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.community.ide" },
     scope: "distribution",
-    scopeId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    scopeId: VARIN_WORKBENCH_IDE_PROFILE_ID,
     surface: "web",
   }];
-  assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
+  assert.equal(migrateVarinWorkbenchProfileDocument(document), true);
   const webIde = document.layouts.find((layer) => (
-    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
+    layer.profileId === VARIN_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
   ));
-  assert.equal(webIde?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.community.ide");
+  assert.equal(webIde?.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.community.ide");
   const desktopIde = document.layouts.find((layer) => (
-    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "desktop"
+    layer.profileId === VARIN_WORKBENCH_IDE_PROFILE_ID && layer.surface === "desktop"
   ));
-  assert.equal(desktopIde?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
-  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.equal(desktopIde?.replacementSelections[VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell], VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(document.activeProfileId, VARIN_WORKBENCH_DEFAULT_PROFILE_ID);
 });
 
 test("resolves the official Agent Workspace shell without mutating enablement", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   const extensions = [catalogEntry({
     enabled: false,
-    contributionId: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-    extensionId: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+    contributionId: VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+    extensionId: VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
     supports: ["web", "desktop", "mobile"],
   })];
   const context = { surface: "web" as const, userId: "default" };
-  const disabled = resolvePiariumWorkbenchProfile(document, extensions, context);
+  const disabled = resolveVarinWorkbenchProfile(document, extensions, context);
   assert.equal(disabled.status, "disabled");
-  assert.equal(disabled.shellExtensionId, PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID);
+  assert.equal(disabled.shellExtensionId, VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID);
   assert.equal(extensions[0]?.desired.enabled, false);
 
   extensions[0]!.desired.enabled = true;
-  const ready = resolvePiariumWorkbenchProfile(document, extensions, context);
+  const ready = resolveVarinWorkbenchProfile(document, extensions, context);
   assert.equal(ready.status, "ready");
-  assert.equal(ready.shellContributionId, PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(ready.shellContributionId, VARIN_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
 });
 
 test("resolves the official IDE Workbench on web and desktop without forcing mobile", () => {
-  const document = defaultPiariumWorkbenchProfileDocument();
-  document.activeProfileId = PIARIUM_WORKBENCH_IDE_PROFILE_ID;
+  const document = defaultVarinWorkbenchProfileDocument();
+  document.activeProfileId = VARIN_WORKBENCH_IDE_PROFILE_ID;
   const extensions = [catalogEntry({
     enabled: false,
-    contributionId: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
-    extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+    contributionId: VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    extensionId: VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
     supports: ["web", "desktop"],
   })];
-  const web = resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
+  const web = resolveVarinWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
   assert.equal(web.status, "disabled");
-  assert.equal(web.shellContributionId, PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(web.shellContributionId, VARIN_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
   assert.equal(extensions[0]?.desired.enabled, false);
   extensions[0]!.desired.enabled = true;
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" }).status, "ready");
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "desktop", userId: "default" }).status, "ready");
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "mobile", userId: "default" }).status, "builtin");
+  assert.equal(resolveVarinWorkbenchProfile(document, extensions, { surface: "web", userId: "default" }).status, "ready");
+  assert.equal(resolveVarinWorkbenchProfile(document, extensions, { surface: "desktop", userId: "default" }).status, "ready");
+  assert.equal(resolveVarinWorkbenchProfile(document, extensions, { surface: "mobile", userId: "default" }).status, "builtin");
 });
 
 // ---------------------------------------------------------------------------
@@ -422,40 +422,40 @@ test("resolves the official IDE Workbench on web and desktop without forcing mob
 // ---------------------------------------------------------------------------
 
 const agentSeams = {
-  contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+  contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
   seams: {
     web: {
       replacementTargets: [
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
       ],
       slots: [],
     },
     desktop: {
       replacementTargets: [
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
       ],
       slots: [],
     },
     mobile: {
       replacementTargets: [
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.agents,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.mcp,
-        PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.settings,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatTimeline,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.chatComposer,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.agents,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.mcp,
+        VARIN_WORKBENCH_REPLACEMENT_TARGETS.settings,
       ],
       slots: [],
     },
@@ -463,19 +463,19 @@ const agentSeams = {
 };
 
 test("parses a complete Agent shell seam declaration", () => {
-  const parsed = parsePiariumWorkbenchShellContributionData(agentSeams, ["web", "desktop", "mobile"]);
-  assert.equal(parsed.contract, PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT);
-  const webSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "web");
+  const parsed = parseVarinWorkbenchShellContributionData(agentSeams, ["web", "desktop", "mobile"]);
+  assert.equal(parsed.contract, VARIN_WORKBENCH_SHELL_DATA_CONTRACT);
+  const webSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "web");
   assert.equal(webSeams.replacementTargets.length, 7);
   assert.equal(webSeams.slots.length, 0);
-  const mobileSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "mobile");
-  assert.ok(!mobileSeams.replacementTargets.includes(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer));
+  const mobileSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "mobile");
+  assert.ok(!mobileSeams.replacementTargets.includes(VARIN_WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer));
 });
 
 test("rejects a supported surface missing from seams", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
-      { contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
+    () => parseVarinWorkbenchShellContributionData(
+      { contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
       ["web", "desktop"],
     ),
     (err: Error & { issues?: string[] }) => err.issues?.some((i) => i.includes("missing")) === true,
@@ -484,9 +484,9 @@ test("rejects a supported surface missing from seams", () => {
 
 test("rejects a seam for an unsupported surface", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: { replacementTargets: [], slots: [] },
           mobile: { replacementTargets: [], slots: [] },
@@ -500,9 +500,9 @@ test("rejects a seam for an unsupported surface", () => {
 
 test("rejects duplicate replacement targets within a surface", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: {
             replacementTargets: ["sessions.navigator", "sessions.navigator"],
@@ -518,12 +518,12 @@ test("rejects duplicate replacement targets within a surface", () => {
 
 test("rejects workbench.shell as a nested target", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: {
-            replacementTargets: [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell],
+            replacementTargets: [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell],
             slots: [],
           },
         },
@@ -536,12 +536,12 @@ test("rejects workbench.shell as a nested target", () => {
 
 test("rejects workbench.transition as a nested target", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: {
-            replacementTargets: [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition],
+            replacementTargets: [VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition],
             slots: [],
           },
         },
@@ -554,7 +554,7 @@ test("rejects workbench.transition as a nested target", () => {
 
 test("rejects a malformed contract string", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       { contract: "wrong", seams: { web: { replacementTargets: [], slots: [] } } },
       ["web"],
     ),
@@ -564,9 +564,9 @@ test("rejects a malformed contract string", () => {
 
 test("rejects the same identifier in both replacementTargets and slots", () => {
   assert.throws(
-    () => parsePiariumWorkbenchShellContributionData(
+    () => parseVarinWorkbenchShellContributionData(
       {
-        contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+        contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
         seams: {
           web: {
             replacementTargets: ["workbench.panel"],
@@ -581,18 +581,18 @@ test("rejects the same identifier in both replacementTargets and slots", () => {
 });
 
 test("resolves empty seams for an undeclared surface", () => {
-  const parsed = parsePiariumWorkbenchShellContributionData(
-    { contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
+  const parsed = parseVarinWorkbenchShellContributionData(
+    { contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT, seams: { web: { replacementTargets: [], slots: [] } } },
     ["web"],
   );
-  const desktop = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "desktop");
+  const desktop = resolveVarinWorkbenchShellSurfaceSeams(parsed, "desktop");
   assert.deepEqual(desktop, { replacementTargets: [], slots: [] });
 });
 
 test("allows unknown third-party targets in seams", () => {
-  const parsed = parsePiariumWorkbenchShellContributionData(
+  const parsed = parseVarinWorkbenchShellContributionData(
     {
-      contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+      contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
       seams: {
         web: {
           replacementTargets: ["my.custom.target"],
@@ -602,16 +602,16 @@ test("allows unknown third-party targets in seams", () => {
     },
     ["web"],
   );
-  const webSeams = resolvePiariumWorkbenchShellSurfaceSeams(parsed, "web");
+  const webSeams = resolveVarinWorkbenchShellSurfaceSeams(parsed, "web");
   assert.ok(webSeams.replacementTargets.includes("my.custom.target"));
   assert.ok(webSeams.slots.includes("my.custom.slot"));
 });
 
 test("public workbench context keys stay stable identifiers", () => {
-  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
-  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsDirty, "editorIsDirty");
-  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorHasSelection, "editorHasSelection");
-  assert.equal(PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
-  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell, "workbench.shell");
-  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
+  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
+  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorIsDirty, "editorIsDirty");
+  assert.equal(VARIN_WORKBENCH_CONTEXT_KEYS.editorHasSelection, "editorHasSelection");
+  assert.equal(VARIN_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
+  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell, "workbench.shell");
+  assert.equal(VARIN_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
 });

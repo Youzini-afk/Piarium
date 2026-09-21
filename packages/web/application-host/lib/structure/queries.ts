@@ -1,10 +1,10 @@
 /**
- * Piarium tree-sitter queries for TypeScript / TSX.
+ * Varin tree-sitter queries for TypeScript / TSX.
  *
  * Adapted from Apache-2.0 query sets in Aider (paul-gauthier/aider,
  * `aider/repomap.py` language queries) and nvim-treesitter
  * (`queries/typescript/locals.scm` / `highlights.scm`). Captures and
- * grouping are Piarium's; node names follow tree-sitter-typescript.
+ * grouping are Varin's; node names follow tree-sitter-typescript.
  *
  * `@unit` marks a candidate outline span. The provider keeps it as a slice
  * unit only when it is a container or a definition binding (D-098):

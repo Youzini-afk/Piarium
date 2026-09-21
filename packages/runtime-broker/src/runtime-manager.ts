@@ -8,14 +8,14 @@ import type {
   PiRuntimeIssueCode,
   PiRuntimeManagerStatus,
   PiRuntimeSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   discoverPiRuntimes,
   readPinnedPiVersion,
   toRuntimeInstallation,
   type CustomRuntimeConfig,
   type RuntimeDiscoveryOptions,
-} from "@piarium/pi-host/discovery";
+} from "@varin/pi-host/discovery";
 import { detectInstallManagers, planPiInstall } from "./runtime-install-plan.js";
 import {
   describeInstallFailure,

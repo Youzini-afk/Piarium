@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity, PiSettingsSnapshot } from "@piarium/protocol";
+import type { HarnessActorIdentity, PiSettingsSnapshot } from "@varin/protocol";
 import { createHarnessServiceHost, type HarnessSessionContext } from "./service-host.js";
 import { createHarnessSessionRegistration } from "./session-registration.js";
 import { createHarnessRouter } from "./router.js";

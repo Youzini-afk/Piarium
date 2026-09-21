@@ -3,7 +3,7 @@ import type {
   MobileDevice,
   MobilePairStartResult,
   MobileTestPushResult,
-} from '@piarium/application-client';
+} from '@varin/application-client';
 
 const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T | null> => {
   try {

@@ -1,5 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { ImageAttachment, ThreadInheritedContext } from "@piarium/protocol";
+import type { ImageAttachment, ThreadInheritedContext } from "@varin/protocol";
 
 export type CapturedInheritedInput = Pick<ThreadInheritedContext, "text" | "anchors" | "images">;
 

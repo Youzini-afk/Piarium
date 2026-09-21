@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HarnessSettings, ResolvedPreset, ResolvedResearchCapability } from "@piarium/protocol";
+import type { HarnessSettings, ResolvedPreset, ResolvedResearchCapability } from "@varin/protocol";
 import { createBashTool } from "./bash-tool.js";
 import { createGrepTool } from "./grep-tool.js";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
@@ -102,7 +102,7 @@ export interface SelectHarnessToolsDeps {
  * New tools (get_output, write_to_process, kill_shell, diagnostics,
  * apply_patch) are omitted when disabled.
  * apply_patch is only included when isOpenAIFamily is true AND not disabled.
- * webfetch / websearch remain Piarium-native unless explicitly disabled in
+ * webfetch / websearch remain Varin-native unless explicitly disabled in
  * harness.tools. Installing pi-web-access does not silently replace them.
  * websearch uses the Host's default search unless the user selected a provider.
  */

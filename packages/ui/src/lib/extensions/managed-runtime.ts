@@ -1,27 +1,27 @@
-import { SurfaceExtensionLoader } from '@piarium/extension-loader';
+import { SurfaceExtensionLoader } from '@varin/extension-loader';
 import {
-  PIARIUM_EDITOR_MONACO_SERVICE_ID,
-  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
-} from '@piarium/extension-contract';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+  VARIN_EDITOR_MONACO_SERVICE_ID,
+  VARIN_EDITOR_MONACO_SERVICE_VERSION,
+} from '@varin/extension-contract';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { piariumSurfaceRuntime } from './surface-runtime';
-import { startBuiltinPiariumExtensions } from './builtin-surface-manager';
+import { varinSurfaceRuntime } from './surface-runtime';
+import { startBuiltinVarinExtensions } from './builtin-surface-manager';
 import { surfaceCapabilityRegistry } from './surface-capabilities';
 import { createMonacoExtensionExternalService } from '@/lib/monaco/extension-service';
 
 const runtimeExtensions = () => {
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
-  if (!extensions) throw new Error('Piarium application-host extension API is unavailable');
+  if (!extensions) throw new Error('Varin application-host extension API is unavailable');
   return extensions;
 };
 
 let activeProjectTrusted = false;
 
-export const setPiariumExtensionProjectTrust = (trusted: boolean): void => {
+export const setVarinExtensionProjectTrust = (trusted: boolean): void => {
   if (activeProjectTrusted === trusted) return;
   activeProjectTrusted = trusted;
   void surfaceExtensionLoader.reconcile();
@@ -29,8 +29,8 @@ export const setPiariumExtensionProjectTrust = (trusted: boolean): void => {
 
 export const surfaceExtensionLoader = new SurfaceExtensionLoader({
   accessContext: () => ({
-    access: piariumSurfaceRuntime.surface === 'desktop'
-      || (typeof window !== 'undefined' && typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string')
+    access: varinSurfaceRuntime.surface === 'desktop'
+      || (typeof window !== 'undefined' && typeof window.__VARIN_LOCAL_ORIGIN__ === 'string')
       ? 'local'
       : 'remote',
     projectTrusted: activeProjectTrusted,
@@ -50,18 +50,18 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
     waitForHostState: (request, signal) => runtimeExtensions().waitForHostState(request, signal),
   },
   capabilities: surfaceCapabilityRegistry,
-  externalServiceFactories: piariumSurfaceRuntime.surface === 'desktop' || piariumSurfaceRuntime.surface === 'web'
+  externalServiceFactories: varinSurfaceRuntime.surface === 'desktop' || varinSurfaceRuntime.surface === 'web'
     ? [{
         create: createMonacoExtensionExternalService,
         descriptor: {
-          id: PIARIUM_EDITOR_MONACO_SERVICE_ID,
-          version: PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+          id: VARIN_EDITOR_MONACO_SERVICE_ID,
+          version: VARIN_EDITOR_MONACO_SERVICE_VERSION,
         },
-        providerId: 'piarium.builtin.text',
+        providerId: 'varin.builtin.text',
       }]
     : [],
-  surface: piariumSurfaceRuntime.surface,
-  surfaceRuntime: piariumSurfaceRuntime,
+  surface: varinSurfaceRuntime.surface,
+  surfaceRuntime: varinSurfaceRuntime,
 });
 
 let trustOwnerKey = '';
@@ -81,14 +81,14 @@ const refreshProjectTrustOwner = (): void => {
   if (nextOwnerKey === trustOwnerKey) return;
   trustOwnerKey = nextOwnerKey;
   const generation = ++trustGeneration;
-  setPiariumExtensionProjectTrust(false);
+  setVarinExtensionProjectTrust(false);
   if (!target) return;
   void surfaceExtensionLoader.triggerActivation('workspace-match').catch((error) => {
-    console.error('[Piarium Extensions] Workspace Surface activation failed:', error);
+    console.error('[Varin Extensions] Workspace Surface activation failed:', error);
   });
   void getPiSettings(target).then((settings) => {
     if (generation !== trustGeneration || nextOwnerKey !== trustOwnerKey || runtimeKey !== getRuntimeKey()) return;
-    setPiariumExtensionProjectTrust(settings.projectTrusted);
+    setVarinExtensionProjectTrust(settings.projectTrusted);
   }).catch(() => {
     // A failed read is not evidence of either trusted or untrusted state. The new owner stays untrusted
     // until a complete authoritative catalog is observed.
@@ -108,7 +108,7 @@ let initialReconcile: Promise<void> | null = null;
 export const startSurfaceExtensions = (): Promise<void> => {
   initialReconcile ??= Promise.all([
     surfaceExtensionLoader.start(),
-    startBuiltinPiariumExtensions(),
+    startBuiltinVarinExtensions(),
   ]).then(() => undefined).catch((error) => {
     initialReconcile = null;
     throw error;

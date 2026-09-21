@@ -2,13 +2,13 @@ import { spawn, type SpawnOptionsWithStdioTuple, type StdioPipe } from 'node:chi
 import { expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from './supervisor.js';
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from './servers.js';
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from './servers.js';
 
 const launchProcess = (command: string, args: readonly string[], options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) => spawn(command, args, options);
 
 it('prepares on demand and shares startup between concurrent requests', async () => {
   const harness = await createDocumentAuthorityHarness();
-  const prepare = vi.fn(async () => ({ command: process.execPath, args: PIARIUM_LSP_FIXTURE_SERVER_ARGS }));
+  const prepare = vi.fn(async () => ({ command: process.execPath, args: VARIN_LSP_FIXTURE_SERVER_ARGS }));
   const launch = vi.fn(launchProcess);
   const supervisor = createLanguageSupervisor({ documents: harness.authority, spawn: launch, prepareProvider: prepare });
   supervisor.registerProvider({ providerId: 'managed', command: 'not-installed', languageIds: ['go'], source: 'builtin' });

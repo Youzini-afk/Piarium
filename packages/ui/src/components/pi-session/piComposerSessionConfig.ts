@@ -2,7 +2,7 @@ import type {
   ModelDescriptor,
   SessionSnapshot,
   ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface PiComposerModelSelection {
   id: string;

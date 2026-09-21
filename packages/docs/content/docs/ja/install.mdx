@@ -1,11 +1,11 @@
 ---
 title: インストール
-description: ソースまたは Docker から、デスクトップまたは Web 向けに Piarium をインストールします。
+description: ソースまたは Docker から、デスクトップまたは Web 向けに Varin をインストールします。
 ---
 
 # インストール
 
-Piarium は pre-1.0 です。現在サポートされている実行方法は**ソースから**と **Docker を使う**ことだけです。パッケージ化された npm と GitHub Release のダウンロードはまだ公開されていません。
+Varin は pre-1.0 です。現在サポートされている実行方法は**ソースから**と **Docker を使う**ことだけです。パッケージ化された npm と GitHub Release のダウンロードはまだ公開されていません。
 
 主な製品画面は 2 つです。
 
@@ -24,13 +24,13 @@ Piarium は pre-1.0 です。現在サポートされている実行方法は**�
 ## ソースから（Web）
 
 ```bash
-git clone https://github.com/Youzini-afk/Piarium.git
-cd Piarium
+git clone https://github.com/Youzini-afk/Varin.git
+cd Varin
 bun install --frozen-lockfile
 bun run dev
 ```
 
-ターミナルに表示された Vite URL を開きます。Piarium は UI と信頼できる API/ランタイムサービスを一緒に起動します。
+ターミナルに表示された Vite URL を開きます。Varin は UI と信頼できる API/ランタイムサービスを一緒に起動します。
 
 ## ソースから（デスクトップ）
 
@@ -51,17 +51,17 @@ Windows インストーラーは `bun run electron:build:win` でローカルに
 Linux の Docker ホスト上で：
 
 ```bash
-mkdir -p data/piarium data/ssh data/cloudflared workspaces
+mkdir -p data/varin data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 umask 077
-printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+printf 'VARIN_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
 docker compose up -d
 curl --fail http://127.0.0.1:3000/health
 ```
 
-`http://127.0.0.1:3000` を開き、生成されたパスワードを使います。インターネットに公開するデプロイの前には、TLS リバースプロキシか承認済みのトンネルを置いてください。本番では `PIARIUM_IMAGE` を `:latest` ではなく、検証済みの digest に固定してください。
+`http://127.0.0.1:3000` を開き、生成されたパスワードを使います。インターネットに公開するデプロイの前には、TLS リバースプロキシか承認済みのトンネルを置いてください。本番では `VARIN_IMAGE` を `:latest` ではなく、検証済みの digest に固定してください。
 
-Compose は既定で軽量イメージ `ghcr.io/youzini-afk/piarium-slim:latest` を使います（サーバーを動かすのに必要な Bun、Node、Git、SSH、cloudflared）。コンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルトのオーバーレイを重ねます：
+Compose は既定で軽量イメージ `ghcr.io/youzini-afk/varin-slim:latest` を使います（サーバーを動かすのに必要な Bun、Node、Git、SSH、cloudflared）。コンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルトのオーバーレイを重ねます：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
@@ -69,4 +69,4 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ## CLI ワンライナー（未公開）
 
-`scripts/install.sh` と `npx @piarium/web` は `@piarium/web` npm パッケージを対象にしています。そのパッケージはまだ公開レジストリにないため、リリースが公開されるまで curl インストーラーは失敗します。それまではソースまたは Docker を使ってください。
+`scripts/install.sh` と `npx @varin/web` は `@varin/web` npm パッケージを対象にしています。そのパッケージはまだ公開レジストリにないため、リリースが公開されるまで curl インストーラーは失敗します。それまではソースまたは Docker を使ってください。

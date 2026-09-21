@@ -1,4 +1,4 @@
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
@@ -231,7 +231,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         response = await fetch(currentUrl, {
           signal: controller.signal,
           redirect: "manual", // Handle redirects manually for cross-host detection
-          headers: { "User-Agent": "Piarium-Agent/1.0" },
+          headers: { "User-Agent": "Varin-Agent/1.0" },
         });
       } catch (error) {
         if (ctx.signal?.aborted) {

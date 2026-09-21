@@ -23,7 +23,7 @@ import {
 } from "./managed-remote-types.js";
 
 const BASE_PATH = "/api/harness/managed-execution/v1";
-const TARGET_REFRESH_WORKSPACE = "__piarium_managed_remote__";
+const TARGET_REFRESH_WORKSPACE = "__varin_managed_remote__";
 const digest = (...values: string[]): string => createHash("sha256").update(values.join("\0")).digest("hex");
 const payloadOf = (record: KernelRecordResult): Record<string, unknown> => {
   try {
@@ -87,7 +87,7 @@ class ManagedTargetClient {
       ...(body === undefined ? {} : { body: body as never }),
       ...(asyncBody ? { duplex: "half" as never } : {}),
     });
-    const actualHost = response.headers.get("x-piarium-managed-host");
+    const actualHost = response.headers.get("x-varin-managed-host");
     if (actualHost !== this.target.hostId) {
       await response.body?.cancel().catch(() => undefined);
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
@@ -157,7 +157,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       throw new Error(identity && "error" in identity && typeof identity.error === "string" ? identity.error : `Target probe failed (${response.status})`);
     }
     if (identity.protocolVersion !== MANAGED_REMOTE_PROTOCOL_VERSION) throw new Error(`Unsupported managed target protocol ${String(identity.protocolVersion)}`);
-    if (response.headers.get("x-piarium-managed-host") !== identity.hostId) throw new Error("Managed target identity receipt is inconsistent");
+    if (response.headers.get("x-varin-managed-host") !== identity.hostId) throw new Error("Managed target identity receipt is inconsistent");
     if (identity.hostId === options.coordinatorHostId) throw new Error("Configured target resolves to this coordinator Host");
     return {
       machineId: `managed:${identity.hostId}`,
@@ -272,7 +272,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     const target = await targetFor(workspaceId, machineId);
     if (!target) throw new Error(`Managed target ${machineId} is unavailable`);
     const client = new ManagedTargetClient(target, fetchImpl);
-    const result = await client.json<import("@piarium/protocol").ShellExecResult>("/shell/exec", {
+    const result = await client.json<import("@varin/protocol").ShellExecResult>("/shell/exec", {
       coordinatorHostId: options.coordinatorHostId,
       ...input,
     });
@@ -294,7 +294,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     if (offset !== undefined) query.set("offset", String(offset));
     if (length !== undefined) query.set("length", String(length));
     if (waitMs !== undefined) query.set("waitMs", String(waitMs));
-    const result = await client.request<import("@piarium/protocol").ShellReadResult>(`/shell/${encodeURIComponent(options.coordinatorHostId)}/${encodeURIComponent(route.processId)}?${query}`);
+    const result = await client.request<import("@varin/protocol").ShellReadResult>(`/shell/${encodeURIComponent(options.coordinatorHostId)}/${encodeURIComponent(route.processId)}?${query}`);
     return {
       ...result,
       ...(result.executionId ? { executionId: routedShellId(route.machineId, result.executionId) } : {}),
@@ -430,8 +430,8 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           await client.request(`/objects/${encodeURIComponent(object.objectHash)}`, {
             method: "PUT",
             headers: {
-              "X-Piarium-Coordinator-Host": options.coordinatorHostId,
-              "X-Piarium-Object-Length": String(object.byteLength),
+              "X-Varin-Coordinator-Host": options.coordinatorHostId,
+              "X-Varin-Object-Length": String(object.byteLength),
               "Content-Type": "application/octet-stream",
             },
             body: transfer.readObject(object.objectHash, object.byteLength),

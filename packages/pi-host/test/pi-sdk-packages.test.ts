@@ -23,7 +23,7 @@ async function writeManifest(directory: string, name: string, extra: Record<stri
 
 describe("Pi SDK package resolution", () => {
   it("resolves sibling SDK packages from a coding-agent package root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-sdk-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-sdk-"));
     try {
       const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
       const agentCore = join(root, "node_modules", "@earendil-works", "pi-agent-core");
@@ -72,7 +72,7 @@ describe("Pi SDK package resolution", () => {
   });
 
   it("names the missing SDK module when the package root is incomplete", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-sdk-missing-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-sdk-missing-"));
     try {
       const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
       await writeManifest(codingAgent, "@earendil-works/pi-coding-agent");
@@ -90,7 +90,7 @@ describe("Pi SDK package resolution", () => {
   });
 
   it("locates an npm-style global install from the command path", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-sdk-command-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-sdk-command-"));
     try {
       const prefix = join(root, "npm");
       const codingAgent = join(prefix, "node_modules", "@earendil-works", "pi-coding-agent");
@@ -100,7 +100,7 @@ describe("Pi SDK package resolution", () => {
       const resolved = resolvePiPackageFromCommand(command);
       assert.equal(resolved.packageRoot, codingAgent);
       assert.equal(resolved.issue, undefined);
-      assert.match(importerParentURL(codingAgent, "@earendil-works/pi-coding-agent") ?? "", /piarium-sdk-importer\.mjs$/);
+      assert.match(importerParentURL(codingAgent, "@earendil-works/pi-coding-agent") ?? "", /varin-sdk-importer\.mjs$/);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

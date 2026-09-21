@@ -9,7 +9,7 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 /**
- * Hook that provides bidirectional URL routing for Piarium.
+ * Hook that provides bidirectional URL routing for Varin.
  *
  * On mount:
  * - Parses URL parameters and applies them to app state
@@ -22,7 +22,7 @@ import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation'
  * - Embedded session-chat iframe (`?piPanel=session-chat`): No URL updates.
  *   The iframe's session identity is fixed at mount (the parent builds the
  *   src with `sessionId`); in-place subtask navigation must NOT rewrite the
- *   URL, otherwise the embedded Piarium identity params get stripped and
+ *   URL, otherwise the embedded Varin identity params get stripped and
  *   `isEmbeddedSessionChat()` starts returning false, breaking subsequent
  *   "Open subtask" clicks.
  */

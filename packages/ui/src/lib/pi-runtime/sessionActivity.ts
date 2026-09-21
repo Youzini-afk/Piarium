@@ -1,4 +1,4 @@
-import type { SessionSnapshot } from '@piarium/protocol';
+import type { SessionSnapshot } from '@varin/protocol';
 
 export type PiSessionActivityPhase = 'idle' | 'busy' | 'retry';
 

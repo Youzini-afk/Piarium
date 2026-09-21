@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity } from "@piarium/protocol";
+import type { HarnessActorIdentity } from "@varin/protocol";
 import {
   createHarnessServiceHost,
   deriveHarnessCapabilities,

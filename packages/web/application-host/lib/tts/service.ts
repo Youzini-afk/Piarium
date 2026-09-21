@@ -117,7 +117,7 @@ export class TTSService {
     }
 
     if (!client) {
-      throw new Error('TTS service not available. Configure OpenAI credentials in Piarium, provide an API key, or set a custom server URL in settings.');
+      throw new Error('TTS service not available. Configure OpenAI credentials in Varin, provide an API key, or set a custom server URL in settings.');
     }
 
     if (!text.trim()) {
@@ -158,7 +158,7 @@ export class TTSService {
   async generateSpeechBuffer(options: GenerateSpeechOptions): Promise<Buffer> {
     const client = this._getClient();
     if (!client) {
-      throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY or configure OpenAI credentials in Piarium.');
+      throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY or configure OpenAI credentials in Varin.');
     }
 
     const {

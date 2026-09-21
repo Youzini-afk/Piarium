@@ -247,7 +247,7 @@ export class FileEditorModelRegistry {
       const record = entry.record;
       if (!record) return;
       const uri = monaco.Uri.from({
-        scheme: 'piarium-document',
+        scheme: 'varin-document',
         authority: runtimeAuthority(this.runtimeKey),
         path: `/${expectedInstanceId}`,
       });

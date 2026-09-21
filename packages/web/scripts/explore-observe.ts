@@ -307,7 +307,7 @@ const printDiagnostic = (question: ObserveQuestion, payload: ObservePayload): vo
 const main = async (): Promise<void> => {
   const dataDir = dataDirArg
     ? path.resolve(repoRoot, dataDirArg)
-    : await fsPromises.mkdtemp(path.join(os.tmpdir(), "piarium-explore-observe-"));
+    : await fsPromises.mkdtemp(path.join(os.tmpdir(), "varin-explore-observe-"));
   if (dataDirArg) await fsPromises.mkdir(dataDir, { recursive: true });
   let store: KnowledgeStore | null = null;
 

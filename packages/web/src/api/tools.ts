@@ -1,5 +1,5 @@
-import type { ToolsAPI } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
+import type { ToolsAPI } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
 
 export const createWebToolsAPI = (): ToolsAPI => ({
   async getAvailableTools(): Promise<string[]> {

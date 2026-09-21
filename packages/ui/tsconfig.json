@@ -16,7 +16,7 @@
     "baseUrl": "./src",
     "paths": {
       "@/*": ["./*"],
-      "@piarium/ui/*": ["./*"]
+      "@varin/ui/*": ["./*"]
     }
   },
   "include": ["src"]

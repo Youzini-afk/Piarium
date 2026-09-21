@@ -3,7 +3,7 @@ import type { Theme } from '@/types/theme';
 import { isValidTheme } from './theme-validation';
 
 type ThemeBootstrapWindow = Window & {
-  __piariumEmbeddedThemeBootstrap?: unknown;
+  __varinEmbeddedThemeBootstrap?: unknown;
 };
 
 export const readEmbeddedThemeSearchParams = (): URLSearchParams | null => {
@@ -18,7 +18,7 @@ export const publishEmbeddedThemeBootstrap = (theme: Theme): void => {
     return;
   }
 
-  (window as ThemeBootstrapWindow).__piariumEmbeddedThemeBootstrap = theme;
+  (window as ThemeBootstrapWindow).__varinEmbeddedThemeBootstrap = theme;
 };
 
 export const readEmbeddedThemeBootstrap = (): Theme | null => {
@@ -31,8 +31,8 @@ export const readEmbeddedThemeBootstrap = (): Theme | null => {
     if (parent === window) {
       return null;
     }
-    return isValidTheme(parent.__piariumEmbeddedThemeBootstrap)
-      ? parent.__piariumEmbeddedThemeBootstrap
+    return isValidTheme(parent.__varinEmbeddedThemeBootstrap)
+      ? parent.__varinEmbeddedThemeBootstrap
       : null;
   } catch {
     return null;

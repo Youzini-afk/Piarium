@@ -2,7 +2,7 @@ import path from 'node:path';
 import { createWorkspaceTaskRunner } from './tasks.js';
 import { createDebugSupervisor } from './debug-supervisor.js';
 import { createTestSupervisor } from './test-supervisor.js';
-import { PIARIUM_NODE_DAP_ADAPTER_ARGS } from './servers.js';
+import { VARIN_NODE_DAP_ADAPTER_ARGS } from './servers.js';
 import type { RunRuntimeOptions } from './types.js';
 
 export const createRunRuntime = ({
@@ -39,14 +39,14 @@ export const createRunRuntime = ({
   });
   if (registerBuiltins) {
     debug.registerAdapter({
-      adapterId: 'piarium.node',
+      adapterId: 'varin.node',
       command: execPath,
-      args: PIARIUM_NODE_DAP_ADAPTER_ARGS,
+      args: VARIN_NODE_DAP_ADAPTER_ARGS,
       languageIds: ['javascript', 'javascriptreact', 'typescript'],
       source: 'builtin',
     });
     tests.registerProvider({
-      providerId: 'piarium.node-test',
+      providerId: 'varin.node-test',
       kind: 'node-test',
       source: 'builtin',
     });

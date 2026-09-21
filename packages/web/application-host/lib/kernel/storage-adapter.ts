@@ -1558,7 +1558,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return this.listBranchObjectReferences(document.branchId);
   }
 
-  async measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement> {
+  async measurePin(pin: WorkingStatePin): Promise<import("@varin/protocol").ThreadSpaceMeasurement> {
     this.assertPinForBranch(pin.branchId, pin);
     let logical = 0;
     let unknown = false;

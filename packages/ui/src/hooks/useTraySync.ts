@@ -1,6 +1,6 @@
 import React from 'react';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
-import { getRuntimeApiBaseUrl } from '@piarium/application-client';
+import { getRuntimeApiBaseUrl } from '@varin/application-client';
 import {
   desktopHostsGet,
   getDesktopHostApiUrl,
@@ -39,12 +39,12 @@ type TraySnapshot = {
 
 const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
-  const platform = (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__;
+  const platform = (window as unknown as { __VARIN_PLATFORM__?: string }).__VARIN_PLATFORM__;
   return platform === 'darwin' || platform === 'win32' || platform === 'linux';
 };
 
 const isTrayEnabled = (): boolean => (
-  typeof window !== 'undefined' && window.__PIARIUM_ELECTRON__?.trayEnabled !== false
+  typeof window !== 'undefined' && window.__VARIN_ELECTRON__?.trayEnabled !== false
 );
 
 const buildUsage = (): TrayUsage => {
@@ -80,11 +80,11 @@ const buildUsage = (): TrayUsage => {
 
 const resolveInstanceName = async (): Promise<string> => {
   try {
-    if (isDesktopLocalOriginActive()) return 'Local Piarium';
-    const localOrigin = (window as unknown as { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__
+    if (isDesktopLocalOriginActive()) return 'Local Varin';
+    const localOrigin = (window as unknown as { __VARIN_LOCAL_ORIGIN__?: string }).__VARIN_LOCAL_ORIGIN__
       || window.location.origin;
     const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
-    if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) return 'Local Piarium';
+    if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) return 'Local Varin';
     const config = await desktopHostsGet();
     const match = config.hosts.find((host) => (
       runtimeApiBaseUrl
@@ -92,9 +92,9 @@ const resolveInstanceName = async (): Promise<string> => {
         : false
     ));
     if (match?.label?.trim()) return redactSensitiveUrl(match.label.trim());
-    return 'Piarium';
+    return 'Varin';
   } catch {
-    return 'Piarium';
+    return 'Varin';
   }
 };
 
@@ -120,7 +120,7 @@ export const useTraySync = (options: { enabled?: boolean } = {}): void => {
 
     let disposed = false;
     let flushTimer: number | null = null;
-    let instanceName = 'Piarium';
+    let instanceName = 'Varin';
     let lastSerialized = '';
 
     const flushNow = () => {

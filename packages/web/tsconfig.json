@@ -29,10 +29,10 @@
       "@web/*": [
         "./src/*"
       ],
-      "@piarium/ui/*": [
+      "@varin/ui/*": [
         "../ui/src/*"
       ],
-      "@piarium/web/*": [
+      "@varin/web/*": [
         "./src/*"
       ]
     }

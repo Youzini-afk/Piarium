@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { SessionHost } from "../src/session-host.js";
 
 describe("SessionHost Pi packages", () => {
   it("installs, reloads, reports, and removes a project-scoped local package", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-packages-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-packages-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const packageRoot = join(root, "fixture-pi-package");
@@ -106,7 +106,7 @@ describe("SessionHost Pi packages", () => {
   });
 
   it("does not bootstrap a duplicate when another global source declares the same package", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-host-package-bootstrap-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-host-package-bootstrap-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const packageRoot = join(root, "maintained-mcp");

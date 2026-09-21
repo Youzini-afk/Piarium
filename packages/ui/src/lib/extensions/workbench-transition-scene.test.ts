@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'vitest';
-import { PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION } from '@piarium/extension-builtins';
-import { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS } from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+import { VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION } from '@varin/extension-builtins';
+import { VARIN_WORKBENCH_REPLACEMENT_TARGETS } from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import {
   findCapturedWorkbenchTransitionScene,
   holdWorkbenchTransitionSceneContribution,
   resolveWorkbenchTransitionScene,
 } from './workbench-transition-scene';
 
-const descriptor = PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.contributions?.[0];
+const descriptor = VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.contributions?.[0];
 if (!descriptor) throw new Error('Built-in transition scene descriptor is unavailable');
 
 const contribution = (generation = 1): SurfaceContribution => ({
@@ -17,8 +17,8 @@ const contribution = (generation = 1): SurfaceContribution => ({
   owner: {
     desiredRevision: 1,
     entrypointId: 'main',
-    extensionId: PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.id,
-    extensionVersion: PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.version,
+    extensionId: VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.id,
+    extensionVersion: VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.version,
     generation,
     hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
     realmId: 'transition-scene-test',
@@ -46,7 +46,7 @@ describe('Workbench Transition Scene selection', () => {
 
   test('retains an explicit missing selection instead of silently choosing another scene', () => {
     const resolved = resolveWorkbenchTransitionScene(snapshot([contribution()]), {
-      [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition]: 'dev.example.missing.transition',
+      [VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition]: 'dev.example.missing.transition',
     });
     expect(resolved).toEqual({ contribution: null, scene: null, status: 'missing' });
   });

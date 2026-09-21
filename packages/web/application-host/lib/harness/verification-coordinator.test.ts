@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity } from "@piarium/protocol";
+import type { HarnessActorIdentity } from "@varin/protocol";
 import { createVerificationCoordinator, type CapturedVerificationIdentity } from "./verification-coordinator.js";
 import type { ParentVerificationBundle, ResultReviewRecord, ResultVerificationBundle } from "./working-state/types.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";

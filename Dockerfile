@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main
+ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-slim:main
 
 FROM --platform=$BUILDPLATFORM rust:1.97.1-bookworm AS kernel-builder
 WORKDIR /src
@@ -26,21 +26,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=private \
     *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; \
   esac; \
   if [ "$BUILDARCH" != "amd64" ]; then \
-    echo "Piarium's Linux cross-build stage requires an amd64 build runner, found $BUILDARCH" >&2; \
+    echo "Varin's Linux cross-build stage requires an amd64 build runner, found $BUILDARCH" >&2; \
     exit 1; \
   fi; \
   build_identity="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1)"; \
   test -n "$build_identity"; \
   rustup target add "$kernel_target"; \
-  PIARIUM_KERNEL_BUILD_IDENTITY="$build_identity" \
-  PIARIUM_KERNEL_TARGET="$kernel_target" \
-  PIARIUM_KERNEL_ARCH="$kernel_arch" \
-  cargo build --manifest-path kernel/Cargo.toml --release --bin piarium-kernel --locked --target "$kernel_target"; \
-  install -D -m 0755 "kernel/target/$kernel_target/release/piarium-kernel" /out/piarium-kernel
+  VARIN_KERNEL_BUILD_IDENTITY="$build_identity" \
+  VARIN_KERNEL_TARGET="$kernel_target" \
+  VARIN_KERNEL_ARCH="$kernel_arch" \
+  cargo build --manifest-path kernel/Cargo.toml --release --bin varin-kernel --locked --target "$kernel_target"; \
+  install -D -m 0755 "kernel/target/$kernel_target/release/varin-kernel" /out/varin-kernel
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app
-ARG PIARIUM_SOURCE_REVISION
+ARG VARIN_SOURCE_REVISION
 ARG TARGETARCH
 
 # Keep dependency installation cacheable while still presenting every Bun
@@ -71,35 +71,35 @@ RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./scripts/fix-deprecation.js
 
 COPY . .
-COPY --from=kernel-builder /out/piarium-kernel /tmp/piarium-kernel
-RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \
-  PIARIUM_KERNEL_PREBUILT=/tmp/piarium-kernel \
-  PIARIUM_TARGET_PLATFORM=linux \
-  PIARIUM_TARGET_ARCH="${TARGETARCH}" \
+COPY --from=kernel-builder /out/varin-kernel /tmp/varin-kernel
+RUN VARIN_SOURCE_REVISION="${VARIN_SOURCE_REVISION}" \
+  VARIN_KERNEL_PREBUILT=/tmp/varin-kernel \
+  VARIN_TARGET_PLATFORM=linux \
+  VARIN_TARGET_ARCH="${TARGETARCH}" \
   bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive
 
 # This stage runs on TARGETPLATFORM. Installing the canonical runtime tree here
 # ensures native production dependencies match the image architecture instead
 # of the builder architecture.
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
-WORKDIR /home/piarium/app
+WORKDIR /home/varin/app
 
-ENV HOME=/home/piarium \
+ENV HOME=/home/varin \
   NODE_ENV=production \
-  PIARIUM_DATA_DIR=/home/piarium/.config/piarium \
-  PIARIUM_WORKSPACE_ROOT=/home/piarium/workspaces
+  VARIN_DATA_DIR=/home/varin/.config/varin \
+  VARIN_WORKSPACE_ROOT=/home/varin/workspaces
 
-COPY --from=builder --chown=piarium:piarium /app/artifacts/cloud-runtime/ ./
-RUN --mount=type=cache,target=/home/piarium/.cache/bun,uid=1000,gid=1000 \
-  bun install --production --frozen-lockfile --cache-dir=/home/piarium/.cache/bun \
-  && node --input-type=module -e "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('Piarium runtime broker is missing resolveBundledPiHostEntry'); const entry = broker.resolveBundledPiHostEntry(); if (typeof entry !== 'string' || entry.length === 0) throw new Error('Piarium host entry did not resolve'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node');" \
+COPY --from=builder --chown=varin:varin /app/artifacts/cloud-runtime/ ./
+RUN --mount=type=cache,target=/home/varin/.cache/bun,uid=1000,gid=1000 \
+  bun install --production --frozen-lockfile --cache-dir=/home/varin/.cache/bun \
+  && node --input-type=module -e "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('Varin runtime broker is missing resolveBundledPiHostEntry'); const entry = broker.resolveBundledPiHostEntry(); if (typeof entry !== 'string' || entry.length === 0) throw new Error('Varin host entry did not resolve'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node');" \
   && node verify-kernel.mjs packages/web
 
-COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/piarium-entrypoint
+COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/varin-entrypoint
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
   CMD curl --fail --silent --show-error http://127.0.0.1:3000/health || exit 1
 
-ENTRYPOINT ["/usr/local/bin/piarium-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/varin-entrypoint"]
 CMD ["node", "packages/web/bin/cli.js", "serve", "--foreground"]

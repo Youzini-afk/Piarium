@@ -1,14 +1,14 @@
 import type { PackageSource } from "@earendil-works/pi-coding-agent";
 
 const RESOURCE_KEYS = ["extensions", "skills", "prompts", "themes"] as const;
-const SAVED_FILTERS_KEY = "piariumDisabledResources";
+const SAVED_FILTERS_KEY = "varinDisabledResources";
 
 type ResourceKey = (typeof RESOURCE_KEYS)[number];
 interface SavedPackageState extends Partial<Record<ResourceKey, string[] | null>> {
   autoload: boolean | null;
 }
 type PackageSourceObject = Exclude<PackageSource, string>;
-type PiariumPackageSource = PackageSourceObject & {
+type VarinPackageSource = PackageSourceObject & {
   [SAVED_FILTERS_KEY]?: SavedPackageState;
 };
 
@@ -18,7 +18,7 @@ export function packageSourceValue(entry: PackageSource): string {
 
 export function packageSourceEnabled(entry: PackageSource): boolean {
   if (typeof entry === "string") return true;
-  const saved = (entry as PiariumPackageSource)[SAVED_FILTERS_KEY];
+  const saved = (entry as VarinPackageSource)[SAVED_FILTERS_KEY];
   if (saved) return false;
   return entry.autoload === false
     || !RESOURCE_KEYS.every((key) => entry[key]?.length === 0);
@@ -36,7 +36,7 @@ export function setPackageSourceEnabled(entry: PackageSource, enabled: boolean):
         current[key] === undefined ? null : [...current[key]],
       ])),
     } as SavedPackageState;
-    const disabled: PiariumPackageSource = {
+    const disabled: VarinPackageSource = {
       ...current,
       autoload: true,
       extensions: [],
@@ -49,10 +49,10 @@ export function setPackageSourceEnabled(entry: PackageSource, enabled: boolean):
   }
 
   if (typeof entry === "string") return entry;
-  const saved = (entry as PiariumPackageSource)[SAVED_FILTERS_KEY];
+  const saved = (entry as VarinPackageSource)[SAVED_FILTERS_KEY];
   if (!saved) {
     if (packageSourceEnabled(entry)) return entry;
-    const restored: PiariumPackageSource = { ...entry };
+    const restored: VarinPackageSource = { ...entry };
     for (const key of RESOURCE_KEYS) delete restored[key];
     if (
       restored.autoload === undefined
@@ -60,7 +60,7 @@ export function setPackageSourceEnabled(entry: PackageSource, enabled: boolean):
     ) return source;
     return restored;
   }
-  const restored: PiariumPackageSource = { ...entry };
+  const restored: VarinPackageSource = { ...entry };
   delete restored[SAVED_FILTERS_KEY];
   if (saved.autoload === null) delete restored.autoload;
   else restored.autoload = saved.autoload;

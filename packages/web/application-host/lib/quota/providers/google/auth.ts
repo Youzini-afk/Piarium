@@ -19,12 +19,12 @@ import { parseGoogleRefreshToken } from './transforms.js';
 
 export const GOOGLE_OAUTH_CLIENT_ENV = {
   gemini: {
-    clientId: 'PIARIUM_GOOGLE_GEMINI_CLIENT_ID',
-    clientSecret: 'PIARIUM_GOOGLE_GEMINI_CLIENT_SECRET'
+    clientId: 'VARIN_GOOGLE_GEMINI_CLIENT_ID',
+    clientSecret: 'VARIN_GOOGLE_GEMINI_CLIENT_SECRET'
   },
   antigravity: {
-    clientId: 'PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_ID',
-    clientSecret: 'PIARIUM_GOOGLE_ANTIGRAVITY_CLIENT_SECRET'
+    clientId: 'VARIN_GOOGLE_ANTIGRAVITY_CLIENT_ID',
+    clientSecret: 'VARIN_GOOGLE_ANTIGRAVITY_CLIENT_SECRET'
   }
 } as const;
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';

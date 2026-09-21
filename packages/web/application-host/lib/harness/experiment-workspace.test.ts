@@ -13,11 +13,11 @@ import {
 import { canonicalizePathIdentity, isPathWithinRoot } from "../workspace/path-safety.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
-  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH
+  ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")) as { version: string };
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1" && !hasReleaseKernel) {
+if (process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1" && !hasReleaseKernel) {
   throw new Error("Experiment workspace acceptance requires a built release kernel");
 }
 const it = vitestIt.skipIf(!hasReleaseKernel);
@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-experiment-workspace-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-experiment-workspace-"));
   roots.push(root);
   const source = path.join(root, "source");
   const storageRoot = path.join(root, "storage");
@@ -63,7 +63,7 @@ it("freezes the source before queue time and records the actual capture semantic
   const input = await prepareExperimentInput(f.client, f.caller, f.source, { captureScopes: [], cwd: "nested" });
   assert.equal(input.captureSemantics.gitignore, "not-applied");
   assert.equal(input.captureSemantics.ignoredFilesIncluded, true);
-  assert.deepEqual(input.captureSemantics.excludedDirectories, [".git", ".piarium"]);
+  assert.deepEqual(input.captureSemantics.excludedDirectories, [".git", ".varin"]);
 
   // This is the live source changing while a queued attempt waits. The
   // materializer must use input.root, never the source path again.

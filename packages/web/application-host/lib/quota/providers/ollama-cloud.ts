@@ -48,7 +48,7 @@ export const fetchOllamaCloudUsage = async (
   if (!credential.cookie) throw new Error('Ollama Cloud cookie is missing');
   const response = await fetchImpl('https://ollama.com/settings', {
     method: 'GET',
-    headers: { Cookie: credential.cookie, 'User-Agent': 'Piarium quota provider' },
+    headers: { Cookie: credential.cookie, 'User-Agent': 'Varin quota provider' },
     redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   });

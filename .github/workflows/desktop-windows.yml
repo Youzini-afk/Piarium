@@ -29,7 +29,7 @@ jobs:
         architecture: ${{ fromJSON(inputs.architecture == 'all' && '["x64","arm64"]' || format('["{0}"]', inputs.architecture)) }}
     runs-on: ${{ matrix.architecture == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
     env:
-      PIARIUM_TARGET_ARCH: ${{ matrix.architecture }}
+      VARIN_TARGET_ARCH: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -76,11 +76,11 @@ jobs:
       - name: Smoke unpacked Windows application
         shell: pwsh
         run: |
-          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Piarium.exe |
+          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Varin.exe |
             Where-Object { $_.FullName -match 'unpacked' } |
             Select-Object -First 1
           if (-not $executable) {
-            throw 'Packaged Piarium.exe was not found under an unpacked output directory.'
+            throw 'Packaged Varin.exe was not found under an unpacked output directory.'
           }
           node packages/electron/scripts/smoke-windows-unpacked.mjs $executable.FullName
 
@@ -89,14 +89,14 @@ jobs:
         run: |
           $assets = 'packages/electron/release-assets'
           New-Item -ItemType Directory -Path $assets -Force | Out-Null
-          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
-          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
           $manifest = if ('${{ matrix.architecture }}' -eq 'arm64') { 'latest-arm64.yml' } else { 'latest.yml' }
           Copy-Item -LiteralPath 'packages/electron/dist/latest.yml' -Destination (Join-Path $assets $manifest)
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: piarium-windows-${{ matrix.architecture }}-${{ steps.source.outputs.sha }}
+          name: varin-windows-${{ matrix.architecture }}-${{ steps.source.outputs.sha }}
           if-no-files-found: error
           path: packages/electron/release-assets/*

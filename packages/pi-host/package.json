@@ -1,17 +1,17 @@
 {
-  "name": "@piarium/pi-host",
+  "name": "@varin/pi-host",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Isolated Node host for Piarium's Pi SDK runtime.",
+  "description": "Isolated Node host for Varin's Pi SDK runtime.",
   "files": [
     "dist"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "piarium-host": "./dist/host-bootstrap.js"
+    "varin-host": "./dist/host-bootstrap.js"
   },
   "exports": {
     ".": {
@@ -41,7 +41,7 @@
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "0.85.1",
-    "@piarium/protocol": "0.1.0",
+    "@varin/protocol": "0.1.0",
     "jsonc-parser": "^3.3.1",
     "proper-lockfile": "4.1.2",
     "typebox": "1.3.7"

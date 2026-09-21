@@ -15,7 +15,7 @@ describe("managed remote target recovery", () => {
         machine: { machineId: "managed:remote-host", kind: "managed-remote", state: "available" },
       }), {
         status: 200,
-        headers: { "Content-Type": "application/json", "x-piarium-managed-host": "remote-host" },
+        headers: { "Content-Type": "application/json", "x-varin-managed-host": "remote-host" },
       });
     });
     const reconciled: Array<{ workspaceId: string; machineId: string }> = [];

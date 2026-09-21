@@ -1,14 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export const NPM_PUBLIC_REPOSITORY = 'https://github.com/Youzini-afk/Piarium.git';
+export const NPM_PUBLIC_REPOSITORY = 'https://github.com/Youzini-afk/Varin.git';
 
 export const NPM_PUBLIC_PACKAGES = Object.freeze([
-  { directory: 'packages/extension-contract', name: '@piarium/extension-contract' },
-  { directory: 'packages/extension-surface', name: '@piarium/extension-surface' },
-  { directory: 'packages/extension-sdk', name: '@piarium/extension-sdk' },
-  { directory: 'packages/extension-react', name: '@piarium/extension-react' },
-  { directory: 'packages/extension-cli', name: '@piarium/extension-cli' },
+  { directory: 'packages/extension-contract', name: '@varin/extension-contract' },
+  { directory: 'packages/extension-surface', name: '@varin/extension-surface' },
+  { directory: 'packages/extension-sdk', name: '@varin/extension-sdk' },
+  { directory: 'packages/extension-react', name: '@varin/extension-react' },
+  { directory: 'packages/extension-cli', name: '@varin/extension-cli' },
 ]);
 
 const PUBLIC_PACKAGE_NAMES = new Set(NPM_PUBLIC_PACKAGES.map(({ name }) => name));
@@ -16,9 +16,9 @@ const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependenc
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const CLI_TEMPLATE_PATH = 'packages/extension-cli/src/templates.ts';
 const CLI_TEMPLATE_PACKAGES = [
-  '@piarium/extension-contract',
-  '@piarium/extension-sdk',
-  '@piarium/extension-cli',
+  '@varin/extension-contract',
+  '@varin/extension-sdk',
+  '@varin/extension-cli',
 ];
 
 const readJson = async (filePath) => JSON.parse(await readFile(filePath, 'utf8'));

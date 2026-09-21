@@ -1,36 +1,36 @@
-# @piarium/extension-sdk
+# @varin/extension-sdk
 
-Framework-neutral authoring API for managed, isolated, and brokered-Host Piarium extensions.
+Framework-neutral authoring API for managed, isolated, and brokered-Host Varin extensions.
 Extensions export an `activate` function or use `defineSurfaceExtension`, `defineIsolatedExtension`,
 or `defineHostExtension`. Activation contexts own contributions, services, disposers, authenticated
-assets, styles, revisioned storage, and capability clients without importing Piarium's product UI.
+assets, styles, revisioned storage, and capability clients without importing Varin's product UI.
 
 Managed Surface extensions write custom context keys with `context.context.set(localKey, value)` and
-`delete(localKey)`. Piarium prefixes the extension ID, stages candidate values until activation commits,
+`delete(localKey)`. Varin prefixes the extension ID, stages candidate values until activation commits,
 and returns `false` to a disposed or superseded writer. Isolated extensions receive the same owner-scoped
 client through their message bridge; its `set` and `delete` methods return promises.
 
 Host extensions open independent namespaced documents with
 `await context.storage.open({ scope, key, schemaVersion? })`. Each document client exposes its own
-snapshot, refresh, revision-checked update, and schema version. Piarium injects the extension ID, so
+snapshot, refresh, revision-checked update, and schema version. Varin injects the extension ID, so
 an extension cannot address another extension's namespace. `context.storage.snapshot/update` remains
 the compatibility client for `application/state`; new code should use `storage.open(...)` explicitly.
 
 `defineSurfaceMount` creates a framework-neutral contribution implementation. Its `mount(container,
 context)` callback receives an ordinary `HTMLElement`, contribution props, owner metadata, a
 mount-scoped `AbortSignal`, and `reportError`; it may return a synchronous or asynchronous disposer.
-Piarium aborts and disposes that mounted instance when its props or owner change, the extension is
+Varin aborts and disposes that mounted instance when its props or owner change, the extension is
 disabled, or the host unmounts it. DOM, Canvas, Web Components, and framework-owned roots can all use
-the same contract without importing Piarium's React or private UI.
+the same contract without importing Varin's React or private UI.
 
 `defineTransitionSceneMount` specializes that boundary for `transition-scene` contributions. It
 receives one stable external-store controller for the full cover/covered/reveal transaction; the
-scene owns its pixels while Piarium retains Profile commit and failure recovery. No official Shell
+scene owns its pixels while Varin retains Profile commit and failure recovery. No official Shell
 element names are part of this contract.
 
-`@piarium/extension-sdk/testing` exports managed Surface, isolated Surface, and Host conformance
+`@varin/extension-sdk/testing` exports managed Surface, isolated Surface, and Host conformance
 harnesses with real owner cleanup semantics. See the complete
-[authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).
+[authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/varin-extension-authoring.md).
 
 Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` or
 `createWorkspaceDocumentsClient` for resource-scoped, revisioned document access. The capability never
@@ -53,8 +53,8 @@ Brokered Host code resolves packaged executables with `context.assets.path("runt
 The returned path belongs to the immutable selected package artifact and does not depend on the
 workspace working directory. Provider helpers accept either a descriptor or a context factory.
 
-Public workbench constants (`PIARIUM_WORKBENCH_REPLACEMENT_TARGETS`, `PIARIUM_WORKBENCH_SLOTS`,
-`PIARIUM_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
+Public workbench constants (`VARIN_WORKBENCH_REPLACEMENT_TARGETS`, `VARIN_WORKBENCH_SLOTS`,
+`VARIN_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
 and `defineViewMount` share the generic mount contract. `defineEditorMount` additionally types
 `mount.props.resource`, `viewId`, and the stable document controller used to subscribe, update with an
 expected `documentVersion`, and save. Editor contributions declare `data.languageIds` or
@@ -64,12 +64,12 @@ Custom editors can use `document.applyEdits(edits, expectedDocumentVersion)` for
 `replaceContent` remains available for simple or low-frequency editors. Both return typed stale,
 conflict, and unsupported outcomes instead of treating a rejected write as success.
 
-`createPiariumEditorMonacoClient(context)` resolves the optional owner-bound
-`piarium.editor.monaco` v1 service for managed or isolated Surface extensions. The helper exposes the
+`createVarinEditorMonacoClient(context)` resolves the optional owner-bound
+`varin.editor.monaco` v1 service for managed or isolated Surface extensions. The helper exposes the
 same serializable active-view/action/decoration subset in both modes. `getState` plus revisioned
 `waitForState` follows later view registration/focus/selection changes without a timer or callback
 escape hatch, and the client returns `absent` when a
 managed Surface does not inject the optional service. It does not invent managed-only raw Monaco,
-callback, or DOM access. `@piarium/extension-sdk/testing` also exports
+callback, or DOM access. `@varin/extension-sdk/testing` also exports
 `runEditorExtensionConformance` and a real mock document controller covering incremental failures and
 mount abort/disposal.

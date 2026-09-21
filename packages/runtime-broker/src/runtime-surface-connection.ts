@@ -7,7 +7,7 @@ import {
   ProtocolDecodeError,
   type JsonValue,
   type RuntimeWireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { PiHostRequestError } from "./host-client.js";
 import { PiRuntimeBrokerError } from "./errors.js";
 import {

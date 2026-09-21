@@ -1,7 +1,7 @@
 # APNs remote push — signed relay or direct mode
 
 Native iOS background push (notifications even when the app is **suspended or killed**) is delivered
-through APNs. A deployment can select a signed Piarium-compatible relay or configure direct APNs
+through APNs. A deployment can select a signed Varin-compatible relay or configure direct APNs
 credentials. Source builds do not silently reuse another product's relay. In relay mode each server
 signs requests with an auto-generated keypair, and tokens are bound to the server that registered
 them, so a leaked device token alone cannot be used to push.
@@ -69,22 +69,22 @@ device token of a server sees the same badge.
 
 ## Modes
 
-- **Relay:** set `PIARIUM_PUSH_RELAY_URL` to a Piarium-compatible relay endpoint (the register URL is
+- **Relay:** set `VARIN_PUSH_RELAY_URL` to a Varin-compatible relay endpoint (the register URL is
   derived as `…/register-token`). Source builds intentionally have no inherited central relay.
-- **Direct:** set `PIARIUM_PUSH_RELAY_DISABLED=true` + `PIARIUM_APNS_KEY_ID/
+- **Direct:** set `VARIN_PUSH_RELAY_DISABLED=true` + `VARIN_APNS_KEY_ID/
   TEAM_ID/P8` to sign+send from the server itself (HTTP/2 + ES256 JWT); no relay binding needed.
 
 ## Config
 
 Server (`apns-runtime.js`):
-- `PIARIUM_PUSH_RELAY_URL` (optional explicit relay), `PIARIUM_APNS_ENVIRONMENT`
+- `VARIN_PUSH_RELAY_URL` (optional explicit relay), `VARIN_APNS_ENVIRONMENT`
   (optional override forcing every send to `sandbox` or `production`; normally unset — each
   token is delivered to the environment it registered with: the iOS shell reads the
   `aps-environment` entitlement from the embedded provisioning profile and reports it at
   registration, so Xcode dev builds go to sandbox and TestFlight/App Store to production).
   The signing keypair is auto-generated — nothing to set.
-- Direct fallback: `PIARIUM_APNS_KEY_ID`, `PIARIUM_APNS_TEAM_ID`, `PIARIUM_APNS_P8`
-  (or `_P8_PATH`), `PIARIUM_APNS_BUNDLE_ID`, `PIARIUM_PUSH_RELAY_DISABLED=true`.
+- Direct fallback: `VARIN_APNS_KEY_ID`, `VARIN_APNS_TEAM_ID`, `VARIN_APNS_P8`
+  (or `_P8_PATH`), `VARIN_APNS_BUNDLE_ID`, `VARIN_PUSH_RELAY_DISABLED=true`.
 
 Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
 `APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`
@@ -93,8 +93,8 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 ## Apple setup (one-time)
 
 1. Apple **Keys** (not Certificates) → create an **APNs Auth Key** (`.p8`) → Key ID + Team ID;
-   enable **Push Notifications** on App ID `dev.piarium.mobile`.
-2. Configure the selected Piarium push relay with that key, or configure the self-hosted server's
+   enable **Push Notifications** on App ID `dev.varin.mobile`.
+2. Configure the selected Varin push relay with that key, or configure the self-hosted server's
    direct APNs environment variables. Do not reuse an OpenChamber App ID, token database, or key.
 3. Xcode: confirm the Push Notifications capability; Clean Build Folder; run on device.
 

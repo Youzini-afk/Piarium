@@ -5,12 +5,12 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createSessionFeaturesExtension,
   mutateSessionFeatures,
-  PIARIUM_SESSION_FEATURES_ENTRY_TYPE,
+  VARIN_SESSION_FEATURES_ENTRY_TYPE,
   readSessionFeatures,
   SessionFeatureConflictError,
 } from "../src/session-features.js";
 
-describe("Piarium session features", () => {
+describe("Varin session features", () => {
   it("persists versioned branch-aware state without putting it in model context", () => {
     const manager = SessionManager.inMemory("/workspace");
     const userEntryId = manager.appendMessage({
@@ -31,7 +31,7 @@ describe("Piarium session features", () => {
     assert.equal(
       manager.buildSessionContext().messages.some((message) => (
         message.role === "custom"
-        && message.customType === PIARIUM_SESSION_FEATURES_ENTRY_TYPE
+        && message.customType === VARIN_SESSION_FEATURES_ENTRY_TYPE
       )),
       false,
     );
@@ -75,7 +75,7 @@ describe("Piarium session features", () => {
 
   it("ignores retired pinned-context data without discarding Goal or Assist state", () => {
     const manager = SessionManager.inMemory("/workspace");
-    manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, {
+    manager.appendCustomEntry(VARIN_SESSION_FEATURES_ENTRY_TYPE, {
       assist: {
         forEntryId: "assistant-1",
         generatedAt: 1,
@@ -117,7 +117,7 @@ describe("Piarium session features", () => {
     // Zone 0 fix: the hook returns a message (Zone 2 append), not a systemPrompt modification.
     assert.equal(goalResult.systemPrompt, undefined);
     assert.ok(goalResult.message);
-    assert.equal(goalResult.message.customType, "piarium-goal");
+    assert.equal(goalResult.message.customType, "varin-goal");
     assert.equal(goalResult.message.display, false);
     assert.match(goalResult.message.content, /Preserve every custom capability/);
   });

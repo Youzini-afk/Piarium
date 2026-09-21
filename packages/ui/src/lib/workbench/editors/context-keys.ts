@@ -1,4 +1,4 @@
-import { evaluatePiariumContextExpression, type PiariumContextExpressionV1 } from '@piarium/extension-contract';
+import { evaluateVarinContextExpression, type VarinContextExpressionV1 } from '@varin/extension-contract';
 
 type WorkbenchContextValue = string | boolean | number;
 
@@ -78,12 +78,12 @@ export const whenWorkbenchContext = (expression: Record<string, string | boolean
 );
 
 /**
- * Evaluate a structured PiariumContextExpressionV1 against the workbench
+ * Evaluate a structured VarinContextExpressionV1 against the workbench
  * context key store. This is the structured-expression counterpart to
  * whenWorkbenchContext, used by extension contribution visibility projection.
  */
-export const evaluateWorkbenchContextExpression = (expression: PiariumContextExpressionV1): boolean => (
-  evaluatePiariumContextExpression(expression, keys as ReadonlyMap<string, string | number | boolean>)
+export const evaluateWorkbenchContextExpression = (expression: VarinContextExpressionV1): boolean => (
+  evaluateVarinContextExpression(expression, keys as ReadonlyMap<string, string | number | boolean>)
 );
 
 // --- Owner-scoped context key writers ---

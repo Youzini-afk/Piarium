@@ -9,7 +9,7 @@ import type {
   PiConfigTextRoot,
   PiConfigWatchTarget,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { toast } from '@/components/ui';
 import {
@@ -27,7 +27,7 @@ import {
   parsePiJsonObjectDocument,
 } from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import {
   notifyPiRuntimeCatalogChanged,
   subscribePiRuntimeCatalogChanged,
@@ -206,8 +206,8 @@ const useConfigDraftWatch = (
         void reload({ preserveNewerDraft: true });
       } else {
         onPreserve(action === 'preserve-watch-error'
-          ? t('settings.piarium.pluginSettings.source.watchFailed')
-          : t('settings.piarium.pluginSettings.source.externalChanged'));
+          ? t('settings.varin.pluginSettings.source.watchFailed')
+          : t('settings.varin.pluginSettings.source.externalChanged'));
       }
     };
     void Promise.allSettled(watchTargetsRef.current.map((watchTarget) => (
@@ -218,7 +218,7 @@ const useConfigDraftWatch = (
       ));
       if (!active || results.some((result) => result.status === 'rejected')) {
         void Promise.allSettled(unsubscribes.map((unsubscribe) => unsubscribe()));
-        if (active) onPreserve(t('settings.piarium.pluginSettings.source.watchFailed'));
+        if (active) onPreserve(t('settings.varin.pluginSettings.source.watchFailed'));
         return;
       }
       stops = unsubscribes;
@@ -348,7 +348,7 @@ export const useSettingsObjectDraft = ({
         setState((current) => options.preserveNewerDraft
           ? {
               ...current,
-              error: t('settings.piarium.pluginSettings.source.externalChanged'),
+              error: t('settings.varin.pluginSettings.source.externalChanged'),
               externalChanged: true,
               loading: false,
             }
@@ -497,7 +497,7 @@ export const useConfigDocumentObjectDraft = ({
         setState((current) => options.preserveNewerDraft
           ? {
               ...current,
-              error: t('settings.piarium.pluginSettings.source.externalChanged'),
+              error: t('settings.varin.pluginSettings.source.externalChanged'),
               externalChanged: true,
               loading: false,
             }
@@ -757,7 +757,7 @@ export const useTextObjectDraft = (options: TextDraftOptions): PluginObjectDraft
         setState((current) => options.preserveNewerDraft
           ? {
               ...current,
-              error: t('settings.piarium.pluginSettings.source.externalChanged'),
+              error: t('settings.varin.pluginSettings.source.externalChanged'),
               externalChanged: true,
               loading: false,
             }

@@ -4,7 +4,7 @@ import type {
   PiSessionEntry,
   SessionEntriesResult,
   TranscriptRef,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
 
 export interface ThreadTranscriptReader {

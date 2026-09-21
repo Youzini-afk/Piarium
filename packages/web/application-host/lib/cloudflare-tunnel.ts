@@ -386,7 +386,7 @@ export async function startCloudflareQuickTunnel({ originUrl }: { originUrl: str
 
   console.log(`Using cloudflared: ${cfCheck.path} (${cfCheck.version})`);
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cf-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-cf-'));
 
   const child = spawnCloudflared(['tunnel', '--url', originUrl], { HOME: tempDir }, cfCheck.path ?? 'cloudflared');
 
@@ -494,7 +494,7 @@ export async function startCloudflareManagedRemoteTunnel({
   let tempTokenFile: { dir: string; path: string } | null = null;
 
   if (!effectiveTokenFilePath) {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cf-token-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-cf-token-'));
     effectiveTokenFilePath = path.join(tempDir, 'token');
     fs.writeFileSync(effectiveTokenFilePath, normalizedToken, { encoding: 'utf8', mode: 0o600 });
     tempTokenFile = { dir: tempDir, path: effectiveTokenFilePath };

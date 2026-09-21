@@ -1,4 +1,4 @@
-import { editorLanguageIdForLanguage, languageIdForPath } from '@piarium/protocol';
+import { editorLanguageIdForLanguage, languageIdForPath } from '@varin/protocol';
 
 type LanguageDefinition = {
   id: string;
@@ -14,9 +14,9 @@ const filenameFromResourceId = (resourceId: string): string => (
 const patternMatchesFilename = (pattern: string, filename: string): boolean => {
   const source = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '__PIARIUM_GLOBSTAR__')
+    .replace(/\*\*/g, '__VARIN_GLOBSTAR__')
     .replace(/\*/g, '[^/]*')
-    .replace(/__PIARIUM_GLOBSTAR__/g, '.*')
+    .replace(/__VARIN_GLOBSTAR__/g, '.*')
     .replace(/\?/g, '.');
   return new RegExp(`^${source}$`, 'i').test(filename);
 };

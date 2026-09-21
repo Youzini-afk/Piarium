@@ -6,11 +6,11 @@ import { describe, it } from "node:test";
 import {
   createRequest,
   type EventEnvelope,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type PiConfigTextAuthoritySnapshot,
   type ResponseEnvelope,
   type WireEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { resolveAftUserConfigPath } from "../src/config-text-authority-resolver.js";
 import { HostController } from "../src/host-controller.js";
 import { MemoryHostTransport } from "../src/transport.js";
@@ -81,7 +81,7 @@ describe("resolved configuration text authorities", () => {
   });
 
   it("resolves Pi Lens authorities, watches every project candidate, and enforces revisions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-authority-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-authority-"));
     const workspace = join(root, "workspace");
     const cwd = join(workspace, "nested");
     const agentDir = join(root, "agent");
@@ -228,7 +228,7 @@ describe("resolved configuration text authorities", () => {
   });
 
   it("keeps the project authority behind the project trust gate", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-config-authority-trust-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-config-authority-trust-"));
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
     const transport = new MemoryHostTransport();
@@ -255,7 +255,7 @@ describe("resolved configuration text authorities", () => {
   });
 
   it("owns the AFT user JSONC authority without project trust", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-aft-authority-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-aft-authority-"));
     const cwd = join(root, "workspace");
     const configHome = join(root, "config-home");
     const aftPath = join(configHome, "cortexkit", "aft.jsonc");
@@ -345,7 +345,7 @@ describe("resolved configuration text authorities", () => {
         kind: "request",
         method: "config.text.authority.get",
         params: { authority: "unknown-authority" },
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       } as unknown as WireEnvelope);
       const unknownResponse = await transport.waitFor((entry) => isResponse(entry, "aft-unknown"));
       assert.ok(unknownResponse.kind === "response" && !unknownResponse.ok);
@@ -374,7 +374,7 @@ describe("resolved configuration text authorities", () => {
   });
 
   it("owns the Hermes Memory JSON authority from the active agent directory", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-hermes-authority-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-hermes-authority-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "custom-agent");
     const configPath = join(agentDir, "hermes-memory-config.json");

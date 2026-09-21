@@ -9,7 +9,7 @@ import {
   type RuntimeMethodParams,
   type RuntimeMethodResult,
   type RuntimeResponseEnvelope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { RuntimeTransport } from "./transport.js";
 
 interface PendingRequest {

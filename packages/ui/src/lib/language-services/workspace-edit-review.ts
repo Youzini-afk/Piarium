@@ -1,5 +1,5 @@
 import type { DocumentWorkspaceEditPreview } from '@/lib/documents/types';
-import { subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 
 export type WorkspaceEditReviewKind = 'rename' | 'code-action';
 

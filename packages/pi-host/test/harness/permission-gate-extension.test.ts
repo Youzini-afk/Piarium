@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { relative, resolve } from "node:path";
 import { describe, it } from "node:test";
-import { defaultRules, type PermissionAuditRecord, type PermissionInspectParams } from "@piarium/protocol";
+import { defaultRules, type PermissionAuditRecord, type PermissionInspectParams } from "@varin/protocol";
 import { createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
 
 const workspaceRoot = resolve("permission-gate-workspace");
@@ -91,7 +91,7 @@ const packageTool = (name: string, path = "C:/pkg/index.js") => ({
 });
 const mcpTool = (name: string) => ({
   name,
-  sourceInfo: { path: "C:/pkg/pi-mcp-adapter/index.js", source: "npm:@piarium/pi-mcp-adapter", scope: "user", origin: "package" },
+  sourceInfo: { path: "C:/pkg/pi-mcp-adapter/index.js", source: "npm:@varin/pi-mcp-adapter", scope: "user", origin: "package" },
 });
 
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });

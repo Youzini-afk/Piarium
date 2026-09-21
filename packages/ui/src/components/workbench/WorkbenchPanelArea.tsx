@@ -20,10 +20,10 @@ import { useDirtyResourceIds } from '@/lib/documents/hooks';
 import { peekEditorSessionLink, revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SLOTS,
-  type PiariumWorkbenchPanelViewsSlotProps,
-} from '@piarium/extension-contract';
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SLOTS,
+  type VarinWorkbenchPanelViewsSlotProps,
+} from '@varin/extension-contract';
 import {
   WorkbenchContributionSlot,
   WorkbenchReplacement,
@@ -221,11 +221,11 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
         <div className="max-h-[50%] shrink-0 overflow-auto border-t border-border/40">
           <WorkbenchContributionSlot
             kind="view"
-            slot={PIARIUM_WORKBENCH_SLOTS.panelViews}
+            slot={VARIN_WORKBENCH_SLOTS.panelViews}
             props={{
               workspaceId,
               activePanelId: layout.activePanelId,
-            } satisfies PiariumWorkbenchPanelViewsSlotProps}
+            } satisfies VarinWorkbenchPanelViewsSlotProps}
           />
         </div>
       </div>
@@ -248,7 +248,7 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
       </Button>
       {replaceable ? (
         <WorkbenchReplacement
-          target={PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.panel}
+          target={VARIN_WORKBENCH_REPLACEMENT_TARGETS.panel}
           fallback={content}
         />
       ) : content}

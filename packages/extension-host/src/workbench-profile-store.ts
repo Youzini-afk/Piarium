@@ -1,36 +1,36 @@
 import {
-  PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
-  defaultPiariumWorkbenchProfileDocument,
-  migratePiariumWorkbenchProfileDocument,
-  parsePiariumWorkbenchLayoutUpdateRequest,
-  parsePiariumWorkbenchProfileRemoveRequest,
-  parsePiariumWorkbenchProfileSelectionRequest,
-  parsePiariumWorkbenchProfileUpsertRequest,
+  VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
+  defaultVarinWorkbenchProfileDocument,
+  migrateVarinWorkbenchProfileDocument,
+  parseVarinWorkbenchLayoutUpdateRequest,
+  parseVarinWorkbenchProfileRemoveRequest,
+  parseVarinWorkbenchProfileSelectionRequest,
+  parseVarinWorkbenchProfileUpsertRequest,
   type JsonObject,
-  type PiariumWorkbenchLayoutLayer,
-  type PiariumWorkbenchLayoutUpdateRequest,
-  type PiariumWorkbenchProfileDocument,
-  type PiariumWorkbenchProfileRemoveRequest,
-  type PiariumWorkbenchProfileSelectionRequest,
-  type PiariumWorkbenchProfileSnapshot,
-  type PiariumWorkbenchProfileUpsertRequest,
+  type VarinWorkbenchLayoutLayer,
+  type VarinWorkbenchLayoutUpdateRequest,
+  type VarinWorkbenchProfileDocument,
+  type VarinWorkbenchProfileRemoveRequest,
+  type VarinWorkbenchProfileSelectionRequest,
+  type VarinWorkbenchProfileSnapshot,
+  type VarinWorkbenchProfileUpsertRequest,
   workbenchDocumentFromStorage,
-} from "@piarium/extension-contract";
+} from "@varin/extension-contract";
 import { ExtensionStorageStore } from "./storage-store.js";
 
 export type WorkspaceScopeResolver = (scopeId: string) => Promise<string | null>;
 
 const ADDRESS = {
-  extensionId: "piarium.core.workbench",
+  extensionId: "varin.core.workbench",
   key: "profiles",
   scope: "application",
 } as const;
 
-const layerKey = (layer: PiariumWorkbenchLayoutLayer): string => (
+const layerKey = (layer: VarinWorkbenchLayoutLayer): string => (
   `${layer.profileId}\0${layer.surface}\0${layer.scope}\0${layer.scopeId}`
 );
 
-const dataFromDocument = (document: PiariumWorkbenchProfileDocument): JsonObject => ({
+const dataFromDocument = (document: VarinWorkbenchProfileDocument): JsonObject => ({
   activeProfileId: document.activeProfileId,
   layouts: structuredClone(document.layouts) as unknown as JsonObject["layouts"],
   profileSelections: structuredClone(document.profileSelections) as unknown as JsonObject["profileSelections"],
@@ -40,7 +40,7 @@ const dataFromDocument = (document: PiariumWorkbenchProfileDocument): JsonObject
 export class WorkbenchProfileStore {
   readonly hostId: string;
   readonly storage: ExtensionStorageStore;
-  #lastValid: PiariumWorkbenchProfileDocument | null = null;
+  #lastValid: VarinWorkbenchProfileDocument | null = null;
   #resolveWorkspaceScopeId: WorkspaceScopeResolver | null = null;
 
   constructor(options: { hostId: string; storage: ExtensionStorageStore }) {
@@ -52,17 +52,17 @@ export class WorkbenchProfileStore {
     this.#resolveWorkspaceScopeId = resolver;
   }
 
-  async read(): Promise<PiariumWorkbenchProfileSnapshot> {
+  async read(): Promise<VarinWorkbenchProfileSnapshot> {
     const snapshot = await this.#load();
     if (!snapshot.authoritative) return snapshot;
     const document = structuredClone(snapshot.document);
     const workspaceChanged = await this.#migrateWorkspaceScopes(document);
-    const agentChanged = migratePiariumWorkbenchProfileDocument(document);
+    const agentChanged = migrateVarinWorkbenchProfileDocument(document);
     if (!workspaceChanged && !agentChanged) return snapshot;
     return this.#persist(document, snapshot.document.revision);
   }
 
-  async #load(): Promise<PiariumWorkbenchProfileSnapshot> {
+  async #load(): Promise<VarinWorkbenchProfileSnapshot> {
     try {
       const storage = await this.storage.read(ADDRESS);
       const document = workbenchDocumentFromStorage(storage);
@@ -83,15 +83,15 @@ export class WorkbenchProfileStore {
           severity: "error",
           timestamp: new Date().toISOString(),
         }],
-        document: structuredClone(this.#lastValid ?? defaultPiariumWorkbenchProfileDocument()),
+        document: structuredClone(this.#lastValid ?? defaultVarinWorkbenchProfileDocument()),
         hostId: this.hostId,
         storageState: "stale",
       };
     }
   }
 
-  updateLayout(requestValue: PiariumWorkbenchLayoutUpdateRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
-    const request = parsePiariumWorkbenchLayoutUpdateRequest(requestValue);
+  updateLayout(requestValue: VarinWorkbenchLayoutUpdateRequest | unknown): Promise<VarinWorkbenchProfileSnapshot> {
+    const request = parseVarinWorkbenchLayoutUpdateRequest(requestValue);
     return this.#mutate(request.expectedRevision, async (document) => {
       if (!document.profiles.some((profile) => profile.id === request.layer.profileId)) {
         throw new Error(`Workbench profile is not installed: ${request.layer.profileId}`);
@@ -106,8 +106,8 @@ export class WorkbenchProfileStore {
     });
   }
 
-  selectProfile(requestValue: PiariumWorkbenchProfileSelectionRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
-    const request = parsePiariumWorkbenchProfileSelectionRequest(requestValue);
+  selectProfile(requestValue: VarinWorkbenchProfileSelectionRequest | unknown): Promise<VarinWorkbenchProfileSnapshot> {
+    const request = parseVarinWorkbenchProfileSelectionRequest(requestValue);
     return this.#mutate(request.expectedRevision, async (document) => {
       if (!document.profiles.some((profile) => profile.id === request.profileId)) {
         throw new Error(`Workbench profile is not installed: ${request.profileId}`);
@@ -117,8 +117,8 @@ export class WorkbenchProfileStore {
     });
   }
 
-  upsertProfile(requestValue: PiariumWorkbenchProfileUpsertRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
-    const request = parsePiariumWorkbenchProfileUpsertRequest(requestValue);
+  upsertProfile(requestValue: VarinWorkbenchProfileUpsertRequest | unknown): Promise<VarinWorkbenchProfileSnapshot> {
+    const request = parseVarinWorkbenchProfileUpsertRequest(requestValue);
     return this.#mutate(request.expectedRevision, (document) => {
       const index = document.profiles.findIndex((profile) => profile.id === request.profile.id);
       if (index === -1) document.profiles.push(request.profile);
@@ -126,8 +126,8 @@ export class WorkbenchProfileStore {
     });
   }
 
-  removeProfile(requestValue: PiariumWorkbenchProfileRemoveRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
-    const request = parsePiariumWorkbenchProfileRemoveRequest(requestValue);
+  removeProfile(requestValue: VarinWorkbenchProfileRemoveRequest | unknown): Promise<VarinWorkbenchProfileSnapshot> {
+    const request = parseVarinWorkbenchProfileRemoveRequest(requestValue);
     return this.#mutate(request.expectedRevision, (document) => {
       if (document.profiles.length === 1) throw new Error("The last workbench profile cannot be removed");
       if (!document.profiles.some((profile) => profile.id === request.profileId)) return;
@@ -145,10 +145,10 @@ export class WorkbenchProfileStore {
     return await this.#resolveWorkspaceScopeId(scopeId) ?? scopeId;
   }
 
-  async #migrateWorkspaceScopes(document: PiariumWorkbenchProfileDocument): Promise<boolean> {
+  async #migrateWorkspaceScopes(document: VarinWorkbenchProfileDocument): Promise<boolean> {
     if (!this.#resolveWorkspaceScopeId) return false;
     let changed = false;
-    const layouts: PiariumWorkbenchLayoutLayer[] = [];
+    const layouts: VarinWorkbenchLayoutLayer[] = [];
     for (const layer of document.layouts) {
       if (layer.scope !== "workspace") {
         layouts.push(layer);
@@ -163,13 +163,13 @@ export class WorkbenchProfileStore {
   }
 
   async #persist(
-    document: PiariumWorkbenchProfileDocument,
+    document: VarinWorkbenchProfileDocument,
     expectedRevision: number,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     const storage = await this.storage.update(
       ADDRESS,
       expectedRevision,
-      PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
+      VARIN_WORKBENCH_PROFILE_SCHEMA_VERSION,
       dataFromDocument(document),
     );
     const next = {
@@ -178,23 +178,23 @@ export class WorkbenchProfileStore {
       document: workbenchDocumentFromStorage(storage),
       hostId: this.hostId,
       storageState: storage.storageState,
-    } satisfies PiariumWorkbenchProfileSnapshot;
+    } satisfies VarinWorkbenchProfileSnapshot;
     if (next.authoritative) this.#lastValid = structuredClone(next.document);
     return next;
   }
 
   async #mutate(
     expectedRevision: number,
-    mutate: (document: PiariumWorkbenchProfileDocument) => void | Promise<void>,
-  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    mutate: (document: VarinWorkbenchProfileDocument) => void | Promise<void>,
+  ): Promise<VarinWorkbenchProfileSnapshot> {
     const current = await this.#load();
     if (!current.authoritative) throw new Error("Cannot update stale workbench profile state");
     const document = structuredClone(current.document);
     await this.#migrateWorkspaceScopes(document);
-    migratePiariumWorkbenchProfileDocument(document);
+    migrateVarinWorkbenchProfileDocument(document);
     await mutate(document);
     return this.#persist(document, expectedRevision);
   }
 }
 
-export const emptyWorkbenchProfileDocument = defaultPiariumWorkbenchProfileDocument;
+export const emptyWorkbenchProfileDocument = defaultVarinWorkbenchProfileDocument;

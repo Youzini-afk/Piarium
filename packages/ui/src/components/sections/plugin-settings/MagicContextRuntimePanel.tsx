@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { usePiChatCatalog } from '@/components/chat/usePiChatCatalog';
 import { Icon } from '@/components/icon/Icon';
 import { PiExtensionStatusCard } from '@/components/pi-session/PiExtensionStatusCard';
@@ -108,7 +108,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
     try {
       command = buildMagicContextRuntimeCommand(action, options).command;
     } catch (error) {
-      toast.error(t('settings.piarium.pluginSettings.magic.runtime.invalidArguments'), {
+      toast.error(t('settings.varin.pluginSettings.magic.runtime.invalidArguments'), {
         description: error instanceof Error ? error.message : String(error),
       });
       return false;
@@ -119,7 +119,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
       await refreshEntries(sessionId);
       return true;
     } catch (error) {
-      toast.error(t('settings.piarium.pluginSettings.magic.runtime.commandFailed'), {
+      toast.error(t('settings.varin.pluginSettings.magic.runtime.commandFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
       return false;
@@ -154,10 +154,10 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
         <div className="min-w-0 space-y-1">
           <h3 className="typography-settings-group-title text-foreground">
-            {t('settings.piarium.pluginSettings.magic.runtime.title')}
+            {t('settings.varin.pluginSettings.magic.runtime.title')}
           </h3>
           <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.pluginSettings.magic.runtime.description')}
+            {t('settings.varin.pluginSettings.magic.runtime.description')}
           </p>
         </div>
         <span className={cn(
@@ -166,36 +166,36 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             ? 'border-[var(--status-success)]/30 text-[var(--status-success)]'
             : 'border-border/60 text-muted-foreground',
         )}>
-          {t(`settings.piarium.pluginSettings.magic.runtime.state.${providerState}`)}
+          {t(`settings.varin.pluginSettings.magic.runtime.state.${providerState}`)}
         </span>
       </div>
 
       {!sessionId ? (
         <p className="rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.magic.runtime.openSession')}
+          {t('settings.varin.pluginSettings.magic.runtime.openSession')}
         </p>
       ) : catalog.error ? (
         <p className="break-words typography-meta text-[var(--status-error)]">{catalog.error}</p>
       ) : !magicActive && catalog.loaded ? (
         <p className="rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.magic.runtime.notActive')}
+          {t('settings.varin.pluginSettings.magic.runtime.notActive')}
         </p>
       ) : null}
 
       {runningCommand ? (
         <p className="flex items-center gap-2 rounded-md bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
           <Icon name="loader-4" className="size-4 animate-spin" />
-          {t('settings.piarium.pluginSettings.magic.runtime.running', { command: `/${runningCommand}` })}
+          {t('settings.varin.pluginSettings.magic.runtime.running', { command: `/${runningCommand}` })}
         </p>
       ) : sessionBusy ? (
         <p className="rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 px-3 py-2 typography-meta text-[var(--status-warning)]">
-          {t('settings.piarium.pluginSettings.magic.runtime.busy')}
+          {t('settings.varin.pluginSettings.magic.runtime.busy')}
         </p>
       ) : null}
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.runtime.session.title')}
-        description={t('settings.piarium.pluginSettings.magic.runtime.session.description')}
+        title={t('settings.varin.pluginSettings.magic.runtime.session.title')}
+        description={t('settings.varin.pluginSettings.magic.runtime.session.description')}
         contentClassName="space-y-4"
       >
         <div className="flex flex-wrap gap-2">
@@ -207,7 +207,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => void runAction('status')}
           >
             {runningCommand === 'ctx-status' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.magic.runtime.action.status')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.status')}
           </Button>
           <Button
             type="button"
@@ -217,7 +217,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => void runAction('flush')}
           >
             {runningCommand === 'ctx-flush' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.magic.runtime.action.flush')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.flush')}
           </Button>
           <Button
             type="button"
@@ -227,16 +227,16 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => void runAction('todos')}
           >
             {runningCommand === 'todos' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.magic.runtime.action.todos')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.todos')}
           </Button>
         </div>
         <div className="space-y-2 border-t border-border/60 pt-4">
           <div className="space-y-1">
             <h4 className="typography-settings-field-label text-foreground">
-              {t('settings.piarium.pluginSettings.magic.runtime.latest.title')}
+              {t('settings.varin.pluginSettings.magic.runtime.latest.title')}
             </h4>
             <p className="typography-meta text-muted-foreground">
-              {t('settings.piarium.pluginSettings.magic.runtime.latest.description')}
+              {t('settings.varin.pluginSettings.magic.runtime.latest.description')}
             </p>
           </div>
           {latestStatus ? (
@@ -251,7 +251,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             </div>
           ) : (
             <p className="typography-meta text-muted-foreground">
-              {t('settings.piarium.pluginSettings.magic.runtime.latest.empty')}
+              {t('settings.varin.pluginSettings.magic.runtime.latest.empty')}
             </p>
           )}
         </div>
@@ -259,19 +259,19 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
 
       <SettingsControlGroup
         className="border-t border-border/60 pt-5"
-        title={t('settings.piarium.pluginSettings.magic.runtime.augmentation.title')}
-        description={t('settings.piarium.pluginSettings.magic.runtime.augmentation.description')}
+        title={t('settings.varin.pluginSettings.magic.runtime.augmentation.title')}
+        description={t('settings.varin.pluginSettings.magic.runtime.augmentation.description')}
         contentClassName="space-y-3"
       >
         <div className="space-y-1.5">
           <label className="typography-settings-field-label text-foreground" htmlFor="magic-augmentation-prompt">
-            {t('settings.piarium.pluginSettings.magic.runtime.augmentation.prompt')}
+            {t('settings.varin.pluginSettings.magic.runtime.augmentation.prompt')}
           </label>
           <Textarea
             id="magic-augmentation-prompt"
             value={augmentationPrompt}
             disabled={actionsDisabled}
-            placeholder={t('settings.piarium.pluginSettings.magic.runtime.augmentation.placeholder')}
+            placeholder={t('settings.varin.pluginSettings.magic.runtime.augmentation.placeholder')}
             onChange={(event) => setAugmentationPrompt(event.target.value)}
             className="min-h-24"
           />
@@ -283,20 +283,20 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
           disabled={actionsDisabled || !augmentationPrompt.trim() || !commandAvailable('augment', { prompt: augmentationPrompt })}
           onClick={() => void runAction('augment', { prompt: augmentationPrompt })}
         >
-          {t('settings.piarium.pluginSettings.magic.runtime.action.augment')}
+          {t('settings.varin.pluginSettings.magic.runtime.action.augment')}
         </Button>
       </SettingsControlGroup>
 
       <SettingsControlGroup
         className="border-t border-border/60 pt-5"
-        title={t('settings.piarium.pluginSettings.magic.runtime.maintenance.title')}
-        description={t('settings.piarium.pluginSettings.magic.runtime.maintenance.description')}
+        title={t('settings.varin.pluginSettings.magic.runtime.maintenance.title')}
+        description={t('settings.varin.pluginSettings.magic.runtime.maintenance.description')}
         contentClassName="space-y-4"
       >
         <div className="flex flex-col gap-2 @xl:flex-row @xl:items-end">
           <div className="min-w-0 flex-1 space-y-1.5">
             <label className="typography-settings-field-label text-foreground" htmlFor="magic-wrapup-tail">
-              {t('settings.piarium.pluginSettings.magic.runtime.messagesToKeep')}
+              {t('settings.varin.pluginSettings.magic.runtime.messagesToKeep')}
             </label>
             <Input
               id="magic-wrapup-tail"
@@ -316,7 +316,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !validMessagesToKeep || !commandAvailable('wrapup', { messagesToKeep })}
             onClick={() => setConfirmAction('wrapup')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.wrapup')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.wrapup')}
           </Button>
         </div>
 
@@ -324,7 +324,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
           <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
             <div className="space-y-1.5">
               <label className="typography-settings-field-label text-foreground" htmlFor="magic-recomp-start">
-                {t('settings.piarium.pluginSettings.magic.runtime.recompStart')}
+                {t('settings.varin.pluginSettings.magic.runtime.recompStart')}
               </label>
               <Input
                 id="magic-recomp-start"
@@ -338,7 +338,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             </div>
             <div className="space-y-1.5">
               <label className="typography-settings-field-label text-foreground" htmlFor="magic-recomp-end">
-                {t('settings.piarium.pluginSettings.magic.runtime.recompEnd')}
+                {t('settings.varin.pluginSettings.magic.runtime.recompEnd')}
               </label>
               <Input
                 id="magic-recomp-end"
@@ -362,7 +362,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
               recompRange: { end: recompEnd, start: recompStart },
             })}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.recompRange')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.recompRange')}
           </Button>
         </div>
 
@@ -374,7 +374,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !commandAvailable('recomp')}
             onClick={() => void runAction('recomp')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.recomp')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.recomp')}
           </Button>
           <Button
             type="button"
@@ -383,18 +383,18 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !commandAvailable('session-upgrade')}
             onClick={() => setConfirmAction('session-upgrade')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.upgrade')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.upgrade')}
           </Button>
         </div>
         <p className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.magic.runtime.recompConfirmation')}
+          {t('settings.varin.pluginSettings.magic.runtime.recompConfirmation')}
         </p>
       </SettingsControlGroup>
 
       <SettingsControlGroup
         className="border-t border-border/60 pt-5"
-        title={t('settings.piarium.pluginSettings.magic.runtime.dreamer.title')}
-        description={t('settings.piarium.pluginSettings.magic.runtime.dreamer.description')}
+        title={t('settings.varin.pluginSettings.magic.runtime.dreamer.title')}
+        description={t('settings.varin.pluginSettings.magic.runtime.dreamer.description')}
         contentClassName="space-y-4"
       >
         <div className="flex flex-wrap gap-2">
@@ -406,7 +406,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => void runAction('embedding-status')}
           >
             {runningCommand === 'ctx-embed' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStatus')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.embeddingStatus')}
           </Button>
           <Button
             type="button"
@@ -415,7 +415,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !commandAvailable('embedding-start')}
             onClick={() => void runAction('embedding-start')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStart')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.embeddingStart')}
           </Button>
           <Button
             type="button"
@@ -424,30 +424,30 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !commandAvailable('embedding-pause')}
             onClick={() => void runAction('embedding-pause')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingPause')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.embeddingPause')}
           </Button>
         </div>
 
         <div className="flex flex-col gap-2 border-t border-border/60 pt-4 @xl:flex-row @xl:items-end">
           <div className="min-w-0 flex-1 space-y-1.5">
             <label className="typography-settings-field-label text-foreground" htmlFor="magic-dream-task">
-              {t('settings.piarium.pluginSettings.magic.runtime.dreamTask')}
+              {t('settings.varin.pluginSettings.magic.runtime.dreamTask')}
             </label>
             <Select value={dreamTask} onValueChange={setDreamTask} disabled={runningCommand !== null}>
               <SelectTrigger id="magic-dream-task" size="settings" className="w-full max-w-sm">
                 <SelectValue>
                   {dreamTask === 'all'
-                    ? t('settings.piarium.pluginSettings.magic.runtime.dreamAll')
-                    : t(`settings.piarium.pluginSettings.magic.ui.task.${dreamTask}` as never)}
+                    ? t('settings.varin.pluginSettings.magic.runtime.dreamAll')
+                    : t(`settings.varin.pluginSettings.magic.ui.task.${dreamTask}` as never)}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">
-                  {t('settings.piarium.pluginSettings.magic.runtime.dreamAll')}
+                  {t('settings.varin.pluginSettings.magic.runtime.dreamAll')}
                 </SelectItem>
                 {DREAM_TASKS.map((task) => (
                   <SelectItem key={task} value={task}>
-                    {t(`settings.piarium.pluginSettings.magic.ui.task.${task}` as never)}
+                    {t(`settings.varin.pluginSettings.magic.ui.task.${task}` as never)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -460,12 +460,12 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             disabled={actionsDisabled || !commandAvailable('dream', dreamTask === 'all' ? undefined : { dreamTask })}
             onClick={() => setConfirmAction('dream')}
           >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.dream')}
+            {t('settings.varin.pluginSettings.magic.runtime.action.dream')}
           </Button>
         </div>
 
         <p className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.magic.runtime.longRunningNote')}
+          {t('settings.varin.pluginSettings.magic.runtime.longRunningNote')}
         </p>
       </SettingsControlGroup>
 
@@ -474,12 +474,12 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
           <DialogHeader>
             <DialogTitle>
               {confirmAction
-                ? t(`settings.piarium.pluginSettings.magic.runtime.confirm.${confirmAction}.title`)
+                ? t(`settings.varin.pluginSettings.magic.runtime.confirm.${confirmAction}.title`)
                 : ''}
             </DialogTitle>
             <DialogDescription>
               {confirmAction
-                ? t(`settings.piarium.pluginSettings.magic.runtime.confirm.${confirmAction}.description`)
+                ? t(`settings.varin.pluginSettings.magic.runtime.confirm.${confirmAction}.description`)
                 : ''}
             </DialogDescription>
           </DialogHeader>
@@ -501,7 +501,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
               disabled={actionsDisabled || (confirmAction === 'wrapup' && !validMessagesToKeep)}
               onClick={submitConfirmedAction}
             >
-              {t('settings.piarium.pluginSettings.magic.runtime.confirm.run')}
+              {t('settings.varin.pluginSettings.magic.runtime.confirm.run')}
             </Button>
           </DialogFooter>
         </DialogContent>

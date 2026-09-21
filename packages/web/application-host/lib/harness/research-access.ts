@@ -1,4 +1,4 @@
-import type { Thread, ThreadParent } from "@piarium/protocol";
+import type { Thread, ThreadParent } from "@varin/protocol";
 import type { ExperimentCaller } from "./experiments.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { HarnessServiceError } from "./service-error.js";

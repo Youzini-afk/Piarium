@@ -1,12 +1,12 @@
 import type { Express, RequestHandler } from "express";
-import type { HarnessWebSearchProvider } from "@piarium/protocol";
+import type { HarnessWebSearchProvider } from "@varin/protocol";
 import { readPiAuthFile, removePiProviderAuth, savePiProviderAuth } from "../pi-config/storage.js";
 import { resolveSearchCredential } from "./web-search.js";
 
 const PROVIDERS = new Set<HarnessWebSearchProvider>(["brave", "exa", "tavily", "jina", "searxng"]);
 const noAuth: RequestHandler = (_request, _response, next) => next();
 
-export const webSearchCredentialRef = (provider: HarnessWebSearchProvider): string => `piarium-web-search-${provider}`;
+export const webSearchCredentialRef = (provider: HarnessWebSearchProvider): string => `varin-web-search-${provider}`;
 
 const providerOf = (value: unknown): HarnessWebSearchProvider | null => (
   typeof value === "string" && PROVIDERS.has(value as HarnessWebSearchProvider)

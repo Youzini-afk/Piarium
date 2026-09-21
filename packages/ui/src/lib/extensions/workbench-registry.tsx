@@ -3,31 +3,31 @@ import React from 'react';
 import type { ComponentType } from 'react';
 import type {
   JsonValue,
-  PiariumExtensionContributionKind,
-  PiariumWorkbenchDistributionProfile,
-} from '@piarium/extension-contract';
+  VarinExtensionContributionKind,
+  VarinWorkbenchDistributionProfile,
+} from '@varin/extension-contract';
 import {
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  parsePiariumWorkbenchShellContributionData,
-  resolvePiariumWorkbenchLayout,
-  resolvePiariumWorkbenchShellSurfaceSeams,
-} from '@piarium/extension-contract';
-import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  parseVarinWorkbenchShellContributionData,
+  resolveVarinWorkbenchLayout,
+  resolveVarinWorkbenchShellSurfaceSeams,
+} from '@varin/extension-contract';
+import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@varin/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
-  getPiariumExtensionCatalogState,
-  refreshPiariumExtensionCatalog,
-  usePiariumExtensionCatalog,
+  getVarinExtensionCatalogState,
+  refreshVarinExtensionCatalog,
+  useVarinExtensionCatalog,
 } from './catalog-store';
 import { useWorkbenchWorkspace } from './workbench-workspace';
 import {
   startWorkbenchMountSession,
   type WorkbenchMountImplementation,
 } from './workbench-mount';
-import { piariumSurfaceRuntime } from './surface-runtime';
+import { varinSurfaceRuntime } from './surface-runtime';
 import { createWorkbenchCompositionHost } from './workbench-composition-host';
 
-export { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS as WORKBENCH_REPLACEMENT_TARGETS } from '@piarium/extension-contract';
+export { VARIN_WORKBENCH_REPLACEMENT_TARGETS as WORKBENCH_REPLACEMENT_TARGETS } from '@varin/extension-contract';
 export { startWorkbenchMountSession } from './workbench-mount';
 export {
   selectActiveWorkbenchProfile,
@@ -134,7 +134,7 @@ class ContributionRenderBoundary extends React.Component<
   componentDidCatch(error: unknown, errorInfo: React.ErrorInfo): void {
     const { descriptor, owner } = this.props.contribution;
     console.error(
-      `[Piarium Extensions] Contribution ${descriptor.id} from ${owner.extensionId} failed to render:`,
+      `[Varin Extensions] Contribution ${descriptor.id} from ${owner.extensionId} failed to render:`,
       error,
       errorInfo,
     );
@@ -197,7 +197,7 @@ const WorkbenchMountHost = <TProps extends object>({
     let mountFailed = false;
     const reportMountError = (error: unknown, phase: 'dispose' | 'mount' | 'render') => {
       console.error(
-        `[Piarium Extensions] Contribution ${contribution.descriptor.id} from ${contribution.owner.extensionId} failed during ${phase}:`,
+        `[Varin Extensions] Contribution ${contribution.descriptor.id} from ${contribution.owner.extensionId} failed during ${phase}:`,
         error,
       );
       if (!active || phase === 'dispose') return;
@@ -207,11 +207,11 @@ const WorkbenchMountHost = <TProps extends object>({
     let composition: ReturnType<typeof createWorkbenchCompositionHost> | null = null;
     if (contribution.descriptor.kind === 'shell') {
       try {
-        const shellData = parsePiariumWorkbenchShellContributionData(
+        const shellData = parseVarinWorkbenchShellContributionData(
           contribution.descriptor.data,
           contribution.descriptor.supports,
         );
-        const seams = resolvePiariumWorkbenchShellSurfaceSeams(shellData, piariumSurfaceRuntime.surface);
+        const seams = resolveVarinWorkbenchShellSurfaceSeams(shellData, varinSurfaceRuntime.surface);
         composition = createWorkbenchCompositionHost({
           shellContributionId: contribution.descriptor.id,
           owner: contribution.owner,
@@ -219,21 +219,21 @@ const WorkbenchMountHost = <TProps extends object>({
           allowedSlots: new Set(seams.slots),
           activate: triggerVisibleSurfaceContributions,
           resolveReplacement: (target) => {
-            if (target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell
-              || target === PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition) return undefined;
-            const selected = selectedReplacement(piariumSurfaceRuntime.getSnapshot(), target);
+            if (target === VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell
+              || target === VARIN_WORKBENCH_REPLACEMENT_TARGETS.transition) return undefined;
+            const selected = selectedReplacement(varinSurfaceRuntime.getSnapshot(), target);
             if (!selected || workbenchContributionInstanceKey(selected) === contributionKey) return undefined;
             return { contribution: selected, props: { target } };
           },
-          resolveSlotCandidates: (slot, kind) => piariumSurfaceRuntime.getSnapshot().visibleContributions.filter((candidate) => (
+          resolveSlotCandidates: (slot, kind) => varinSurfaceRuntime.getSnapshot().visibleContributions.filter((candidate) => (
             candidate.descriptor.placement?.slot === slot
             && candidate.descriptor.replacement === undefined
             && (kind === undefined || candidate.descriptor.kind === kind)
           )),
-          subscribe: piariumSurfaceRuntime.subscribe,
+          subscribe: varinSurfaceRuntime.subscribe,
           onError: (error, phase) => {
             console.error(
-              `[Piarium Extensions] Child contribution hosted by ${contribution.descriptor.id} failed during ${phase}:`,
+              `[Varin Extensions] Child contribution hosted by ${contribution.descriptor.id} failed during ${phase}:`,
               error,
             );
           },
@@ -278,7 +278,7 @@ const WorkbenchMountHost = <TProps extends object>({
     <div
       ref={containerRef}
       className={className}
-      data-piarium-surface-contribution={contribution.descriptor.id}
+      data-varin-surface-contribution={contribution.descriptor.id}
     />
   );
 };
@@ -360,9 +360,9 @@ const ContributionReadySignal: React.FC<{
 };
 
 export const useSurfaceRegistrySnapshot = (): SurfaceRegistrySnapshot => React.useSyncExternalStore(
-  piariumSurfaceRuntime.subscribe,
-  piariumSurfaceRuntime.getSnapshot,
-  piariumSurfaceRuntime.getSnapshot,
+  varinSurfaceRuntime.subscribe,
+  varinSurfaceRuntime.getSnapshot,
+  varinSurfaceRuntime.getSnapshot,
 );
 
 interface VisibleContributionActivationDependencies {
@@ -397,7 +397,7 @@ const useVisibleContributionActivation = (contributions: readonly SurfaceContrib
   const activationKey = contributions.map(workbenchContributionInstanceKey).join('\n');
   React.useEffect(() => {
     void triggerVisibleSurfaceContributions(contributions).catch((error) => {
-      console.error('[Piarium Extensions] Visible Surface contribution activation failed:', error);
+      console.error('[Varin Extensions] Visible Surface contribution activation failed:', error);
     });
   // The owner-generation key changes exactly when a newly visible implementation needs evaluation.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -405,19 +405,19 @@ const useVisibleContributionActivation = (contributions: readonly SurfaceContrib
 };
 
 export const WorkbenchProfileBridge: React.FC = () => {
-  const catalog = usePiariumExtensionCatalog();
+  const catalog = useVarinExtensionCatalog();
   const workspace = useWorkbenchWorkspace();
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const workbench = catalog.snapshot?.workbench;
   React.useEffect(() => {
     if (!workbench?.authoritative) return;
     if (workspace.status === 'loading' || workspace.status === 'error') return;
-    const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
-      surface: piariumSurfaceRuntime.surface,
+    const resolved = resolveVarinWorkbenchLayout(workbench.document, {
+      surface: varinSurfaceRuntime.surface,
       userId: 'default',
       ...(workspaceId ? { workspaceId } : {}),
     });
-    piariumSurfaceRuntime.setWorkbenchState(resolved.references, resolved.replacementSelections);
+    varinSurfaceRuntime.setWorkbenchState(resolved.references, resolved.replacementSelections);
   }, [workspace.status, workspaceId, workbench]);
   return null;
 };
@@ -548,7 +548,7 @@ const WorkbenchOwnedViewRender: React.FC<{
 const EMPTY_MOUNT_PROPS: Readonly<Record<string, unknown>> = {};
 
 export const WorkbenchContributionSlot: React.FC<{
-  kind?: PiariumExtensionContributionKind;
+  kind?: VarinExtensionContributionKind;
   props?: Record<string, unknown>;
   slot: string;
 }> = ({ kind, props, slot }) => {
@@ -623,39 +623,39 @@ export const renderFirstWorkbenchMatch = <TInput,>(
 };
 
 export const upsertWorkbenchProfile = async (
-  profile: PiariumWorkbenchDistributionProfile,
+  profile: VarinWorkbenchDistributionProfile,
 ): Promise<void> => {
-  const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
+  const snapshot = getVarinExtensionCatalogState().snapshot?.workbench;
   if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
-  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
   await extensions.upsertWorkbenchProfile({
     expectedRevision: snapshot.document.revision,
     profile,
   });
-  await refreshPiariumExtensionCatalog();
+  await refreshVarinExtensionCatalog();
 };
 
 export const removeWorkbenchProfile = async (profileId: string): Promise<void> => {
-  const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
+  const snapshot = getVarinExtensionCatalogState().snapshot?.workbench;
   if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
-  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
   await extensions.removeWorkbenchProfile({
     expectedRevision: snapshot.document.revision,
     profileId,
   });
-  await refreshPiariumExtensionCatalog();
+  await refreshVarinExtensionCatalog();
 };
 
 export const applyWorkbenchProfile = async (profileId: string): Promise<void> => {
-  const snapshot = getPiariumExtensionCatalogState().snapshot;
+  const snapshot = getVarinExtensionCatalogState().snapshot;
   if (!snapshot?.workbench.authoritative) throw new Error('Workbench profile state is unavailable');
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
-  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  if (!extensions) throw new Error('Varin Extensions runtime is unavailable');
   await extensions.applyWorkbenchProfile({
     expectedCatalogRevision: snapshot.catalog.revision,
     profileId,
   });
-  await refreshPiariumExtensionCatalog();
+  await refreshVarinExtensionCatalog();
 };

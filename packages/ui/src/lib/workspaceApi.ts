@@ -1,5 +1,5 @@
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import type { WorkspaceAPI } from '@piarium/application-client';
+import type { WorkspaceAPI } from '@varin/application-client';
 
 export const getWorkspaceAPI = (): WorkspaceAPI => {
   const workspace = getRegisteredRuntimeAPIs()?.workspace;

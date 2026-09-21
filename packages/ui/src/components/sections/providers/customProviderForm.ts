@@ -4,7 +4,7 @@ import {
   type ProviderConfigInput,
   type ProviderConfigScope,
   type ProviderModelConfigInput,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 type ApiKeyInputLike = { value?: string | null } | null | undefined;
 

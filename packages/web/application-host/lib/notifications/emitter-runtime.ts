@@ -103,7 +103,7 @@ export const createNotificationEmitterRuntime = (dependencies: NotificationEmitt
     const desktopNotificationDelivered = options.desktopNotificationDelivered === true;
 
     const syntheticPayload = {
-      type: 'piarium:notification',
+      type: 'varin:notification',
       properties: {
           ...(payload as NotificationPayload),
         // Tell local desktop UI whether a native channel already accepted this

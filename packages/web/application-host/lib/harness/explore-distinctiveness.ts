@@ -6,7 +6,7 @@
  * group share one row; repeating a term inside a file does not raise df.
  */
 
-import type { ExploreDistinctivenessDetails, ExploreTermCoverage, ExploreTermWeight } from "@piarium/protocol";
+import type { ExploreDistinctivenessDetails, ExploreTermCoverage, ExploreTermWeight } from "@varin/protocol";
 import type { TermGroup, TermGroupKind } from "./explore-query.js";
 
 /** Ordinary match contribution. Extra distinctiveness is added only when coverage is complete. */

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { JsonValue, PiSettingsSnapshot } from '@piarium/protocol';
+import type { JsonValue, PiSettingsSnapshot } from '@varin/protocol';
 import { HarnessSettingsController } from './harness-settings-state';
 
 const snapshot = (harness: JsonValue, revision: string): PiSettingsSnapshot => ({

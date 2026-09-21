@@ -1,4 +1,4 @@
-import type { WorkingBranchPathOrigin } from "@piarium/protocol";
+import type { WorkingBranchPathOrigin } from "@varin/protocol";
 import type { RecoveryState, WorkingStateReadOptions, WorkingStateRootStore, WorkingStateTreeEntry } from "./types.js";
 
 export interface BranchViewEntry {

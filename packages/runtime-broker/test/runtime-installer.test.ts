@@ -35,7 +35,7 @@ test("spawns the package manager with discrete arguments and no shell string", a
 test("executes a Windows command shim whose path contains spaces", {
   skip: process.platform !== "win32",
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium package manager "));
+  const root = await mkdtemp(join(tmpdir(), "varin package manager "));
   const executable = join(root, "Program Files", "nodejs", "npm.cmd");
   try {
     await mkdir(join(root, "Program Files", "nodejs"), { recursive: true });
@@ -85,7 +85,7 @@ test("does not run an install command when the plan keeps a newer Pi", async () 
 });
 
 test("installs a standalone payload to the user-global location and skips a newer copy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-standalone-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-standalone-"));
   const payload = join(root, "payload");
   const home = join(root, "home");
   try {
@@ -137,7 +137,7 @@ test("installs a standalone payload to the user-global location and skips a newe
 });
 
 test("rejects a standalone archive whose SHA-256 does not match the manifest", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-standalone-hash-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-standalone-hash-"));
   try {
     const payload = join(root, "payload");
     await mkdir(payload, { recursive: true });
@@ -175,7 +175,7 @@ test("rejects a standalone archive whose SHA-256 does not match the manifest", a
 });
 
 test("registers the user-global bin directory on PATH without touching ~/.pi/agent", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-standalone-path-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-standalone-path-"));
   const payload = join(root, "payload");
   const home = join(root, "home");
   const agentDir = join(home, ".pi", "agent");

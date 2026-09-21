@@ -17,7 +17,7 @@ import type {
   TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@varin/protocol";
 import { SessionHost } from "../src/session-host.js";
 import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
 import { persistentProviderMessages, providerRosterMessages } from "./harness/provider-context.js";
@@ -113,7 +113,7 @@ void (null as unknown as ToolDefinitionShape satisfies {
 
 describe("Pi hooks contract (0.84.3)", () => {
   it("before_agent_start message is appended and system prompt is stable across steps", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-hooks-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-hooks-"));
     const agentDir = join(root, "agent");
     const projectExtensions = join(root, ".pi", "extensions");
     await mkdir(projectExtensions, { recursive: true });
@@ -126,7 +126,7 @@ describe("Pi hooks contract (0.84.3)", () => {
         pi.on("before_agent_start", () => {
           return {
             message: {
-              customType: "piarium-hooks-test",
+              customType: "varin-hooks-test",
               content: "hooks-test-zone2-message",
               display: false,
             },
@@ -261,7 +261,7 @@ describe("Pi hooks contract (0.84.3)", () => {
   // -------------------------------------------------------------------------
   it("session_before_compact compaction result is consumed by Pi (zero LLM calls)", async () => {
     // This test generates a large session and triggers compaction.
-    const root = await mkdtemp(join(tmpdir(), "piarium-compact-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-compact-"));
     const agentDir = join(root, "agent");
     const projectExtensions = join(root, ".pi", "extensions");
     await mkdir(projectExtensions, { recursive: true });
@@ -274,7 +274,7 @@ describe("Pi hooks contract (0.84.3)", () => {
         pi.on("session_before_compact", (event: any) => {
           return {
             compaction: {
-              summary: "piarium-custom-compaction-summary-marker",
+              summary: "varin-custom-compaction-summary-marker",
               firstKeptEntryId: event.preparation.firstKeptEntryId,
               tokensBefore: event.preparation.tokensBefore,
             },
@@ -363,7 +363,7 @@ describe("Pi hooks contract (0.84.3)", () => {
       const messagesJson = JSON.stringify(host.session.messages);
       assert.match(
         messagesJson,
-        /piarium-custom-compaction-summary-marker/,
+        /varin-custom-compaction-summary-marker/,
         "custom compaction summary must appear in session messages after compaction",
       );
 

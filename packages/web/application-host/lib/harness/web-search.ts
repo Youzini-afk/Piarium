@@ -3,7 +3,7 @@ import {
   type HarnessWebDomainPolicy,
   type HarnessWebSearchSettings,
   type SearchResultItem,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 

@@ -1,11 +1,11 @@
 !ifndef BUILD_UNINSTALLER
 !include "FileFunc.nsh"
 
-!define PIARIUM_INSTALL_DIR_NAME "Piarium"
+!define VARIN_INSTALL_DIR_NAME "Varin"
 
-Var PiariumDirectoryInput
+Var VarinDirectoryInput
 
-Function PiariumResolveInstallDirectory
+Function VarinResolveInstallDirectory
   Push $0
   Push $1
 
@@ -25,15 +25,15 @@ Function PiariumResolveInstallDirectory
   done_trim_trailing_slash:
     StrCpy $INSTDIR "$0"
     ${GetFileName} "$INSTDIR" $1
-    StrCmp "$1" "${PIARIUM_INSTALL_DIR_NAME}" done_resolve_install_directory
+    StrCmp "$1" "${VARIN_INSTALL_DIR_NAME}" done_resolve_install_directory
 
     StrCpy $1 "$INSTDIR" 1 -1
     StrCmp "$1" "\" 0 append_with_separator
-      StrCpy $INSTDIR "$INSTDIR${PIARIUM_INSTALL_DIR_NAME}"
+      StrCpy $INSTDIR "$INSTDIR${VARIN_INSTALL_DIR_NAME}"
       Goto done_resolve_install_directory
 
     append_with_separator:
-      StrCpy $INSTDIR "$INSTDIR\${PIARIUM_INSTALL_DIR_NAME}"
+      StrCpy $INSTDIR "$INSTDIR\${VARIN_INSTALL_DIR_NAME}"
 
   done_resolve_install_directory:
     Pop $1
@@ -41,29 +41,29 @@ Function PiariumResolveInstallDirectory
 FunctionEnd
 
 !macro customPageAfterChangeDir
-  Page custom PiariumDirectoryPageCreate PiariumDirectoryPageLeave
+  Page custom VarinDirectoryPageCreate VarinDirectoryPageLeave
 
-  Function PiariumDirectoryBrowse
+  Function VarinDirectoryBrowse
     nsDialogs::SelectFolderDialog "$(^DirBrowseText)" "$INSTDIR"
     Pop $0
-    StrCmp "$0" "error" done_piarium_directory_browse
-    StrCmp "$0" "" done_piarium_directory_browse
+    StrCmp "$0" "error" done_varin_directory_browse
+    StrCmp "$0" "" done_varin_directory_browse
 
     StrCpy $INSTDIR "$0"
-    Call PiariumResolveInstallDirectory
-    ${NSD_SetText} $PiariumDirectoryInput "$INSTDIR"
+    Call VarinResolveInstallDirectory
+    ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
 
-    done_piarium_directory_browse:
+    done_varin_directory_browse:
   FunctionEnd
 
-  Function PiariumDirectoryPageCreate
+  Function VarinDirectoryPageCreate
     !insertmacro MUI_HEADER_TEXT_PAGE "$(^DirSubText)" "$(^DirBrowseText)"
     nsDialogs::Create 1018
     Pop $0
     StrCmp "$0" "error" 0 +2
       Abort
 
-    Call PiariumResolveInstallDirectory
+    Call VarinResolveInstallDirectory
 
     ${NSD_CreateLabel} 0 0 100% 38u "$(^DirText)"
     Pop $0
@@ -72,19 +72,19 @@ FunctionEnd
     Pop $0
 
     ${NSD_CreateText} 16u 87u 72% 12u "$INSTDIR"
-    Pop $PiariumDirectoryInput
+    Pop $VarinDirectoryInput
 
     ${NSD_CreateBrowseButton} 78% 86u 20% 14u "$(^BrowseBtn)"
     Pop $0
-    ${NSD_OnClick} $0 PiariumDirectoryBrowse
+    ${NSD_OnClick} $0 VarinDirectoryBrowse
 
     nsDialogs::Show
   FunctionEnd
 
-  Function PiariumDirectoryPageLeave
-    ${NSD_GetText} $PiariumDirectoryInput $INSTDIR
-    Call PiariumResolveInstallDirectory
-    ${NSD_SetText} $PiariumDirectoryInput "$INSTDIR"
+  Function VarinDirectoryPageLeave
+    ${NSD_GetText} $VarinDirectoryInput $INSTDIR
+    Call VarinResolveInstallDirectory
+    ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
   FunctionEnd
 !macroend
 !endif

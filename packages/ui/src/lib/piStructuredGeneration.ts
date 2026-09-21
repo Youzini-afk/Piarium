@@ -1,4 +1,4 @@
-import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
+import type { PiAssistantMessage, PiSessionEntry } from '@varin/protocol';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 
 const DEFAULT_TIMEOUT_MS = 180_000;

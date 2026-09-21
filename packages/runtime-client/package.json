@@ -1,10 +1,10 @@
 {
-  "name": "@piarium/runtime-client",
+  "name": "@varin/runtime-client",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Browser-safe Piarium runtime protocol client.",
+  "description": "Browser-safe Varin runtime protocol client.",
   "files": [
     "dist"
   ],
@@ -25,7 +25,7 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/protocol": "0.1.0"
+    "@varin/protocol": "0.1.0"
   },
   "engines": {
     "node": ">=22.19.0"

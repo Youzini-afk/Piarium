@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseWorkspaceRecoveryCheckpointListResult } from '@piarium/extension-contract';
-import type { HostCapabilityCallContext } from '@piarium/extension-host';
+import { parseWorkspaceRecoveryCheckpointListResult } from '@varin/extension-contract';
+import type { HostCapabilityCallContext } from '@varin/extension-host';
 import {
   createDocumentAuthorityHarness,
   type DocumentAuthorityHarness,
@@ -16,7 +16,7 @@ let harness: DocumentAuthorityHarness | undefined;
 const context: HostCapabilityCallContext = {
   owner: {
     entrypointId: 'builtin-recovery',
-    extensionId: 'piarium.builtin.recovery',
+    extensionId: 'varin.builtin.recovery',
     extensionVersion: '0.3.0',
     generation: 1,
   },

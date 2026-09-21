@@ -119,9 +119,9 @@ export function isComplete(packageDir, targetArch = expectedArch()) {
 }
 
 const installCommands = (env) => {
-  if (env.PIARIUM_ELECTRON_INSTALL_COMMANDS) {
+  if (env.VARIN_ELECTRON_INSTALL_COMMANDS) {
     try {
-      const commands = JSON.parse(env.PIARIUM_ELECTRON_INSTALL_COMMANDS);
+      const commands = JSON.parse(env.VARIN_ELECTRON_INSTALL_COMMANDS);
       if (Array.isArray(commands) && commands.every((entry) => Array.isArray(entry) && typeof entry[0] === 'string')) {
         return commands;
       }
@@ -160,8 +160,8 @@ export function repair(packageDir, options = {}) {
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const bestEffort = argv.includes('--best-effort');
-  const packageDir = env.PIARIUM_ELECTRON_PKG_DIR
-    ? (fs.existsSync(path.join(env.PIARIUM_ELECTRON_PKG_DIR, 'package.json')) ? env.PIARIUM_ELECTRON_PKG_DIR : null)
+  const packageDir = env.VARIN_ELECTRON_PKG_DIR
+    ? (fs.existsSync(path.join(env.VARIN_ELECTRON_PKG_DIR, 'package.json')) ? env.VARIN_ELECTRON_PKG_DIR : null)
     : resolveElectronPackageDir();
   if (!packageDir) {
     console.warn('[electron:ensure] could not locate the installed Electron package');

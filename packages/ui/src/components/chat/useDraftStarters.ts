@@ -1,6 +1,6 @@
 import React from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -10,7 +10,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters } from '@/lib/project-config';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { listPiResources } from '@/lib/pi-runtime/resources';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import type { IconName } from '@/components/icon/icons';
 import {
     BUILTIN_STARTERS,

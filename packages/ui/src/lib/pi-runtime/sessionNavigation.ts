@@ -1,4 +1,4 @@
-import type { ProjectEntry } from '@piarium/application-client';
+import type { ProjectEntry } from '@varin/application-client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore, selectActivePiSessions } from '@/stores/usePiSessionStore';
@@ -8,7 +8,7 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface PiSessionOpenTarget {
   directory?: string | null;

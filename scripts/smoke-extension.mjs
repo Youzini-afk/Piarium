@@ -9,7 +9,7 @@ if (!extensionArgument) {
 
 const extensionPath = resolve(extensionArgument);
 await access(extensionPath);
-const root = await mkdtemp(join(tmpdir(), "piarium-extension-smoke-"));
+const root = await mkdtemp(join(tmpdir(), "varin-extension-smoke-"));
 const agentDir = join(root, "agent");
 const workspace = join(root, "workspace");
 const projectConfigDir = join(workspace, ".pi");

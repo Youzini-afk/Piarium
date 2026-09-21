@@ -10,14 +10,14 @@ import type {
   CommonRequestMiddlewareDependencies,
   ServerStatusDependencies,
 } from './core-routes.js';
-import type { registerPiariumRoutes } from './piarium-routes.js';
+import type { registerVarinRoutes } from './varin-routes.js';
 
 type UiAuthOptions = NonNullable<Parameters<typeof createUiAuth>[0]>;
 type UiAuthController = ReturnType<typeof createUiAuth>;
 type NotificationDependencies = Parameters<typeof registerNotificationRoutes>[1];
 type MobileDependencies = Parameters<typeof registerMobileRoutes>[1];
 type TtsDependencies = Parameters<typeof registerTtsRoutes>[1];
-type PiariumDependencies = Parameters<typeof registerPiariumRoutes>[1];
+type VarinDependencies = Parameters<typeof registerVarinRoutes>[1];
 
 type SessionNotificationMethod =
   | 'getSessionActivitySnapshot'
@@ -34,7 +34,7 @@ export type ServerBootstrapOptions =
   & Omit<AuthAccessDependencies, 'express' | 'uiAuthController'>
   & TtsDependencies
   & Omit<NotificationDependencies, 'uiAuthController' | SessionNotificationMethod>
-  & PiariumDependencies
+  & VarinDependencies
   & {
     clientPairingRuntime: AuthAccessDependencies['clientPairingRuntime'];
     mobileDeviceStore: MobileDependencies['deviceStore'];
@@ -52,7 +52,7 @@ export interface ServerBootstrapDependencies {
   registerCommonRequestMiddleware(app: Express, dependencies: CommonRequestMiddlewareDependencies): void;
   registerMobileRoutes?: typeof registerMobileRoutes;
   registerNotificationRoutes: typeof registerNotificationRoutes;
-  registerPiariumRoutes: typeof registerPiariumRoutes;
+  registerVarinRoutes: typeof registerVarinRoutes;
   registerServerStatusRoutes(app: Express, dependencies: ServerStatusDependencies): void;
   registerTtsRoutes: typeof registerTtsRoutes;
 }
@@ -66,7 +66,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
     registerTtsRoutes,
     registerNotificationRoutes,
     registerMobileRoutes,
-    registerPiariumRoutes,
+    registerVarinRoutes,
     express,
   } = dependencies;
 
@@ -75,7 +75,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
   } => {
     const {
       process,
-      piariumVersion,
+      varinVersion,
       runtimeName,
       serverStartedAt,
       gracefulShutdown,
@@ -115,7 +115,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       path,
       server,
       __dirname,
-      piariumDataDir,
+      varinDataDir,
       modelsDevApiUrl,
       modelsMetadataCacheTtl,
       mobileDeviceStore,
@@ -135,7 +135,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
     registerServerStatusRoutes(app, {
       express,
       process,
-      piariumVersion,
+      varinVersion,
       runtimeName,
       serverStartedAt,
       gracefulShutdown,
@@ -206,13 +206,13 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       });
     }
 
-    registerPiariumRoutes(app, {
+    registerVarinRoutes(app, {
       fs,
       path,
       process,
       server,
       __dirname,
-      piariumDataDir,
+      varinDataDir,
       modelsDevApiUrl,
       modelsMetadataCacheTtl,
     });

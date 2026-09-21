@@ -5,7 +5,7 @@ import {
   type FindOperations,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { DocumentPathOverlayResult } from "@piarium/protocol";
+import type { DocumentPathOverlayResult } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const DEFAULT_FIND_LIMIT = 1000;

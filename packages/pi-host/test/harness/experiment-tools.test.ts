@@ -7,7 +7,7 @@ import {
   createResourcesTool,
 } from "../../src/harness/experiment-tools.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
-import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@piarium/protocol";
+import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@varin/protocol";
 
 const SESSION = "session-1";
 const isError = (result: unknown) => (result as { isError?: boolean }).isError;

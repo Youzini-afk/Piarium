@@ -12,7 +12,7 @@ export interface RuntimeSocketCloseEvent {
   reason: string;
 }
 
-/** Minimal socket contract shared by native WebSocket and Piarium relay sockets. */
+/** Minimal socket contract shared by native WebSocket and Varin relay sockets. */
 export interface RuntimeWebSocket {
   readonly readyState: number;
   close(code?: number, reason?: string): void;

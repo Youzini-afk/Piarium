@@ -18,7 +18,7 @@ import {
   createThreadsTool,
   createWaitTool,
 } from "../../src/harness/thread-tools.js";
-import { resolvePresets } from "@piarium/protocol";
+import { resolvePresets } from "@varin/protocol";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3-e2e-session";
@@ -253,7 +253,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
 
       const active = await harness.bridge.request("zone2.status", {});
       assert.equal(active.status, "ready");
-      assert.match(active.content ?? "", /<piarium-status/);
+      assert.match(active.content ?? "", /<varin-status/);
       assert.match(active.content ?? "", new RegExp(`${thread.id}.*zone2 work.*working`));
 
       await harness.threadRegistry.completeThread(WORKSPACE_ID, thread.id, report("zone2 complete"));

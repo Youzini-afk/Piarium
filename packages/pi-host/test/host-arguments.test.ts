@@ -30,14 +30,14 @@ describe("host arguments", () => {
   });
 
   it("reads package root from the environment when the flag is omitted", () => {
-    const previous = process.env.PIARIUM_PI_PACKAGE_ROOT;
-    process.env.PIARIUM_PI_PACKAGE_ROOT = "C:\\selected-pi";
+    const previous = process.env.VARIN_PI_PACKAGE_ROOT;
+    process.env.VARIN_PI_PACKAGE_ROOT = "C:\\selected-pi";
     try {
       const runtime = resolveHostRuntimeOptions(parseHostArguments([]));
       assert.equal(runtime.packageRoot, "C:\\selected-pi");
     } finally {
-      if (previous === undefined) delete process.env.PIARIUM_PI_PACKAGE_ROOT;
-      else process.env.PIARIUM_PI_PACKAGE_ROOT = previous;
+      if (previous === undefined) delete process.env.VARIN_PI_PACKAGE_ROOT;
+      else process.env.VARIN_PI_PACKAGE_ROOT = previous;
     }
   });
 });

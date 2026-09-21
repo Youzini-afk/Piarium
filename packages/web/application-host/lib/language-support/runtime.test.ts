@@ -184,7 +184,7 @@ describe("createLanguageSupportRuntime", () => {
   });
 
   it("wires an installed grammar that shipped a query and reports the rest as installed-only", async () => {
-    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-language-support-")));
+    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "varin-language-support-")));
     const wasm = new Uint8Array([1, 2, 3]);
     const tags = new TextEncoder().encode("(class_declaration) @definition.class");
     store.put(
@@ -218,7 +218,7 @@ describe("createLanguageSupportRuntime", () => {
   });
 
   it("reports an unreadable index as unknown instead of nothing installed", async () => {
-    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-language-support-")));
+    const store = createGrammarStore(mkdtempSync(join(tmpdir(), "varin-language-support-")));
     const wasm = new Uint8Array([4, 5, 6]);
     store.put("swift", wasm, {
       integrity: grammarIntegrityOf(wasm),

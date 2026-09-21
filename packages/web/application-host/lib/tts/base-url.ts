@@ -50,13 +50,13 @@ export const normalizeCustomOpenAIBaseURL = (value: unknown): NormalizedBaseUrlR
     return { error: 'Custom server URL must not include credentials' };
   }
 
-  const isDesktop = (process.env.PIARIUM_RUNTIME || '').trim().toLowerCase() === 'desktop';
-  const envFlagRaw = process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  const isDesktop = (process.env.VARIN_RUNTIME || '').trim().toLowerCase() === 'desktop';
+  const envFlagRaw = process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
   const hasExplicitFlag = typeof envFlagRaw === 'string' && envFlagRaw.trim().length > 0;
   const allowRemote = hasExplicitFlag ? isEnvFlagEnabled(envFlagRaw) : isDesktop;
   if (!allowRemote && !isAllowedLocalHost(parsed.hostname)) {
     return {
-      error: 'Remote custom server URLs are disabled. Set PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
+      error: 'Remote custom server URLs are disabled. Set VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS=true to allow this host.',
     };
   }
 

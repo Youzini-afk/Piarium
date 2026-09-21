@@ -1,4 +1,4 @@
-import type { HarnessError } from "@piarium/protocol";
+import type { HarnessError } from "@varin/protocol";
 
 /** A typed service failure that the router can preserve on the wire. */
 export class HarnessServiceError extends Error {

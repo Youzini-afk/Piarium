@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { AgentInputContext, DocumentSurfaceWritePathResult } from "@piarium/protocol";
+import type { AgentInputContext, DocumentSurfaceWritePathResult } from "@varin/protocol";
 import type { DirtyBufferPublication, DocumentSurfaceOperationRequest, DocumentSurfaceOperationResult } from "./authority.js";
 import { applyAgentSurfaceMutation, applyTextEdits } from "./surface-mutation.js";
 import { beginAgentMutationOperationAsync, compensateAgentMutationDiskPath, finalizeAgentMutationOperation, reconcileInterruptedAgentMutations, type PersistedAgentMutationData } from "./agent-mutation-operation.js";

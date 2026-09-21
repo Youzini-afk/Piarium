@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mergePolicies, normalizeFrozenHarnessPermissions } from "@piarium/protocol";
-import type { SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
+import { mergePolicies, normalizeFrozenHarnessPermissions } from "@varin/protocol";
+import type { SessionSnapshot, SessionStats, SessionSummary } from "@varin/protocol";
 import { createOnThreadDequeued } from "./thread-dequeue.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "./thread-runtime.js";
@@ -78,7 +78,7 @@ describe("dequeued thread permissions", () => {
   });
 
   it("passes frozen accept-edits through the production dequeue callback into session.create", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-dequeue-permissions-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-dequeue-permissions-"));
     roots.push(dataDir);
     const created: Array<{ permissions?: unknown }> = [];
     const sessionAdapter: ThreadSessionAdapter = {
@@ -109,7 +109,7 @@ describe("dequeued thread permissions", () => {
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
-        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },
@@ -155,7 +155,7 @@ describe("dequeued thread permissions", () => {
   });
 
   it("carries the frozen input origin and inherited context into a dequeued spawn", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "piarium-dequeue-inherit-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-dequeue-inherit-"));
     roots.push(dataDir);
     const prompts: string[] = [];
     const sessionAdapter: ThreadSessionAdapter = {
@@ -183,7 +183,7 @@ describe("dequeued thread permissions", () => {
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
-        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "varin/thread", resultCommit: "result" }),
         inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
         merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
       },

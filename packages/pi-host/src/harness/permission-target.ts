@@ -7,7 +7,7 @@ import {
   type PermissionInspectResult,
   type PermissionPolicy,
   type PermissionToolSource,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 export interface PiToolSourceInfo {
   path: string;
@@ -82,7 +82,7 @@ export function classifyPermissionAction(toolName: string, source: PermissionToo
   if (meta?.mutation === "journaled") return "write";
   if (meta?.mutation === "process") return "process";
   if (meta?.mutation === "none") return "read";
-  // Pi built-ins are maintained by Piarium explicitly. Unknown package/MCP
+  // Pi built-ins are maintained by Varin explicitly. Unknown package/MCP
   // tools do not inherit authority from their own descriptions/annotations.
   if (source.kind === "builtin") {
     if (["read", "grep", "find", "ls"].includes(toolName)) return "read";

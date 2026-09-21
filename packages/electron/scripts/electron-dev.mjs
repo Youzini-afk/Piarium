@@ -14,10 +14,10 @@ const developmentKernel = path.join(
   'kernel',
   'target',
   'release',
-  process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel',
+  process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel',
 );
-const preferredHmrUiPort = Number(process.env.PIARIUM_HMR_UI_PORT || '5173');
-const preferredHmrApiPort = Number(process.env.PIARIUM_HMR_API_PORT || '3901');
+const preferredHmrUiPort = Number(process.env.VARIN_HMR_UI_PORT || '5173');
+const preferredHmrApiPort = Number(process.env.VARIN_HMR_API_PORT || '3901');
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
@@ -45,7 +45,7 @@ function spawnProcess(command, args, options = {}) {
 
   return spawn(spawnCommand, spawnArgs, {
     cwd: repoRoot,
-    env: { ...process.env, PIARIUM_ELECTRON_DEV: '1' },
+    env: { ...process.env, VARIN_ELECTRON_DEV: '1' },
     stdio: 'inherit',
     detached: process.platform !== 'win32',
     windowsVerbatimArguments: isWindowsCommandScript,
@@ -73,7 +73,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...process.env, PIARIUM_ELECTRON_DEV: '1' },
+      env: { ...process.env, VARIN_ELECTRON_DEV: '1' },
       stdio: 'inherit',
       ...options,
     });
@@ -217,7 +217,7 @@ async function main() {
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
   await runProcess('bun', ['run', '--cwd', 'packages/electron', 'bundle:main']);
 
-  const useBundledUi = process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1';
+  const useBundledUi = process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1';
   let devServer = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
@@ -230,11 +230,11 @@ async function main() {
     devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
       env: {
         ...process.env,
-        PIARIUM_ELECTRON_DEV: '1',
-        PIARIUM_HMR_UI_PORT: hmrUiPort,
-        PIARIUM_HMR_API_PORT: hmrApiPort,
-        PIARIUM_KERNEL_PATH: developmentKernel,
-        PIARIUM_DISABLE_PWA_DEV: '1',
+        VARIN_ELECTRON_DEV: '1',
+        VARIN_HMR_UI_PORT: hmrUiPort,
+        VARIN_HMR_API_PORT: hmrApiPort,
+        VARIN_KERNEL_PATH: developmentKernel,
+        VARIN_DISABLE_PWA_DEV: '1',
       },
     });
     await Promise.all([
@@ -248,12 +248,12 @@ async function main() {
     cwd: electronDir,
     env: {
       ...process.env,
-      PIARIUM_ELECTRON_DEV: '1',
-      ...(useBundledUi ? { PIARIUM_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
-      PIARIUM_HMR_UI_PORT: hmrUiPort,
-      PIARIUM_HMR_API_PORT: hmrApiPort,
-      PIARIUM_KERNEL_PATH: developmentKernel,
-      PIARIUM_DISABLE_PWA_DEV: '1',
+      VARIN_ELECTRON_DEV: '1',
+      ...(useBundledUi ? { VARIN_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
+      VARIN_HMR_UI_PORT: hmrUiPort,
+      VARIN_HMR_API_PORT: hmrApiPort,
+      VARIN_KERNEL_PATH: developmentKernel,
+      VARIN_DISABLE_PWA_DEV: '1',
     },
   });
 

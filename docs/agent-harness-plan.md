@@ -21,11 +21,11 @@ Last updated: 2026-09-21
 Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性检查决定何时交付，同一会话或线程在需要时恢复。
 完整设计见 [agent-follow-up-design.md](agent-follow-up-design.md)；交付事实与未覆盖边界见 status。
 
-**下一阶段 B：Varin 全面更名（D-313，设计已接受，尚未实施）。**
+**阶段 B：Varin 全面更名（D-313，源码/产品与 GitHub 仓库已切换；首次新品牌发行待发布）。**
 产品、自有代码/协议/配置、构建发行和当前文档一次切换为 Varin，不留旧名称兼容层；
 真实 Pi 依赖、已有成果与历史记录按原归属保留。完整设计见 [varin-rebrand-design.md](varin-rebrand-design.md)。
 
-**阶段 F：快速决策模型与渐进检索（D-312，设计已接受，尚未实施；在 B 后推进）。**
+**下一阶段 F：快速决策模型与渐进检索（D-312，设计已接受，尚未实施）。**
 通用能力与首个 Jev 适配、模型配置、`explore` 选材和动态下一步选择按 F0 → F1 → F2 → F3 → F4 推进。
 完整合同见 [fast-decision-model-design.md](fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
 
@@ -35,7 +35,7 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 
 - **正式设计直接实施。** D-078 已授权工作状态与目录分离、原生结果存储、版本化集成，以及检索、记忆和 review 的默认交付。
   执行者可以调整持久格式、数据 authority、协议、方法语义和默认值，连同消费者和文档完成，不按变更类别自动暂停。
-- **当前没有用户，不留旧内部格式兼容。** Piarium 内部协议、catalog、缓存、索引和派生状态直接替换，旧内部库可清除重建。
+- **当前没有用户，不留旧内部格式兼容。** Varin 内部协议、catalog、缓存、索引和派生状态直接替换，旧内部库可清除重建。
   不做旧格式 reader、升级/导入器、多版本分支、双写或旧后端 fallback；相关消费者、夹具和文档在同一改动更新。
   工作区文件/Git、原生 Pi 数据及外部配置照常保全；尚未写回的实际成果如需带走，做具体交接，不据此建设旧 schema 转换机制。
   新格式自身的事务、引用保护、崩溃恢复与损坏报错仍须正确，不能把读取失败吞成空库（D-253 更正 D-252 的默认转换要求）。
@@ -84,7 +84,7 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 4. 限制对应真实问题；权限/路径是边界，调度是背压，输出/磁盘预算是配置策略，没有定标不猜硬拒绝数值。
 5. 正文不进日志、广播事件或 URL，经已授权的正文/工具通道传递。
 6. 模型选择 user-owned；普通线程明确继承当前模型，预设沿槽位或明示 inherit，专用未配不偷借。续接摘要沿活动请求派生，不新增凭据栈。
-7. 用户确认由 Piarium 原生 `tool_call` 门统一拥有，Host 只做不交互的身份/能力/路径强制；原生 web 工具不会因检测到插件而自动让位，替换能力必须由用户显式关闭原生工具。
+7. 用户确认由 Varin 原生 `tool_call` 门统一拥有，Host 只做不交互的身份/能力/路径强制；原生 web 工具不会因检测到插件而自动让位，替换能力必须由用户显式关闭原生工具。
 8. 主 agent 对上下文维护零义务。plan/todo、用户笔记和 accepted knowledge 独立保留；停止 keeper 不删除或隐藏它们。
 9. 摘要准备不改历史；提交使用 Pi 安全切点，摘要与固定收束范围一起发布，保留准备期间新增原文。回合内每次模型请求前检查预算，不能用摘要丢失 B/N 来凑比例（D-284）。
 10. 损坏、权限错误、未来格式不读成空；新记录发布后切换，失败迁移不覆盖旧数据。
@@ -118,7 +118,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 产品与 Agent 编排，Pi 保留 Agent loop/provider/session。未测平台、真实 provider 与真实 CoW 的观察继续如实登记，但不把它们
 改写成已完成平台的功能禁用。
 
-**现有 Harness 收口（D-283）已完成。** Piarium 原生权限门已经接管 Harness、Pi 内置、MCP、Pi 包工具和嵌套线程的用户确认，
+**现有 Harness 收口（D-283）已完成。** Varin 原生权限门已经接管 Harness、Pi 内置、MCP、Pi 包工具和嵌套线程的用户确认，
 foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 `webfetch` / `websearch` 的配置代际、域名策略、渲染选择与
 插件替换语义也已收口，不再重开权限/Web 双轨。
 
@@ -245,7 +245,7 @@ websearch provider / render / domain policy 现在按 worker generation 冻结�
 
 ### 2.2 Zone 2
 
-现有 zone2.assemble / 隐藏 piarium-context 追加通道保留。D-284 只投递新事实、用户修改与相关的新知识指针，不每轮复制全部
+现有 zone2.assemble / 隐藏 varin-context 追加通道保留。D-284 只投递新事实、用户修改与相关的新知识指针，不每轮复制全部
 blocks/计划/用量面板；agent 自己的编辑、命令和 todo 已在工具结果中。用量 UI 保留，不为变化的使用率单独追加消息。
 保留 event cursor 与送达提交；无材料不造消息。去重绑定来源/修订及其是否仍在保留原文中；压缩实际切点丢失基线才重建
 对应观察，不在候选准备时重置。沿现有呈现预算汇总明确机械重复，正常 read 不因读过或临近容量缩短，估算明示。
@@ -529,7 +529,7 @@ web 工具仅在 Host 已装配时可用。交付物由 `submit_facts` → `thre
 保持现有 workspace/scope、一基位置与"编辑器 buffer 不被磁盘覆盖"；隔离线程用自身版本/物化目录，不能借父缓冲冒充子状态。
 缺某语言服务器只说明该来源不可用。本切片把共享会话拆成按来源隔离的视图，并让范围携带正文修订，交付顺序：
 
-1. **语言身份统一（已交付）。** `@piarium/protocol` 的 `languageIdForPath` 取代 `lib/harness/language-id.ts` 与 UI
+1. **语言身份统一（已交付）。** `@varin/protocol` 的 `languageIdForPath` 取代 `lib/harness/language-id.ts` 与 UI
    `language-services/language-id.ts` 两张表。`.mts/.cts/.mjs/.cjs` 在 agent 侧不再判 unsupported，`.sh` 统一为 `shellscript`
    （编辑器显示经 `editorLanguageIdForLanguage` 映射回 `shell`）。运行时由编辑器注册表贡献的语言仍只在 renderer 可见。
 2. **视图键与版本命名空间（已交付）。** 会话键加 `viewId`；Host 视图按 (视图, 资源) 单调分配版本，`surface` 视图沿用
@@ -577,7 +577,7 @@ rail/overlay/时间线共用session feed/SSE。已有归档/恢复、结果/占�
 2. **冷启动对照基线。** 在本仓库量一次 agent 视图从冷启动到 `documentSymbol` 可用的时间，记入 status；这是第 3 步"好了多少"的对照，
    不再是"要不要做"的门。
 3. **web-tree-sitter + TS/TSX 包作第二 provider，同时接命中分类。** 引入依赖与 `.wasm` 打包路径（Electron/Web 宿主都能读到）；
-   语法包 = 语法 wasm + Piarium 查询（定义、带字面量调用、import；从 Aider / nvim-treesitter 的 Apache 2.0 查询改起并注明来源）；
+   语法包 = 语法 wasm + Varin 查询（定义、带字面量调用、import；从 Aider / nvim-treesitter 的 Apache 2.0 查询改起并注明来源）；
    解析结果按内容哈希缓存，授权与来源仍每次核验；ABI 随应用版本锁定，加载失败按 provider `unavailable` 报告。验收：同一查询在
    语言服务器冷态下由 tree-sitter 给出切片；命中按节点种类分类进入排序；解析受工作预算与取消约束。
 4. **连接边查询、冷仓库符号目录、`imports` 边。** ✓ `bridge.request("…")` / `router.register("…")` / `on("…")` 等形状产出确认连接，
@@ -860,11 +860,11 @@ OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对
 
 ## 阶段 3b：原生权限唯一权威（D-283，已完成）
 
-当前交付事实：Piarium 内置 `tool_call` extension 是唯一交互式确认权威，覆盖 Harness、Pi 内置、MCP、Pi package 与嵌套线程工具。
+当前交付事实：Varin 内置 `tool_call` extension 是唯一交互式确认权威，覆盖 Harness、Pi 内置、MCP、Pi package 与嵌套线程工具。
 `normal` / `accept-edits` / `bypass` / `smart`、用户规则、workspace 只收紧和 `permissionJudge` 都作用于这条唯一链；Host 继续只做
 非交互 actor/capability/workspace/path enforcement。D-283 完成了以下纵切：
 
-1. pi-host 内置 `tool_call` extension 成为 Piarium 会话唯一的用户确认权威。它在会话构造时取得所有实际工具的稳定身份与来源，覆盖
+1. pi-host 内置 `tool_call` extension 成为 Varin 会话唯一的用户确认权威。它在会话构造时取得所有实际工具的稳定身份与来源，覆盖
    Harness、Pi 内置、MCP、Pi 包工具和嵌套线程允许集；不能再以“非 Harness 工具”直接放行。Host 继续只验证 broker actor、冻结
    capability、workspace/path scope 与资源 authority，不弹第二次确认，也不替 worker 内执行的工具假装做交互门。
 2. 工具装配生成规范化的权限对象：工具来源、动作类别、实际 cwd、命令、规范路径集合、网络目标和子线程范围。Harness/Pi 内置工具
@@ -879,14 +879,14 @@ OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对
    放行整个 `bash` 或未知工具。嵌套线程继承创建时冻结的 overlay，只能收紧；父会话之后切到 bypass 不放宽已运行子线程。
 6. 每次 allow/deny/ask、规则来源、规范化目标、用户选择和 policy generation 进入现有 session/Thread 事件与审计投影；敏感正文和凭据
    不进入日志。不新建另一套 permission 数据库或把审计写进模型上下文。
-7. 单一 Piarium 权限 UI 负责确认卡片、会话授权撤销、模式与规则。完成覆盖后，从 foundational manifest 删除
+7. 单一 Varin 权限 UI 负责确认卡片、会话授权撤销、模式与规则。完成覆盖后，从 foundational manifest 删除
    `@gotgenes/pi-permission-system`，并删除 session service 让位、permission-system Plugin Settings/quick mode/status bridge、专属 i18n 与
    测试路径；不保留默认关闭、旧配置 reader 或双重提示兼容层。
 
 实现使用 Pi `getAllTools().sourceInfo` 识别实际来源，SDK Harness override 才按 Harness 元数据分类；MCP/package/未知工具缺副作用证据时
 进入 unknown/ask，不能借同名 `read` 等默认规则放行。路径证据经 Host `permission.inspect` 复用既有规范路径 authority；shell 解析保持
 保守，组合/子 shell 等无法完整归一时标 evidence incomplete，因此不能走 Smart 或 session grant。会话 grant 绑定来源、动作、owning /
-execution workspace、cwd、规范资源、网络目标和 thread scope，`/piarium-permissions` 可撤销。每次决定经 `permission.audit` 投影，不含正文/
+execution workspace、cwd、规范资源、网络目标和 thread scope，`/varin-permissions` 可撤销。每次决定经 `permission.audit` 投影，不含正文/
 凭据。foundational manifest 已升 revision 3 且只保留 MCP；permission-system 的 service 让位、状态桥、Plugin Settings、Composer quick mode、
 专属 i18n 与测试路径已物理删除。公开反例与跨包类型/lint 证据见 status 3b.1–3b.3。
 
@@ -958,7 +958,7 @@ surface 权威留在 Registry，Rust 维护混合操作的 operationId/intent/�
 
 D-276 已完成本阶段生产接管：kernel `fileResources` 注册 Documents-authorized canonical execution root，负责 exact/subtree lease、稳定 file state capture、内容对象安装、条件 apply、mkdir/remove/rename 以及 side-effect 后 terminal 丢失的 restart reconciliation。Documents write/move/delete、workspace-scoped Files CRUD、Recovery/Integration disk apply/compensation 和生产 `fs.lock` 使用该同一权威；Registry 仍拥有未保存正文和 grouped undo，Host 只在 kernel intent/file phase 已持久化后定向执行 surface 操作，等待 Registry 回执期间不持 SQLite transaction。
 
-Piarium 模式的 Pi `write` / `edit` / `apply_patch` 先走 virtual `document.branchWrite`，disk/surface target 统一由 `document.surfaceWrite` 进入 Host Documents；Host mutation backend 不可用时明确失败，不再退回 pi-host 本地 `writeFile/rm`。WorkspaceAPI/Git/bulk/external adapter 尚未迁移其领域实现，但在执行时向同一 kernel exact/subtree gate 登记 writer；这满足 R2 的 single-gate 要求。D-278 曾因 low-level pending operation 处置缺口重新打开 R2；D-279 通过 `file.operation.list/reconcile` 与真实 restart audit 关闭该 gate。R4–R6 不变。
+Varin 模式的 Pi `write` / `edit` / `apply_patch` 先走 virtual `document.branchWrite`，disk/surface target 统一由 `document.surfaceWrite` 进入 Host Documents；Host mutation backend 不可用时明确失败，不再退回 pi-host 本地 `writeFile/rm`。WorkspaceAPI/Git/bulk/external adapter 尚未迁移其领域实现，但在执行时向同一 kernel exact/subtree gate 登记 writer；这满足 R2 的 single-gate 要求。D-278 曾因 low-level pending operation 处置缺口重新打开 R2；D-279 通过 `file.operation.list/reconcile` 与真实 restart audit 关闭该 gate。R4–R6 不变。
 
 ### R3. 基线、物化与资源生命周期
 
@@ -1344,7 +1344,7 @@ Host 接收 envelope 时确认发送身份、目标关系授权、请求幂等�
 | 后端 | 执行权威 | 必须呈现的能力与限制 |
 | --- | --- | --- |
 | 本机 | 现有 Rust process/resource 服务 | 进程组控制、日志游标、退出事实、工作目录与结果保留 |
-| 受管远程机器 | 经现有连接建立的远端 Rust 执行组件或 Piarium Host | SSH 可引导安装/连接；远端持续监督、重连附着、身份和协议核对，主 UI 关闭不等于作业退出 |
+| 受管远程机器 | 经现有连接建立的远端 Rust 执行组件或 Varin Host | SSH 可引导安装/连接；远端持续监督、重连附着、身份和协议核对，主 UI 关闭不等于作业退出 |
 | 普通 SSH 操作 | 已授权远端 Shell/文件操作 | 可用于环境准备和排查；未建立监督的命令不声称具备完整作业恢复能力 |
 | 原生计算集群（延期） | 有明确需求时另行接入 | 当前不实现 Slurm 等适配器，也不为其预建配置或调度框架 |
 
@@ -1467,7 +1467,7 @@ D-303 收口本机生产链；D-305 已把 D-304 的远程/多目标余项沿 7G
 2. **受管远程现场。** SSH/现有远程连接建立目标身份，复用远端执行核心；接入授权的远端文件/环境/排查操作。
    覆盖提交响应丢失、断线后继续、Host 重启附着、真实停止和结果收集，不能只证明远端命令能执行。
 3. **多目标与资源确认。** 接通资源可见、放置、排队、冲突和释放；目标执行服务统一确认来自不同工作区/客户端的分配。
-   遥测、Piarium 预留与可落实的隔离分别表达。运维线程按规模引入，不替代程序资源确认；Slurm 等原生集群延期。
+   遥测、Varin 预留与可落实的隔离分别表达。运维线程按规模引入，不替代程序资源确认；Slurm 等原生集群延期。
 4. **研究消费者。** 在科研工作台/普通工具中查看机器、作业、日志、指标和结果，渐进展开；
    从已有研究线程直接操作并继续实验；代码与实际消费者未接线属于功能缺项，缺少外部环境的实测只记录其证据范围。
 
@@ -1590,7 +1590,7 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 按下列责任分段接通；不是只交一组后端接口，公开工具与 UI 必须能使用每段能力：
 
 1. **目标接入与远端监督。** 复用现有远程连接/凭据和 Rust 执行核心，通过 SSH 准备或连接用户权限下的执行组件，
-   也可使用已有远程 Piarium Host。远端不装桌面 UI 或模型账户；组件准备结果、目标稳定身份、工作范围和可用能力可见。
+   也可使用已有远程 Varin Host。远端不装桌面 UI 或模型账户；组件准备结果、目标稳定身份、工作范围和可用能力可见。
    目标身份不能仅取 SSH 别名；远端形成自己的授权/实例身份，不能复制本地 kernel grant。原始 kernel 私有协议不直接裸露为公网接口。
    本地保存研究意图与引用，目标保存实际作业/输出/分配，既有 backend 接缝扩展到真实消费者，不新建并行 TS 执行权威。
 2. **实验与排查共用真实现场。** 固定输入 → 远端准备 → 持久提交 → 进程监督 → cursor 日志 → 产物读取贯通，
@@ -1710,7 +1710,7 @@ S0–S4 是同一完整阶段内的实施顺序，不是把剩余设置长期列
 - 资源描述接入 7H 调度；同一全局配置不能因来自不同工作区而失去协调。同 owner 原子提交，
   跨 owner 如实报告逐项结果，不承诺跨进程全局事务或无条件回滚用户后续修改。
 - 目录引用登录、安装、启停、准备、连接等原领域动作；缺 Agent 入口的正式管理项补同 owner 的类型化工具适配。
-  Skill/提示词管理走 resource API，Pi 包与 Piarium 扩展保持各自 authority。
+  Skill/提示词管理走 resource API，Pi 包与 Varin 扩展保持各自 authority。
 - 自身会话配置写入和 reload 先在原 owner/broker 拆清责任，避免设置工具等待自己的运行队列；
   生效规则随写入合同实现，不能先接一个会中途重载 Agent 的临时版本。
 
@@ -1827,13 +1827,13 @@ file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 o
 
 ## 阶段 B：Varin 全面更名（D-313）
 
-状态：**accepted design / not implemented**。设计 authority 为
-[Varin 全面更名](varin-rebrand-design.md)。优先于尚未实施的阶段 F；B0–B4 是一次完整切换的工作切片，
-不为半改名状态建设新旧共存机制，不把外部资源计划冒充已生效。
+状态：**源码、品牌资源、构建配置与 GitHub 仓库已切换并通过本地生产链检查；新品牌公开发行待发布**。
+设计 authority 为 [Varin 全面更名](varin-rebrand-design.md)，实际证据与 npm/发行边界见 status。
+B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也不把未发布的新坐标标成已有下载产物。
 
 ### B0：命名映射与真实消费入口
 
-- 从跟踪文件定位 Piarium/piarium/PIARIUM、自有派生符号和文件名，按 UI、包/构建、运行时合同、
+- 从跟踪文件定位 Piarium/piarium/PIARIUM、自有派生符号和文件名，再按 UI、包/构建、运行时合同、
   数据/配置、发行/外部资源、文档划分入口；搜索生成源而非批改 node_modules、缓存和输出目录。
 - 采用设计的命名表，追踪 package/filter/import、事件发送/消费、kernel 生成/启动、appId/原生工程、
   asset/feed 等实际依赖。不新增另一个永远需要维护的命名数据库或品牌服务。

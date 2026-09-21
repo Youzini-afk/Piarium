@@ -28,14 +28,14 @@ describe('runtime manager routes', () => {
     };
     registerRuntimeManagerRoutes(app, { lifecycle });
 
-    expect((await request(app).get('/api/piarium/runtime-manager').expect(200)).body).toEqual(snapshot);
-    expect((await request(app).post('/api/piarium/runtime-manager/refresh').expect(200)).body.status).toBe('discovering');
-    expect((await request(app).post('/api/piarium/runtime-manager/install').expect(200)).body.status).toBe('installing');
-    expect((await request(app).post('/api/piarium/runtime-manager/upgrade').expect(200)).body.status).toBe('upgrading');
-    expect((await request(app).post('/api/piarium/runtime-manager/activate').send({ id: 'system' }).expect(200)).body.selectedId).toBe('system');
-    expect((await request(app).post('/api/piarium/runtime-manager/activate-custom').send({ packageRoot: 'D:/pi' }).expect(200)).body.active.packageRoot).toBe('D:/pi');
-    await request(app).post('/api/piarium/runtime-manager/activate').send({}).expect(400, { error: 'id is required' });
-    await request(app).post('/api/piarium/runtime-manager/pick').expect(501);
+    expect((await request(app).get('/api/varin/runtime-manager').expect(200)).body).toEqual(snapshot);
+    expect((await request(app).post('/api/varin/runtime-manager/refresh').expect(200)).body.status).toBe('discovering');
+    expect((await request(app).post('/api/varin/runtime-manager/install').expect(200)).body.status).toBe('installing');
+    expect((await request(app).post('/api/varin/runtime-manager/upgrade').expect(200)).body.status).toBe('upgrading');
+    expect((await request(app).post('/api/varin/runtime-manager/activate').send({ id: 'system' }).expect(200)).body.selectedId).toBe('system');
+    expect((await request(app).post('/api/varin/runtime-manager/activate-custom').send({ packageRoot: 'D:/pi' }).expect(200)).body.active.packageRoot).toBe('D:/pi');
+    await request(app).post('/api/varin/runtime-manager/activate').send({}).expect(400, { error: 'id is required' });
+    await request(app).post('/api/varin/runtime-manager/pick').expect(501);
   });
 
   it('opens a picked package root when the desktop dialog is available', async () => {
@@ -53,10 +53,10 @@ describe('runtime manager routes', () => {
     const openFilesystemPath = vi.fn(async () => {});
     registerRuntimeManagerRoutes(app, { lifecycle, pickPiPackageRoot, openFilesystemPath });
 
-    expect((await request(app).post('/api/piarium/runtime-manager/pick').expect(200)).body).toEqual({
+    expect((await request(app).post('/api/varin/runtime-manager/pick').expect(200)).body).toEqual({
       packageRoot: 'D:/chosen/pi',
     });
-    await request(app).post('/api/piarium/runtime-manager/open-location').send({ path: 'D:/chosen/pi' }).expect(200, { ok: true });
+    await request(app).post('/api/varin/runtime-manager/open-location').send({ path: 'D:/chosen/pi' }).expect(200, { ok: true });
     expect(openFilesystemPath).toHaveBeenCalledWith('D:/chosen/pi');
   });
 });

@@ -6,16 +6,16 @@ describe('theme storage', () => {
   test('accepts the complete current theme state', () => {
     expect(parseStoredThemeState(JSON.stringify({
       mode: 'system',
-      lightThemeId: 'piarium-light',
-      darkThemeId: 'piarium-dark',
+      lightThemeId: 'varin-light',
+      darkThemeId: 'varin-dark',
       splash: {
         light: { background: '#fff', foreground: '#111' },
         dark: { background: '#111', foreground: '#fff' },
       },
     }))).toEqual({
       mode: 'system',
-      lightThemeId: 'piarium-light',
-      darkThemeId: 'piarium-dark',
+      lightThemeId: 'varin-light',
+      darkThemeId: 'varin-dark',
       splash: {
         light: { background: '#fff', foreground: '#111' },
         dark: { background: '#111', foreground: '#fff' },
@@ -29,8 +29,8 @@ describe('theme storage', () => {
     expect(parseStoredThemeState(JSON.stringify({ themeMode: 'dark' }))).toBeNull();
     expect(parseStoredThemeState(JSON.stringify({
       mode: 'dark',
-      lightThemeId: 'piarium-light',
-      darkThemeId: 'piarium-dark',
+      lightThemeId: 'varin-light',
+      darkThemeId: 'varin-dark',
       splash: { light: {}, dark: {} },
     }))).toBeNull();
   });

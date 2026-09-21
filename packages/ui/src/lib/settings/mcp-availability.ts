@@ -4,10 +4,10 @@ import {
   matchesFoundationalPackage,
   type PackageDescriptor,
   type RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { listPiPackages } from '@/lib/pi-runtime/packages';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 export interface McpSettingsAvailabilityState {
   error: string | null;

@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getDeferredSafeStorage, getSafeStorage } from './utils/safeStorage';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeKey } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 
 // --- Types ---
 
@@ -41,9 +41,9 @@ type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
 
 // --- Storage ---
 
-const FOLDERS_STORAGE_KEY = 'piarium.sessionFolders.v1';
-const COLLAPSED_STORAGE_KEY = 'piarium.sessionFolderCollapse.v1';
-const STORAGE_INDEX_KEY = 'piarium.sessionFolders.index.v1';
+const FOLDERS_STORAGE_KEY = 'varin.sessionFolders.v1';
+const COLLAPSED_STORAGE_KEY = 'varin.sessionFolderCollapse.v1';
+const STORAGE_INDEX_KEY = 'varin.sessionFolders.index.v1';
 const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 
@@ -568,7 +568,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         return null;
       },
     }),
-    { name: 'piarium-session-folders' },
+    { name: 'varin-session-folders' },
   ),
 );
 

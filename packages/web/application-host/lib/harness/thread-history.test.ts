@@ -4,7 +4,7 @@ import request from "supertest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { SessionSnapshot, ThreadReport } from "@piarium/protocol";
+import type { SessionSnapshot, ThreadReport } from "@varin/protocol";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createThreadRegistry } from "./thread-registry.js";
@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 async function setup() {
-  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-thread-history-"));
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-thread-history-"));
   const workspace = path.join(root, "workspace");
   await fs.promises.mkdir(workspace);
   await fs.promises.writeFile(path.join(workspace, "a.txt"), "base\n");

@@ -13,10 +13,10 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { useDictation } from '@/hooks/useDictation';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
-import { usePiariumPreferencesStore } from '@/stores/usePiariumPreferencesStore';
+import { useVarinPreferencesStore } from '@/stores/useVarinPreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
@@ -73,7 +73,7 @@ const VolumeMeter: React.FC<{ volume: number }> = ({ volume }) => {
  * returns the download percent (null while unknown / not downloading).
  */
 const useModelDownloadProgress = (active: boolean): number | null => {
-    const sttLocalModel = usePiariumPreferencesStore((state) => state.sttLocalModel);
+    const sttLocalModel = useVarinPreferencesStore((state) => state.sttLocalModel);
     const [percent, setPercent] = React.useState<number | null>(null);
 
     React.useEffect(() => {
@@ -131,7 +131,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
-    const dictationEnabled = usePiariumPreferencesStore((state) => state.dictationEnabled);
+    const dictationEnabled = useVarinPreferencesStore((state) => state.dictationEnabled);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
     const [supported] = React.useState(() => isDictationCaptureSupported());
@@ -198,8 +198,8 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                 void confirmDictation();
             }
         };
-        window.addEventListener('piarium:dictation-toggle', onToggle);
-        return () => window.removeEventListener('piarium:dictation-toggle', onToggle);
+        window.addEventListener('varin:dictation-toggle', onToggle);
+        return () => window.removeEventListener('varin:dictation-toggle', onToggle);
     }, [startDictation, confirmDictation]);
 
     // While recording: Enter confirms (insert), Escape cancels. Capture-phase

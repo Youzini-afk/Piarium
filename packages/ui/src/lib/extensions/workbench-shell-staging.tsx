@@ -73,7 +73,7 @@ export const WorkbenchShellStagingHost: React.FC = () => {
   return (
     <div
       aria-hidden="true"
-      data-piarium-workbench-shell-staging=""
+      data-varin-workbench-shell-staging=""
       style={{
         inset: 0,
         pointerEvents: 'none',

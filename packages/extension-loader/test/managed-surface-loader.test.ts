@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
 import test from "node:test";
 import type {
-  PiariumApplicationSurface,
-  PiariumExtensionActualState,
-  PiariumExtensionAssetPayload,
-  PiariumExtensionCatalogEntry,
-  PiariumExtensionCatalogSnapshot,
-  PiariumExtensionManagedEntrypointPayload,
-  PiariumExtensionManifest,
-  PiariumExtensionHostStateSnapshot,
-  PiariumExtensionStaticContribution,
-} from "@piarium/extension-contract";
-import { SurfaceCapabilityRegistry, SurfaceExtensionRuntime } from "@piarium/extension-surface";
+  VarinApplicationSurface,
+  VarinExtensionActualState,
+  VarinExtensionAssetPayload,
+  VarinExtensionCatalogEntry,
+  VarinExtensionCatalogSnapshot,
+  VarinExtensionManagedEntrypointPayload,
+  VarinExtensionManifest,
+  VarinExtensionHostStateSnapshot,
+  VarinExtensionStaticContribution,
+} from "@varin/extension-contract";
+import { SurfaceCapabilityRegistry, SurfaceExtensionRuntime } from "@varin/extension-surface";
 import {
   browserIsolatedSurfaceRealmFactory,
   evaluateManagedSurfaceModule,
@@ -28,7 +28,7 @@ const realmId = "window-test";
 
 const integrityFor = (value: string): string => `sha256-${createHash("sha256").update(value).digest("hex")}`;
 
-const asset = (value: string, artifactIntegrity: string, path: string, contentType = "text/javascript; charset=utf-8"): PiariumExtensionAssetPayload => ({
+const asset = (value: string, artifactIntegrity: string, path: string, contentType = "text/javascript; charset=utf-8"): VarinExtensionAssetPayload => ({
   artifactIntegrity,
   bytesBase64: Buffer.from(value).toString("base64"),
   contentType,
@@ -36,17 +36,17 @@ const asset = (value: string, artifactIntegrity: string, path: string, contentTy
   path,
 });
 
-const manifest = (version: string): PiariumExtensionManifest => ({
+const manifest = (version: string): VarinExtensionManifest => ({
   schemaVersion: 1,
   id: "dev.example.managed",
   version,
-  engines: { piarium: "*" },
+  engines: { varin: "*" },
   entrypoints: {
     surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
   },
 });
 
-const catalogEntry = (version: string, artifactIntegrity: string): PiariumExtensionCatalogEntry => ({
+const catalogEntry = (version: string, artifactIntegrity: string): VarinExtensionCatalogEntry => ({
   actual: [],
   capabilityGrants: [],
   desired: { enabled: true, revision: 1, updatedAt: "2026-08-14T00:00:00.000Z" },
@@ -61,9 +61,9 @@ const catalogEntry = (version: string, artifactIntegrity: string): PiariumExtens
 
 const snapshot = (
   revision: number,
-  entry: PiariumExtensionCatalogEntry,
+  entry: VarinExtensionCatalogEntry,
   applicationHostId = hostId,
-): PiariumExtensionCatalogSnapshot => ({
+): VarinExtensionCatalogSnapshot => ({
   authoritative: true,
   diagnostics: [],
   extensions: [entry],
@@ -75,11 +75,11 @@ const snapshot = (
 });
 
 const hostState = (
-  catalog: PiariumExtensionCatalogSnapshot,
+  catalog: VarinExtensionCatalogSnapshot,
   revision = catalog.revision,
-  providers: PiariumExtensionHostStateSnapshot['services']['providers'] = [],
+  providers: VarinExtensionHostStateSnapshot['services']['providers'] = [],
   selections: Record<string, string> = {},
-): PiariumExtensionHostStateSnapshot => ({
+): VarinExtensionHostStateSnapshot => ({
   catalog,
   revision,
   routing: {
@@ -103,14 +103,14 @@ const hostState = (
   },
 });
 
-for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly PiariumApplicationSurface[]) {
+for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly VarinApplicationSurface[]) {
   test(`pure declarative ${surface} lifecycle registers without module bytes and withdraws on disable`, async () => {
     const artifactIntegrity = integrityFor(`declarative-${surface}`);
-    const declarativeManifest: PiariumExtensionManifest = {
+    const declarativeManifest: VarinExtensionManifest = {
       schemaVersion: 1,
       id: "dev.example.declarative",
       version: "1.0.0",
-      engines: { piarium: "*" },
+      engines: { varin: "*" },
       entrypoints: {
         surfaces: [
           { id: "declarative", mode: "declarative", supports: [surface] },
@@ -139,7 +139,7 @@ for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly P
     let assetReads = 0;
     let entrypointReads = 0;
     let evaluations = 0;
-    const reported: PiariumExtensionActualState[] = [];
+    const reported: VarinExtensionActualState[] = [];
     const runtime = new SurfaceExtensionRuntime({ surface });
     const loader = new SurfaceExtensionLoader({
       evaluateModule: () => {
@@ -178,7 +178,7 @@ for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly P
       "dev.example.declarative.manifest-page",
     ]);
     const manifestImplementation = visible.find((item) => item.descriptor.id.endsWith("manifest-page"))?.implementation as {
-      descriptor: PiariumExtensionStaticContribution;
+      descriptor: VarinExtensionStaticContribution;
       kind: string;
     };
     assert.equal(manifestImplementation.kind, "declarative");
@@ -192,7 +192,7 @@ for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly P
     assert.equal(evaluations, 0);
 
     current = snapshot(2, {
-      ...current.extensions[0] as PiariumExtensionCatalogEntry,
+      ...current.extensions[0] as VarinExtensionCatalogEntry,
       desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:01:00.000Z" },
     });
     await loader.reconcile();
@@ -208,7 +208,7 @@ for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly P
 
 test("manifest and managed contributions publish as one Surface generation", async () => {
   const artifactIntegrity = integrityFor("mixed-artifact");
-  const mixedManifest: PiariumExtensionManifest = {
+  const mixedManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
     contributions: [{
       contractVersion: 1,
@@ -272,11 +272,11 @@ test("manifest and managed contributions publish as one Surface generation", asy
 
 test("eager entrypoint with only incompatible contributions does not execute its module", async () => {
   const artifactIntegrity = integrityFor("incompatible-only");
-  const incompatibleManifest: PiariumExtensionManifest = {
+  const incompatibleManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.incompatible-only",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
     },
@@ -336,11 +336,11 @@ test("eager entrypoint with only incompatible contributions does not execute its
 
 test("lazy Surface entrypoints index declarative contributions and activate once per real event", async () => {
   const artifactIntegrity = integrityFor("lazy-events");
-  const lazyManifest: PiariumExtensionManifest = {
+  const lazyManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.lazy",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [
         { activation: ["command"], file: "command.js", id: "command", mode: "managed", supports: ["web"] },
@@ -360,7 +360,7 @@ test("lazy Surface entrypoints index declarative contributions and activate once
   const reads = new Map<string, number>();
   const executions = new Map<string, number>();
   let hostActivations = 0;
-  const reported: PiariumExtensionActualState[] = [];
+  const reported: VarinExtensionActualState[] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
     evaluateModule: (source) => ({
@@ -439,13 +439,13 @@ test("lazy Surface entrypoints index declarative contributions and activate once
   assert.equal(hostActivations, 4);
 
   current = snapshot(2, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:01:00.000Z" },
   });
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
   current = snapshot(3, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     desired: { enabled: true, revision: 3, updatedAt: "2026-08-14T00:02:00.000Z" },
   });
   await loader.reconcile();
@@ -462,11 +462,11 @@ test("lazy Surface entrypoints index declarative contributions and activate once
 test("declarative owner is replaced across an application-host switch", async () => {
   const artifactIntegrity = integrityFor("host-switch-declarative");
   const secondHostId = "55b455dc-555c-4d67-b82d-d2f94aa4a729";
-  const declarativeManifest: PiariumExtensionManifest = {
+  const declarativeManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.switchable",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     contributions: [{
       contractVersion: 1,
       data: { source: "manifest" },
@@ -513,11 +513,11 @@ test("declarative owner is replaced across an application-host switch", async ()
 
 test("declarative contributions do not register on an incompatible Surface", async () => {
   const artifactIntegrity = integrityFor("desktop-only-declarative");
-  const desktopManifest: PiariumExtensionManifest = {
+  const desktopManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.desktop-only",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: { surfaces: [{ id: "desktop", mode: "declarative", supports: ["desktop"] }] },
     contributions: [{
       contractVersion: 1,
@@ -565,11 +565,11 @@ test("declarative contributions honor capability availability and required Host 
   const artifactIntegrity = integrityFor("declarative-requirements");
   const capabilityId = "dev.example.surface-data";
   const serviceId = "dev.example.declarative-service";
-  const requiredManifest: PiariumExtensionManifest = {
+  const requiredManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.requirements",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     capabilities: { surface: [capabilityId] },
     requires: { services: [{ id: serviceId, version: 1 }] },
     contributions: [{
@@ -581,7 +581,7 @@ test("declarative contributions honor capability availability and required Host 
       supports: ["web"],
     }],
   };
-  const selectedEntry: PiariumExtensionCatalogEntry = {
+  const selectedEntry: VarinExtensionCatalogEntry = {
     ...catalogEntry("1.0.0", artifactIntegrity),
     capabilityGrants: [{
       capability: capabilityId,
@@ -594,7 +594,7 @@ test("declarative contributions honor capability availability and required Host 
   };
   const current = snapshot(1, selectedEntry);
   let stateRevision = 1;
-  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  let providers: VarinExtensionHostStateSnapshot["services"]["providers"] = [];
   const capabilities = new SurfaceCapabilityRegistry();
   const unregisterCapability = capabilities.register({
     exposure: "remote-safe",
@@ -649,11 +649,11 @@ test("declarative contributions honor capability availability and required Host 
   assert.equal(loader.getSnapshot().diagnostics.some((item) => item.code === "required_surface_capability_withdrawn"), true);
 });
 
-const serviceManifest = (binding: "single" | "selected" | "all"): PiariumExtensionManifest => ({
+const serviceManifest = (binding: "single" | "selected" | "all"): VarinExtensionManifest => ({
   schemaVersion: 1,
   id: `dev.example.binding-${binding}`,
   version: "1.0.0",
-  engines: { piarium: "*" },
+  engines: { varin: "*" },
   requires: { services: [{ id: "dev.example.matrix-service", version: 1, binding }] },
   entrypoints: {
     surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web"] }],
@@ -668,7 +668,7 @@ const serviceManifest = (binding: "single" | "selected" | "all"): PiariumExtensi
   }],
 });
 
-const matrixProvider = (providerId: string): PiariumExtensionHostStateSnapshot["services"]["providers"][number] => ({
+const matrixProvider = (providerId: string): VarinExtensionHostStateSnapshot["services"]["providers"][number] => ({
   descriptor: { id: "dev.example.matrix-service", version: 1 },
   entrypointId: "host",
   extensionId: `dev.example.provider-${providerId}`,
@@ -681,13 +681,13 @@ const matrixProvider = (providerId: string): PiariumExtensionHostStateSnapshot["
 
 test("service binding matrix: single requires exactly one provider", async () => {
   const artifactIntegrity = integrityFor("binding-single");
-  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("single") };
+  const entry: VarinExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("single") };
   const current = snapshot(1, entry);
   let stateRevision = 1;
-  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  let providers: VarinExtensionHostStateSnapshot["services"]["providers"] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
-    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
+    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: VarinExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
       contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-single.page", kind: "page", supports: ["web"],
     }, {}) } }),
     host: {
@@ -728,16 +728,16 @@ test("service binding matrix: single requires exactly one provider", async () =>
 
 test("service binding matrix: selected requires and resolves the explicit provider", async () => {
   const artifactIntegrity = integrityFor("binding-selected");
-  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("selected") };
+  const entry: VarinExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("selected") };
   const current = snapshot(1, entry);
   let stateRevision = 1;
-  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  let providers: VarinExtensionHostStateSnapshot["services"]["providers"] = [];
   let selections: Record<string, string> = {};
   const resolvedProviders: string[] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
     evaluateModule: () => ({ default: { activate: async (ctx: {
-      contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void;
+      contribute: (d: VarinExtensionStaticContribution, impl: unknown) => void;
       useService<T>(id: string, version: number): T | undefined;
     }) => {
       const service = ctx.useService<{ provider(): Promise<string> }>("dev.example.matrix-service", 1);
@@ -800,13 +800,13 @@ test("service binding matrix: selected requires and resolves the explicit provid
 
 test("service binding matrix: all activates with at least one provider", async () => {
   const artifactIntegrity = integrityFor("binding-all");
-  const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("all") };
+  const entry: VarinExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("all") };
   const current = snapshot(1, entry);
   let stateRevision = 1;
-  let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
+  let providers: VarinExtensionHostStateSnapshot["services"]["providers"] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
-    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: PiariumExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
+    evaluateModule: () => ({ default: { activate: (ctx: { contribute: (d: VarinExtensionStaticContribution, impl: unknown) => void }) => ctx.contribute({
       contractVersion: 1, data: {}, entrypoint: "main", id: "dev.example.binding-all.page", kind: "page", supports: ["web"],
     }, {}) } }),
     host: {
@@ -857,7 +857,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   const v1Integrity = integrityFor("artifact-v1");
   const failedIntegrity = integrityFor("artifact-failed");
   const v3Integrity = integrityFor("artifact-v3");
-  const manifestWithStatic = (version: string, release: string): PiariumExtensionManifest => ({
+  const manifestWithStatic = (version: string, release: string): VarinExtensionManifest => ({
     ...manifest(version),
     contributions: [{
       contractVersion: 1,
@@ -872,7 +872,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
     manifest: manifestWithStatic("1.0.0", "v1"),
   });
   const code = new Map([[v1Integrity, "v1"], [failedIntegrity, "fail"], [v3Integrity, "v3"]]);
-  const reported: PiariumExtensionActualState[] = [];
+  const reported: VarinExtensionActualState[] = [];
   let selections = 0;
   let committedStyles = 0;
   const styleHost: ManagedStyleHost = {
@@ -914,7 +914,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       requestCandidateApplication: async (request) => {
-        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        const entry = current.extensions[0] as VarinExtensionCatalogEntry;
         assert.equal(entry.candidate?.integrity, request.candidateIntegrity);
         const candidate = entry.candidate;
         assert.ok(candidate);
@@ -925,7 +925,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
         return current;
       },
       readAsset: async () => { throw new Error("unexpected asset read"); },
-      readManagedEntrypoint: async (request): Promise<PiariumExtensionManagedEntrypointPayload> => {
+      readManagedEntrypoint: async (request): Promise<VarinExtensionManagedEntrypointPayload> => {
         const source = code.get(request.integrity);
         if (!source) throw new Error("unknown artifact");
         return {
@@ -938,7 +938,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       reportActualState: async (_extensionId, state) => { reported.push(state); },
       selectCandidate: async (request) => {
         selections += 1;
-        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        const entry = current.extensions[0] as VarinExtensionCatalogEntry;
         assert.equal(entry.candidate?.integrity, request.candidateIntegrity);
         const candidate = entry.candidate;
         if (!candidate) throw new Error("candidate disappeared");
@@ -968,12 +968,12 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   const staticContribution = () => runtime.getSnapshot().visibleContributions
     .find((item) => item.descriptor.id === "dev.example.managed.static-page");
   assert.equal((dynamicContribution()?.implementation as { version: string }).version, "v1");
-  assert.deepEqual((staticContribution()?.implementation as { descriptor: PiariumExtensionStaticContribution }).descriptor.data, { release: "v1" });
+  assert.deepEqual((staticContribution()?.implementation as { descriptor: VarinExtensionStaticContribution }).descriptor.data, { release: "v1" });
   const selectedStaticGeneration = staticContribution()?.owner.generation;
   assert.equal(committedStyles, 1);
 
   current = snapshot(2, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     candidate: {
       applyRequested: false,
       capabilitiesReviewed: true,
@@ -988,7 +988,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   });
   await loader.reconcile();
   assert.equal((dynamicContribution()?.implementation as { version: string }).version, "v1");
-  assert.deepEqual((staticContribution()?.implementation as { descriptor: PiariumExtensionStaticContribution }).descriptor.data, { release: "v1" });
+  assert.deepEqual((staticContribution()?.implementation as { descriptor: VarinExtensionStaticContribution }).descriptor.data, { release: "v1" });
   assert.equal(selections, 0);
   assert.equal(committedStyles, 1);
   await assert.rejects(
@@ -996,14 +996,14 @@ test("managed candidate activation, rollback, style ownership, and disable are r
     /candidate module failed/,
   );
   assert.equal((dynamicContribution()?.implementation as { version: string }).version, "v1");
-  assert.deepEqual((staticContribution()?.implementation as { descriptor: PiariumExtensionStaticContribution }).descriptor.data, { release: "v1" });
+  assert.deepEqual((staticContribution()?.implementation as { descriptor: VarinExtensionStaticContribution }).descriptor.data, { release: "v1" });
   assert.equal(staticContribution()?.owner.generation, selectedStaticGeneration);
   assert.equal(current.extensions[0]?.selectedVersion, "1.0.0");
   assert.equal(selections, 0);
   assert.equal(committedStyles, 1);
 
   current = snapshot(3, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     candidate: {
       applyRequested: false,
       capabilitiesReviewed: true,
@@ -1026,7 +1026,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   assert.equal(committedStyles, 1);
 
   current = snapshot(current.revision + 1, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:03:00.000Z" },
   });
   await loader.reconcile();
@@ -1040,11 +1040,11 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
   const v1Integrity = integrityFor("lazy-candidate-v1");
   const v2Integrity = integrityFor("lazy-candidate-v2");
   const failedIntegrity = integrityFor("lazy-candidate-failed");
-  const lazyCandidateManifest = (version: string, release: string): PiariumExtensionManifest => ({
+  const lazyCandidateManifest = (version: string, release: string): VarinExtensionManifest => ({
     schemaVersion: 1,
     id: "dev.example.lazy-candidate",
     version,
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{ activation: ["command"], file: "surface.js", id: "main", mode: "managed", supports: ["web"] }],
     },
@@ -1090,11 +1090,11 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       requestCandidateApplication: async (request) => {
-        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        const entry = current.extensions[0] as VarinExtensionCatalogEntry;
         assert.equal(entry.candidate?.integrity, request.candidateIntegrity);
         current = snapshot(current.revision + 1, {
           ...entry,
-          candidate: { ...entry.candidate as NonNullable<PiariumExtensionCatalogEntry["candidate"]>, applyRequested: true },
+          candidate: { ...entry.candidate as NonNullable<VarinExtensionCatalogEntry["candidate"]>, applyRequested: true },
         });
         return current;
       },
@@ -1112,7 +1112,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
       reportActualState: async () => undefined,
       selectCandidate: async (request) => {
         selections += 1;
-        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        const entry = current.extensions[0] as VarinExtensionCatalogEntry;
         const candidate = entry.candidate;
         if (!candidate || candidate.integrity !== request.candidateIntegrity) throw new Error("candidate disappeared");
         const { candidate: _candidate, ...selectedEntry } = entry;
@@ -1144,7 +1144,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
   assert.equal(hostActivations, 0);
 
   current = snapshot(2, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     candidate: {
       applyRequested: false,
       capabilitiesReviewed: true,
@@ -1161,7 +1161,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
   assert.deepEqual(reads, []);
   assert.deepEqual(evaluations, []);
   assert.equal(current.extensions[0]?.selectedVersion, "2.0.0");
-  assert.deepEqual((implementation() as { descriptor: PiariumExtensionStaticContribution }).descriptor.data, { release: "v2" });
+  assert.deepEqual((implementation() as { descriptor: VarinExtensionStaticContribution }).descriptor.data, { release: "v2" });
 
   await loader.triggerActivation("command", { contributionId: "dev.example.lazy-candidate.command" });
   assert.deepEqual(reads, [v2Integrity]);
@@ -1170,7 +1170,7 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
   assert.equal(hostActivations, 1);
 
   current = snapshot(current.revision + 1, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     candidate: {
       applyRequested: false,
       capabilitiesReviewed: true,
@@ -1197,11 +1197,11 @@ test("lazy candidates stay unread until triggered and a triggered candidate fail
 test("candidate code does not execute before added capabilities are reviewed", async () => {
   const selectedIntegrity = integrityFor("review-selected");
   const candidateIntegrity = integrityFor("review-candidate");
-  const candidateManifest: PiariumExtensionManifest = {
+  const candidateManifest: VarinExtensionManifest = {
     ...manifest("2.0.0"),
     capabilities: { surface: ["desktop.files"] },
   };
-  const entry: PiariumExtensionCatalogEntry = {
+  const entry: VarinExtensionCatalogEntry = {
     ...catalogEntry("1.0.0", selectedIntegrity),
     candidate: {
       applyRequested: false,
@@ -1255,7 +1255,7 @@ test("candidate code does not execute before added capabilities are reviewed", a
 
 test("withdrawn Host services tear down dependent Surface owners", async () => {
   const artifactIntegrity = integrityFor("service-artifact");
-  const serviceManifest: PiariumExtensionManifest = {
+  const serviceManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
     requires: { services: [{ id: "dev.example.host-service", version: 1 }] },
   };
@@ -1321,7 +1321,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
 
 test("isolated Surface realms contribute transactionally and are physically disposed on disable", async () => {
   const artifactIntegrity = integrityFor("isolated-artifact");
-  const isolatedManifest: PiariumExtensionManifest = {
+  const isolatedManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", isolation: "iframe", mode: "isolated", supports: ["web"] }],
@@ -1381,7 +1381,7 @@ test("isolated Surface realms contribute transactionally and are physically disp
   assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
   assert.deepEqual(receivedStyles, [".isolated {}"]);
   current = snapshot(2, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:05:00.000Z" },
   });
   await loader.reconcile();
@@ -1500,9 +1500,9 @@ test("isolated realm requests bridge owner-scoped context writes", async () => {
 test("Surface-local external service factories bind consumer owners and preserve the old generation on failed update", async () => {
   const v1Integrity = integrityFor("local-service-v1");
   const failedIntegrity = integrityFor("local-service-failed");
-  const serviceManifest = (version: string): PiariumExtensionManifest => ({
+  const serviceManifest = (version: string): VarinExtensionManifest => ({
     ...manifest(version),
-    requires: { services: [{ id: "piarium.editor.monaco", optional: true, version: 1 }] },
+    requires: { services: [{ id: "varin.editor.monaco", optional: true, version: 1 }] },
   });
   let current = snapshot(1, {
     ...catalogEntry("1.0.0", v1Integrity),
@@ -1516,7 +1516,7 @@ test("Surface-local external service factories bind consumer owners and preserve
     evaluateModule: (source) => ({
       default: {
         activate: (context) => {
-          assert.ok(context.useService("piarium.editor.monaco", 1));
+          assert.ok(context.useService("varin.editor.monaco", 1));
           if (source === "failed") throw new Error("local-service candidate failed");
           context.contribute({
             contractVersion: 1,
@@ -1533,14 +1533,14 @@ test("Surface-local external service factories bind consumer owners and preserve
         const identity = { generation: owner.generation, version: owner.extensionVersion };
         created.push(identity);
         return {
-          descriptor: { id: "piarium.editor.monaco", version: 1 },
+          descriptor: { id: "varin.editor.monaco", version: 1 },
           dispose: () => { disposed.push(identity); },
           implementation: { getActiveView: () => ({ reason: "provider-inactive", status: "absent" }) },
-          providerId: "piarium.builtin.text",
+          providerId: "varin.builtin.text",
         };
       },
-      descriptor: { id: "piarium.editor.monaco", version: 1 },
-      providerId: "piarium.builtin.text",
+      descriptor: { id: "varin.editor.monaco", version: 1 },
+      providerId: "varin.builtin.text",
     }],
     host: {
       activateExtension: async () => undefined,
@@ -1550,11 +1550,11 @@ test("Surface-local external service factories bind consumer owners and preserve
       invokeService: async () => { throw new Error("UI-local service must not use Host RPC"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       requestCandidateApplication: async (request) => {
-        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        const entry = current.extensions[0] as VarinExtensionCatalogEntry;
         current = snapshot(current.revision + 1, {
           ...entry,
           candidate: {
-            ...entry.candidate as NonNullable<PiariumExtensionCatalogEntry["candidate"]>,
+            ...entry.candidate as NonNullable<VarinExtensionCatalogEntry["candidate"]>,
             applyRequested: true,
           },
         });
@@ -1581,7 +1581,7 @@ test("Surface-local external service factories bind consumer owners and preserve
   assert.deepEqual(runtime.getSnapshot().visibleContributions[0]?.implementation, { version: "v1" });
   const selectedOwner = runtime.getSnapshot().visibleContributions[0]?.owner;
   current = snapshot(2, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     candidate: {
       applyRequested: false,
       capabilitiesReviewed: true,
@@ -1605,7 +1605,7 @@ test("Surface-local external service factories bind consumer owners and preserve
   assert.deepEqual(disposed.map((item) => item.version), ["2.0.0"]);
 
   current = snapshot(current.revision + 1, {
-    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    ...current.extensions[0] as VarinExtensionCatalogEntry,
     desired: { enabled: false, revision: 2, updatedAt: "2026-08-26T00:01:00.000Z" },
   });
   await loader.reconcile();
@@ -1614,12 +1614,12 @@ test("Surface-local external service factories bind consumer owners and preserve
 
 test("isolated realms call the serializable Surface-local editor service subset", async () => {
   const artifactIntegrity = integrityFor("isolated-local-service");
-  const isolatedManifest: PiariumExtensionManifest = {
+  const isolatedManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.js", isolation: "iframe", mode: "isolated", supports: ["web"] }],
     },
-    requires: { services: [{ id: "piarium.editor.monaco", optional: true, version: 1 }] },
+    requires: { services: [{ id: "varin.editor.monaco", optional: true, version: 1 }] },
   };
   const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: isolatedManifest });
   let response: unknown;
@@ -1628,7 +1628,7 @@ test("isolated realms call the serializable Surface-local editor service subset"
   const loader = new SurfaceExtensionLoader({
     externalServiceFactories: [{
       create: (owner) => ({
-        descriptor: { id: "piarium.editor.monaco", version: 1 },
+        descriptor: { id: "varin.editor.monaco", version: 1 },
         implementation: {
           getActiveView: () => ({
             status: "ready",
@@ -1638,17 +1638,17 @@ test("isolated realms call the serializable Surface-local editor service subset"
               generation: owner.generation,
               kind: "text",
               languageId: "typescript",
-              providerId: "piarium.builtin.text",
+              providerId: "varin.builtin.text",
               resource: { resourceId: "src/main.ts", workspaceId: "workspace" },
               selection: null,
               viewId: "view-1",
             },
           }),
         },
-        providerId: "piarium.builtin.text",
+        providerId: "varin.builtin.text",
       }),
-      descriptor: { id: "piarium.editor.monaco", version: 1 },
-      providerId: "piarium.builtin.text",
+      descriptor: { id: "varin.editor.monaco", version: 1 },
+      providerId: "varin.builtin.text",
     }],
     host: {
       activateExtension: async () => undefined,
@@ -1672,8 +1672,8 @@ test("isolated realms call the serializable Surface-local editor service subset"
     isolatedRealmFactory: {
       create: (_source, _styles, identity) => ({
         activate: async (context) => {
-          available = context.hasService("piarium.editor.monaco", 1);
-          response = await context.callService("piarium.editor.monaco", 1, undefined, "getActiveView", []);
+          available = context.hasService("varin.editor.monaco", 1);
+          response = await context.callService("varin.editor.monaco", 1, undefined, "getActiveView", []);
           context.contribute({
             contractVersion: 1,
             data: {},
@@ -1699,14 +1699,14 @@ test("isolated realms call the serializable Surface-local editor service subset"
 
 test("trusted-native Surface activation failure requires a Surface reload and is not retried", async () => {
   const artifactIntegrity = integrityFor("native-artifact");
-  const nativeManifest: PiariumExtensionManifest = {
+  const nativeManifest: VarinExtensionManifest = {
     ...manifest("1.0.0"),
     entrypoints: {
       surfaces: [{ id: "main", file: "surface.cjs", mode: "native", supports: ["web"] }],
     },
   };
   const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: nativeManifest });
-  const reported: PiariumExtensionActualState[] = [];
+  const reported: VarinExtensionActualState[] = [];
   let evaluations = 0;
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const loader = new SurfaceExtensionLoader({
@@ -1747,11 +1747,11 @@ test("trusted-native Surface activation failure requires a Surface reload and is
 
 test("Host-state watch reconnects from an authoritative snapshot after a transient transport failure", async () => {
   const artifactIntegrity = integrityFor("watch-recovery");
-  const declarativeManifest: PiariumExtensionManifest = {
+  const declarativeManifest: VarinExtensionManifest = {
     schemaVersion: 1,
     id: "dev.example.watch-recovery",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: { surfaces: [{ id: "main", mode: "declarative", supports: ["web"] }] },
     contributions: [{
       contractVersion: 1,
@@ -1762,7 +1762,7 @@ test("Host-state watch reconnects from an authoritative snapshot after a transie
       supports: ["web"],
     }],
   };
-  const enabledEntry: PiariumExtensionCatalogEntry = {
+  const enabledEntry: VarinExtensionCatalogEntry = {
     ...catalogEntry("1.0.0", artifactIntegrity),
     manifest: declarativeManifest,
   };

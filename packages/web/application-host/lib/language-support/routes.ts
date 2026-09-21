@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
-import type { LanguageSupportAPI } from "@piarium/application-client";
-import { LanguageSupportError } from "@piarium/application-client";
+import type { LanguageSupportAPI } from "@varin/application-client";
+import { LanguageSupportError } from "@varin/application-client";
 
 const sendError = (res: Response, error: unknown) => {
   if (error instanceof LanguageSupportError) {

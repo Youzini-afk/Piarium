@@ -6,7 +6,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { extract } from "tar";
-import type { LocalSemanticStatus } from "@piarium/protocol";
+import type { LocalSemanticStatus } from "@varin/protocol";
 import { resolveModelPackAtComponentRoot, type ResolvedModelPack } from "./model-store.js";
 
 export const LOCAL_SEMANTIC_COMPONENT_ID = "local-semantic";
@@ -226,7 +226,7 @@ const defaultValidatePack = async (pack: ResolvedModelPack, signal?: AbortSignal
       dtype: "q8",
       session_options: { intraOpNumThreads: 1, interOpNumThreads: 1, intra_op_num_threads: 1, inter_op_num_threads: 1 },
     });
-    const output = await pipe(["Piarium local semantic component validation"], { pooling, normalize });
+    const output = await pipe(["Varin local semantic component validation"], { pooling, normalize });
     const listed = typeof output?.tolist === "function" ? output.tolist() : output;
     const row = Array.isArray(listed?.[0]) ? listed[0] : listed;
     if (!Array.isArray(row) || row.length !== dim || row.some((value) => !Number.isFinite(value)) || !row.some(value => value !== 0)) {
@@ -300,7 +300,7 @@ const extractArchive = async (archive: string, destination: string, signal: Abor
 };
 
 const componentUrl = (version: string, platform: string, arch: string): string => (
-  `https://github.com/Youzini-afk/Piarium/releases/download/v${encodeURIComponent(version)}/Piarium-local-semantic-${encodeURIComponent(version)}-${platform}-${arch}.tar.gz`
+  `https://github.com/Youzini-afk/Varin/releases/download/v${encodeURIComponent(version)}/Varin-local-semantic-${encodeURIComponent(version)}-${platform}-${arch}.tar.gz`
 );
 
 export const localSemanticComponentUrl = componentUrl;

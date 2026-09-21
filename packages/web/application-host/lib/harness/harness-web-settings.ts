@@ -3,7 +3,7 @@ import {
   type HarnessSettings,
   type HarnessWebDomainPolicy,
   type PiSettingsSnapshot,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { parseSearchProviderSettings } from "./web-search.js";
 
 export interface HarnessWebBinding {

@@ -40,7 +40,7 @@ Last updated: 2026-08-24
 
 ## Extension capability labels
 
-Piarium reports observed capabilities rather than claiming a complete sandbox:
+Varin reports observed capabilities rather than claiming a complete sandbox:
 
 - filesystem read/write;
 - subprocess execution;
@@ -74,7 +74,7 @@ Security-sensitive behavior changes require an architecture note and focused reg
 Electron keeps saved host tokens, custom request headers, local filesystem identity, and relay host
 identity in the main process. A preload obtains the current window's bootstrap over synchronous IPC
 at document start; the main process returns those sensitive fields only when the requesting frame is
-the packaged `piarium-ui://app` renderer, the exact local application origin, or the exact development
+the packaged `varin-ui://app` renderer, the exact local application origin, or the exact development
 UI origin. They are never passed through Chromium `additionalArguments`, where operating-system
 process inspection and crash diagnostics could expose them.
 
@@ -95,7 +95,7 @@ deleting the security boundary that module currently enforces.
 ## Upstream dependency baseline
 
 Pi `0.84.3` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
-Piarium no longer mutates Pi's installed dependency tree after installation. The root and cloud
+Varin no longer mutates Pi's installed dependency tree after installation. The root and cloud
 lockfiles keep those resolved versions reproducible. Confirm both resolutions
 when the bundled Pi moves; the floor is the requirement, and the exact Pi release is only where it
 currently comes from.

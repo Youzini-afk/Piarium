@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ThreadReport } from "@piarium/protocol";
+import type { ThreadReport } from "@varin/protocol";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadReadService } from "./thread-services.js";
 import type { HarnessServiceHost } from "./service-host.js";
@@ -10,7 +10,7 @@ import type { HarnessServiceContext } from "./router.js";
 
 describe("fixed Thread deliveries", () => {
   it("keeps R1 report and exact materials readable during a later Run, after its failure and after Registry reload", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "piarium-fixed-delivery-"));
+    const dataDir = await mkdtemp(join(tmpdir(), "varin-fixed-delivery-"));
     let registry = createThreadRegistry({ dataDir, hostId: "test" });
     const parent = { kind: "session" as const, id: "parent" };
     const ctx: HarnessServiceContext = { sessionId: "parent", workspaceId: "workspace", authorizedPaths: [], signal: new AbortController().signal,

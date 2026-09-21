@@ -51,7 +51,7 @@ export interface FsRouteDependencies {
   normalizeDirectoryPath<Value>(path: Value): Value | string;
   os: OsModule;
   path: PathModule;
-  piariumUserConfigRoot: string;
+  varinUserConfigRoot: string;
   platform?: NodeJS.Platform;
   resolveGitBinaryForSpawn(): string;
   resolveProjectDirectory: ResolveProjectDirectory;

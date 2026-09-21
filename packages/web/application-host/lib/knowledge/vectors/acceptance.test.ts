@@ -16,7 +16,7 @@ const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
 async function fixture() {
-  const dataDir = mkdtempSync(join(tmpdir(), "piarium-knowledge-acceptance-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "varin-knowledge-acceptance-"));
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
   const authority = await openWorkspaceKnowledge({ dataDir, hostId: "host", workspaceId: "workspace", embedding: null });
   cleanup.push(() => authority.close());

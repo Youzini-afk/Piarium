@@ -1,4 +1,4 @@
-import type { JsonValue, PiUserContent } from '@piarium/protocol';
+import type { JsonValue, PiUserContent } from '@varin/protocol';
 
 type JsonObject = Record<string, JsonValue>;
 

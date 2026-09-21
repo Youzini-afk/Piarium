@@ -1,6 +1,6 @@
 import type { HostEvent, HostEventData } from "./events.js";
 import type { HostMethod, HostMethodParams, HostMethodResult } from "./methods.js";
-import { PIARIUM_PROTOCOL_VERSION, type ProtocolErrorData, type ProtocolVersion } from "./types.js";
+import { VARIN_PROTOCOL_VERSION, type ProtocolErrorData, type ProtocolVersion } from "./types.js";
 
 export type RequestEnvelope<M extends HostMethod = HostMethod> = M extends HostMethod
   ? {
@@ -51,7 +51,7 @@ export function createRequest<M extends HostMethod>(
   method: M,
   params: HostMethodParams<M>,
 ): RequestEnvelope<M> {
-  return { id, kind: "request", method, params, v: PIARIUM_PROTOCOL_VERSION } as RequestEnvelope<M>;
+  return { id, kind: "request", method, params, v: VARIN_PROTOCOL_VERSION } as RequestEnvelope<M>;
 }
 
 export function createSuccessResponse<M extends HostMethod>(
@@ -63,12 +63,12 @@ export function createSuccessResponse<M extends HostMethod>(
     kind: "response",
     ok: true,
     result,
-    v: PIARIUM_PROTOCOL_VERSION,
+    v: VARIN_PROTOCOL_VERSION,
   } as SuccessResponseEnvelope<M>;
 }
 
 export function createErrorResponse(id: string, error: ProtocolErrorData): ErrorResponseEnvelope {
-  return { error, id, kind: "response", ok: false, v: PIARIUM_PROTOCOL_VERSION };
+  return { error, id, kind: "response", ok: false, v: VARIN_PROTOCOL_VERSION };
 }
 
 export function createEvent<E extends HostEvent>(
@@ -76,5 +76,5 @@ export function createEvent<E extends HostEvent>(
   event: E,
   data: HostEventData<E>,
 ): EventEnvelope<E> {
-  return { data, event, kind: "event", seq, v: PIARIUM_PROTOCOL_VERSION } as EventEnvelope<E>;
+  return { data, event, kind: "event", seq, v: VARIN_PROTOCOL_VERSION } as EventEnvelope<E>;
 }

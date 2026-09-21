@@ -1,4 +1,4 @@
-import type { PiariumDebugSessionStatus } from '@piarium/application-client';
+import type { VarinDebugSessionStatus } from '@varin/application-client';
 
 export interface IdeDebugControlAvailability {
   canContinue: boolean;
@@ -8,7 +8,7 @@ export interface IdeDebugControlAvailability {
 }
 
 export const ideDebugControlAvailability = (
-  snapshot: PiariumDebugSessionStatus | null,
+  snapshot: VarinDebugSessionStatus | null,
 ): IdeDebugControlAvailability => {
   const status = snapshot?.status ?? null;
   const active = status === 'starting' || status === 'running' || status === 'paused';

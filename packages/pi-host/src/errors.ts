@@ -1,4 +1,4 @@
-import type { JsonValue, ProtocolErrorData } from "@piarium/protocol";
+import type { JsonValue, ProtocolErrorData } from "@varin/protocol";
 
 export class HostError extends Error {
   readonly code: string;

@@ -18,7 +18,7 @@ export const assertUpdaterCapability = ({
 
   if (!appImagePath) {
     throw new Error(
-      'Updates require the packaged Linux AppImage. Start Piarium from its .AppImage file, not an extracted or repackaged copy.',
+      'Updates require the packaged Linux AppImage. Start Varin from its .AppImage file, not an extracted or repackaged copy.',
     );
   }
   if (!path.isAbsolute(appImagePath)) {
@@ -28,7 +28,7 @@ export const assertUpdaterCapability = ({
   try {
     if (!stat(appImagePath).isFile()) throw new Error('not a file');
   } catch {
-    throw new Error(`The running AppImage cannot be found at ${appImagePath}. Start Piarium from a valid .AppImage file.`);
+    throw new Error(`The running AppImage cannot be found at ${appImagePath}. Start Varin from a valid .AppImage file.`);
   }
 
   try {

@@ -1,12 +1,12 @@
 import {
   PiRuntimeSurfaceConnection,
   type PiRuntimeBroker,
-} from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
-export const PI_RUNTIME_WS_PATH = '/api/piarium/runtime/ws';
+export const PI_RUNTIME_WS_PATH = '/api/varin/runtime/ws';
 
 const configurableLimit = (name: string): number => {
   const raw = process.env[name];
@@ -18,9 +18,9 @@ const configurableLimit = (name: string): number => {
   return value;
 };
 
-const MAX_PAYLOAD_BYTES = configurableLimit('PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES');
-const MAX_PENDING_REQUESTS = configurableLimit('PIARIUM_RUNTIME_MAX_PENDING_REQUESTS');
-const MAX_BUFFERED_BYTES = configurableLimit('PIARIUM_RUNTIME_MAX_BUFFERED_BYTES');
+const MAX_PAYLOAD_BYTES = configurableLimit('VARIN_RUNTIME_MAX_PAYLOAD_BYTES');
+const MAX_PENDING_REQUESTS = configurableLimit('VARIN_RUNTIME_MAX_PENDING_REQUESTS');
+const MAX_BUFFERED_BYTES = configurableLimit('VARIN_RUNTIME_MAX_BUFFERED_BYTES');
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const WS_OPEN = 1;
 

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import { useI18n } from '@/lib/i18n';
 
 export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
@@ -89,7 +89,7 @@ export const MobileQrConnectionLoading: React.FC = () => {
   const { t } = useI18n();
   return createPortal(
     <div role="status" className="fixed inset-0 z-[1000] flex flex-col items-center justify-center gap-5 bg-background px-6 text-foreground">
-      <PiariumLogo width={96} height={96} isAnimated />
+      <VarinLogo width={96} height={96} isAnimated />
       <div className="flex items-center gap-2 typography-ui-label text-muted-foreground">
         <Icon name="loader-4" className="size-[18px] animate-spin" />
         <span>{t('mobile.connect.connecting')}</span>

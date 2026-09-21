@@ -54,7 +54,7 @@ describe('Monaco language DTO conversion', () => {
         endColumn: 7,
       },
       documentation: { value: '[docs](command:unsafe)', isTrusted: false, supportHtml: false },
-      __piariumResolveToken: '4:2',
+      __varinResolveToken: '4:2',
     });
     expect(toMonacoHover({
       contents: [{ kind: 'markdown', value: '<script>unsafe()</script>' }],
@@ -82,6 +82,6 @@ describe('Monaco language DTO conversion', () => {
       legend: { tokenTypes: ['variable'], tokenModifiers: ['readonly'] },
     });
     expect([...semantic!.data]).toEqual([0, 2, 3, 8, 4]);
-    expect(markerOwner('fixture/provider', 7)).toBe('piarium-language:fixture%2Fprovider:7');
+    expect(markerOwner('fixture/provider', 7)).toBe('varin-language:fixture%2Fprovider:7');
   });
 });

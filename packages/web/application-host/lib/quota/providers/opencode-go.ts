@@ -50,7 +50,7 @@ export const fetchOpenCodeGoUsage = async (
     headers: {
       Accept: 'text/html,application/xhtml+xml',
       Cookie: `auth=${authCookie}`,
-      'User-Agent': 'Piarium quota provider',
+      'User-Agent': 'Varin quota provider',
     },
     redirect: 'manual',
     signal: AbortSignal.timeout(15_000),

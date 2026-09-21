@@ -2,43 +2,43 @@ import {
   SurfaceExtensionRuntime,
   type SurfaceActivation,
   type SurfaceOwnerIdentity,
-} from "@piarium/extension-surface";
+} from "@varin/extension-surface";
 import type {
   JsonObject,
   JsonValue,
-  PiariumEditorDocumentApplyEditsResult,
-  PiariumEditorDocumentController,
-  PiariumEditorDocumentEdit,
-  PiariumEditorDocumentSnapshot,
-  PiariumEditorDocumentUpdateResult,
-  PiariumExtensionAssetPayload,
-  PiariumExtensionServiceProvision,
-  PiariumExtensionStaticContribution,
-  PiariumExtensionStorageOpenRequest,
-  PiariumExtensionStorageSnapshot,
-} from "@piarium/extension-contract";
+  VarinEditorDocumentApplyEditsResult,
+  VarinEditorDocumentController,
+  VarinEditorDocumentEdit,
+  VarinEditorDocumentSnapshot,
+  VarinEditorDocumentUpdateResult,
+  VarinExtensionAssetPayload,
+  VarinExtensionServiceProvision,
+  VarinExtensionStaticContribution,
+  VarinExtensionStorageOpenRequest,
+  VarinExtensionStorageSnapshot,
+} from "@varin/extension-contract";
 import {
-  defaultPiariumWorkbenchProfileDocument,
-  inspectPiariumWorkbenchShell,
-  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
-  PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
-  resolvePiariumWorkbenchProfile,
-} from "@piarium/extension-contract";
+  defaultVarinWorkbenchProfileDocument,
+  inspectVarinWorkbenchShell,
+  VARIN_WORKBENCH_REPLACEMENT_TARGETS,
+  VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
+  resolveVarinWorkbenchProfile,
+} from "@varin/extension-contract";
 import type {
-  PiariumBrokeredHostContext,
-  PiariumBrokeredHostExtension,
-  PiariumHostServiceHandler,
-  PiariumIsolatedSurfaceExtension,
-  PiariumEditorMountProps,
-  PiariumSurfaceMountImplementation,
+  VarinBrokeredHostContext,
+  VarinBrokeredHostExtension,
+  VarinHostServiceHandler,
+  VarinIsolatedSurfaceExtension,
+  VarinEditorMountProps,
+  VarinSurfaceMountImplementation,
 } from "./index.js";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
-  PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY,
-  PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY,
-  PIARIUM_WORKSPACE_DEBUG_CAPABILITY,
-  PIARIUM_WORKSPACE_TEST_CAPABILITY,
-  PIARIUM_WORKSPACE_TASKS_CAPABILITY,
+  VARIN_WORKSPACE_DOCUMENTS_CAPABILITY,
+  VARIN_WORKSPACE_LANGUAGE_CAPABILITY,
+  VARIN_WORKSPACE_DEBUG_CAPABILITY,
+  VARIN_WORKSPACE_TEST_CAPABILITY,
+  VARIN_WORKSPACE_TASKS_CAPABILITY,
   createWorkspaceDocumentsClient,
   defineSurfaceMount,
 } from "./index.js";
@@ -78,8 +78,8 @@ export const runSurfaceExtensionConformance = async (options: {
 };
 
 export interface HostConformanceResult {
-  finalStorage: PiariumExtensionStorageSnapshot;
-  finalStorages: PiariumExtensionStorageSnapshot[];
+  finalStorage: VarinExtensionStorageSnapshot;
+  finalStorages: VarinExtensionStorageSnapshot[];
   providedServiceIds: string[];
   registeredDisposers: number;
 }
@@ -89,8 +89,8 @@ export interface IsolatedConformanceResult {
   registeredDisposers: number;
 }
 
-export interface PiariumIsolatedConformanceService {
-  descriptor: PiariumExtensionServiceProvision;
+export interface VarinIsolatedConformanceService {
+  descriptor: VarinExtensionServiceProvision;
   implementation: Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
   providerId?: string;
 }
@@ -103,7 +103,7 @@ const createConformanceCapabilities = () => {
   const files = new Map<string, { content: string; revision: string }>();
   const providers = new Map<string, JsonObject>();
   const call = async (capability: string, method: string, params: JsonValue): Promise<JsonValue> => {
-    if (capability === PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY) {
+    if (capability === VARIN_WORKSPACE_DOCUMENTS_CAPABILITY) {
       const record = asRecord(params) ?? {};
       const resource = asRecord(record.resource) ?? record;
       const key = `${String(resource.workspaceId ?? "")}\0${String(resource.resourceId ?? "")}`;
@@ -136,7 +136,7 @@ const createConformanceCapabilities = () => {
         return { status: "written", revision, byteLength: content.length };
       }
     }
-    if (capability === PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY) {
+    if (capability === VARIN_WORKSPACE_LANGUAGE_CAPABILITY) {
       const record = asRecord(params) ?? {};
       if (method === "registerProvider") {
         const providerId = String(record.providerId ?? "");
@@ -154,18 +154,18 @@ const createConformanceCapabilities = () => {
         return { status: "disposed" };
       }
     }
-    if (capability === PIARIUM_WORKSPACE_TASKS_CAPABILITY) {
+    if (capability === VARIN_WORKSPACE_TASKS_CAPABILITY) {
       if (method === "list") return { status: "empty", configurations: [] };
       if (method === "run") return { status: "running" };
       if (method === "disposeWorkspace") return { status: "disposed" };
     }
-    if (capability === PIARIUM_WORKSPACE_DEBUG_CAPABILITY) {
+    if (capability === VARIN_WORKSPACE_DEBUG_CAPABILITY) {
       const record = asRecord(params) ?? {};
       if (method === "registerAdapter") return { status: "registered", adapterId: String(record.adapterId ?? "") };
       if (method === "unregisterAdapter") return { status: "unregistered", adapterId: String(record.adapterId ?? "") };
       if (method === "getStatus") return { status: "absent" };
     }
-    if (capability === PIARIUM_WORKSPACE_TEST_CAPABILITY) {
+    if (capability === VARIN_WORKSPACE_TEST_CAPABILITY) {
       const record = asRecord(params) ?? {};
       if (method === "registerProvider") return { status: "registered", providerId: String(record.providerId ?? "") };
       if (method === "unregisterProvider") return { status: "unregistered", providerId: String(record.providerId ?? "") };
@@ -177,12 +177,12 @@ const createConformanceCapabilities = () => {
 };
 
 export const runIsolatedExtensionConformance = async (options: {
-  activation: PiariumIsolatedSurfaceExtension["activate"];
+  activation: VarinIsolatedSurfaceExtension["activate"];
   grantedCapabilities?: readonly string[];
-  services?: readonly PiariumIsolatedConformanceService[];
+  services?: readonly VarinIsolatedConformanceService[];
 }): Promise<IsolatedConformanceResult> => {
   const controller = new AbortController();
-  const contributions = new Map<string, PiariumExtensionStaticContribution>();
+  const contributions = new Map<string, VarinExtensionStaticContribution>();
   const contextValues = new Map<string, string | number | boolean>();
   const disposers: Array<() => void | Promise<void>> = [];
   const grantedCapabilities = new Set(options.grantedCapabilities ?? []);
@@ -191,7 +191,7 @@ export const runIsolatedExtensionConformance = async (options: {
   const emptyIntegrity = `sha256-${"0".repeat(64)}`;
   const returned = await options.activation({
     assets: {
-      read: async (path): Promise<PiariumExtensionAssetPayload> => ({
+      read: async (path): Promise<VarinExtensionAssetPayload> => ({
         artifactIntegrity: emptyIntegrity,
         bytesBase64: "",
         contentType: "application/octet-stream",
@@ -272,7 +272,7 @@ export const runIsolatedExtensionConformance = async (options: {
 };
 
 export const runHostExtensionConformance = async (options: {
-  activation: PiariumBrokeredHostExtension["activate"];
+  activation: VarinBrokeredHostExtension["activate"];
   extensionId: string;
   initialData?: JsonObject;
   packageRoot?: string;
@@ -280,11 +280,11 @@ export const runHostExtensionConformance = async (options: {
 }): Promise<HostConformanceResult> => {
   const controller = new AbortController();
   const disposers: Array<() => void | Promise<void>> = [];
-  const services = new Map<string, PiariumHostServiceHandler>();
-  const storageKey = (request: Pick<PiariumExtensionStorageOpenRequest, "key" | "scope">): string => (
+  const services = new Map<string, VarinHostServiceHandler>();
+  const storageKey = (request: Pick<VarinExtensionStorageOpenRequest, "key" | "scope">): string => (
     `${request.scope}\0${request.key}`
   );
-  const createStorage = (request: PiariumExtensionStorageOpenRequest): PiariumExtensionStorageSnapshot => ({
+  const createStorage = (request: VarinExtensionStorageOpenRequest): VarinExtensionStorageSnapshot => ({
     address: { extensionId: options.extensionId, key: request.key, scope: request.scope },
     authoritative: true,
     diagnostics: [],
@@ -297,25 +297,25 @@ export const runHostExtensionConformance = async (options: {
     exists: options.initialData !== undefined,
     storageState: options.initialData === undefined ? "missing" : "ready",
   });
-  const storages = new Map<string, PiariumExtensionStorageSnapshot>();
+  const storages = new Map<string, VarinExtensionStorageSnapshot>();
   storages.set(storageKey({ key: "state", scope: "application" }), createStorage({
     key: "state",
     schemaVersion: options.storageSchemaVersion ?? 1,
     scope: "application",
   }));
-  const storageClient = (request: PiariumExtensionStorageOpenRequest) => {
+  const storageClient = (request: VarinExtensionStorageOpenRequest) => {
     const key = storageKey(request);
     if (!storages.has(key)) storages.set(key, createStorage(request));
     return {
-      get snapshot() { return structuredClone(storages.get(key) as PiariumExtensionStorageSnapshot); },
-      refresh: async () => structuredClone(storages.get(key) as PiariumExtensionStorageSnapshot),
+      get snapshot() { return structuredClone(storages.get(key) as VarinExtensionStorageSnapshot); },
+      refresh: async () => structuredClone(storages.get(key) as VarinExtensionStorageSnapshot),
       update: async (data: JsonObject, expectedRevision?: number) => {
-        const current = storages.get(key) as PiariumExtensionStorageSnapshot;
+        const current = storages.get(key) as VarinExtensionStorageSnapshot;
         const revision = expectedRevision ?? current.document.revision;
         if (revision !== current.document.revision) {
           throw new Error(`Conformance storage revision conflict: expected ${revision}, current ${current.document.revision}`);
         }
-        const next: PiariumExtensionStorageSnapshot = {
+        const next: VarinExtensionStorageSnapshot = {
           ...current,
           document: {
             ...current.document,
@@ -339,7 +339,7 @@ export const runHostExtensionConformance = async (options: {
   });
   const capabilities = createConformanceCapabilities();
   const packageRoot = resolve(options.packageRoot ?? process.cwd());
-  const context: PiariumBrokeredHostContext = {
+  const context: VarinBrokeredHostContext = {
     assets: {
       path: (logicalPath) => {
         if (!logicalPath || logicalPath.includes("\\") || logicalPath.includes("\0") || isAbsolute(logicalPath)) {
@@ -358,7 +358,7 @@ export const runHostExtensionConformance = async (options: {
     },
     effect: (disposer) => { disposers.push(disposer); },
     services: {
-      provide: (descriptor: PiariumExtensionServiceProvision, handler: PiariumHostServiceHandler) => {
+      provide: (descriptor: VarinExtensionServiceProvision, handler: VarinHostServiceHandler) => {
         const key = `${descriptor.id}@${descriptor.version}`;
         if (services.has(key)) throw new Error(`Host service provided more than once: ${key}`);
         services.set(key, handler);
@@ -437,17 +437,17 @@ export const runSurfaceMountConformance = async (): Promise<SurfaceMountConforma
   return { aborted: controller.signal.aborted, disposed, mounted };
 };
 
-export interface PiariumEditorDocumentControllerFixture {
-  readonly controller: PiariumEditorDocumentController;
+export interface VarinEditorDocumentControllerFixture {
+  readonly controller: VarinEditorDocumentController;
   readonly subscriberCount: number;
-  setStatus(status: PiariumEditorDocumentSnapshot["status"]): void;
+  setStatus(status: VarinEditorDocumentSnapshot["status"]): void;
 }
 
-export const createPiariumEditorDocumentControllerFixture = (
+export const createVarinEditorDocumentControllerFixture = (
   initialContent = "alpha",
-): PiariumEditorDocumentControllerFixture => {
+): VarinEditorDocumentControllerFixture => {
   const listeners = new Set<() => void>();
-  let snapshot: PiariumEditorDocumentSnapshot = {
+  let snapshot: VarinEditorDocumentSnapshot = {
     baseRevision: "fixture-0",
     content: initialContent,
     dirty: false,
@@ -459,15 +459,15 @@ export const createPiariumEditorDocumentControllerFixture = (
     for (const listener of listeners) listener();
   };
   const mutationUnavailable = (): Extract<
-    PiariumEditorDocumentUpdateResult,
+    VarinEditorDocumentUpdateResult,
     { status: "conflict" | "unsupported" }
   > | null => {
     if (snapshot.status === "conflict") return { snapshot: structuredClone(snapshot), status: "conflict" };
     if (snapshot.status !== "ready") return { snapshot: structuredClone(snapshot), status: "unsupported" };
     return null;
   };
-  const controller: PiariumEditorDocumentController = {
-    applyEdits: async (edits, expectedDocumentVersion): Promise<PiariumEditorDocumentApplyEditsResult> => {
+  const controller: VarinEditorDocumentController = {
+    applyEdits: async (edits, expectedDocumentVersion): Promise<VarinEditorDocumentApplyEditsResult> => {
       if (expectedDocumentVersion !== snapshot.documentVersion) {
         return { snapshot: structuredClone(snapshot), status: "stale" };
       }
@@ -485,8 +485,8 @@ export const createPiariumEditorDocumentControllerFixture = (
         left.from - right.from || left.to - right.to || left.index - right.index
       ));
       for (let index = 1; index < ascending.length; index += 1) {
-        const previous = ascending[index - 1] as PiariumEditorDocumentEdit;
-        const next = ascending[index] as PiariumEditorDocumentEdit;
+        const previous = ascending[index - 1] as VarinEditorDocumentEdit;
+        const next = ascending[index] as VarinEditorDocumentEdit;
         if (previous.to > next.from) {
           return { snapshot: structuredClone(snapshot), status: "overlapping-ranges" };
         }
@@ -555,20 +555,20 @@ export const createPiariumEditorDocumentControllerFixture = (
 
 export interface EditorExtensionConformanceResult {
   aborted: boolean;
-  appliedStatus: PiariumEditorDocumentApplyEditsResult["status"];
-  conflictStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  appliedStatus: VarinEditorDocumentApplyEditsResult["status"];
+  conflictStatus: VarinEditorDocumentApplyEditsResult["status"];
   disposed: boolean;
-  invalidStatus: PiariumEditorDocumentApplyEditsResult["status"];
-  overlappingStatus: PiariumEditorDocumentApplyEditsResult["status"];
-  staleStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  invalidStatus: VarinEditorDocumentApplyEditsResult["status"];
+  overlappingStatus: VarinEditorDocumentApplyEditsResult["status"];
+  staleStatus: VarinEditorDocumentApplyEditsResult["status"];
   subscriptionsReleased: boolean;
-  unsupportedStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  unsupportedStatus: VarinEditorDocumentApplyEditsResult["status"];
 }
 
 export const runEditorExtensionConformance = async (options: {
-  implementation: PiariumSurfaceMountImplementation<PiariumEditorMountProps>;
+  implementation: VarinSurfaceMountImplementation<VarinEditorMountProps>;
 }): Promise<EditorExtensionConformanceResult> => {
-  const fixture = createPiariumEditorDocumentControllerFixture();
+  const fixture = createVarinEditorDocumentControllerFixture();
   const controller = new AbortController();
   const container = { textContent: "" } as HTMLElement;
   const cleanup = await options.implementation.mount(container, {
@@ -630,12 +630,12 @@ export interface WorkbenchProfileConformanceResult {
 }
 
 export const runWorkbenchProfileConformance = (): WorkbenchProfileConformanceResult => {
-  const document = defaultPiariumWorkbenchProfileDocument();
+  const document = defaultVarinWorkbenchProfileDocument();
   document.profiles.push({ id: "studio", label: "Studio" });
   document.layouts.push({
     profileId: "studio",
     references: [],
-    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.studio.shell" },
+    replacementSelections: { [VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.studio.shell" },
     scope: "distribution",
     scopeId: "studio",
     surface: "web",
@@ -646,21 +646,21 @@ export const runWorkbenchProfileConformance = (): WorkbenchProfileConformanceRes
     desired: { enabled: true, revision: 1, updatedAt: "2026-08-20T00:00:00.000Z" },
     installedAt: "2026-08-20T00:00:00.000Z",
     manifest: {
-      engines: { piarium: "*" },
+      engines: { varin: "*" },
       id: "dev.example.studio",
       schemaVersion: 1 as const,
       version: "1.0.0",
       contributions: [{
         contractVersion: 1,
         data: {
-          contract: PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
+          contract: VARIN_WORKBENCH_SHELL_DATA_CONTRACT,
           seams: {
             web: { replacementTargets: [], slots: [] },
           },
         },
         id: "dev.example.studio.shell",
         kind: "shell" as const,
-        replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+        replacement: { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell },
         supports: ["web" as const],
       }],
     },
@@ -669,10 +669,10 @@ export const runWorkbenchProfileConformance = (): WorkbenchProfileConformanceRes
     source: { display: "Studio", kind: "local" as const },
     updatedAt: "2026-08-20T00:00:00.000Z",
   }];
-  const before = resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
+  const before = resolveVarinWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
   document.profileSelections.users.default = "studio";
-  const after = resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
-  const failed = inspectPiariumWorkbenchShell(
+  const after = resolveVarinWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
+  const failed = inspectVarinWorkbenchShell(
     after.layout.replacementSelections,
     [{ ...extensions[0]!, desired: { ...extensions[0]!.desired, enabled: false } }],
     "web",
@@ -688,7 +688,7 @@ export const runWorkbenchProfileConformance = (): WorkbenchProfileConformanceRes
 export const runIsolatedDocumentConflictConformance = async (): Promise<{ status: string }> => {
   let status = "missing";
   await runIsolatedExtensionConformance({
-    grantedCapabilities: [PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY],
+    grantedCapabilities: [VARIN_WORKSPACE_DOCUMENTS_CAPABILITY],
     activation: async (context) => {
       const documents = createWorkspaceDocumentsClient(context.capabilities);
       const resource = { workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", resourceId: "note.txt" };

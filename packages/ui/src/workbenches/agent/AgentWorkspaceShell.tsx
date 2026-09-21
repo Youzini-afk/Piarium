@@ -1,13 +1,13 @@
 import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { MobileWorkspaceShell } from '@/apps/mobileWorkspaceShell';
-import { switchRuntimeEndpointSafely } from '@piarium/application-client';
-import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { switchRuntimeEndpointSafely } from '@varin/application-client';
+import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 
-export const MOBILE_WORKSPACE_DISCONNECTED_EVENT = 'piarium:mobile-workspace-disconnected';
+export const MOBILE_WORKSPACE_DISCONNECTED_EVENT = 'varin:mobile-workspace-disconnected';
 
 export const AgentWorkspaceShell: React.FC<Record<string, unknown>> = () => {
-  if (piariumSurfaceRuntime.surface === 'mobile') {
+  if (varinSurfaceRuntime.surface === 'mobile') {
     return (
       <MobileWorkspaceShell
         onActiveConnectionDeleted={() => {

@@ -239,7 +239,7 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          isPiariumDiagnosticsDialogOpen,
+          isVarinDiagnosticsDialogOpen,
           isMultiRunLauncherOpen,
           isImagePreviewOpen,
         } = useUIStore.getState();
@@ -253,7 +253,7 @@ export const useKeyboardShortcuts = () => {
           || isHelpDialogOpen
           || isSessionSwitcherOpen
           || isAboutDialogOpen
-          || isPiariumDiagnosticsDialogOpen
+          || isVarinDiagnosticsDialogOpen
           || isMultiRunLauncherOpen
           || isImagePreviewOpen;
 
@@ -268,7 +268,7 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('open_diagnostics'))) {
         e.preventDefault();
-        useUIStore.getState().setPiariumDiagnosticsDialogOpen(true);
+        useUIStore.getState().setVarinDiagnosticsDialogOpen(true);
         return;
       }
 
@@ -301,7 +301,7 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('cycle_theme'))) {
         e.preventDefault();
         if (readEmbeddedThemeSearchParams() !== null && window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: 'piarium:cycle-theme-request' }, window.location.origin);
+          window.parent.postMessage({ type: 'varin:cycle-theme-request' }, window.location.origin);
           return;
         }
         const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
@@ -566,7 +566,7 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         // Dictation state lives inside the composer's isolated component;
         // toggle it via an event instead of subscribing this hot hook to it.
-        window.dispatchEvent(new CustomEvent('piarium:dictation-toggle'));
+        window.dispatchEvent(new CustomEvent('varin:dictation-toggle'));
         return;
       }
 

@@ -1,24 +1,24 @@
-import type { PiariumExtensionPackageSource } from "./types.js";
+import type { VarinExtensionPackageSource } from "./types.js";
 
-export const PIARIUM_EXTENSION_DISCOVERY_SCHEMA_VERSION = 1 as const;
+export const VARIN_EXTENSION_DISCOVERY_SCHEMA_VERSION = 1 as const;
 
-export interface PiariumExtensionDiscoveryEntry {
+export interface VarinExtensionDiscoveryEntry {
   description?: string;
   displayName?: string;
   homepage?: string;
   icon?: string;
   id: string;
   keywords?: string[];
-  source: PiariumExtensionPackageSource;
+  source: VarinExtensionPackageSource;
 }
 
-export interface PiariumExtensionDiscoveryDocument {
-  entries: PiariumExtensionDiscoveryEntry[];
-  schemaVersion: typeof PIARIUM_EXTENSION_DISCOVERY_SCHEMA_VERSION;
+export interface VarinExtensionDiscoveryDocument {
+  entries: VarinExtensionDiscoveryEntry[];
+  schemaVersion: typeof VARIN_EXTENSION_DISCOVERY_SCHEMA_VERSION;
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
-const SOURCE_KINDS = new Set<PiariumExtensionPackageSource["kind"]>(["builtin", "git", "local", "npm"]);
+const SOURCE_KINDS = new Set<VarinExtensionPackageSource["kind"]>(["builtin", "git", "local", "npm"]);
 
 const record = (value: unknown): Record<string, unknown> | null => (
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -35,10 +35,10 @@ const optionalText = (value: unknown, label: string): string | undefined => (
   value === undefined ? undefined : text(value, label)
 );
 
-const parseSource = (value: unknown, label: string): PiariumExtensionPackageSource => {
+const parseSource = (value: unknown, label: string): VarinExtensionPackageSource => {
   const raw = record(value);
   if (!raw) throw new Error(`${label} must be an object`);
-  const kind = text(raw.kind, `${label}.kind`) as PiariumExtensionPackageSource["kind"];
+  const kind = text(raw.kind, `${label}.kind`) as VarinExtensionPackageSource["kind"];
   if (!SOURCE_KINDS.has(kind)) throw new Error(`${label}.kind is unsupported`);
   return {
     display: text(raw.display, `${label}.display`),
@@ -47,16 +47,16 @@ const parseSource = (value: unknown, label: string): PiariumExtensionPackageSour
   };
 };
 
-export const parsePiariumExtensionDiscoveryDocument = (
+export const parseVarinExtensionDiscoveryDocument = (
   value: unknown,
-): PiariumExtensionDiscoveryDocument => {
+): VarinExtensionDiscoveryDocument => {
   const raw = record(value);
-  if (!raw) throw new Error("Piarium extension discovery document must be an object");
-  if (raw.schemaVersion !== PIARIUM_EXTENSION_DISCOVERY_SCHEMA_VERSION) {
-    throw new Error("Piarium extension discovery schemaVersion is unsupported");
+  if (!raw) throw new Error("Varin extension discovery document must be an object");
+  if (raw.schemaVersion !== VARIN_EXTENSION_DISCOVERY_SCHEMA_VERSION) {
+    throw new Error("Varin extension discovery schemaVersion is unsupported");
   }
-  if (!Array.isArray(raw.entries)) throw new Error("Piarium extension discovery entries must be an array");
-  const entries = raw.entries.map<PiariumExtensionDiscoveryEntry>((value, index) => {
+  if (!Array.isArray(raw.entries)) throw new Error("Varin extension discovery entries must be an array");
+  const entries = raw.entries.map<VarinExtensionDiscoveryEntry>((value, index) => {
     const entry = record(value);
     if (!entry) throw new Error(`entries[${index}] must be an object`);
     const id = text(entry.id, `entries[${index}].id`);
@@ -82,7 +82,7 @@ export const parsePiariumExtensionDiscoveryDocument = (
     };
   });
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
-    throw new Error("Piarium extension discovery entry IDs must be unique");
+    throw new Error("Varin extension discovery entry IDs must be unique");
   }
-  return { entries, schemaVersion: PIARIUM_EXTENSION_DISCOVERY_SCHEMA_VERSION };
+  return { entries, schemaVersion: VARIN_EXTENSION_DISCOVERY_SCHEMA_VERSION };
 };

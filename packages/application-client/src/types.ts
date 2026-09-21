@@ -1,36 +1,36 @@
-import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@piarium/protocol';
+import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@varin/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
-  PiariumExtensionActualState,
-  PiariumExtensionAssetPayload,
-  PiariumExtensionAssetRequest,
-  PiariumExtensionCandidateCapabilityReviewRequest,
-  PiariumExtensionCapabilityReviewRequest,
-  PiariumExtensionCandidateSelectionRequest,
-  PiariumExtensionCandidatePreparationResult,
-  PiariumExtensionCatalogAvailability,
-  PiariumExtensionCatalogSnapshot,
-  PiariumExtensionHostStateSnapshot,
-  PiariumExtensionHostStateWaitRequest,
-  PiariumExtensionManagedEntrypointPayload,
-  PiariumExtensionManagedEntrypointRequest,
-  PiariumExtensionLocalSourceReloadRequest,
-  PiariumExtensionLocalSourceReloadResult,
-  PiariumExtensionPackageInstallRequest,
-  PiariumExtensionRemoveRequest,
-  PiariumExtensionServiceInvocationRequest,
-  PiariumExtensionServiceRoutingRuleRemoveRequest,
-  PiariumExtensionServiceRoutingRuleUpdateRequest,
-  PiariumExtensionServiceRoutingSnapshot,
-  PiariumExtensionServiceSelectionRequest,
-  PiariumWorkbenchLayoutUpdateRequest,
-  PiariumWorkbenchProfileRemoveRequest,
-  PiariumWorkbenchProfileApplyRequest,
-  PiariumWorkbenchProfileSelectionRequest,
-  PiariumWorkbenchProfileSnapshot,
-  PiariumWorkbenchProfileUpsertRequest,
+  VarinExtensionActualState,
+  VarinExtensionAssetPayload,
+  VarinExtensionAssetRequest,
+  VarinExtensionCandidateCapabilityReviewRequest,
+  VarinExtensionCapabilityReviewRequest,
+  VarinExtensionCandidateSelectionRequest,
+  VarinExtensionCandidatePreparationResult,
+  VarinExtensionCatalogAvailability,
+  VarinExtensionCatalogSnapshot,
+  VarinExtensionHostStateSnapshot,
+  VarinExtensionHostStateWaitRequest,
+  VarinExtensionManagedEntrypointPayload,
+  VarinExtensionManagedEntrypointRequest,
+  VarinExtensionLocalSourceReloadRequest,
+  VarinExtensionLocalSourceReloadResult,
+  VarinExtensionPackageInstallRequest,
+  VarinExtensionRemoveRequest,
+  VarinExtensionServiceInvocationRequest,
+  VarinExtensionServiceRoutingRuleRemoveRequest,
+  VarinExtensionServiceRoutingRuleUpdateRequest,
+  VarinExtensionServiceRoutingSnapshot,
+  VarinExtensionServiceSelectionRequest,
+  VarinWorkbenchLayoutUpdateRequest,
+  VarinWorkbenchProfileRemoveRequest,
+  VarinWorkbenchProfileApplyRequest,
+  VarinWorkbenchProfileSelectionRequest,
+  VarinWorkbenchProfileSnapshot,
+  VarinWorkbenchProfileUpsertRequest,
   JsonValue,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 
 export type RuntimePlatform = 'web' | 'desktop';
 
@@ -407,7 +407,7 @@ export interface GitWorktreeBootstrapStatus {
 
 export interface CreateGitWorktreePayload {
   mode?: 'new' | 'existing';
-  /** Worktree folder name (falls back to Piarium name generation when omitted). */
+  /** Worktree folder name (falls back to Varin name generation when omitted). */
   worktreeName?: string;
   /** New local branch name for mode=new. */
   branchName?: string;
@@ -1512,32 +1512,32 @@ export interface SmartSearchAPI {
 
 export interface ExtensionsAPI {
   activateExtension(extensionId: string): Promise<void>;
-  catalog(): Promise<PiariumExtensionCatalogAvailability>;
+  catalog(): Promise<VarinExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
-  discardCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  hostState(): Promise<PiariumExtensionHostStateSnapshot>;
-  install(request: PiariumExtensionPackageInstallRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
-  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
-  requestCandidateApplication(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
-  readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
-  reloadLocalSource(request: PiariumExtensionLocalSourceReloadRequest): Promise<PiariumExtensionLocalSourceReloadResult>;
-  reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
-  reviewCapabilities(request: PiariumExtensionCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  reviewCandidateCapabilities(request: PiariumExtensionCandidateCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot>;
-  setServiceSelection(request: PiariumExtensionServiceSelectionRequest): Promise<PiariumExtensionHostStateSnapshot>;
-  upsertServiceRoutingRule(request: PiariumExtensionServiceRoutingRuleUpdateRequest): Promise<PiariumExtensionServiceRoutingSnapshot>;
-  removeServiceRoutingRule(request: PiariumExtensionServiceRoutingRuleRemoveRequest): Promise<PiariumExtensionServiceRoutingSnapshot>;
-  removeExtension(request: PiariumExtensionRemoveRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  updateWorkbenchLayout(request: PiariumWorkbenchLayoutUpdateRequest): Promise<PiariumWorkbenchProfileSnapshot>;
-  selectWorkbenchProfile(request: PiariumWorkbenchProfileSelectionRequest): Promise<PiariumWorkbenchProfileSnapshot>;
-  upsertWorkbenchProfile(request: PiariumWorkbenchProfileUpsertRequest): Promise<PiariumWorkbenchProfileSnapshot>;
-  removeWorkbenchProfile(request: PiariumWorkbenchProfileRemoveRequest): Promise<PiariumWorkbenchProfileSnapshot>;
-  applyWorkbenchProfile(request: PiariumWorkbenchProfileApplyRequest): Promise<PiariumExtensionCatalogSnapshot>;
-  waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
+  discardCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  hostState(): Promise<VarinExtensionHostStateSnapshot>;
+  install(request: VarinExtensionPackageInstallRequest): Promise<VarinExtensionCatalogSnapshot>;
+  invokeService(request: VarinExtensionServiceInvocationRequest): Promise<JsonValue>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<VarinExtensionCandidatePreparationResult>;
+  requestCandidateApplication(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  readAsset(request: VarinExtensionAssetRequest): Promise<VarinExtensionAssetPayload>;
+  readManagedEntrypoint(request: VarinExtensionManagedEntrypointRequest): Promise<VarinExtensionManagedEntrypointPayload>;
+  reloadLocalSource(request: VarinExtensionLocalSourceReloadRequest): Promise<VarinExtensionLocalSourceReloadResult>;
+  reportActualState(extensionId: string, state: VarinExtensionActualState): Promise<void>;
+  reviewCapabilities(request: VarinExtensionCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
+  reviewCandidateCapabilities(request: VarinExtensionCandidateCapabilityReviewRequest): Promise<VarinExtensionCatalogSnapshot>;
+  selectCandidate(request: VarinExtensionCandidateSelectionRequest): Promise<VarinExtensionCatalogSnapshot>;
+  setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<VarinExtensionCatalogSnapshot>;
+  setServiceSelection(request: VarinExtensionServiceSelectionRequest): Promise<VarinExtensionHostStateSnapshot>;
+  upsertServiceRoutingRule(request: VarinExtensionServiceRoutingRuleUpdateRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
+  removeServiceRoutingRule(request: VarinExtensionServiceRoutingRuleRemoveRequest): Promise<VarinExtensionServiceRoutingSnapshot>;
+  removeExtension(request: VarinExtensionRemoveRequest): Promise<VarinExtensionCatalogSnapshot>;
+  updateWorkbenchLayout(request: VarinWorkbenchLayoutUpdateRequest): Promise<VarinWorkbenchProfileSnapshot>;
+  selectWorkbenchProfile(request: VarinWorkbenchProfileSelectionRequest): Promise<VarinWorkbenchProfileSnapshot>;
+  upsertWorkbenchProfile(request: VarinWorkbenchProfileUpsertRequest): Promise<VarinWorkbenchProfileSnapshot>;
+  removeWorkbenchProfile(request: VarinWorkbenchProfileRemoveRequest): Promise<VarinWorkbenchProfileSnapshot>;
+  applyWorkbenchProfile(request: VarinWorkbenchProfileApplyRequest): Promise<VarinExtensionCatalogSnapshot>;
+  waitForHostState(request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<VarinExtensionHostStateSnapshot>;
 }
 
 export interface PiRuntimeManagementCapabilities {
@@ -1559,13 +1559,13 @@ export interface PiRuntimeManagementAPI {
   upgrade(): Promise<PiRuntimeSnapshot>;
 }
 
-export interface PiariumWorkspaceIdentity {
+export interface VarinWorkspaceIdentity {
   workspaceId: string;
   hostId: string;
   epoch: number;
 }
 
-export interface PiariumResourceReference {
+export interface VarinResourceReference {
   workspaceId: string;
   resourceId: string;
 }
@@ -1582,11 +1582,11 @@ export interface WorkspaceMutationToken {
   owner: WorkspaceMutationOwner;
 }
 
-export type PiariumDocumentReadResult =
+export type VarinDocumentReadResult =
   | {
       status: 'ready';
       epoch: number;
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;
       content: string;
       encoding: string;
@@ -1597,12 +1597,12 @@ export type PiariumDocumentReadResult =
   | {
       status: 'missing';
       epoch: number;
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
     }
   | {
       status: 'binary';
       epoch: number;
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;
       byteLength: number;
       mime?: string;
@@ -1610,15 +1610,15 @@ export type PiariumDocumentReadResult =
   | {
       status: 'unsupported-encoding';
       epoch: number;
-      resource: PiariumResourceReference;
+      resource: VarinResourceReference;
       revision: string;
       byteLength: number;
       candidates?: string[];
     };
 
-export interface PiariumDocumentWriteRequest {
+export interface VarinDocumentWriteRequest {
   token: WorkspaceMutationToken;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   content: string;
   encoding: string;
   bom: boolean;
@@ -1626,52 +1626,52 @@ export interface PiariumDocumentWriteRequest {
   operationId: string;
 }
 
-export type PiariumDocumentWriteResult =
+export type VarinDocumentWriteResult =
   | { status: 'written'; revision: string; byteLength: number; modifiedAt?: string }
-  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> }
+  | { status: 'conflict'; current: Omit<VarinDocumentReadResult, 'content'> }
   | { status: 'stale-epoch'; currentEpoch: number };
 
-export interface PiariumDocumentMoveRequest {
+export interface VarinDocumentMoveRequest {
   token: WorkspaceMutationToken;
-  from: PiariumResourceReference;
-  to: PiariumResourceReference;
+  from: VarinResourceReference;
+  to: VarinResourceReference;
   expectedRevision: string;
   operationId: string;
 }
 
-export type PiariumDocumentMoveResult =
-  | { status: 'moved'; resource: PiariumResourceReference; revision: string; byteLength: number; modifiedAt?: string }
-  | { status: 'missing'; resource: PiariumResourceReference }
-  | { status: 'target-exists'; resource: PiariumResourceReference }
-  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> }
+export type VarinDocumentMoveResult =
+  | { status: 'moved'; resource: VarinResourceReference; revision: string; byteLength: number; modifiedAt?: string }
+  | { status: 'missing'; resource: VarinResourceReference }
+  | { status: 'target-exists'; resource: VarinResourceReference }
+  | { status: 'conflict'; current: Omit<VarinDocumentReadResult, 'content'> }
   | { status: 'stale-epoch'; currentEpoch: number };
 
-export interface PiariumDocumentDeleteRequest {
+export interface VarinDocumentDeleteRequest {
   token: WorkspaceMutationToken;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   expectedRevision: string;
   operationId: string;
 }
 
-export type PiariumDocumentDeleteResult =
-  | { status: 'deleted'; resource: PiariumResourceReference }
-  | { status: 'missing'; resource: PiariumResourceReference }
-  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> }
+export type VarinDocumentDeleteResult =
+  | { status: 'deleted'; resource: VarinResourceReference }
+  | { status: 'missing'; resource: VarinResourceReference }
+  | { status: 'conflict'; current: Omit<VarinDocumentReadResult, 'content'> }
   | { status: 'stale-epoch'; currentEpoch: number };
 
-type PiariumWorkspaceFileEventPosition = {
+type VarinWorkspaceFileEventPosition = {
   sourceId: string;
   generation: number;
   sequence: number;
 };
 
-export type PiariumWorkspaceFileEvent = PiariumWorkspaceFileEventPosition & (
-  | { kind: 'created' | 'changed' | 'deleted'; resource: PiariumResourceReference; revision?: string }
-  | { kind: 'moved'; from: PiariumResourceReference; resource: PiariumResourceReference; revision?: string }
+export type VarinWorkspaceFileEvent = VarinWorkspaceFileEventPosition & (
+  | { kind: 'created' | 'changed' | 'deleted'; resource: VarinResourceReference; revision?: string }
+  | { kind: 'moved'; from: VarinResourceReference; resource: VarinResourceReference; revision?: string }
   | { kind: 'reset'; reason: 'overflow' | 'reconnected' | 'authority-changed' | 'gap' }
 );
 
-export type PiariumDirtyStateBarrierEvent = {
+export type VarinDirtyStateBarrierEvent = {
   action: 'acquire' | 'release';
   barrierId: string;
   caseSensitive: boolean;
@@ -1680,7 +1680,7 @@ export type PiariumDirtyStateBarrierEvent = {
   workspaceId: string;
 };
 
-export type PiariumDocumentSurfaceOperationEvent = {
+export type VarinDocumentSurfaceOperationEvent = {
   action: 'capture' | 'apply' | 'undo';
   kind: 'surface-operation';
   operationId: string;
@@ -1688,14 +1688,14 @@ export type PiariumDocumentSurfaceOperationEvent = {
   workspaceId: string;
 };
 
-export type PiariumDocumentWatchEvent =
-  | PiariumWorkspaceFileEvent
-  | PiariumDirtyStateBarrierEvent
-  | PiariumDocumentSurfaceOperationEvent;
+export type VarinDocumentWatchEvent =
+  | VarinWorkspaceFileEvent
+  | VarinDirtyStateBarrierEvent
+  | VarinDocumentSurfaceOperationEvent;
 
-export interface PiariumDocumentRecoveryJournalSummary {
+export interface VarinDocumentRecoveryJournalSummary {
   journalId: string;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   revision: number;
   baseRevision: string | null;
   epoch: number;
@@ -1703,7 +1703,7 @@ export interface PiariumDocumentRecoveryJournalSummary {
   byteLength: number;
 }
 
-export interface PiariumDirtyBufferResource {
+export interface VarinDirtyBufferResource {
   baseRevision: string | null;
   /** Hash of the editor-normalized buffer text, not the serialized file bytes. */
   bufferHash?: string;
@@ -1712,10 +1712,10 @@ export interface PiariumDirtyBufferResource {
   bom?: boolean;
   lineEnding?: 'lf' | 'crlf' | 'cr';
   localEditRevision: number;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
 }
 
-export interface PiariumDocumentSurfaceBinding {
+export interface VarinDocumentSurfaceBinding {
   baseRevision: string | null;
   bufferHash: string;
   documentInstanceId: string;
@@ -1723,25 +1723,25 @@ export interface PiariumDocumentSurfaceBinding {
   bom: boolean;
   lineEnding: 'lf' | 'crlf' | 'cr';
   localEditRevision: number;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
 }
 
-export interface PiariumDocumentSurfaceOperationTarget extends PiariumDocumentSurfaceBinding {
+export interface VarinDocumentSurfaceOperationTarget extends VarinDocumentSurfaceBinding {
   newText?: string;
   expectedAppliedRevision?: number;
   expectedAppliedHash?: string;
 }
 
-export interface PiariumDocumentSurfaceOperationPayload {
+export interface VarinDocumentSurfaceOperationPayload {
   action: 'capture' | 'apply' | 'undo';
   operationId: string;
   requestId: string;
-  targets: PiariumDocumentSurfaceOperationTarget[];
+  targets: VarinDocumentSurfaceOperationTarget[];
   workspaceId: string;
 }
 
-export interface PiariumDocumentSurfaceOperationResourceResult {
-  resource: PiariumResourceReference;
+export interface VarinDocumentSurfaceOperationResourceResult {
+  resource: VarinResourceReference;
   status: 'captured' | 'applied' | 'undone' | 'failed';
   documentInstanceId?: string;
   beforeLocalEditRevision?: number;
@@ -1752,41 +1752,41 @@ export interface PiariumDocumentSurfaceOperationResourceResult {
   message?: string;
 }
 
-export interface PiariumDocumentSurfaceOperationCompletion {
+export interface VarinDocumentSurfaceOperationCompletion {
   generation: number;
   ownerId: string;
   operationId: string;
   requestId: string;
-  resources: PiariumDocumentSurfaceOperationResourceResult[];
+  resources: VarinDocumentSurfaceOperationResourceResult[];
   workspaceId: string;
 }
 
-export interface PiariumAgentInputSnapshotResource extends PiariumDirtyBufferResource {
+export interface VarinAgentInputSnapshotResource extends VarinDirtyBufferResource {
   content: string;
   encoding: string;
   bom: boolean;
 }
 
-export interface PiariumAgentInputSnapshotCaptureRequest {
+export interface VarinAgentInputSnapshotCaptureRequest {
   generation: number;
   ownerId: string;
-  resources: PiariumAgentInputSnapshotResource[];
+  resources: VarinAgentInputSnapshotResource[];
   sessionId: string;
   workspaceId: string;
 }
 
-export interface PiariumDirtyBufferPublication {
+export interface VarinDirtyBufferPublication {
   generation: number;
   ownerId: string;
-  resources: PiariumDirtyBufferResource[];
+  resources: VarinDirtyBufferResource[];
   updatedAt: string;
   workspaceId: string;
 }
 
-export type PiariumDocumentRecoveryReadResult =
+export type VarinDocumentRecoveryReadResult =
   | {
       status: 'ready';
-      journal: PiariumDocumentRecoveryJournalSummary;
+      journal: VarinDocumentRecoveryJournalSummary;
       content: string;
       encoding: string;
       bom: boolean;
@@ -1794,11 +1794,11 @@ export type PiariumDocumentRecoveryReadResult =
   | { status: 'missing'; journalId: string }
   | { status: 'malformed'; journalId: string };
 
-export interface PiariumDocumentRecoveryWriteRequest {
+export interface VarinDocumentRecoveryWriteRequest {
   token: WorkspaceMutationToken;
   workspaceId: string;
   recoverySessionId: string;
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   content: string;
   encoding: string;
   bom: boolean;
@@ -1806,9 +1806,9 @@ export interface PiariumDocumentRecoveryWriteRequest {
   expectedRevision: number | null;
 }
 
-export type PiariumDocumentRecoveryWriteResult =
-  | { status: 'written'; journal: PiariumDocumentRecoveryJournalSummary }
-  | { status: 'conflict'; journal: PiariumDocumentRecoveryJournalSummary }
+export type VarinDocumentRecoveryWriteResult =
+  | { status: 'written'; journal: VarinDocumentRecoveryJournalSummary }
+  | { status: 'conflict'; journal: VarinDocumentRecoveryJournalSummary }
   | { status: 'missing'; journalId: string }
   | { status: 'stale-epoch'; currentEpoch: number };
 
@@ -1824,23 +1824,23 @@ export interface DocumentsAPI {
     ownerId: string;
     workspaceId: string;
   }): Promise<{ cleared: boolean }>;
-  captureAgentInputSnapshot?(request: PiariumAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
+  captureAgentInputSnapshot?(request: VarinAgentInputSnapshotCaptureRequest): Promise<AgentInputContext>;
   releaseAgentInputSnapshot?(request: { context: AgentInputContext; sessionId: string }): Promise<{ released: boolean }>;
   readSurfaceOperation?(request: {
     generation: number;
     ownerId: string;
     requestId: string;
     workspaceId: string;
-  }): Promise<PiariumDocumentSurfaceOperationPayload>;
-  completeSurfaceOperation?(request: PiariumDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
-  resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<PiariumWorkspaceIdentity>;
-  read(resource: PiariumResourceReference): Promise<PiariumDocumentReadResult>;
-  write(request: PiariumDocumentWriteRequest): Promise<PiariumDocumentWriteResult>;
-  move(request: PiariumDocumentMoveRequest): Promise<PiariumDocumentMoveResult>;
-  delete(request: PiariumDocumentDeleteRequest): Promise<PiariumDocumentDeleteResult>;
+  }): Promise<VarinDocumentSurfaceOperationPayload>;
+  completeSurfaceOperation?(request: VarinDocumentSurfaceOperationCompletion): Promise<{ accepted: boolean }>;
+  resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<VarinWorkspaceIdentity>;
+  read(resource: VarinResourceReference): Promise<VarinDocumentReadResult>;
+  write(request: VarinDocumentWriteRequest): Promise<VarinDocumentWriteResult>;
+  move(request: VarinDocumentMoveRequest): Promise<VarinDocumentMoveResult>;
+  delete(request: VarinDocumentDeleteRequest): Promise<VarinDocumentDeleteResult>;
   watch(
     workspaceId: string,
-    listener: (event: PiariumDocumentWatchEvent) => void,
+    listener: (event: VarinDocumentWatchEvent) => void,
     options?: {
       dirtyOwner?: { generation: number; ownerId: string };
       signal?: AbortSignal;
@@ -1849,15 +1849,15 @@ export interface DocumentsAPI {
   listRecoveryJournals(request: {
     workspaceId: string;
     recoverySessionId?: string;
-  }): Promise<PiariumDocumentRecoveryJournalSummary[]>;
+  }): Promise<VarinDocumentRecoveryJournalSummary[]>;
   publishDirtyBuffers(request: {
     generation: number;
     ownerId: string;
-    resources: PiariumDirtyBufferResource[];
+    resources: VarinDirtyBufferResource[];
     workspaceId: string;
-  }): Promise<PiariumDirtyBufferPublication>;
-  readRecoveryJournal(journalId: string): Promise<PiariumDocumentRecoveryReadResult>;
-  writeRecoveryJournal(request: PiariumDocumentRecoveryWriteRequest): Promise<PiariumDocumentRecoveryWriteResult>;
+  }): Promise<VarinDirtyBufferPublication>;
+  readRecoveryJournal(journalId: string): Promise<VarinDocumentRecoveryReadResult>;
+  writeRecoveryJournal(request: VarinDocumentRecoveryWriteRequest): Promise<VarinDocumentRecoveryWriteResult>;
   deleteRecoveryJournal(request: {
     token: WorkspaceMutationToken;
     journalId: string;
@@ -1865,13 +1865,13 @@ export interface DocumentsAPI {
   }): Promise<
     | { status: 'deleted' }
     | { status: 'missing' }
-    | { status: 'conflict'; journal: PiariumDocumentRecoveryJournalSummary }
+    | { status: 'conflict'; journal: VarinDocumentRecoveryJournalSummary }
     | { status: 'stale-epoch'; currentEpoch: number }
   >;
 }
 
 export type WorkspaceContentSearchHit = {
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   line: number;
   column: number;
   preview: string;
@@ -1900,148 +1900,148 @@ export interface WorkspaceSearchAPI {
   ): Promise<WorkspaceContentSearchResult>;
 }
 
-export type PiariumLanguageProviderFeatures = {
+export type VarinLanguageProviderFeatures = {
   completionTriggerCharacters?: string[];
   signatureHelpTriggerCharacters?: string[];
   signatureHelpRetriggerCharacters?: string[];
   onTypeFormattingTriggerCharacters?: string[];
 };
 
-export type PiariumLanguageProviderStatus =
+export type VarinLanguageProviderStatus =
   | { status: 'absent'; workspaceId: string; languageId: string; providerId?: string; generation?: number }
   | { status: 'starting'; workspaceId: string; languageId: string; providerId: string; generation: number }
-  | { status: 'ready'; workspaceId: string; languageId: string; providerId: string; generation: number; features?: PiariumLanguageProviderFeatures }
-  | { status: 'degraded'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string; features?: PiariumLanguageProviderFeatures }
+  | { status: 'ready'; workspaceId: string; languageId: string; providerId: string; generation: number; features?: VarinLanguageProviderFeatures }
+  | { status: 'degraded'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string; features?: VarinLanguageProviderFeatures }
   | { status: 'failed'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string };
 
-export type PiariumLanguagePosition = {
+export type VarinLanguagePosition = {
   line: number;
   character: number;
 };
 
-export type PiariumLanguageRange = {
-  start: PiariumLanguagePosition;
-  end: PiariumLanguagePosition;
+export type VarinLanguageRange = {
+  start: VarinLanguagePosition;
+  end: VarinLanguagePosition;
 };
 
-export type PiariumLanguageCompletionItem = {
+export type VarinLanguageCompletionItem = {
   label: string;
   kind?: number;
   detail?: string;
   insertText?: string;
   insertTextFormat?: 'plain' | 'snippet';
-  documentation?: PiariumLanguageMarkupContent;
+  documentation?: VarinLanguageMarkupContent;
   sortText?: string;
   filterText?: string;
   preselect?: boolean;
   deprecated?: boolean;
   commitCharacters?: string[];
   tags?: number[];
-  textEdit?: PiariumLanguageTextEdit | PiariumLanguageInsertReplaceEdit;
-  additionalTextEdits?: PiariumLanguageTextEdit[];
-  command?: PiariumLanguageCommand;
+  textEdit?: VarinLanguageTextEdit | VarinLanguageInsertReplaceEdit;
+  additionalTextEdits?: VarinLanguageTextEdit[];
+  command?: VarinLanguageCommand;
   resolveToken?: string;
 };
 
-export type PiariumLanguageLocation = {
-  resource: PiariumResourceReference;
-  range: PiariumLanguageRange;
+export type VarinLanguageLocation = {
+  resource: VarinResourceReference;
+  range: VarinLanguageRange;
 };
 
-export type PiariumLanguageLocationLink = {
-  resource: PiariumResourceReference;
-  targetRange: PiariumLanguageRange;
-  targetSelectionRange: PiariumLanguageRange;
-  originSelectionRange?: PiariumLanguageRange;
+export type VarinLanguageLocationLink = {
+  resource: VarinResourceReference;
+  targetRange: VarinLanguageRange;
+  targetSelectionRange: VarinLanguageRange;
+  originSelectionRange?: VarinLanguageRange;
 };
 
-export type PiariumLanguageMarkupContent = {
+export type VarinLanguageMarkupContent = {
   kind: 'plaintext' | 'markdown';
   value: string;
 };
 
-export type PiariumLanguageCommand = {
+export type VarinLanguageCommand = {
   title: string;
   command: string;
   arguments?: JsonValue[];
 };
 
-export type PiariumLanguageTextEdit = {
-  range: PiariumLanguageRange;
+export type VarinLanguageTextEdit = {
+  range: VarinLanguageRange;
   newText: string;
   annotationId?: string;
 };
 
-export type PiariumLanguageInsertReplaceEdit = {
-  insert: PiariumLanguageRange;
-  replace: PiariumLanguageRange;
+export type VarinLanguageInsertReplaceEdit = {
+  insert: VarinLanguageRange;
+  replace: VarinLanguageRange;
   newText: string;
 };
 
-export type PiariumLanguageHover = {
-  contents: PiariumLanguageMarkupContent[];
-  range?: PiariumLanguageRange;
+export type VarinLanguageHover = {
+  contents: VarinLanguageMarkupContent[];
+  range?: VarinLanguageRange;
 };
 
-export type PiariumLanguageSignatureParameter = {
+export type VarinLanguageSignatureParameter = {
   label: string | [number, number];
-  documentation?: PiariumLanguageMarkupContent;
+  documentation?: VarinLanguageMarkupContent;
 };
 
-export type PiariumLanguageSignatureInformation = {
+export type VarinLanguageSignatureInformation = {
   label: string;
-  documentation?: PiariumLanguageMarkupContent;
-  parameters: PiariumLanguageSignatureParameter[];
+  documentation?: VarinLanguageMarkupContent;
+  parameters: VarinLanguageSignatureParameter[];
   activeParameter?: number;
 };
 
-export type PiariumLanguageSignatureHelp = {
-  signatures: PiariumLanguageSignatureInformation[];
+export type VarinLanguageSignatureHelp = {
+  signatures: VarinLanguageSignatureInformation[];
   activeSignature: number;
   activeParameter: number;
 };
 
-export type PiariumLanguageSymbol = {
+export type VarinLanguageSymbol = {
   name: string;
   kind: number;
-  range: PiariumLanguageRange;
-  selectionRange?: PiariumLanguageRange;
+  range: VarinLanguageRange;
+  selectionRange?: VarinLanguageRange;
   detail?: string;
   containerName?: string;
   tags?: number[];
-  resource?: PiariumResourceReference;
-  children?: PiariumLanguageSymbol[];
+  resource?: VarinResourceReference;
+  children?: VarinLanguageSymbol[];
 };
 
-export type PiariumLanguageWorkspaceDocumentEdit = {
+export type VarinLanguageWorkspaceDocumentEdit = {
   kind: 'text';
-  resource: PiariumResourceReference;
+  resource: VarinResourceReference;
   version: number | null;
-  edits: PiariumLanguageTextEdit[];
+  edits: VarinLanguageTextEdit[];
 };
 
-export type PiariumLanguageWorkspaceResourceOperation =
-  | { kind: 'create'; resource: PiariumResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
-  | { kind: 'rename'; from: PiariumResourceReference; to: PiariumResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
-  | { kind: 'delete'; resource: PiariumResourceReference; annotationId?: string; recursive?: boolean; ignoreIfNotExists?: boolean };
+export type VarinLanguageWorkspaceResourceOperation =
+  | { kind: 'create'; resource: VarinResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'rename'; from: VarinResourceReference; to: VarinResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'delete'; resource: VarinResourceReference; annotationId?: string; recursive?: boolean; ignoreIfNotExists?: boolean };
 
-export type PiariumLanguageWorkspaceEdit = {
-  documentChanges: Array<PiariumLanguageWorkspaceDocumentEdit | PiariumLanguageWorkspaceResourceOperation>;
+export type VarinLanguageWorkspaceEdit = {
+  documentChanges: Array<VarinLanguageWorkspaceDocumentEdit | VarinLanguageWorkspaceResourceOperation>;
   changeAnnotations?: Record<string, { label: string; description?: string; needsConfirmation?: boolean }>;
 };
 
-export type PiariumLanguageCodeAction = {
+export type VarinLanguageCodeAction = {
   title: string;
   kind?: string;
   isPreferred?: boolean;
-  diagnostics?: PiariumLanguageDiagnostic[];
+  diagnostics?: VarinLanguageDiagnostic[];
   disabledReason?: string;
-  edit?: PiariumLanguageWorkspaceEdit;
-  command?: PiariumLanguageCommand;
+  edit?: VarinLanguageWorkspaceEdit;
+  command?: VarinLanguageCommand;
   resolveToken?: string;
 };
 
-export type PiariumLanguageSemanticTokens = {
+export type VarinLanguageSemanticTokens = {
   data: number[];
   resultId?: string;
   legend: {
@@ -2050,30 +2050,30 @@ export type PiariumLanguageSemanticTokens = {
   };
 };
 
-export type PiariumLanguageInlayHintLabelPart = {
+export type VarinLanguageInlayHintLabelPart = {
   value: string;
-  tooltip?: PiariumLanguageMarkupContent;
-  location?: PiariumLanguageLocation;
-  command?: PiariumLanguageCommand;
+  tooltip?: VarinLanguageMarkupContent;
+  location?: VarinLanguageLocation;
+  command?: VarinLanguageCommand;
 };
 
-export type PiariumLanguageInlayHint = {
-  position: PiariumLanguagePosition;
-  label: string | PiariumLanguageInlayHintLabelPart[];
+export type VarinLanguageInlayHint = {
+  position: VarinLanguagePosition;
+  label: string | VarinLanguageInlayHintLabelPart[];
   kind?: 'type' | 'parameter';
-  tooltip?: PiariumLanguageMarkupContent;
-  textEdits?: PiariumLanguageTextEdit[];
+  tooltip?: VarinLanguageMarkupContent;
+  textEdits?: VarinLanguageTextEdit[];
   paddingLeft?: boolean;
   paddingRight?: boolean;
   resolveToken?: string;
 };
 
-export type PiariumLanguageDocumentHighlight = {
-  range: PiariumLanguageRange;
+export type VarinLanguageDocumentHighlight = {
+  range: VarinLanguageRange;
   kind?: 'text' | 'read' | 'write';
 };
 
-export type PiariumLanguageFoldingRange = {
+export type VarinLanguageFoldingRange = {
   startLine: number;
   endLine: number;
   startCharacter?: number;
@@ -2081,36 +2081,36 @@ export type PiariumLanguageFoldingRange = {
   kind?: 'comment' | 'imports' | 'region';
 };
 
-export type PiariumLanguageSelectionRange = {
-  range: PiariumLanguageRange;
-  parent?: PiariumLanguageSelectionRange;
+export type VarinLanguageSelectionRange = {
+  range: VarinLanguageRange;
+  parent?: VarinLanguageSelectionRange;
 };
 
-export type PiariumLanguageDocumentLinkTarget =
-  | { kind: 'resource'; resource: PiariumResourceReference; range?: PiariumLanguageRange }
+export type VarinLanguageDocumentLinkTarget =
+  | { kind: 'resource'; resource: VarinResourceReference; range?: VarinLanguageRange }
   | { kind: 'uri'; uri: string };
 
-export type PiariumLanguageDocumentLink = {
-  range: PiariumLanguageRange;
-  target?: PiariumLanguageDocumentLinkTarget;
+export type VarinLanguageDocumentLink = {
+  range: VarinLanguageRange;
+  target?: VarinLanguageDocumentLinkTarget;
   tooltip?: string;
   resolveToken?: string;
 };
 
-export type PiariumLanguageColor = { red: number; green: number; blue: number; alpha: number };
+export type VarinLanguageColor = { red: number; green: number; blue: number; alpha: number };
 
-export type PiariumLanguageColorInformation = {
-  range: PiariumLanguageRange;
-  color: PiariumLanguageColor;
+export type VarinLanguageColorInformation = {
+  range: VarinLanguageRange;
+  color: VarinLanguageColor;
 };
 
-export type PiariumLanguageColorPresentation = {
+export type VarinLanguageColorPresentation = {
   label: string;
-  textEdit?: PiariumLanguageTextEdit;
-  additionalTextEdits?: PiariumLanguageTextEdit[];
+  textEdit?: VarinLanguageTextEdit;
+  additionalTextEdits?: VarinLanguageTextEdit[];
 };
 
-export type PiariumLanguageFeatureResult<T> =
+export type VarinLanguageFeatureResult<T> =
   | { status: 'ready'; documentVersion: number; providerId: string; generation: number; value: T }
   | { status: 'stale'; documentVersion: number; providerId?: string; generation?: number }
   | { status: 'absent'; workspaceId?: string; languageId?: string }
@@ -2122,8 +2122,8 @@ export type PiariumLanguageFeatureResult<T> =
       generation?: number;
     };
 
-export interface PiariumLanguageCommandRequest {
-  resource: PiariumResourceReference;
+export interface VarinLanguageCommandRequest {
+  resource: VarinResourceReference;
   languageId: string;
   documentVersion: number;
   providerId: string;
@@ -2132,8 +2132,8 @@ export interface PiariumLanguageCommandRequest {
   arguments?: JsonValue[];
 }
 
-export interface PiariumLanguageDocumentSyncRequest {
-  resource: PiariumResourceReference;
+export interface VarinLanguageDocumentSyncRequest {
+  resource: VarinResourceReference;
   languageId: string;
   documentVersion: number;
   reason: 'open' | 'change' | 'save' | 'close';
@@ -2141,28 +2141,28 @@ export interface PiariumLanguageDocumentSyncRequest {
   changes?: Array<{ from: number; to: number; insert: string }>;
 }
 
-export type PiariumLanguageDocumentSyncResult =
+export type VarinLanguageDocumentSyncResult =
   | { status: 'synced'; documentVersion: number; providerId: string; generation: number }
   | { status: 'absent' }
   | { status: 'stale'; documentVersion: number }
   | { status: 'failed'; message: string };
 
-export type PiariumLanguageDiagnostic = {
-  resource: PiariumResourceReference;
+export type VarinLanguageDiagnostic = {
+  resource: VarinResourceReference;
   documentVersion: number;
   severity: 'error' | 'warning' | 'info' | 'hint';
   message: string;
-  range: PiariumLanguageRange;
+  range: VarinLanguageRange;
   code?: string | number;
   source?: string;
   tags?: number[];
-  relatedInformation?: Array<{ location: PiariumLanguageLocation; message: string }>;
+  relatedInformation?: Array<{ location: VarinLanguageLocation; message: string }>;
   providerId?: string;
   generation?: number;
 };
 
-export type PiariumLanguageServiceEvent =
-  | { kind: 'status'; snapshot: PiariumLanguageProviderStatus }
+export type VarinLanguageServiceEvent =
+  | { kind: 'status'; snapshot: VarinLanguageProviderStatus }
   | {
       kind: 'diagnostics';
       workspaceId: string;
@@ -2170,24 +2170,24 @@ export type PiariumLanguageServiceEvent =
       resourceId: string;
       providerId: string;
       generation: number;
-      items: PiariumLanguageDiagnostic[];
+      items: VarinLanguageDiagnostic[];
     };
 
-export interface PiariumLanguageFeatureRequest {
-  resource: PiariumResourceReference;
+export interface VarinLanguageFeatureRequest {
+  resource: VarinResourceReference;
   languageId: string;
   documentVersion: number;
-  position?: PiariumLanguagePosition;
-  range?: PiariumLanguageRange;
+  position?: VarinLanguagePosition;
+  range?: VarinLanguageRange;
   newName?: string;
   query?: string;
   triggerCharacter?: string;
   triggerKind?: 'invoked' | 'triggerCharacter' | 'incomplete';
   resolveToken?: string;
-  positions?: PiariumLanguagePosition[];
+  positions?: VarinLanguagePosition[];
   previousResultId?: string;
-  color?: PiariumLanguageColor;
-  diagnostics?: PiariumLanguageDiagnostic[];
+  color?: VarinLanguageColor;
+  diagnostics?: VarinLanguageDiagnostic[];
   formatting?: {
     tabSize: number;
     insertSpaces: boolean;
@@ -2198,39 +2198,39 @@ export interface PiariumLanguageFeatureRequest {
 }
 
 export interface LanguageServicesAPI {
-  getStatus(workspaceId: string, languageId: string): Promise<PiariumLanguageProviderStatus>;
+  getStatus(workspaceId: string, languageId: string): Promise<VarinLanguageProviderStatus>;
   subscribe(
     workspaceId: string,
-    listener: (event: PiariumLanguageServiceEvent) => void,
+    listener: (event: VarinLanguageServiceEvent) => void,
     options?: { signal?: AbortSignal },
   ): Subscription;
-  syncDocument(request: PiariumLanguageDocumentSyncRequest): Promise<PiariumLanguageDocumentSyncResult>;
-  completion(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCompletionItem[]>>;
-  completionResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCompletionItem>>;
-  hover(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageHover | null>>;
-  signatureHelp(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSignatureHelp | null>>;
-  definition(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocationLink[]>>;
-  references(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocation[]>>;
-  documentSymbols(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSymbol[]>>;
-  workspaceSymbols(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSymbol[]>>;
-  rename(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageWorkspaceEdit | null>>;
-  codeActions(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction[]>>;
-  codeActionResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction>>;
-  executeCommand(request: PiariumLanguageCommandRequest): Promise<PiariumLanguageFeatureResult<JsonValue | null>>;
-  documentFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
-  documentRangeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
-  onTypeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
-  semanticTokens(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSemanticTokens | null>>;
-  inlayHints(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageInlayHint[]>>;
-  inlayHintResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageInlayHint>>;
-  documentHighlights(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentHighlight[]>>;
-  foldingRanges(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageFoldingRange[]>>;
-  selectionRanges(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSelectionRange[]>>;
-  documentLinks(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentLink[]>>;
-  documentLinkResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentLink>>;
-  documentColors(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageColorInformation[]>>;
-  colorPresentations(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageColorPresentation[]>>;
-  restart(workspaceId: string, languageId: string): Promise<PiariumLanguageProviderStatus>;
+  syncDocument(request: VarinLanguageDocumentSyncRequest): Promise<VarinLanguageDocumentSyncResult>;
+  completion(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageCompletionItem[]>>;
+  completionResolve(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageCompletionItem>>;
+  hover(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageHover | null>>;
+  signatureHelp(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageSignatureHelp | null>>;
+  definition(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageLocationLink[]>>;
+  references(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageLocation[]>>;
+  documentSymbols(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageSymbol[]>>;
+  workspaceSymbols(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageSymbol[]>>;
+  rename(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageWorkspaceEdit | null>>;
+  codeActions(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageCodeAction[]>>;
+  codeActionResolve(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageCodeAction>>;
+  executeCommand(request: VarinLanguageCommandRequest): Promise<VarinLanguageFeatureResult<JsonValue | null>>;
+  documentFormatting(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageTextEdit[]>>;
+  documentRangeFormatting(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageTextEdit[]>>;
+  onTypeFormatting(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageTextEdit[]>>;
+  semanticTokens(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageSemanticTokens | null>>;
+  inlayHints(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageInlayHint[]>>;
+  inlayHintResolve(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageInlayHint>>;
+  documentHighlights(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageDocumentHighlight[]>>;
+  foldingRanges(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageFoldingRange[]>>;
+  selectionRanges(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageSelectionRange[]>>;
+  documentLinks(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageDocumentLink[]>>;
+  documentLinkResolve(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageDocumentLink>>;
+  documentColors(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageColorInformation[]>>;
+  colorPresentations(request: VarinLanguageFeatureRequest): Promise<VarinLanguageFeatureResult<VarinLanguageColorPresentation[]>>;
+  restart(workspaceId: string, languageId: string): Promise<VarinLanguageProviderStatus>;
   disposeWorkspace(workspaceId: string): Promise<void>;
 }
 
@@ -2319,41 +2319,41 @@ export interface LanguageSupportAPI {
   importUserGrammar(request: { languageId: string; path: string }): Promise<LanguageSupportInstallResult>;
 }
 
-export type PiariumTaskConfigurationType = 'node' | 'process' | 'npm';
+export type VarinTaskConfigurationType = 'node' | 'process' | 'npm';
 
-export type PiariumTaskConfiguration = {
+export type VarinTaskConfiguration = {
   id: string;
   label: string;
-  type: PiariumTaskConfigurationType;
+  type: VarinTaskConfigurationType;
   script?: string;
   command?: string;
   args?: string[];
 };
 
-export type PiariumTaskListResult =
-  | { status: 'ready'; workspaceId: string; configurations: PiariumTaskConfiguration[] }
+export type VarinTaskListResult =
+  | { status: 'ready'; workspaceId: string; configurations: VarinTaskConfiguration[] }
   | { status: 'failure'; workspaceId: string; message: string; configurations: [] };
 
-export type PiariumTaskRunStatus =
+export type VarinTaskRunStatus =
   | { status: 'running' | 'stopped' | 'failed'; workspaceId: string; runId?: string; taskId?: string; generation?: number; message?: string; exitCode?: number };
 
-export type PiariumTaskEvent =
-  | { kind: 'status'; snapshot: PiariumTaskRunStatus }
+export type VarinTaskEvent =
+  | { kind: 'status'; snapshot: VarinTaskRunStatus }
   | { kind: 'output'; runId: string; channel: string; text: string };
 
 export interface WorkspaceTasksAPI {
-  list(workspaceId: string): Promise<PiariumTaskListResult>;
-  run(request: { workspaceId: string; taskId: string }): Promise<PiariumTaskRunStatus>;
-  cancel(request: { workspaceId: string; runId: string }): Promise<PiariumTaskRunStatus>;
+  list(workspaceId: string): Promise<VarinTaskListResult>;
+  run(request: { workspaceId: string; taskId: string }): Promise<VarinTaskRunStatus>;
+  cancel(request: { workspaceId: string; runId: string }): Promise<VarinTaskRunStatus>;
   subscribe(
     workspaceId: string,
-    listener: (event: PiariumTaskEvent) => void,
+    listener: (event: VarinTaskEvent) => void,
     options?: { signal?: AbortSignal },
   ): Subscription;
   disposeWorkspace(workspaceId: string): Promise<void>;
 }
 
-export type PiariumDebugSessionStatus =
+export type VarinDebugSessionStatus =
   | { status: 'absent'; workspaceId: string; message?: string }
   | {
       status: 'starting' | 'running' | 'paused' | 'stopped' | 'failed';
@@ -2365,12 +2365,12 @@ export type PiariumDebugSessionStatus =
       reason?: string;
     };
 
-export type PiariumBreakpoint = {
+export type VarinBreakpoint = {
   resourceId: string;
   line: number;
 };
 
-export type PiariumDebugBreakpointMutationRequest = {
+export type VarinDebugBreakpointMutationRequest = {
   workspaceId: string;
   resourceId: string;
   lines: number[];
@@ -2379,24 +2379,24 @@ export type PiariumDebugBreakpointMutationRequest = {
   | { expectedSessionId: null; expectedGeneration: null }
 );
 
-export type PiariumDebugBreakpointsResult = {
+export type VarinDebugBreakpointsResult = {
   status: 'ready' | 'stale';
   workspaceId: string;
   sessionId?: string;
   generation?: number;
-  breakpoints: PiariumBreakpoint[];
+  breakpoints: VarinBreakpoint[];
 };
 
-export type PiariumDebugBreakpointListResult = PiariumDebugBreakpointsResult & {
+export type VarinDebugBreakpointListResult = VarinDebugBreakpointsResult & {
   status: 'ready';
 };
 
-export type PiariumDebugThread = {
+export type VarinDebugThread = {
   id: number;
   name: string;
 };
 
-export type PiariumDebugStackFrame = {
+export type VarinDebugStackFrame = {
   id: number;
   name: string;
   line: number;
@@ -2404,56 +2404,56 @@ export type PiariumDebugStackFrame = {
   resourceId?: string;
 };
 
-export type PiariumDebugScope = {
+export type VarinDebugScope = {
   name: string;
   variablesReference: number;
 };
 
-export type PiariumDebugVariable = {
+export type VarinDebugVariable = {
   name: string;
   value: string;
   variablesReference: number;
   type?: string;
 };
 
-export type PiariumDebugFeatureResult<T> =
+export type VarinDebugFeatureResult<T> =
   | { status: 'ready'; workspaceId: string; sessionId?: string; generation?: number; value: T }
   | { status: 'absent'; workspaceId?: string }
   | { status: 'failed'; workspaceId?: string; sessionId?: string; generation?: number; message: string };
 
-export type PiariumDebugEvent =
-  | { kind: 'status'; snapshot: PiariumDebugSessionStatus }
-  | { kind: 'breakpoints'; snapshot: PiariumDebugBreakpointListResult }
+export type VarinDebugEvent =
+  | { kind: 'status'; snapshot: VarinDebugSessionStatus }
+  | { kind: 'breakpoints'; snapshot: VarinDebugBreakpointListResult }
   | { kind: 'output'; sessionId: string; channel: string; text: string };
 
 export interface WorkspaceDebugAPI {
-  getStatus(workspaceId: string): Promise<PiariumDebugSessionStatus>;
-  listBreakpoints(workspaceId: string): Promise<PiariumDebugBreakpointListResult>;
-  setBreakpoints(request: PiariumDebugBreakpointMutationRequest): Promise<PiariumDebugBreakpointsResult>;
-  start(request: { workspaceId: string; program?: string; languageId?: string; adapterId?: string }): Promise<PiariumDebugSessionStatus>;
-  stop(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  continue(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  pause(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  stepOver(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  stepIn(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  stepOut(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
-  getThreads(request: { workspaceId: string }): Promise<PiariumDebugFeatureResult<PiariumDebugThread[]>>;
-  getStack(request: { workspaceId: string; threadId: number }): Promise<PiariumDebugFeatureResult<PiariumDebugStackFrame[]>>;
-  getScopes(request: { workspaceId: string; frameId: number }): Promise<PiariumDebugFeatureResult<PiariumDebugScope[]>>;
-  getVariables(request: { workspaceId: string; variablesReference: number }): Promise<PiariumDebugFeatureResult<PiariumDebugVariable[]>>;
-  evaluate(request: { workspaceId: string; expression: string; frameId?: number }): Promise<PiariumDebugFeatureResult<string>>;
+  getStatus(workspaceId: string): Promise<VarinDebugSessionStatus>;
+  listBreakpoints(workspaceId: string): Promise<VarinDebugBreakpointListResult>;
+  setBreakpoints(request: VarinDebugBreakpointMutationRequest): Promise<VarinDebugBreakpointsResult>;
+  start(request: { workspaceId: string; program?: string; languageId?: string; adapterId?: string }): Promise<VarinDebugSessionStatus>;
+  stop(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  continue(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  pause(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  stepOver(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  stepIn(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  stepOut(request: { workspaceId: string }): Promise<VarinDebugSessionStatus>;
+  getThreads(request: { workspaceId: string }): Promise<VarinDebugFeatureResult<VarinDebugThread[]>>;
+  getStack(request: { workspaceId: string; threadId: number }): Promise<VarinDebugFeatureResult<VarinDebugStackFrame[]>>;
+  getScopes(request: { workspaceId: string; frameId: number }): Promise<VarinDebugFeatureResult<VarinDebugScope[]>>;
+  getVariables(request: { workspaceId: string; variablesReference: number }): Promise<VarinDebugFeatureResult<VarinDebugVariable[]>>;
+  evaluate(request: { workspaceId: string; expression: string; frameId?: number }): Promise<VarinDebugFeatureResult<string>>;
   listWatch(workspaceId: string): Promise<{ status: 'ready'; workspaceId: string; expressions: string[] }>;
   addWatch(request: { workspaceId: string; expression: string }): Promise<{ status: 'ready' | 'failed'; workspaceId: string; expressions?: string[]; message?: string }>;
   removeWatch(request: { workspaceId: string; expression: string }): Promise<{ status: 'ready'; workspaceId: string; expressions: string[] }>;
   subscribe(
     workspaceId: string,
-    listener: (event: PiariumDebugEvent) => void,
+    listener: (event: VarinDebugEvent) => void,
     options?: { signal?: AbortSignal },
   ): Subscription;
   disposeWorkspace(workspaceId: string): Promise<void>;
 }
 
-export type PiariumTestItem = {
+export type VarinTestItem = {
   id: string;
   label: string;
   resourceId?: string;
@@ -2463,27 +2463,27 @@ export type PiariumTestItem = {
   stack?: string;
 };
 
-export type PiariumTestDiscoverResult =
-  | { status: 'ready' | 'empty' | 'absent' | 'cancelled'; workspaceId: string; tests: PiariumTestItem[] }
+export type VarinTestDiscoverResult =
+  | { status: 'ready' | 'empty' | 'absent' | 'cancelled'; workspaceId: string; tests: VarinTestItem[] }
   | { status: 'failure'; workspaceId: string; message: string; tests: [] };
 
-export type PiariumTestRunStatus =
+export type VarinTestRunStatus =
   | { status: 'absent' | 'idle' | 'empty' | 'running' | 'stopped' | 'failed'; workspaceId: string; runId?: string; generation?: number; providerId?: string; message?: string };
 
-export type PiariumTestEvent =
-  | { kind: 'status'; snapshot: PiariumTestRunStatus }
-  | { kind: 'test'; runId: string; generation: number; test: PiariumTestItem }
+export type VarinTestEvent =
+  | { kind: 'status'; snapshot: VarinTestRunStatus }
+  | { kind: 'test'; runId: string; generation: number; test: VarinTestItem }
   | { kind: 'output'; channel: string; runId: string; generation: number; text: string }
-  | { kind: 'finished'; runId: string; generation: number; results?: PiariumTestItem[] };
+  | { kind: 'finished'; runId: string; generation: number; results?: VarinTestItem[] };
 
 export interface WorkspaceTestAPI {
-  discover(request: { workspaceId: string; providerId?: string }): Promise<PiariumTestDiscoverResult>;
-  run(request: { workspaceId: string; testIds?: string[]; providerId?: string }): Promise<PiariumTestRunStatus>;
-  cancel(request: { workspaceId: string }): Promise<PiariumTestRunStatus>;
-  getStatus(workspaceId: string): Promise<PiariumTestRunStatus>;
+  discover(request: { workspaceId: string; providerId?: string }): Promise<VarinTestDiscoverResult>;
+  run(request: { workspaceId: string; testIds?: string[]; providerId?: string }): Promise<VarinTestRunStatus>;
+  cancel(request: { workspaceId: string }): Promise<VarinTestRunStatus>;
+  getStatus(workspaceId: string): Promise<VarinTestRunStatus>;
   subscribe(
     workspaceId: string,
-    listener: (event: PiariumTestEvent) => void,
+    listener: (event: VarinTestEvent) => void,
     options?: { signal?: AbortSignal },
   ): Subscription;
   disposeWorkspace(workspaceId: string): Promise<void>;

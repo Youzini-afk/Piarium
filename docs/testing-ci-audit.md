@@ -13,7 +13,7 @@ inspected are marked **unknown**.
 
 | Entry | Command | Runner | Discovery |
 | --- | --- | --- | --- |
-| `test:pi` | `bun run --sequential --no-exit-on-error --filter '@piarium/*' test` | mixed | every `@piarium/*` package `test` script |
+| `test:pi` | `bun run --sequential --no-exit-on-error --filter '@varin/*' test` | mixed | every `@varin/*` package `test` script |
 | `test:pi:dist` | same filter, `test:dist` | node | only pi-host, runtime-broker, runtime-client define it |
 | `test:kernel` | `node scripts/test-kernel-authority.mjs` | node --test + vitest | explicit file list, requires release kernel |
 | `test:cloud` | `bunx vitest run scripts/cloud-runtime-layout.test.js scripts/cloud-remote-deploy.test.js scripts/docker-cloud-tools.test.js` | vitest | 3 files |
@@ -157,7 +157,7 @@ native vertical files as the authoritative-path evidence.
 | `ui/src/apps/MobileApp.pi-root.test.ts` | same | **delete** (same reason) |
 | `ui/src/components/**/​*.pi-root.test.ts` (4 files) | same migration-era source assertions | **delete** |
 | `ui/src/components/views/__tests__/terminalViewportRemount.test.ts`, `mainLayoutMobileSidebarMount.test.ts` | source/DOM-text assertions | **review** — replace with rendered-behavior assertions or delete |
-| `ui/src/components/ui/piarium-splash-lattice.test.ts`, `piarium-logo-geometry.test.ts` | reads SVG/component source | **review** — geometric invariants may be tested on rendered output |
+| `ui/src/components/ui/varin-splash-lattice.test.ts`, `varin-logo-geometry.test.ts` | reads SVG/component source | **review** — geometric invariants may be tested on rendered output |
 | `vscode/src/webviewHtml.test.ts` | regexes `workerSrc`/`scriptSrc` out of source | **replace** — call the real HTML/CSP generator and assert on its output (real security boundary) |
 | `scripts/cloud-remote-deploy.test.js` | `indexOf` statement-order assertions on deploy scripts | **delete** — the production-build deploy smoke exercises real archive→deploy→health→rollback; statement order proves nothing. Note: Windows-local install ordering it checks is *not* covered by the Linux deploy smoke — record as residual gap, do not keep text test for it. |
 | `scripts/cloud-runtime-layout.test.js` | lock-file content checks + builder-source `toContain` | **keep** the `cloud-runtime.bun.lock` package-closure assertions (real artifact input to `--frozen-lockfile`); **trim** builder-source text checks |
@@ -194,13 +194,13 @@ presence they are not.
   packaging — same-environment duplicate execution. Disposition: reuse the
   `production-build` artifact or gate on its success instead of re-verifying.
 - `docker.yml` + `cloud` smoke: immutable image smokes set
-  `PIARIUM_UI_PASSWORD=piarium-ci-smoke-only` and verify health — real
+  `VARIN_UI_PASSWORD=varin-ci-smoke-only` and verify health — real
   artifact tests, **keep**.
 
 ## 5. Dead suite: packages/vscode
 
 17 test files, **no `test` script** — never run by `test:pi`
-(package name `piarium` is outside the `@piarium/*` filter) and never run in
+(package name `varin` is outside the `@varin/*` filter) and never run in
 CI except `test-pi-runtime.mjs`/`test-native-search.mjs` harness checks.
 
 Measured `bun test` run: 53 pass, 6 fail, 5 file-level errors:
@@ -225,14 +225,14 @@ required evidence.
 
 ## 6. Cloud deploy smoke failure (root-caused)
 
-CI failure signature: `PIARIUM_UI_PASSWORD is not set` →
-`Piarium daemon exited before reporting ready (code 1)` on the **first**
+CI failure signature: `VARIN_UI_PASSWORD is not set` →
+`Varin daemon exited before reporting ready (code 1)` on the **first**
 "good" deploy; rollback scenarios never execute.
 
 Local reproduction (staged runtime + `bun install --production
 --frozen-lockfile` + `cli.js serve`) produced the real daemon error, now
 surfaced through the new log tail: `Cannot find module
-'@piarium/extension-builtins'` from `server/index.js`. Root cause:
+'@varin/extension-builtins'` from `server/index.js`. Root cause:
 `extension-builtins` was declared in `devDependencies` (1f83c02b) while the
 shipped server and application host import it at runtime, so the deploy's
 `--production` install never linked it — and the canonical
@@ -243,7 +243,7 @@ checks the root manifest.
 Classification: **product/artifact + diagnostics**, not test noise.
 Resolution in Q2: moved `extension-builtins` to web `dependencies`,
 regenerated `cloud-runtime.bun.lock` (web 0.9.12 + the missing workspace
-dep), added `@piarium/extension-builtins` resolution to both the build-time
+dep), added `@varin/extension-builtins` resolution to both the build-time
 `requireInstall` check and the deploy post-install verification, and made
 `deploy-cloud-runtime.sh` print the daemon log tail on rollback. Verified
 end-to-end locally: staged runtime installs the link, daemon reports ready,
@@ -377,9 +377,9 @@ was never the CI cause.
   checks still map to real jobs). `docker.yml` gained
   `!packages/docs/**` with `packages/docs/package.json` re-included.
 - **Cloud failure diagnosis** — deploy script prints the daemon log tail
-  (`$PIARIUM_DATA_DIR/logs/piarium-<port>.log`) inside `rollback`; the
+  (`$VARIN_DATA_DIR/logs/varin-<port>.log`) inside `rollback`; the
   post-install check and `requireInstall` verification now assert
-  `@piarium/extension-builtins` resolves.
+  `@varin/extension-builtins` resolves.
 - **Clock-assertion flake** — `thread-wait-admission` "inform does not
   wake" no longer asserts `returned === false` after `delay(35)` (the
   Windows CI failure was a late-firing timer, not a product defect); it

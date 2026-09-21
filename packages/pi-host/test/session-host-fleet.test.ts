@@ -222,7 +222,7 @@ async function withHost(
 
 describe("SessionHost Fleet", () => {
   it("reads pi-subagents public fleetStatus v1 through the in-process RPC", async () => {
-    await withHost("piarium-fleet-", {
+    await withHost("varin-fleet-", {
       "pi-subagents-rpc-test.ts": SUBAGENTS_RPC,
       "pi-background-tasks-empty.ts": EVENTBUS_EMPTY,
     }, async (host, sessionId) => {
@@ -250,7 +250,7 @@ describe("SessionHost Fleet", () => {
   });
 
   it("reports a loaded older pi-subagents surface as incompatible while background tasks stay healthy", async () => {
-    await withHost("piarium-fleet-incompatible-", {
+    await withHost("varin-fleet-incompatible-", {
       "pi-subagents-without-rpc.ts": SUBAGENTS_LEGACY,
       "pi-background-tasks-mixed.ts": EVENTBUS_MIXED,
     }, async (host, sessionId) => {
@@ -266,7 +266,7 @@ describe("SessionHost Fleet", () => {
   });
 
   it("runs, logs, and stops background tasks through EventBus v1", async () => {
-    await withHost("piarium-fleet-eventbus-", {
+    await withHost("varin-fleet-eventbus-", {
       "pi-background-tasks-mixed.ts": EVENTBUS_MIXED,
     }, async (host, sessionId) => {
       const started = await host.fleetAction(sessionId, "pi-background-tasks", "run", undefined, {
@@ -294,7 +294,7 @@ describe("SessionHost Fleet", () => {
   });
 
   it("degrades only pi-background-tasks when EventBus frames contain unknown keys", async () => {
-    await withHost("piarium-fleet-malformed-", {
+    await withHost("varin-fleet-malformed-", {
       "pi-subagents-rpc-test.ts": SUBAGENTS_RPC,
       "pi-background-tasks-malformed.ts": EVENTBUS_MALFORMED_STATUS,
     }, async (host, sessionId) => {

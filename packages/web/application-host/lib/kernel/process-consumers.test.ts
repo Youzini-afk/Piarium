@@ -9,13 +9,13 @@ import { assertManagedWorktreeOwnership } from "../harness/worktree-ownership.js
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
 import { createNativeProcessTestHarness, hasNativeProcessKernel } from "../process/native-process.test-helper.js";
 import { createLanguageSupervisor } from "../lsp/supervisor.js";
-import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
+import { VARIN_LSP_FIXTURE_SERVER_ARGS } from "../lsp/servers.js";
 import { createDebugSupervisor } from "../run/debug-supervisor.js";
 import { createTestSupervisor } from "../run/test-supervisor.js";
 import { createWorkspaceTaskRunner } from "../run/tasks.js";
-import { PIARIUM_DAP_FIXTURE_ADAPTER_ARGS, PIARIUM_TEST_FIXTURE_PROVIDER_ARGS } from "../run/servers.js";
+import { VARIN_DAP_FIXTURE_ADAPTER_ARGS, VARIN_TEST_FIXTURE_PROVIDER_ARGS } from "../run/servers.js";
 
-if (!hasNativeProcessKernel && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native consumer acceptance requires the release kernel");
+if (!hasNativeProcessKernel && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native consumer acceptance requires the release kernel");
 const wait = (ms=10) => new Promise<void>((resolve) => setTimeout(resolve,ms));
 async function until(probe: () => boolean | Promise<boolean>) {
   for(let i=0;i<1200;i++){if(await probe())return;await wait();}
@@ -33,7 +33,7 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
     const f=await fixture();
     const language=createLanguageSupervisor({ documents:f.docs.authority, spawn:f.service.spawn,isTrusted:async()=>true });
     try {
-      language.registerProvider({ providerId:"native-lsp",command:process.execPath,args:PIARIUM_LSP_FIXTURE_SERVER_ARGS,languageIds:["typescript"],source:"host" });
+      language.registerProvider({ providerId:"native-lsp",command:process.execPath,args:VARIN_LSP_FIXTURE_SERVER_ARGS,languageIds:["typescript"],source:"host" });
       const resource=f.docs.resource("note.ts");
       expect(await language.syncDocument({resource,languageId:"typescript",documentVersion:1,reason:"open",content:"const value=1;\n"})).toMatchObject({status:"synced"});
       expect(await language.completion({resource,languageId:"typescript",documentVersion:1,position:{line:0,character:0}})).toMatchObject({status:"ready",value:[expect.objectContaining({label:"fixtureItem"})]});
@@ -48,7 +48,7 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
     const debug=createDebugSupervisor({ documents:f.docs.authority,spawn:f.service.spawn,isTrusted:async()=>true });
     try {
       await fs.writeFile(path.join(f.docs.workspaceRoot,"app.js"),"const value=1;\n");
-      debug.registerAdapter({adapterId:"native-dap",command:process.execPath,args:PIARIUM_DAP_FIXTURE_ADAPTER_ARGS,languageIds:["javascript"],source:"host"});
+      debug.registerAdapter({adapterId:"native-dap",command:process.execPath,args:VARIN_DAP_FIXTURE_ADAPTER_ARGS,languageIds:["javascript"],source:"host"});
       await debug.start({workspaceId:f.docs.identity.workspaceId,program:"app.js",languageId:"javascript"});
       await until(()=>debug.getStatus(f.docs.identity.workspaceId).status==="paused");
       expect(await debug.getThreads({workspaceId:f.docs.identity.workspaceId})).toMatchObject({status:"ready",value:[{id:1,name:"fixture"}]});
@@ -62,7 +62,7 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
     const tasks=createWorkspaceTaskRunner({documents:f.docs.authority,spawn:f.service.spawn,isTrusted:async()=>true});
     try {
       await fs.writeFile(path.join(f.docs.workspaceRoot,"task.js"),"process.stdout.write('native-task 中文');process.exitCode=7;");
-      await fs.writeFile(path.join(f.docs.workspaceRoot,"piarium.tasks.json"),JSON.stringify({version:1,tasks:[{id:"task",label:"Task",type:"node",script:"task.js"}]}));
+      await fs.writeFile(path.join(f.docs.workspaceRoot,"varin.tasks.json"),JSON.stringify({version:1,tasks:[{id:"task",label:"Task",type:"node",script:"task.js"}]}));
       const output:string[]=[];let code:number|undefined;
       tasks.subscribe(f.docs.identity.workspaceId,e=>{if(e.kind==="output")output.push(e.text);if(e.kind==="status")code=e.snapshot.exitCode;});
       await tasks.run({workspaceId:f.docs.identity.workspaceId,taskId:"task"});
@@ -82,7 +82,7 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
       let passed=false;tests.subscribe(f.docs.identity.workspaceId,e=>{if(e.kind==="test"&&e.test.status==="passed")passed=true;});
       await tests.run({workspaceId:f.docs.identity.workspaceId});
       expect(passed).toBe(true);
-      tests.registerProvider({providerId:"adapter",command:process.execPath,args:PIARIUM_TEST_FIXTURE_PROVIDER_ARGS,source:"host"});
+      tests.registerProvider({providerId:"adapter",command:process.execPath,args:VARIN_TEST_FIXTURE_PROVIDER_ARGS,source:"host"});
       expect(await tests.discover({workspaceId:f.docs.identity.workspaceId,providerId:"adapter"})).toMatchObject({status:"ready"});
       await tests.disposeWorkspace(f.docs.identity.workspaceId);
       expect((await f.service.list(f.docs.workspaceRoot)).every(p=>!p.writerActive)).toBe(true);
@@ -95,7 +95,7 @@ describe.skipIf(!hasNativeProcessKernel)("production consumers over Rust process
     const tasks=createWorkspaceTaskRunner({documents:f.docs.authority,isTrusted:async()=>true,spawn:async(...args)=>{entering();await blocked;return f.service.spawn(...args);}});
     try {
       await fs.writeFile(path.join(f.docs.workspaceRoot,"task.js"),"setInterval(()=>{},1000)");
-      await fs.writeFile(path.join(f.docs.workspaceRoot,"piarium.tasks.json"),JSON.stringify({version:1,tasks:[{id:"task",label:"Task",type:"node",script:"task.js"}]}));
+      await fs.writeFile(path.join(f.docs.workspaceRoot,"varin.tasks.json"),JSON.stringify({version:1,tasks:[{id:"task",label:"Task",type:"node",script:"task.js"}]}));
       let runId:string|undefined;tasks.subscribe(f.docs.identity.workspaceId,e=>{if(e.kind==="status")runId=e.snapshot.runId;});
       const starting=tasks.run({workspaceId:f.docs.identity.workspaceId,taskId:"task"});
       await entered;

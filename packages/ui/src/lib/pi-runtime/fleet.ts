@@ -1,4 +1,4 @@
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const getPiFleetStatus = async (sessionId: string) => {

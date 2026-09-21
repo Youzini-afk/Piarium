@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentInputContext, HarnessActorIdentity } from "@piarium/protocol";
+import type { AgentInputContext, HarnessActorIdentity } from "@varin/protocol";
 import {
   createExploreQueryRun,
   type ExploreDeps,

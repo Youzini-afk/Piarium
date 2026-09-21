@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadFactsSetService, createThreadReadService } from "./thread-services.js";
-import type { HarnessActorContext } from "@piarium/protocol";
+import type { HarnessActorContext } from "@varin/protocol";
 
 const parentCtx = {
   actor: {

@@ -4,15 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePiariumExtensionManifest, type PiariumExtensionStaticContribution } from "@piarium/extension-contract";
+import { parseVarinExtensionManifest, type VarinExtensionStaticContribution } from "@varin/extension-contract";
 import { initProject } from "../src/init.js";
 import { buildProject } from "../src/build.js";
 import { checkProject } from "../src/project.js";
 import { runShellCompositionSmoke, testProject } from "../src/test-command.js";
 import { runCli } from "../src/cli.js";
-import { defineShellMount, defineSurfaceExtension } from "@piarium/extension-sdk";
+import { defineShellMount, defineSurfaceExtension } from "@varin/extension-sdk";
 
-const temporaryDirectory = async (): Promise<string> => mkdtemp(join(tmpdir(), "piarium-extension-cli-test-"));
+const temporaryDirectory = async (): Promise<string> => mkdtemp(join(tmpdir(), "varin-extension-cli-test-"));
 
 const exchangeProtocolFrame = async (script: string, message: unknown): Promise<Record<string, unknown>> => {
   const child = spawn(process.execPath, [script], { stdio: ["pipe", "pipe", "pipe"] });
@@ -56,7 +56,7 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
   const project = join(root, "sample");
   await initProject({ directory: project, id: "dev.example.sample", name: "Sample Extension" });
   const files = await readdir(project);
-  assert.deepEqual(files.sort(), ["README.md", "package.json", "piarium.extension.json", "src", "tsconfig.json"]);
+  assert.deepEqual(files.sort(), ["README.md", "package.json", "varin.extension.json", "src", "tsconfig.json"]);
   await assert.rejects(
     initProject({ directory: project, id: "dev.example.other", name: "Other" }),
     /non-empty target directory/,
@@ -74,12 +74,12 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.equal(shell.template, "shell");
   const surface = await readFile(join(shell.directory, "src/surface.ts"), "utf8");
   assert.match(surface, /defineShellMount/);
-  assert.match(surface, /PIARIUM_WORKBENCH_REPLACEMENT_TARGETS/);
+  assert.match(surface, /VARIN_WORKBENCH_REPLACEMENT_TARGETS/);
   assert.match(surface, /mount\.workbench\.mountReplacement/);
   assert.match(surface, /mount\.workbench\.mountSlot/);
-  assert.doesNotMatch(surface, /@piarium\/ui|@\/components/);
-  const shellManifest = JSON.parse(await readFile(join(shell.directory, "piarium.extension.json"), "utf8"));
-  assert.doesNotThrow(() => parsePiariumExtensionManifest(shellManifest));
+  assert.doesNotMatch(surface, /@varin\/ui|@\/components/);
+  const shellManifest = JSON.parse(await readFile(join(shell.directory, "varin.extension.json"), "utf8"));
+  assert.doesNotThrow(() => parseVarinExtensionManifest(shellManifest));
   assert.equal(shellManifest.contributions?.[0]?.kind, "shell");
 
   const editor = await initProject({
@@ -97,7 +97,7 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.doesNotMatch(editorSource, /replaceContent/);
   assert.match(editorSource, /mount\.props\.document\.save/);
   assert.match(editorSource, /languageIds:\s*\["markdown"\]/);
-  assert.doesNotMatch(editorSource, /workbench\.editor\.actions|@piarium\/ui/);
+  assert.doesNotMatch(editorSource, /workbench\.editor\.actions|@varin\/ui/);
   await initProject({
     directory: join(root, "view"),
     id: "dev.example.view",
@@ -148,7 +148,7 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.equal(debugInitialize.type, "response");
   assert.equal(debugInitialize.request_seq, 1);
   assert.equal(debugInitialize.success, true);
-  const debugManifest = await readFile(join(debug.directory, "piarium.extension.json"), "utf8");
+  const debugManifest = await readFile(join(debug.directory, "varin.extension.json"), "utf8");
   assert.match(debugManifest, /workspace\.debug/);
 
   const tests = await initProject({
@@ -161,15 +161,15 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.match(testHost, /defineTestProvider/);
   assert.match(testHost, /kind:\s*"node-test"/);
   assert.doesNotMatch(testHost, /test-adapter\.mjs/);
-  const testManifest = await readFile(join(tests.directory, "piarium.extension.json"), "utf8");
+  const testManifest = await readFile(join(tests.directory, "varin.extension.json"), "utf8");
   assert.match(testManifest, /workspace\.test/);
 });
 
 test("shell composition smoke invokes replacement, slot, and disposer behavior", async () => {
-  const descriptor: PiariumExtensionStaticContribution = {
+  const descriptor: VarinExtensionStaticContribution = {
     contractVersion: 1,
     data: {
-      contract: "piarium-workbench-shell/v1",
+      contract: "varin-workbench-shell/v1",
       seams: { web: { replacementTargets: ["workbench.editor"], slots: ["workbench.primary-sidebar.views"] } },
     },
     entrypoint: "dev.example.shell-smoke.surface",
@@ -178,11 +178,11 @@ test("shell composition smoke invokes replacement, slot, and disposer behavior",
     replacement: { target: "workbench.shell" },
     supports: ["web"],
   };
-  const manifest = parsePiariumExtensionManifest({
+  const manifest = parseVarinExtensionManifest({
     schemaVersion: 1,
     id: "dev.example.shell-smoke",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{
         file: "dist/surface.cjs",
@@ -220,11 +220,11 @@ test("shell composition smoke invokes replacement, slot, and disposer behavior",
 test("check reports a valid contract and missing published output", async () => {
   const root = await temporaryDirectory();
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "dev.example.check", version: "1.0.0" }));
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.check",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       surfaces: [{ id: "main", file: "dist/main.cjs", mode: "managed", supports: ["web"] }],
     },
@@ -239,17 +239,17 @@ test("build uses the manifest output path and test exercises lifecycle cleanup",
     name: "dev.example.lifecycle",
     type: "module",
     version: "1.0.0",
-    piarium: { build: { entrypoints: {
+    varin: { build: { entrypoints: {
       host: { source: "src/host.js" },
       isolated: { source: "src/isolated.js" },
       main: { source: "src/main.js" },
     } } },
   }));
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.lifecycle",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
     entrypoints: {
       host: { file: "dist/host.cjs", mode: "brokered" },
       surfaces: [
@@ -278,11 +278,11 @@ test("build uses the manifest output path and test exercises lifecycle cleanup",
 test("CLI output modes preserve validation and emit script-safe results", async () => {
   const root = await temporaryDirectory();
   await writeFile(join(root, "package.json"), JSON.stringify({ name: "dev.example.output", version: "1.0.0" }));
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.output",
     version: "1.0.0",
-    engines: { piarium: "*" },
+    engines: { varin: "*" },
   }));
 
   const jsonLines: string[] = [];
@@ -324,11 +324,11 @@ test("CLI output modes preserve validation and emit script-safe results", async 
   assert.equal(failure.ok, false);
   assert.match(failure.errors[0] as string, /does not exist/);
 
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 2,
     id: "dev.example.output",
     version: "1.0.0",
-    engines: { piarium: "not-a-semver-range" },
+    engines: { varin: "not-a-semver-range" },
   }));
   const quietFailureLines: string[] = [];
   const quietFailureErrors: string[] = [];
@@ -341,21 +341,21 @@ test("CLI output modes preserve validation and emit script-safe results", async 
   assert.doesNotMatch(quietFailureErrors[0] as string, /[\r\n]/);
   assert.equal(
     quietFailureErrors[0],
-    "error 2 issues: schemaVersion must be 1; engines.piarium must be a valid SemVer range",
+    "error 2 issues: schemaVersion must be 1; engines.varin must be a valid SemVer range",
   );
 });
 
 test("check reports incompatible contributions for unknown contract version", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-cli-incompat-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-cli-incompat-"));
   await writeFile(join(root, "package.json"), JSON.stringify({
     name: "dev.example.incompat",
     version: "1.0.0",
   }));
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.incompat",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [{
       id: "dev.example.incompat.view",
       kind: "view",
@@ -385,23 +385,23 @@ test("check reports incompatible contributions for unknown contract version", as
 });
 
 test("check reports when validation errors for shell and transition-scene", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-cli-when-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-cli-when-"));
   await writeFile(join(root, "package.json"), JSON.stringify({
     name: "dev.example.when",
     version: "1.0.0",
   }));
-  await writeFile(join(root, "piarium.extension.json"), JSON.stringify({
+  await writeFile(join(root, "varin.extension.json"), JSON.stringify({
     schemaVersion: 1,
     id: "dev.example.when",
     version: "1.0.0",
-    engines: { piarium: ">=0.2.0" },
+    engines: { varin: ">=0.2.0" },
     contributions: [
       {
         id: "dev.example.when.shell",
         kind: "shell",
         contractVersion: 1,
         data: {
-          contract: "piarium-workbench-shell/v1",
+          contract: "varin-workbench-shell/v1",
           seams: { web: { replacementTargets: ["workbench.editor"], slots: [] } },
         },
         supports: ["web"],

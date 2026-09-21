@@ -9,7 +9,7 @@ describe("materializer", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-materializer-test-"));
+    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-materializer-test-"));
   });
 
   afterEach(async () => {

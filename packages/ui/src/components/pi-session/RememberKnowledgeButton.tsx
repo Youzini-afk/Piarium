@@ -1,5 +1,5 @@
 import React from 'react';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,

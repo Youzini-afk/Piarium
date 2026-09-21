@@ -7,21 +7,21 @@ type OsModule = typeof import('os');
 type FsPromises = typeof fs.promises;
 
 interface EnvLike {
-  PIARIUM_WORKSPACE_ROOT?: string | undefined;
-  PIARIUM_WORKSPACE_LOCKDOWN?: string | undefined;
-  PIARIUM_WORKSPACE_TRASH?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_READ_MB?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_UPLOAD_MB?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_DOWNLOAD_MB?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_DOWNLOAD_FILES?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_ARCHIVE_MB?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_EXTRACT_MB?: string | undefined;
-  PIARIUM_WORKSPACE_MAX_EXTRACT_FILES?: string | undefined;
-  PIARIUM_WORKSPACE_ARCHIVE_PREVIEW_LIMIT?: string | undefined;
-  PIARIUM_WORKSPACE_CUSTOM_COMMANDS?: string | undefined;
+  VARIN_WORKSPACE_ROOT?: string | undefined;
+  VARIN_WORKSPACE_LOCKDOWN?: string | undefined;
+  VARIN_WORKSPACE_TRASH?: string | undefined;
+  VARIN_WORKSPACE_MAX_READ_MB?: string | undefined;
+  VARIN_WORKSPACE_MAX_UPLOAD_MB?: string | undefined;
+  VARIN_WORKSPACE_MAX_DOWNLOAD_MB?: string | undefined;
+  VARIN_WORKSPACE_MAX_DOWNLOAD_FILES?: string | undefined;
+  VARIN_WORKSPACE_MAX_ARCHIVE_MB?: string | undefined;
+  VARIN_WORKSPACE_MAX_EXTRACT_MB?: string | undefined;
+  VARIN_WORKSPACE_MAX_EXTRACT_FILES?: string | undefined;
+  VARIN_WORKSPACE_ARCHIVE_PREVIEW_LIMIT?: string | undefined;
+  VARIN_WORKSPACE_CUSTOM_COMMANDS?: string | undefined;
   ZEABUR?: string | undefined;
   DOCKER?: string | undefined;
-  PIARIUM_RUNTIME?: string | undefined;
+  VARIN_RUNTIME?: string | undefined;
   [key: string]: string | undefined;
 }
 
@@ -83,8 +83,8 @@ const resolveDefaultWorkspaceRoot = ({
   pathModule = path,
   osModule = os,
 }: ResolveDefaultWorkspaceRootOptions = {}): string => {
-  const explicit = typeof env.PIARIUM_WORKSPACE_ROOT === 'string'
-    ? env.PIARIUM_WORKSPACE_ROOT.trim()
+  const explicit = typeof env.VARIN_WORKSPACE_ROOT === 'string'
+    ? env.VARIN_WORKSPACE_ROOT.trim()
     : '';
   if (explicit) {
     return pathModule.resolve(explicit);
@@ -93,13 +93,13 @@ const resolveDefaultWorkspaceRoot = ({
   // The desktop renderer opens at the local Host's home directory on a fresh
   // install. Keep the server's initial document grant on that same root so the
   // first workspace can resolve before a project or last directory has been
-  // persisted. Explicit PIARIUM_WORKSPACE_ROOT still wins for managed and
+  // persisted. Explicit VARIN_WORKSPACE_ROOT still wins for managed and
   // smoke-test installations.
-  if (env.PIARIUM_RUNTIME === 'desktop') {
+  if (env.VARIN_RUNTIME === 'desktop') {
     return pathModule.resolve(osModule.homedir());
   }
 
-  if (env.ZEABUR || env.DOCKER || env.PIARIUM_RUNTIME === 'web') {
+  if (env.ZEABUR || env.DOCKER || env.VARIN_RUNTIME === 'web') {
     return pathModule.resolve('/workspace');
   }
 
@@ -116,22 +116,22 @@ export const createWorkspaceConfig = (options: CreateWorkspaceConfigOptions = {}
   } = options;
 
   const root = resolveDefaultWorkspaceRoot({ env, cwd, pathModule, osModule });
-  const explicitRoot = typeof env.PIARIUM_WORKSPACE_ROOT === 'string' && env.PIARIUM_WORKSPACE_ROOT.trim().length > 0;
+  const explicitRoot = typeof env.VARIN_WORKSPACE_ROOT === 'string' && env.VARIN_WORKSPACE_ROOT.trim().length > 0;
   const cloudDefault = explicitRoot || Boolean(env.ZEABUR || env.DOCKER);
 
   return {
     root,
-    lockdown: parseBoolean(env.PIARIUM_WORKSPACE_LOCKDOWN, cloudDefault),
-    trashEnabled: parseBoolean(env.PIARIUM_WORKSPACE_TRASH, true),
-    maxReadBytes: parseMegabytes(env.PIARIUM_WORKSPACE_MAX_READ_MB, 2),
-    maxUploadBytes: parseMegabytes(env.PIARIUM_WORKSPACE_MAX_UPLOAD_MB, 1024),
-    maxDownloadBytes: parseMegabytes(env.PIARIUM_WORKSPACE_MAX_DOWNLOAD_MB, 12288),
-    maxDownloadFiles: parseNonNegativeInteger(env.PIARIUM_WORKSPACE_MAX_DOWNLOAD_FILES, 0),
-    maxArchiveBytes: parseMegabytes(env.PIARIUM_WORKSPACE_MAX_ARCHIVE_MB, 1024),
-    maxExtractBytes: parseMegabytes(env.PIARIUM_WORKSPACE_MAX_EXTRACT_MB, 3072),
-    maxExtractFiles: parseNonNegativeInteger(env.PIARIUM_WORKSPACE_MAX_EXTRACT_FILES, 30000),
-    archivePreviewLimit: parseNonNegativeInteger(env.PIARIUM_WORKSPACE_ARCHIVE_PREVIEW_LIMIT, 500),
-    customCommandsEnabled: parseBoolean(env.PIARIUM_WORKSPACE_CUSTOM_COMMANDS, false),
+    lockdown: parseBoolean(env.VARIN_WORKSPACE_LOCKDOWN, cloudDefault),
+    trashEnabled: parseBoolean(env.VARIN_WORKSPACE_TRASH, true),
+    maxReadBytes: parseMegabytes(env.VARIN_WORKSPACE_MAX_READ_MB, 2),
+    maxUploadBytes: parseMegabytes(env.VARIN_WORKSPACE_MAX_UPLOAD_MB, 1024),
+    maxDownloadBytes: parseMegabytes(env.VARIN_WORKSPACE_MAX_DOWNLOAD_MB, 12288),
+    maxDownloadFiles: parseNonNegativeInteger(env.VARIN_WORKSPACE_MAX_DOWNLOAD_FILES, 0),
+    maxArchiveBytes: parseMegabytes(env.VARIN_WORKSPACE_MAX_ARCHIVE_MB, 1024),
+    maxExtractBytes: parseMegabytes(env.VARIN_WORKSPACE_MAX_EXTRACT_MB, 3072),
+    maxExtractFiles: parseNonNegativeInteger(env.VARIN_WORKSPACE_MAX_EXTRACT_FILES, 30000),
+    archivePreviewLimit: parseNonNegativeInteger(env.VARIN_WORKSPACE_ARCHIVE_PREVIEW_LIMIT, 500),
+    customCommandsEnabled: parseBoolean(env.VARIN_WORKSPACE_CUSTOM_COMMANDS, false),
   };
 };
 

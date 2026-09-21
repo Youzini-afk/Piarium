@@ -8,7 +8,7 @@ import {
   encodeEnvelope,
   isHostEvent,
   isRuntimeMethod,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
@@ -19,7 +19,7 @@ describe("workspace mutation journal protocol", () => {
       clientName: "web-host",
       clientVersion: "0.1.0",
       mode: "web",
-      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+      protocolVersions: [VARIN_PROTOCOL_VERSION],
     });
     const before = createEvent(1, "workspace.mutation.request", {
       path: "C:\\workspace\\src\\index.ts",
@@ -62,7 +62,7 @@ describe("workspace mutation journal protocol", () => {
           requestId: "mutation-1",
           sessionId: "session-1",
         },
-        v: PIARIUM_PROTOCOL_VERSION,
+        v: VARIN_PROTOCOL_VERSION,
       })),
       (error: unknown) => {
         assert.ok(error instanceof ProtocolDecodeError);

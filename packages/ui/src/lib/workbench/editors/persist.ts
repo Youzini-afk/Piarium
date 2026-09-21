@@ -1,4 +1,4 @@
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { restoreEditorWorkbenchSnapshot, serializeEditorWorkbenchSnapshot } from './snapshot';
 import type { EditorWorkbenchState, SnapshotRestoreResult } from './types';
 
@@ -36,7 +36,7 @@ export const setEditorWorkbenchPersistBackendForTests = (backend?: PersistBacken
 };
 
 export const editorWorkbenchPersistKey = (workspaceId: string, runtimeKey = getRuntimeKey()): string => (
-  `piarium.editor-workbench:${runtimeKey}:${workspaceId}`
+  `varin.editor-workbench:${runtimeKey}:${workspaceId}`
 );
 
 export const rememberLastGoodEditorWorkbench = (state: EditorWorkbenchState): void => {

@@ -14,7 +14,7 @@ import type {
   HostEvent,
   HostEventData,
   JsonValue,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { createDeferred, type Deferred } from "./deferred.js";
 import { toJsonValue } from "./json.js";
 
@@ -42,7 +42,7 @@ const neutralTheme = {
   getThinkingBorderColor: () => identity,
   inverse: identity,
   italic: identity,
-  name: "piarium-neutral",
+  name: "varin-neutral",
   strikethrough: identity,
   underline: identity,
 } as unknown as Theme;
@@ -167,7 +167,7 @@ export class ExtensionUiBridge {
       theme: neutralTheme,
       getAllThemes: () => [],
       getTheme: () => undefined,
-      setTheme: () => ({ success: false, error: "Theme switching is owned by Piarium" }),
+      setTheme: () => ({ success: false, error: "Theme switching is owned by Varin" }),
       getToolsExpanded: () => false,
       setToolsExpanded: () => {},
     } as ExtensionUIContext;

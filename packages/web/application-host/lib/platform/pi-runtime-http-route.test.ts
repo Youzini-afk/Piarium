@@ -1,11 +1,11 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { createEvent } from '@piarium/protocol';
+import { createEvent } from '@varin/protocol';
 import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
-} from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
 import { registerPiRuntimeHttpRoute, trustProjectRequestsFor } from './pi-runtime-http-route.js';
 
 const asBroker = (members: Partial<PiRuntimeBroker>): PiRuntimeBroker => (
@@ -31,7 +31,7 @@ describe('Pi runtime HTTP route', () => {
     registerPiRuntimeHttpRoute(app, { piRuntimeBroker });
 
     const response = await request(app)
-      .post('/api/piarium/runtime/request')
+      .post('/api/varin/runtime/request')
       .send({ method: 'session.list', params: { cwd: 'C:/workspace' } })
       .expect(200);
 
@@ -44,12 +44,12 @@ describe('Pi runtime HTTP route', () => {
     registerPiRuntimeHttpRoute(app, { piRuntimeBroker: asBroker({}) });
 
     await request(app)
-      .post('/api/piarium/runtime/request')
+      .post('/api/varin/runtime/request')
       .send({ params: {} })
       .expect(400, { error: 'method is required' });
 
     const response = await request(app)
-      .post('/api/piarium/runtime/request')
+      .post('/api/varin/runtime/request')
       .send({ method: 'arbitrary.execute', params: {} })
       .expect(400);
     expect(response.body.code).toBe('unsupported_method');
@@ -62,7 +62,7 @@ describe('Pi runtime HTTP route', () => {
     });
 
     const response = await request(app)
-      .post('/api/piarium/runtime/request')
+      .post('/api/varin/runtime/request')
       .send({ method: 'session.list', params: {} })
       .expect(503);
     expect(response.body.code).toBe('runtime_not_ready');

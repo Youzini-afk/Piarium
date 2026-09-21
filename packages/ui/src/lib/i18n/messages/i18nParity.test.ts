@@ -131,14 +131,14 @@ describe('i18n message parity', () => {
   test('community adapter settings are explicitly translated in every locale', () => {
     const englishSettings = enSettingsDict as MessageDict;
     const keys = sortedKeys(enSettingsDict).filter((key) => (
-      key === 'settings.piarium.plugins.package.aft'
-      || key === 'settings.piarium.plugins.package.hermesMemory'
-      || key === 'settings.piarium.plugins.package.backgroundTasks'
-      || key === 'settings.piarium.plugins.package.rtk'
-      || key.startsWith('settings.piarium.pluginSettings.aft.')
-      || key.startsWith('settings.piarium.pluginSettings.hermesMemory.')
-      || key.startsWith('settings.piarium.pluginSettings.rtk.')
-      || key.startsWith('settings.piarium.fleet.')
+      key === 'settings.varin.plugins.package.aft'
+      || key === 'settings.varin.plugins.package.hermesMemory'
+      || key === 'settings.varin.plugins.package.backgroundTasks'
+      || key === 'settings.varin.plugins.package.rtk'
+      || key.startsWith('settings.varin.pluginSettings.aft.')
+      || key.startsWith('settings.varin.pluginSettings.hermesMemory.')
+      || key.startsWith('settings.varin.pluginSettings.rtk.')
+      || key.startsWith('settings.varin.fleet.')
     ));
     const failures: Record<string, unknown> = {};
 

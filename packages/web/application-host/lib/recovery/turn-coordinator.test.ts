@@ -3,7 +3,7 @@ import type {
   WorkspaceRecoveryCheckpointState,
   WorkspaceRecoveryTurnBinding,
   WorkspaceRecoveryTurnProvenance,
-} from '@piarium/extension-contract';
+} from '@varin/extension-contract';
 import {
   createRecoveryTurnCoordinator,
   type AdmitRequest,

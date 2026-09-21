@@ -7,7 +7,7 @@ process-tree lifetime come from the Rust kernel. Renderers never spawn these pro
 ## Entrypoints
 
 - `runtime.ts`: `createRunRuntime({ documents, spawn, pathModule, env, isTrusted })`
-- `tasks.ts`: `piarium.tasks.json` configurations; host-owned `node` scripts use `process.execPath`
+- `tasks.ts`: `varin.tasks.json` configurations; host-owned `node` scripts use `process.execPath`
 - `debug-supervisor.ts`: DAP session per workspace, generation, breakpoints, watch
 - `test-supervisor.ts`: discovery/run tree; builtin Node test runner plus extension adapters
 - `routes.ts`: authenticated `/api/tasks/*`, `/api/debug/*`, `/api/tests/*` and SSE events

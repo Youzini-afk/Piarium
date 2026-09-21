@@ -1,8 +1,8 @@
-import { createWorkspaceRecoveryAPI } from '@piarium/extension-contract';
-import { toolMutation } from '@piarium/protocol';
+import { createWorkspaceRecoveryAPI } from '@varin/extension-contract';
+import { toolMutation } from '@varin/protocol';
 import type {
   PiSessionExecutionAdmissionRequest,
-} from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
 
 interface WriterOwner {
   kind?: string;

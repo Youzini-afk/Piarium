@@ -20,10 +20,10 @@ const writeJson = (filePath, value) => {
 };
 
 const createFixture = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cloud-runtime-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-cloud-runtime-'));
   temporaryDirectories.push(root);
   writeJson(path.join(root, 'package.json'), {
-    name: 'piarium-cloud-runtime',
+    name: 'varin-cloud-runtime',
     license: 'AGPL-3.0-only',
     workspaces: ['packages/*'],
   });
@@ -36,43 +36,43 @@ const createFixture = () => {
 
   const manifests = {
     'application-client': {
-      name: '@piarium/application-client',
+      name: '@varin/application-client',
       dependencies: {
-        '@piarium/extension-contract': '0.2.0',
-        '@piarium/protocol': '0.1.0',
+        '@varin/extension-contract': '0.2.0',
+        '@varin/protocol': '0.1.0',
       },
     },
-    'extension-contract': { name: '@piarium/extension-contract', dependencies: {} },
+    'extension-contract': { name: '@varin/extension-contract', dependencies: {} },
     'extension-builtins': {
-      name: '@piarium/extension-builtins',
-      dependencies: { '@piarium/extension-contract': '0.1.0' },
+      name: '@varin/extension-builtins',
+      dependencies: { '@varin/extension-contract': '0.1.0' },
     },
     'extension-host': {
-      name: '@piarium/extension-host',
+      name: '@varin/extension-host',
       dependencies: {
-        '@piarium/extension-builtins': '0.1.0',
-        '@piarium/extension-contract': '0.1.0',
+        '@varin/extension-builtins': '0.1.0',
+        '@varin/extension-contract': '0.1.0',
       },
     },
-    protocol: { name: '@piarium/protocol', dependencies: {} },
-    'pi-host': { name: '@piarium/pi-host', dependencies: { '@piarium/protocol': '0.1.0' } },
+    protocol: { name: '@varin/protocol', dependencies: {} },
+    'pi-host': { name: '@varin/pi-host', dependencies: { '@varin/protocol': '0.1.0' } },
     'runtime-broker': {
-      name: '@piarium/runtime-broker',
+      name: '@varin/runtime-broker',
       dependencies: {
-        '@piarium/pi-host': '0.1.0',
-        '@piarium/protocol': '0.1.0',
+        '@varin/pi-host': '0.1.0',
+        '@varin/protocol': '0.1.0',
       },
     },
-    'settings-store': { name: '@piarium/settings-store', dependencies: {} },
+    'settings-store': { name: '@varin/settings-store', dependencies: {} },
     web: {
-      name: '@piarium/web',
+      name: '@varin/web',
       dependencies: {
-        '@piarium/application-client': 'workspace:*',
-        '@piarium/extension-contract': 'workspace:*',
-        '@piarium/extension-host': 'workspace:*',
-        '@piarium/protocol': 'workspace:*',
-        '@piarium/runtime-broker': 'workspace:*',
-        '@piarium/settings-store': 'workspace:*',
+        '@varin/application-client': 'workspace:*',
+        '@varin/extension-contract': 'workspace:*',
+        '@varin/extension-host': 'workspace:*',
+        '@varin/protocol': 'workspace:*',
+        '@varin/runtime-broker': 'workspace:*',
+        '@varin/settings-store': 'workspace:*',
       },
     },
   };
@@ -87,7 +87,7 @@ const createFixture = () => {
       fs.mkdirSync(path.join(packageRoot, 'kernel'), { recursive: true });
       fs.writeFileSync(
         path.join(packageRoot, 'server', 'index.js'),
-        "import '@piarium/extension-host';\n",
+        "import '@varin/extension-host';\n",
       );
     }
     if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
@@ -101,11 +101,11 @@ afterEach(() => {
   }
 });
 
-describe('Piarium cloud runtime layout', () => {
+describe('Varin cloud runtime layout', () => {
   it('keeps the committed lock in sync with each staged production manifest', () => {
     // `--frozen-lockfile` only proves the lock resolves; it does not fail when a
     // manifest gains a production dependency the lock never recorded. That gap
-    // is what let the cloud daemon ship without @piarium/extension-builtins.
+    // is what let the cloud daemon ship without @varin/extension-builtins.
     const lockText = fs.readFileSync(path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock'), 'utf8');
     const lock = JSON.parse(lockText.replace(/,(\s*[}\]])/g, '$1'));
     const lockWorkspaces = lock.workspaces ?? {};
@@ -128,10 +128,10 @@ describe('Piarium cloud runtime layout', () => {
 
     fs.writeFileSync(
       path.join(serverDir, 'missing.js'),
-      "import '@piarium/missing-runtime';\n",
+      "import '@varin/missing-runtime';\n",
     );
     expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
-      'missing.js -> @piarium/missing-runtime',
+      'missing.js -> @varin/missing-runtime',
     ]);
   });
 
@@ -161,7 +161,7 @@ describe('Piarium cloud runtime layout', () => {
     for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
       const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
       for (const dependencyName of Object.keys(manifest.dependencies || {})) {
-        if (dependencyName.startsWith('@piarium/')) {
+        if (dependencyName.startsWith('@varin/')) {
           expect(packageNames.has(dependencyName), `${manifest.name} -> ${dependencyName}`).toBe(true);
         }
       }
@@ -179,11 +179,11 @@ describe('Piarium cloud runtime layout', () => {
     const fixture = createFixture();
     const webManifestPath = path.join(fixture, 'packages', 'web', 'package.json');
     const webManifest = readJson(webManifestPath);
-    webManifest.dependencies['@piarium/missing-runtime'] = 'workspace:*';
+    webManifest.dependencies['@varin/missing-runtime'] = 'workspace:*';
     writeJson(webManifestPath, webManifest);
 
     expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
-      'depends on missing workspace @piarium/missing-runtime',
+      'depends on missing workspace @varin/missing-runtime',
     );
   });
 

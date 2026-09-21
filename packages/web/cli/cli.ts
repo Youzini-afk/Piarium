@@ -45,7 +45,7 @@ import { createServeCommand } from './lib/commands-serve.js';
 import { createTunnelCommand, isValidTunnelDoctorResponse, shouldDisplayTunnelQr } from './lib/commands-tunnel.js';
 import {
   discoverRunningInstances,
-  discoverPiariumInstanceOnPort,
+  discoverVarinInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   resolveTunnelProviders,
@@ -58,9 +58,9 @@ import {
   getPidFilePath,
   getInstanceFilePath,
   isProcessRunning,
-  isPiariumCmdline,
-  isPiariumProcessRunning,
-  getPiariumProcessState,
+  isVarinCmdline,
+  isVarinProcessRunning,
+  getVarinProcessState,
 } from './lib/cli-process.js';
 import {
   intro as clackIntro, outro as clackOutro, cancel as clackCancel,
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
   await commands[command](options);
 }
 
-const isCliExecution = isModuleCliExecution(process.argv[1], import.meta.url, fs.realpathSync, 'piarium');
+const isCliExecution = isModuleCliExecution(process.argv[1], import.meta.url, fs.realpathSync, 'varin');
 
 if (isCliExecution) {
   let isHandlingSigint = false;
@@ -402,14 +402,14 @@ export {
   getPidFilePath,
   getInstanceFilePath,
   isProcessRunning,
-  isPiariumProcessRunning,
-  isPiariumCmdline,
-  getPiariumProcessState,
+  isVarinProcessRunning,
+  isVarinCmdline,
+  getVarinProcessState,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,
   discoverRunningInstances,
-  discoverPiariumInstanceOnPort,
+  discoverVarinInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,

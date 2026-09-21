@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sliceUtf8ByBytes, type DiagnosticItem, type HarnessActorContext } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type DiagnosticItem, type HarnessActorContext } from "@varin/protocol";
 import { createLspDiagnosticsSnapshotService, type DiagnosticsProvider } from "./diagnostics-service.js";
 import { createContextRetainedService, createShellExecService, createShellReadService } from "./harness-services.js";
 import { createObservationCursorStore } from "./observation-cursors.js";

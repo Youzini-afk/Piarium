@@ -1,4 +1,4 @@
-import type { WorkspaceRecoveryTurnProvenance } from "@piarium/extension-contract";
+import type { WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
 import { sameState } from "./journal-files.js";
 import type { RecoveryState } from "./journal-files.js";
@@ -313,7 +313,7 @@ export const createInMemoryRecoveryDurablePort = (
           .map((change) => change.path),
       );
       const observed = [...new Set(input.observedResourceIds
-        .filter((value) => Boolean(value) && !/\.piarium-(?:tmp|restore|recovery)-/u.test(value)))].sort();
+        .filter((value) => Boolean(value) && !/\.varin-(?:tmp|restore|recovery)-/u.test(value)))].sort();
       const unrecorded = observed.filter((value) => !recorded.has(value));
       const retainedFailure = previous.status === "incomplete" && previous.failure && typeof previous.failure === "object"
         ? previous.failure

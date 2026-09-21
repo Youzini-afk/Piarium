@@ -306,7 +306,7 @@ describe('FileEditorModelRegistry', () => {
     documents.replace({ ...documents.current, identity: after });
     expect(registry.getSnapshot(after)).toEqual({ status: 'ready', model, syncFailure: null });
     expect(model.uri).toEqual({
-      scheme: 'piarium-document',
+      scheme: 'varin-document',
       authority: 'r-dXJsOmh0dHBzOi8vaG9zdC5leGFtcGxl',
       path: '/document-one',
     });

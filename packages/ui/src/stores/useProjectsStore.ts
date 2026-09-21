@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { ProjectEntry } from '@piarium/application-client';
-import type { WorkFocusId } from '@piarium/protocol';
+import type { ProjectEntry } from '@varin/application-client';
+import type { WorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
@@ -10,8 +10,8 @@ import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeApiBaseUrl } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeApiBaseUrl } from '@varin/application-client';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -71,7 +71,7 @@ const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
 
 const getLocalRuntimeOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  const value = (window as typeof window & { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__;
+  const value = (window as typeof window & { __VARIN_LOCAL_ORIGIN__?: string }).__VARIN_LOCAL_ORIGIN__;
   return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
 };
 
@@ -772,7 +772,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 );
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('piarium:settings-synced', (event: Event) => {
+  window.addEventListener('varin:settings-synced', (event: Event) => {
     const detail = (event as CustomEvent<DesktopSettings>).detail;
     if (detail && typeof detail === 'object') {
       useProjectsStore.getState().synchronizeFromSettings(detail);

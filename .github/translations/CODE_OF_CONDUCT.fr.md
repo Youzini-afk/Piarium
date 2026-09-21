@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Code de conduite du Contributor Covenant
 
@@ -60,7 +60,7 @@ d'un événement en ligne ou hors ligne.
 
 Signalez les incidents aux mainteneurs via GitHub en ouvrant un contact privé avec les mainteneurs depuis le
 dépôt, ou en déposant un
-[avis de sécurité privé](https://github.com/Youzini-afk/Piarium/security/advisories/new)
+[avis de sécurité privé](https://github.com/Youzini-afk/Varin/security/advisories/new)
 lorsque le signalement concerne une vulnérabilité. Ne publiez pas les signalements de harcèlement dans des
 issues publiques.
 

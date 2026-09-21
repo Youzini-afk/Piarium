@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRelated } from "./related-tool.js";
 
-const TEST_DIR = join(tmpdir(), "piarium-related-tool");
+const TEST_DIR = join(tmpdir(), "varin-related-tool");
 const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 };
 
 let store: KnowledgeStore;
@@ -43,12 +43,12 @@ describe("related tool", () => {
     await store.replaceFileSymbols("lib/core.ts", "typescript", [
       { name: "core", kind: "function", range },
     ], "disk-r2", [
-      { kind: "import", value: "@piarium/protocol", line: 1 },
+      { kind: "import", value: "@varin/protocol", line: 1 },
     ], { linksIncomplete: true });
     const incomplete = await executeRelated({ anchor: "lib/core.ts" }, store);
     expect(incomplete.imports.incomplete).toBe(true);
     expect(incomplete.imports.unresolved).toEqual([
-      { specifier: "@piarium/protocol", path: "lib/core.ts", reason: "non-relative" },
+      { specifier: "@varin/protocol", path: "lib/core.ts", reason: "non-relative" },
     ]);
     expect(incomplete.text).toContain("[unresolved: non-relative]");
     expect(incomplete.text).toContain("incomplete");

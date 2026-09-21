@@ -122,7 +122,7 @@ const server = createJsonRpcServer({
     const params = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? rawParams : {}) as FixtureParams;
     if (method === 'initialize') {
-      if (process.env.PIARIUM_LSP_FIXTURE_MINIMAL === '1') {
+      if (process.env.VARIN_LSP_FIXTURE_MINIMAL === '1') {
         return {
           capabilities: {
             textDocumentSync: 2,
@@ -385,7 +385,7 @@ const server = createJsonRpcServer({
   onNotification(method, rawParams) {
     const params = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? rawParams : {}) as FixtureParams;
-    if (method === 'initialized' && process.env.PIARIUM_LSP_FIXTURE_CRASH === '1') {
+    if (method === 'initialized' && process.env.VARIN_LSP_FIXTURE_CRASH === '1') {
       process.exit(17);
       return;
     }

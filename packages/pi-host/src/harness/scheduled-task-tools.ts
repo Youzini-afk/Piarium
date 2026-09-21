@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 import type {
   HarnessMethod,
   HarnessServiceMap,
@@ -17,7 +17,7 @@ import type {
   ScheduleUpsertResult,
   ScheduleRemoveResult,
   ScheduledTaskView,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 /**
  * Scheduled-task tool (D-307 / Stage W-C): manage the calling workspace
@@ -130,7 +130,7 @@ export function createScheduledTaskTool(bridge: HostServicesBridge): ToolDefinit
         enabled: Type.Optional(Type.Boolean()),
         schedule: Type.Optional(scheduleSchema),
         execution: Type.Optional(executionSchema),
-      }, { description: "upsert: JSON-owned task fields — loop metadata is managed by Piarium and rejected" })),
+      }, { description: "upsert: JSON-owned task fields — loop metadata is managed by Varin and rejected" })),
       enabled: Type.Optional(Type.Boolean({ description: "set_enabled: target state" })),
       expectedRevision: Type.Optional(Type.String({ description: "CAS guard — loop content revision from read_loop (required for write_loop, optional for remove_loop)" })),
       content: Type.Optional(Type.String({ description: "write_loop: full Markdown document including YAML frontmatter" })),

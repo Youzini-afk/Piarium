@@ -2,7 +2,7 @@ import type {
   JsonValue,
   PiAgentDescriptor,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export type PiSubagentsDefinitionMode =
   | 'create-agent'

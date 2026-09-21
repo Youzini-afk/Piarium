@@ -5,34 +5,34 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
-  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
-  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
-} from "@piarium/extension-builtins";
+  VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+  VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+} from "@varin/extension-builtins";
 import {
-  resolvePiariumBuiltinPackageRoot,
-} from "@piarium/extension-builtins/host";
+  resolveVarinBuiltinPackageRoot,
+} from "@varin/extension-builtins/host";
 import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
 
 test("built-in package roots use Electron's physical ASAR-unpacked directory on every desktop path style", () => {
-  const windowsVirtual = "D:\\Piarium\\resources\\app.asar\\node_modules\\@piarium\\extension-builtins\\dist\\builtin-packages\\typescript-language";
-  const windowsPhysical = "D:\\Piarium\\resources\\app.asar.unpacked\\node_modules\\@piarium\\extension-builtins\\dist\\builtin-packages\\typescript-language";
-  const posixVirtual = "/opt/Piarium/resources/app.asar/node_modules/@piarium/extension-builtins/dist/builtin-packages/typescript-language";
-  const posixPhysical = "/opt/Piarium/resources/app.asar.unpacked/node_modules/@piarium/extension-builtins/dist/builtin-packages/typescript-language";
+  const windowsVirtual = "D:\\Varin\\resources\\app.asar\\node_modules\\@varin\\extension-builtins\\dist\\builtin-packages\\typescript-language";
+  const windowsPhysical = "D:\\Varin\\resources\\app.asar.unpacked\\node_modules\\@varin\\extension-builtins\\dist\\builtin-packages\\typescript-language";
+  const posixVirtual = "/opt/Varin/resources/app.asar/node_modules/@varin/extension-builtins/dist/builtin-packages/typescript-language";
+  const posixPhysical = "/opt/Varin/resources/app.asar.unpacked/node_modules/@varin/extension-builtins/dist/builtin-packages/typescript-language";
   const existing = new Set([windowsPhysical, posixPhysical]);
 
-  assert.equal(resolvePiariumBuiltinPackageRoot(windowsVirtual, (path) => existing.has(path)), windowsPhysical);
-  assert.equal(resolvePiariumBuiltinPackageRoot(posixVirtual, (path) => existing.has(path)), posixPhysical);
-  assert.equal(resolvePiariumBuiltinPackageRoot(windowsPhysical, () => true), windowsPhysical);
-  assert.equal(resolvePiariumBuiltinPackageRoot("/opt/piarium/builtins/typescript-language", () => true), "/opt/piarium/builtins/typescript-language");
-  assert.equal(resolvePiariumBuiltinPackageRoot(posixVirtual, () => false), posixVirtual);
+  assert.equal(resolveVarinBuiltinPackageRoot(windowsVirtual, (path) => existing.has(path)), windowsPhysical);
+  assert.equal(resolveVarinBuiltinPackageRoot(posixVirtual, (path) => existing.has(path)), posixPhysical);
+  assert.equal(resolveVarinBuiltinPackageRoot(windowsPhysical, () => true), windowsPhysical);
+  assert.equal(resolveVarinBuiltinPackageRoot("/opt/varin/builtins/typescript-language", () => true), "/opt/varin/builtins/typescript-language");
+  assert.equal(resolveVarinBuiltinPackageRoot(posixVirtual, () => false), posixVirtual);
 });
 
 test("the built-in TypeScript language extension materializes lazily and unregisters when disabled", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "piarium-builtin-language-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "varin-builtin-language-"));
   const runtime = await ApplicationExtensionRuntime.create({
     brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
     dataDir,
-    piariumVersion: "1.2.3",
+    varinVersion: "1.2.3",
   });
   const calls: Array<{ method: string; params: unknown }> = [];
   runtime.capabilities.register("workspace.language", async (method, params) => {
@@ -42,7 +42,7 @@ test("the built-in TypeScript language extension materializes lazily and unregis
   try {
     const started = await runtime.start();
     const entry = started.catalog.extensions.find((candidate) => (
-      candidate.manifest.id === PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID
+      candidate.manifest.id === VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID
     ));
     assert.equal(entry?.desired.enabled, true);
     assert.equal(entry?.integrity, undefined);
@@ -51,7 +51,7 @@ test("the built-in TypeScript language extension materializes lazily and unregis
     await runtime.activateForEvent("workspace-match", { languageId: "typescript" });
     const registration = calls.find((call) => (
       call.method === "registerProvider"
-      && (call.params as { providerId?: unknown } | undefined)?.providerId === "piarium.typescript-language"
+      && (call.params as { providerId?: unknown } | undefined)?.providerId === "varin.typescript-language"
     ))?.params as {
       args?: string[];
       command?: string;
@@ -59,22 +59,22 @@ test("the built-in TypeScript language extension materializes lazily and unregis
       languageIds?: string[];
       providerId?: string;
     } | undefined;
-    assert.equal(registration?.providerId, "piarium.typescript-language");
+    assert.equal(registration?.providerId, "varin.typescript-language");
     assert.deepEqual(registration?.languageIds, ["javascript", "javascriptreact", "typescript", "typescriptreact"]);
     assert.match(registration?.args?.[0] ?? "", /typescript-language-server\.mjs$/);
     assert.match(registration?.initializationOptions?.tsserver?.fallbackPath ?? "", /typescript[\\/]lib[\\/]tsserver\.js$/);
     assert.ok(registration?.command);
     const active = await runtime.state();
     const activeEntry = active.catalog.extensions.find((candidate) => (
-      candidate.manifest.id === PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID
+      candidate.manifest.id === VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID
     ));
     assert.match(activeEntry?.integrity ?? "", /^sha256-[0-9a-f]{64}$/);
     assert.equal(active.catalog.extensions.find((candidate) => (
-      candidate.manifest.id === PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID
+      candidate.manifest.id === VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID
     ))?.integrity, undefined, "TypeScript activation does not materialize the unrelated language pack");
 
     await runtime.setEnabled(
-      PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+      VARIN_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
       false,
       active.catalog.revision,
     );

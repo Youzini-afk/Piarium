@@ -30,7 +30,7 @@ const ATTACH_ERROR_KEYS = {
   'no-session': 'workbench.attachment.no-session',
 } as const satisfies Record<string, I18nKey>;
 
-const OWNER = 'piarium.builtin.workbench';
+const OWNER = 'varin.builtin.workbench';
 
 export const AgentEditorCoordinator: React.FC = () => {
   const { t } = useI18n();
@@ -103,9 +103,9 @@ export const AgentEditorCoordinator: React.FC = () => {
       if ('status' in result) notify(result.status);
     };
     const dispose = [
-      registerWorkbenchCommand('piarium.editor.attachActiveFile', OWNER, () => attach('editor')),
-      registerWorkbenchCommand('piarium.editor.attachSelection', OWNER, () => attach('selection')),
-      registerWorkbenchCommand('piarium.editor.attachProblem', OWNER, () => {
+      registerWorkbenchCommand('varin.editor.attachActiveFile', OWNER, () => attach('editor')),
+      registerWorkbenchCommand('varin.editor.attachSelection', OWNER, () => attach('selection')),
+      registerWorkbenchCommand('varin.editor.attachProblem', OWNER, () => {
         if (!sessionId || !workspaceId) {
           notify('no-session');
           return;
@@ -135,19 +135,19 @@ export const AgentEditorCoordinator: React.FC = () => {
         });
         if ('status' in result) notify(result.status);
       }),
-      registerWorkbenchCommand('piarium.editor.revealInSession', OWNER, () => {
+      registerWorkbenchCommand('varin.editor.revealInSession', OWNER, () => {
         const currentTab = tabRef.current;
         if (!workspaceId || !currentTab) return;
         const link = peekEditorSessionLink({ workspaceId, resourceId: currentTab.resourceId });
         if (!link?.entryId) return;
         void usePiSessionStore.getState().navigateSession(link.sessionId, link.entryId);
       }),
-      registerWorkbenchCommand('piarium.editor.showChanges', OWNER, () => {
+      registerWorkbenchCommand('varin.editor.showChanges', OWNER, () => {
         if (workspaceId) showWorkbenchPanel(workspaceId, 'changes');
       }),
       registerWorkbenchMenuItem({
-        id: 'piarium.editor.attachActiveFile',
-        commandId: 'piarium.editor.attachActiveFile',
+        id: 'varin.editor.attachActiveFile',
+        commandId: 'varin.editor.attachActiveFile',
         group: 'editor/title',
         order: 20,
         when: { editorIsOpen: true },

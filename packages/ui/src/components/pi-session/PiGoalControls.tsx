@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PiSessionGoalState, SessionSnapshot } from '@piarium/protocol';
+import type { PiSessionGoalState, SessionSnapshot } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import {

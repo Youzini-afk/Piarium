@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { HarnessActorContext } from "@piarium/protocol";
+import type { HarnessActorContext } from "@varin/protocol";
 import type { HarnessAuthorizedPath } from "./router.js";
 import {
   assertAbsolutePathInWorkspace,

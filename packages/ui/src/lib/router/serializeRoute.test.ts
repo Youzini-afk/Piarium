@@ -73,7 +73,7 @@ const sessionState = (sessionId: string): AppRouteState => ({
 
 describe('updateBrowserURL embedded-session-chat guard', () => {
   test('is a no-op in the embedded session-chat iframe', () => {
-    // The embedded iframe's Piarium URL identity must never be rewritten.
+    // The embedded iframe's Varin URL identity must never be rewritten.
     // updateBrowserURL rebuilds the
     // query string from scratch, which would strip piPanel and break
     // isEmbeddedSessionChat().

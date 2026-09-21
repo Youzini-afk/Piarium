@@ -32,7 +32,7 @@ const authorizationFromInit = (init: RequestInit | undefined): string | null => 
 };
 
 async function setupBinding(options?: { modelId?: string; key?: string }) {
-  const root = await mkdtemp(join(tmpdir(), "piarium-bg-inference-"));
+  const root = await mkdtemp(join(tmpdir(), "varin-bg-inference-"));
   dirs.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -78,7 +78,7 @@ async function setupBinding(options?: { modelId?: string; key?: string }) {
 
 async function boundEmbed(
   inference: BackgroundInferenceRuntime,
-  input: Omit<import("@piarium/protocol").HarnessEmbedParams, "configurationId" | "maxTokens">,
+  input: Omit<import("@varin/protocol").HarnessEmbedParams, "configurationId" | "maxTokens">,
 ) {
   const described = await inference.describe();
   assert.equal(described.embedding.status, "ready");

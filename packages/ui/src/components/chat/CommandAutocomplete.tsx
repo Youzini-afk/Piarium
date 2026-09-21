@@ -19,7 +19,7 @@ import { commandMatchesSearch } from './commandAutocompleteItems';
 import { usePiChatCatalog } from './usePiChatCatalog';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
-type CommandSource = 'extension' | 'piarium' | 'prompt' | 'skill' | 'unknown';
+type CommandSource = 'extension' | 'varin' | 'prompt' | 'skill' | 'unknown';
 
 export interface CommandInfo {
   description?: string;
@@ -54,7 +54,7 @@ interface CommandAutocompleteProps {
 }
 
 const normalizeSource = (source: string | undefined): CommandSource => {
-  if (source === 'extension' || source === 'piarium' || source === 'prompt' || source === 'skill') return source;
+  if (source === 'extension' || source === 'varin' || source === 'prompt' || source === 'skill') return source;
   return 'unknown';
 };
 

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from './supervisor.js';
-import { PIARIUM_LSP_TYPESCRIPT_SERVER_ARGS } from './servers.js';
+import { VARIN_LSP_TYPESCRIPT_SERVER_ARGS } from './servers.js';
 
 interface TestEvent extends Record<string, unknown> { items: Array<Record<string, unknown>>; kind?: string }
 const featureValue = <Value>(result: object): Value => (result as { value: unknown }).value as Value;
@@ -42,7 +42,7 @@ describe('typescript language server smoke', () => {
       language.registerProvider({
         providerId: 'typescript-smoke',
         command: 'node',
-        args: PIARIUM_LSP_TYPESCRIPT_SERVER_ARGS,
+        args: VARIN_LSP_TYPESCRIPT_SERVER_ARGS,
         languageIds: ['typescript'],
         source: 'host',
       });
@@ -108,7 +108,7 @@ describe('typescript language server smoke', () => {
       language.registerProvider({
         providerId: 'typescript-smoke',
         command: 'node',
-        args: PIARIUM_LSP_TYPESCRIPT_SERVER_ARGS,
+        args: VARIN_LSP_TYPESCRIPT_SERVER_ARGS,
         languageIds: ['typescript'],
         source: 'host',
       });

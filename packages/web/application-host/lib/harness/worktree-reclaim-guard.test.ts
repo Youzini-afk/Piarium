@@ -9,7 +9,7 @@ const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-reclaim-guard-"));
+  const root = await fs.mkdtemp(path.join(tmpdir(), "varin-reclaim-guard-"));
   const directory = path.join(root, "worktree");
   await fs.mkdir(directory);
   const documents = createDocumentAuthority({ hostId: "host", dataDir: path.join(root, "data"), isAllowedRoot: async () => true, isTrusted: async () => true });

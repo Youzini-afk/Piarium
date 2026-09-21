@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { readHistoryPage } from "@piarium/protocol";
+import { readHistoryPage } from "@varin/protocol";
 import { projectSessionEntry } from "../protocol-projector.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 

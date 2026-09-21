@@ -15,7 +15,7 @@ const catalogs: Array<{ close(): void }> = [];
 const git = (cwd: string, args: string[]): string => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
 const harness = async () => {
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-workspace-baseline-"));
+  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-workspace-baseline-"));
   roots.push(parent);
   const workspace = path.join(parent, "workspace");
   const recovery = path.join(parent, "recovery");
@@ -177,7 +177,7 @@ describe("workspace baseline capture", () => {
   });
 
   it("does not invent a complete Git inventory when a listing command fails", async () => {
-    const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-git-inventory-fail-"));
+    const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-git-inventory-fail-"));
     roots.push(parent);
     const workspace = path.join(parent, "workspace");
     await fs.promises.mkdir(workspace);

@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DocumentsError } from '@piarium/application-client';
-import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/application-client';
+import { DocumentsError } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@varin/application-client';
 
 const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
 
-vi.mock('@piarium/application-client', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@piarium/application-client')>(),
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
   runtimeFetch: runtimeFetchMock,
 }));
 

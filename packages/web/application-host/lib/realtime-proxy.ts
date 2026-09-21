@@ -4,8 +4,8 @@ import type { IncomingHttpHeaders, IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { RawData } from 'ws';
 
-const PROXY_SSE_PATH = '/api/piarium/realtime-proxy/sse';
-const PROXY_WS_PATH = '/api/piarium/realtime-proxy/ws';
+const PROXY_SSE_PATH = '/api/varin/realtime-proxy/sse';
+const PROXY_WS_PATH = '/api/varin/realtime-proxy/ws';
 
 type ProxyType = 'sse' | 'ws';
 
@@ -39,13 +39,13 @@ interface ResolvedProxyTarget {
 }
 
 const isAllowedSsePath = (pathname: string): boolean => {
-  return pathname === '/api/piarium/events'
-    || pathname === '/api/piarium/runtime-manager/events'
+  return pathname === '/api/varin/events'
+    || pathname === '/api/varin/runtime-manager/events'
     || pathname === '/api/notifications/stream';
 };
 
 const isAllowedWebSocketPath = (pathname: string): boolean => {
-  return pathname === '/api/piarium/runtime/ws'
+  return pathname === '/api/varin/runtime/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws';
 };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Thread, ThreadRun } from '@piarium/protocol';
+import type { Thread, ThreadRun } from '@varin/protocol';
 import {
   harnessThreadsAtEntry,
   mergeHarnessThreadSnapshot,

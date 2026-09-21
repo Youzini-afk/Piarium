@@ -1,9 +1,9 @@
 {
-  "name": "@piarium/extension-contract",
+  "name": "@varin/extension-contract",
   "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Browser-safe contracts for Piarium extensions and extension-host catalogs.",
+  "description": "Browser-safe contracts for Varin extensions and extension-host catalogs.",
   "files": [
     "dist",
     "schema"
@@ -15,16 +15,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema/manifest": "./schema/piarium.extension.schema.json",
-    "./schema/discovery": "./schema/piarium.discovery-catalog.schema.json"
+    "./schema/manifest": "./schema/varin.extension.schema.json",
+    "./schema/discovery": "./schema/varin.discovery-catalog.schema.json"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "url": "https://github.com/Youzini-afk/Varin.git",
     "directory": "packages/extension-contract"
   },
-  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-contract",
-  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "homepage": "https://github.com/Youzini-afk/Varin/tree/main/packages/extension-contract",
+  "bugs": "https://github.com/Youzini-afk/Varin/issues",
   "publishConfig": {
     "access": "public"
   },

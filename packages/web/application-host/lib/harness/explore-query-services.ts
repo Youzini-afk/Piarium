@@ -11,7 +11,7 @@ import type {
   ExploreQueryViewsParams,
   ExploreSearchResult,
   HarnessServiceMap,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   documentsFromViews,
   exploreShouldRerank,
@@ -19,7 +19,7 @@ import {
   rerankSettingsFromSnapshot,
   scoresFromRerankResult,
 } from "./explore-rerank.js";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";

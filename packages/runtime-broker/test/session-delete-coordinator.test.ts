@@ -9,7 +9,7 @@ const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
 
 describe("session ownership coordination", () => {
   it("waits for the application-owned cleanup before removing the Pi session file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-delete-coordinate-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-delete-coordinate-"));
     const workspace = join(root, "workspace");
     const agentDir = join(root, "agent");
     await Promise.all([mkdir(workspace), mkdir(agentDir)]);
@@ -49,7 +49,7 @@ describe("session ownership coordination", () => {
   });
 
   it("attaches the broker-pinned child workspace scope to Host events", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-session-scope-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-session-scope-"));
     const workspace = join(root, "workspace");
     const agentDir = join(root, "agent");
     await Promise.all([mkdir(workspace), mkdir(agentDir)]);

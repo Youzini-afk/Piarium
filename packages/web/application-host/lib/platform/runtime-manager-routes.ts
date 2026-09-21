@@ -1,6 +1,6 @@
 import express from 'express';
 import type { Express, Response } from 'express';
-import { PiRuntimeNotReadyError } from '@piarium/runtime-broker';
+import { PiRuntimeNotReadyError } from '@varin/runtime-broker';
 
 const json = express.json({ limit: '32kb' });
 
@@ -40,11 +40,11 @@ export const registerRuntimeManagerRoutes = (app: Express, {
   pickPiPackageRoot,
   openFilesystemPath,
 }: RuntimeManagerRouteOptions): void => {
-  app.get('/api/piarium/runtime-manager', (_req, res) => {
+  app.get('/api/varin/runtime-manager', (_req, res) => {
     res.json(snapshotBody(lifecycle));
   });
 
-  app.get('/api/piarium/runtime-manager/events', (req, res) => {
+  app.get('/api/varin/runtime-manager/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -60,27 +60,27 @@ export const registerRuntimeManagerRoutes = (app: Express, {
     });
   });
 
-  app.post('/api/piarium/runtime-manager/refresh', json, (_req, res) => (
+  app.post('/api/varin/runtime-manager/refresh', json, (_req, res) => (
     handleAction(res, () => lifecycle.refresh())
   ));
-  app.post('/api/piarium/runtime-manager/install', json, (_req, res) => (
+  app.post('/api/varin/runtime-manager/install', json, (_req, res) => (
     handleAction(res, () => lifecycle.install())
   ));
-  app.post('/api/piarium/runtime-manager/upgrade', json, (_req, res) => (
+  app.post('/api/varin/runtime-manager/upgrade', json, (_req, res) => (
     handleAction(res, () => lifecycle.upgrade())
   ));
-  app.post('/api/piarium/runtime-manager/activate', json, (req, res) => {
+  app.post('/api/varin/runtime-manager/activate', json, (req, res) => {
     const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
     if (!id) return res.status(400).json({ error: 'id is required' });
     return handleAction(res, () => lifecycle.activate(id));
   });
-  app.post('/api/piarium/runtime-manager/activate-custom', json, (req, res) => {
+  app.post('/api/varin/runtime-manager/activate-custom', json, (req, res) => {
     const packageRoot = typeof req.body?.packageRoot === 'string' ? req.body.packageRoot.trim() : '';
     const nodePath = typeof req.body?.nodePath === 'string' ? req.body.nodePath.trim() : undefined;
     if (!packageRoot) return res.status(400).json({ error: 'packageRoot is required' });
     return handleAction(res, () => lifecycle.activateCustom(packageRoot, nodePath));
   });
-  app.post('/api/piarium/runtime-manager/pick', json, async (_req, res) => {
+  app.post('/api/varin/runtime-manager/pick', json, async (_req, res) => {
     if (typeof pickPiPackageRoot !== 'function') {
       return res.status(501).json({ error: 'Choosing a Pi package root is not available on this surface' });
     }
@@ -91,7 +91,7 @@ export const registerRuntimeManagerRoutes = (app: Express, {
       return res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to choose a Pi package root' });
     }
   });
-  app.post('/api/piarium/runtime-manager/open-location', json, async (req, res) => {
+  app.post('/api/varin/runtime-manager/open-location', json, async (req, res) => {
     const target = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
     if (!target) return res.status(400).json({ error: 'path is required' });
     if (typeof openFilesystemPath !== 'function') {

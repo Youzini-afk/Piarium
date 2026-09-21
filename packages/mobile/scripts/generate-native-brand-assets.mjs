@@ -100,4 +100,4 @@ for (const name of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-27
   await save(join(iosAssets, 'Splash.imageset', name), iosSplash);
 }
 
-console.log('[mobile] Generated Piarium launcher, adaptive, and splash assets.');
+console.log('[mobile] Generated Varin launcher, adaptive, and splash assets.');

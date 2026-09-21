@@ -60,7 +60,7 @@ const createHarness = async (overrides: Partial<Parameters<typeof createTunnelHo
   const loopback = await startLoopback();
   const sentFrames: TunnelFrame[] = [];
   const host = createTunnelHost({
-    connectionId: 'piarium-test',
+    connectionId: 'varin-test',
     getBufferedAmount: () => 0,
     getLocalPort: () => loopback.port,
     sendFrame: async (frame) => { sentFrames.push(decodeTunnelFrame(frame)); },

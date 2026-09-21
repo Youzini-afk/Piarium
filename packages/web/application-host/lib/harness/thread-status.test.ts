@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { PiSessionEntry, SessionEntriesResult, ThreadMessageRecord, ThreadReport } from "@piarium/protocol";
+import type { PiSessionEntry, SessionEntriesResult, ThreadMessageRecord, ThreadReport } from "@varin/protocol";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import {

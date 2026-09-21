@@ -17,7 +17,7 @@ import {
   type SessionWorkspaceBinding,
   type SessionWorkFocusSnapshot,
   type WorkFocusSelection,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 interface SessionMetadata {
   archivedAt?: string;
@@ -158,10 +158,10 @@ function parseDocument(content: string, path: string): SessionMetadataDocument {
   try {
     value = JSON.parse(content);
   } catch (error) {
-    throw new Error(`Invalid Piarium session metadata JSON: ${path}`, { cause: error });
+    throw new Error(`Invalid Varin session metadata JSON: ${path}`, { cause: error });
   }
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.sessions)) {
-    throw new Error(`Unsupported Piarium session metadata document: ${path}`);
+    throw new Error(`Unsupported Varin session metadata document: ${path}`);
   }
   const sessions: Record<string, SessionMetadata> = {};
   for (const [sessionId, raw] of Object.entries(value.sessions)) {
@@ -204,7 +204,7 @@ export class SessionMetadataStore {
 
   constructor(agentDir: string) {
     this.agentDir = resolve(agentDir);
-    this.#directory = join(this.agentDir, "piarium");
+    this.#directory = join(this.agentDir, "varin");
     this.#path = join(this.#directory, "session-metadata.json");
     this.#lockPath = `${this.#path}.lock`;
   }

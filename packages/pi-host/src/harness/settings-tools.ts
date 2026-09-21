@@ -7,7 +7,7 @@ import type {
   SettingsReadResult,
   SettingsSearchResult,
   SettingsUpdateResult,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 
 /**
  * Conversational settings tools (D-306 / Stage S).

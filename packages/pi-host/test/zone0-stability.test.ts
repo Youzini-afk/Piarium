@@ -36,7 +36,7 @@ export function extractPayloads(contexts: Context[]): CapturedPayload[] {
 
 describe("Zone 0 stability contract (1.2)", () => {
   it("system and tools are byte-identical across 5 steps; messages are prefix-growing; goal activation does not change Zone 0", async () => {
-    const root = await mkdtemp(join(tmpdir(), "piarium-zone0-"));
+    const root = await mkdtemp(join(tmpdir(), "varin-zone0-"));
     const agentDir = join(root, "agent");
     const projectExtensions = join(root, ".pi", "extensions");
     await mkdir(projectExtensions, { recursive: true });
@@ -49,11 +49,11 @@ describe("Zone 0 stability contract (1.2)", () => {
           const branch = ctx.sessionManager.getBranch();
           for (let i = branch.length - 1; i >= 0; i--) {
             const entry = branch[i];
-            if (entry && entry.type === "custom" && entry.customType === "piarium.session-features/v1" && entry.data?.goal?.status === "active") {
+            if (entry && entry.type === "custom" && entry.customType === "varin.session-features/v1" && entry.data?.goal?.status === "active") {
               return {
                 message: {
-                  customType: "piarium-goal",
-                  content: "<piarium-active-goal>test goal</piarium-active-goal>",
+                  customType: "varin-goal",
+                  content: "<varin-active-goal>test goal</varin-active-goal>",
                   display: false,
                 },
               };

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
+import { VARIN_PROTOCOL_VERSION } from "@varin/protocol";
 import { PiHostClient, PiRuntimeBroker, PiRuntimeLifecycle } from "../dist/index.js";
 
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/dist/host-bootstrap.js");
@@ -23,7 +23,7 @@ const pinnedPiVersion = () => {
 
 test("the production worker reports missing application files before launching Pi", async () => {
   const client = new PiHostClient({
-    hostEntry: join(tmpdir(), 'piarium-no-such-install', 'missing-bootstrap.js'),
+    hostEntry: join(tmpdir(), 'varin-no-such-install', 'missing-bootstrap.js'),
     handshake: { clientName: 'missing-host-test', clientVersion: '0.1.0', mode: 'test' },
   });
   try {
@@ -34,7 +34,7 @@ test("the production worker reports missing application files before launching P
 });
 
 test("bundled lifecycle starts one compiled worker without external discovery and reuses it for the catalog", async () => {
-  const agentDir = await mkdtemp(join(tmpdir(), "piarium-runtime-broker-dist-"));
+  const agentDir = await mkdtemp(join(tmpdir(), "varin-runtime-broker-dist-"));
   const events = [];
   const brokers = [];
   const lifecycle = new PiRuntimeLifecycle({
@@ -58,7 +58,7 @@ test("bundled lifecycle starts one compiled worker without external discovery an
   try {
     const handshake = await lifecycle.start();
     assert.ok(handshake);
-    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
+    assert.equal(handshake.protocolVersion, VARIN_PROTOCOL_VERSION);
     assert.equal(handshake.runtime.piVersion, pinnedPiVersion());
     assert.equal(handshake.runtime.source, "bundled");
     assert.equal(lifecycle.snapshot.status, "ready");

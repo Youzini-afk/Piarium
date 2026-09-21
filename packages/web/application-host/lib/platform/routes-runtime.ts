@@ -14,7 +14,7 @@ import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
-import { registerPiariumEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { registerVarinEventRoutes, registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
@@ -33,7 +33,7 @@ import { registerRuntimeManagerRoutes } from './runtime-manager-routes.js';
 type ExtensionRouteDependencies = Parameters<typeof registerExtensionRoutes>[1];
 type ProjectIconDependencies = Parameters<typeof registerProjectIconRoutes>[1];
 type ScheduledTaskDependencies = Parameters<typeof registerScheduledTaskRoutes>[1];
-type PiariumEventDependencies = Parameters<typeof registerPiariumEventRoutes>[1];
+type VarinEventDependencies = Parameters<typeof registerVarinEventRoutes>[1];
 type PiRuntimeDependencies = Parameters<typeof registerPiRuntimeHttpRoute>[1];
 type RuntimeManagerDependencies = Parameters<typeof registerRuntimeManagerRoutes>[1];
 type FsRouteDependencies = Parameters<typeof registerFsRoutes>[1];
@@ -64,10 +64,10 @@ export interface PlatformRouteDependencies {
   formatSettingsResponse: SettingsHelpers['formatSettingsResponse'];
   fsPromises: typeof fsPromisesModule;
   getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
-  getPiariumEventClients: PiariumEventDependencies['getPiariumEventClients'];
-  surfaceBridge?: PiariumEventDependencies['surfaceBridge'];
-  resolveSurfaceSession?: PiariumEventDependencies['resolveSurfaceSession'];
-  resolveAuthContext?: PiariumEventDependencies['resolveAuthContext'];
+  getVarinEventClients: VarinEventDependencies['getVarinEventClients'];
+  surfaceBridge?: VarinEventDependencies['surfaceBridge'];
+  resolveSurfaceSession?: VarinEventDependencies['resolveSurfaceSession'];
+  resolveAuthContext?: VarinEventDependencies['resolveAuthContext'];
   languageSupervisor?: LanguageRouteDependencies['language'];
   languageSupport?: import('../language-support/runtime.js').LanguageSupportRuntime;
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
@@ -76,9 +76,9 @@ export interface PlatformRouteDependencies {
   os: typeof osModule;
   path: typeof pathModule;
   persistSettings: SettingsRuntime['persistSettings'];
-  piariumDataDir: string;
-  piariumUserConfigRoot: string;
-  piariumVersion: string;
+  varinDataDir: string;
+  varinUserConfigRoot: string;
+  varinVersion: string;
   pickPiPackageRoot?: RuntimeManagerDependencies['pickPiPackageRoot'];
   piRuntimeBroker: PiRuntimeDependencies['piRuntimeBroker'];
   piRuntimeLifecycle?: RuntimeManagerDependencies['lifecycle'];
@@ -152,9 +152,9 @@ export const createPlatformRoutesRuntime = ({
       resolveGitBinaryForSpawn,
       fileSearch,
       contentSearch,
-      piariumDataDir,
-      piariumUserConfigRoot,
-      piariumVersion,
+      varinDataDir,
+      varinUserConfigRoot,
+      varinVersion,
       runtimeName,
       serverStartedAt,
       remoteClientAuthRuntime,
@@ -176,7 +176,7 @@ export const createPlatformRoutesRuntime = ({
       piRuntimeLifecycle,
       pickPiPackageRoot,
       openFilesystemPath,
-      getPiariumEventClients,
+      getVarinEventClients,
       writeSseEvent,
       surfaceBridge,
       resolveSurfaceSession,
@@ -223,7 +223,7 @@ export const createPlatformRoutesRuntime = ({
         const settings = await readSettingsFromDisk();
         res.json(formatSettingsResponse(settings));
       } catch (error) {
-        console.error('Failed to read Piarium settings:', error);
+        console.error('Failed to read Varin settings:', error);
         res.status(500).json({ error: 'Failed to read settings' });
       }
     });
@@ -232,7 +232,7 @@ export const createPlatformRoutesRuntime = ({
       try {
         res.json(await persistSettings(req.body ?? {}));
       } catch (error) {
-        console.error('Failed to save Piarium settings:', error);
+        console.error('Failed to save Varin settings:', error);
         res.status(500).json({ error: 'Failed to save settings' });
       }
     });
@@ -246,8 +246,8 @@ export const createPlatformRoutesRuntime = ({
       process,
       spawn,
       buildAugmentedPath,
-      piariumDataDir,
-      piariumVersion,
+      varinDataDir,
+      varinVersion,
       runtimeName,
       serverStartedAt,
       remoteClientAuthRuntime,
@@ -259,7 +259,7 @@ export const createPlatformRoutesRuntime = ({
       fsPromises,
       path,
       crypto,
-      piariumDataDir,
+      varinDataDir,
       sanitizeProjects,
       readSettingsFromDisk,
       persistSettings,
@@ -272,8 +272,8 @@ export const createPlatformRoutesRuntime = ({
       scheduledTasksRuntime,
       scheduledTaskService,
     });
-    registerPiariumEventRoutes(app, {
-      getPiariumEventClients,
+    registerVarinEventRoutes(app, {
+      getVarinEventClients,
       writeSseEvent,
       requireAuth: uiAuthController.requireAuth,
       ...(surfaceBridge ? { surfaceBridge } : {}),
@@ -296,8 +296,8 @@ export const createPlatformRoutesRuntime = ({
       ...(documents ? { documents } : {}),
       ...(onGitStatus ? { onGitStatus } : {}),
     });
-    registerMagicPromptRoutes(app, { fsPromises, path, piariumDataDir });
-    registerSessionFoldersRoutes(app, { fsPromises, path, piariumDataDir });
+    registerMagicPromptRoutes(app, { fsPromises, path, varinDataDir });
+    registerSessionFoldersRoutes(app, { fsPromises, path, varinDataDir });
     registerFsRoutes(app, {
       os,
       path,
@@ -308,7 +308,7 @@ export const createPlatformRoutesRuntime = ({
       resolveProjectDirectory,
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
-      piariumUserConfigRoot,
+      varinUserConfigRoot,
       ...(documents ? { documents } : {}),
       ...(fileResources ? { fileResources } : {}),
     });

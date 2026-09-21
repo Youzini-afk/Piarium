@@ -4,7 +4,7 @@ import type {
   PiMessage,
   PiSessionEntry,
   PiUserContent,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 
 export interface PiSessionExportMetadata {
   cwd?: string | null;

@@ -14,9 +14,9 @@ import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/app
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { isTerminalShell } from '@/lib/terminalShell';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { applyAuthoritativeSettings } from '@/lib/settingsApplication';
@@ -30,12 +30,12 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
   if (typeof window === 'undefined') {
     return;
   }
-  if (typeof window.__PIARIUM_HOME__ === 'string' && window.__PIARIUM_HOME__.length > 0) {
+  if (typeof window.__VARIN_HOME__ === 'string' && window.__VARIN_HOME__.length > 0) {
     return;
   }
 
   try {
-    window.__PIARIUM_HOME__ = homeDirectory;
+    window.__VARIN_HOME__ = homeDirectory;
   } catch {
     /* read-only contextBridge property — leave preload-seeded value */
   }
@@ -96,12 +96,12 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.pwaAppName === 'string') {
     const normalized = settings.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
     if (normalized.length > 0) {
-      localStorage.setItem('piarium.pwaName', normalized);
+      localStorage.setItem('varin.pwaName', normalized);
     } else {
-      localStorage.removeItem('piarium.pwaName');
+      localStorage.removeItem('varin.pwaName');
     }
   } else {
-    localStorage.removeItem('piarium.pwaName');
+    localStorage.removeItem('varin.pwaName');
   }
   setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
   if (typeof settings.dictationEnabled === 'boolean') {
@@ -124,7 +124,7 @@ const dispatchSettingsSynced = (settings: DesktopSettings): void => {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<DesktopSettings>('piarium:settings-synced', { detail: settings }));
+  window.dispatchEvent(new CustomEvent<DesktopSettings>('varin:settings-synced', { detail: settings }));
 };
 
 type SettingsSaveState = 'idle' | 'saving' | 'error';
@@ -169,7 +169,7 @@ const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void =>
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('piarium:settings-save-state', { detail: state }));
+  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('varin:settings-save-state', { detail: state }));
 };
 
 type PersistApi = {

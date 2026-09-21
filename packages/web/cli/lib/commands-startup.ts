@@ -14,7 +14,7 @@ async function startupCommand(options: CliOptions, action: unknown = 'status'): 
   const normalized = typeof action === 'string' ? action.trim().toLowerCase() : 'status';
   if (!['status', 'enable', 'disable'].includes(normalized)) {
     throw new TunnelCliError(
-      `Unknown startup subcommand '${action}'. Use 'piarium startup --help'.`,
+      `Unknown startup subcommand '${action}'. Use 'varin startup --help'.`,
       EXIT_CODE.USAGE_ERROR
     );
   }
@@ -37,7 +37,7 @@ async function startupCommand(options: CliOptions, action: unknown = 'status'): 
   }
   if (normalized === 'enable' && result.activeState === 'failed') {
     throw new TunnelCliError(
-      'Startup service was installed but failed to start. Run `journalctl --user -u piarium.service -n 80 --no-pager` for details.',
+      'Startup service was installed but failed to start. Run `journalctl --user -u varin.service -n 80 --no-pager` for details.',
       EXIT_CODE.GENERAL_ERROR
     );
   }
@@ -51,13 +51,13 @@ async function startupCommand(options: CliOptions, action: unknown = 'status'): 
     return;
   }
 
-  clackIntro('Piarium Startup');
+  clackIntro('Varin Startup');
   logStatus(result.enabled ? 'success' : 'info', `startup ${result.enabled ? 'enabled' : 'disabled'}`, result.servicePath || undefined);
   if (typeof result.activeState === 'string') {
     logStatus(result.active ? 'success' : result.activeState === 'failed' ? 'error' : 'warning', `service ${result.activeState}`);
   }
   if (normalized === 'enable') {
-    logStatus('info', 'service command', 'piarium serve --foreground');
+    logStatus('info', 'service command', 'varin serve --foreground');
   }
   clackOutro(normalized === 'status' ? 'status complete' : `${normalized} complete`);
 }

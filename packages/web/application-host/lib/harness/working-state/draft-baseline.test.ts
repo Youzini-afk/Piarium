@@ -16,7 +16,7 @@ describe("draft-baseline", () => {
   let database: SqliteDatabase;
 
   beforeEach(async () => {
-    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-draft-test-"));
+    tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "varin-draft-test-"));
     const workspace = path.join(tempDir, "workspace");
     const root = path.join(tempDir, "recovery");
     await fs.promises.mkdir(workspace, { recursive: true });

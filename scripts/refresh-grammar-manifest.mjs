@@ -239,7 +239,7 @@ const readCommittedVersions = async () => {
 const main = async () => {
   const useLatest = process.argv.includes("--latest");
   const pinned = useLatest ? new Map() : await readCommittedVersions();
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-grammar-manifest-"));
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "varin-grammar-manifest-"));
   const runtime = await loadWebTreeSitter();
   const packs = {};
   const skipped = {};

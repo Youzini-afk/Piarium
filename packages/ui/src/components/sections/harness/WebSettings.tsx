@@ -1,6 +1,6 @@
 import React from 'react';
-import type { HarnessWebSearchProvider } from '@piarium/protocol';
-import { getRuntimeKey, runtimeFetch } from '@piarium/application-client';
+import type { HarnessWebSearchProvider } from '@varin/protocol';
+import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
@@ -99,7 +99,7 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
     if (providerRef.current !== nextProvider) return;
     if (nextProvider === 'default') { update({ web: { search: undefined } }); return; }
     if (nextProvider === 'searxng' && !nextEndpoint.trim()) return;
-    update({ web: { search: { provider: nextProvider, endpoint: nextEndpoint.trim() || undefined, credentialRef: `piarium-web-search-${nextProvider}` } } });
+    update({ web: { search: { provider: nextProvider, endpoint: nextEndpoint.trim() || undefined, credentialRef: `varin-web-search-${nextProvider}` } } });
   };
   return <>
     <SettingsSection title={t('settings.page.harness.section.web')} settingsItem="harness.web.search" contentClassName="space-y-5">

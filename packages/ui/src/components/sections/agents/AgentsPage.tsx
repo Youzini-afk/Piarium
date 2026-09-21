@@ -6,7 +6,7 @@ import type {
   PiAgentSourceScope,
   PiAgentStatus,
   RuntimeContextTarget,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -21,7 +21,7 @@ import {
   runPiAgentProviderAction,
 } from '@/lib/pi-runtime/agent-providers';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 import { AgentProviderActionDialog } from './AgentProviderActionDialog';
@@ -43,41 +43,41 @@ interface AgentActionState {
   success?: boolean;
 }
 
-const UNSUPPORTED_VALUE_KEY = 'settings.piarium.pluginSettings.field.unsupportedValue' as const;
+const UNSUPPORTED_VALUE_KEY = 'settings.varin.pluginSettings.field.unsupportedValue' as const;
 
 const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
-  delegatable: 'settings.piarium.pluginSettings.subagents.kind.delegatable',
-  internal: 'settings.piarium.agents.kind.internal',
-  primary: 'settings.piarium.agents.kind.primary',
-  profile: 'settings.piarium.agents.kind.profile',
-  service: 'settings.piarium.agents.kind.service',
-  workflow: 'settings.piarium.pluginSettings.subagents.kind.workflow',
+  delegatable: 'settings.varin.pluginSettings.subagents.kind.delegatable',
+  internal: 'settings.varin.agents.kind.internal',
+  primary: 'settings.varin.agents.kind.primary',
+  profile: 'settings.varin.agents.kind.profile',
+  service: 'settings.varin.agents.kind.service',
+  workflow: 'settings.varin.pluginSettings.subagents.kind.workflow',
 };
 
 const AGENT_STATUS_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
-  available: 'settings.piarium.pluginSettings.subagents.status.available',
-  disabled: 'settings.piarium.pluginSettings.subagents.status.disabled',
-  error: 'settings.piarium.pluginSettings.subagents.status.error',
-  unavailable: 'settings.piarium.pluginSettings.subagents.status.unavailable',
-  unconfigured: 'settings.piarium.pluginSettings.subagents.status.unconfigured',
+  available: 'settings.varin.pluginSettings.subagents.status.available',
+  disabled: 'settings.varin.pluginSettings.subagents.status.disabled',
+  error: 'settings.varin.pluginSettings.subagents.status.error',
+  unavailable: 'settings.varin.pluginSettings.subagents.status.unavailable',
+  unconfigured: 'settings.varin.pluginSettings.subagents.status.unconfigured',
 };
 
 const AGENT_THINKING_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
-  off: 'settings.piarium.pluginSettings.subagents.thinking.off',
-  minimal: 'settings.piarium.pluginSettings.subagents.thinking.minimal',
-  low: 'settings.piarium.pluginSettings.subagents.thinking.low',
-  medium: 'settings.piarium.pluginSettings.subagents.thinking.medium',
-  high: 'settings.piarium.pluginSettings.subagents.thinking.high',
-  xhigh: 'settings.piarium.pluginSettings.subagents.thinking.xhigh',
-  max: 'settings.piarium.pluginSettings.subagents.thinking.max',
+  off: 'settings.varin.pluginSettings.subagents.thinking.off',
+  minimal: 'settings.varin.pluginSettings.subagents.thinking.minimal',
+  low: 'settings.varin.pluginSettings.subagents.thinking.low',
+  medium: 'settings.varin.pluginSettings.subagents.thinking.medium',
+  high: 'settings.varin.pluginSettings.subagents.thinking.high',
+  xhigh: 'settings.varin.pluginSettings.subagents.thinking.xhigh',
+  max: 'settings.varin.pluginSettings.subagents.thinking.max',
 };
 
 const AGENT_SOURCE_SCOPE_LABEL_KEYS: Record<PiAgentSourceScope, I18nKey> = {
-  builtin: 'settings.piarium.pluginSettings.subagents.scope.builtin',
-  package: 'settings.piarium.pluginSettings.subagents.scope.package',
-  project: 'settings.piarium.pluginSettings.subagents.scope.project',
-  runtime: 'settings.piarium.pluginSettings.subagents.scope.runtime',
-  user: 'settings.piarium.pluginSettings.subagents.scope.user',
+  builtin: 'settings.varin.pluginSettings.subagents.scope.builtin',
+  package: 'settings.varin.pluginSettings.subagents.scope.package',
+  project: 'settings.varin.pluginSettings.subagents.scope.project',
+  runtime: 'settings.varin.pluginSettings.subagents.scope.runtime',
+  user: 'settings.varin.pluginSettings.subagents.scope.user',
 };
 
 function displayLocalizedValue(
@@ -283,23 +283,23 @@ export const AgentsPage: React.FC = () => {
     if (providerId !== 'pi-subagents') return action.label;
     switch (action.id) {
       case 'create-agent':
-        return t('settings.piarium.agents.definition.createAgent');
+        return t('settings.varin.agents.definition.createAgent');
       case 'models':
-        return t('settings.piarium.agents.actions.models');
+        return t('settings.varin.agents.actions.models');
       case 'inspect':
-        return t('settings.piarium.agents.actions.inspect');
+        return t('settings.varin.agents.actions.inspect');
       case 'update':
         return t(agentKind === 'workflow'
-          ? 'settings.piarium.agents.definition.editWorkflow'
-          : 'settings.piarium.agents.definition.editAgent');
+          ? 'settings.varin.agents.definition.editWorkflow'
+          : 'settings.varin.agents.definition.editAgent');
       case 'delete':
         return t('settings.common.actions.delete');
       case 'eject':
-        return t('settings.piarium.agents.actions.copyToScope');
+        return t('settings.varin.agents.actions.copyToScope');
       case 'disable':
-        return t('settings.piarium.agents.actions.disable');
+        return t('settings.varin.agents.actions.disable');
       case 'enable':
-        return t('settings.piarium.agents.actions.enable');
+        return t('settings.varin.agents.actions.enable');
       case 'reset':
         return t('settings.common.actions.reset');
       default:
@@ -371,7 +371,7 @@ export const AgentsPage: React.FC = () => {
             {displayAgentStatus(selectedAgent.status, t)}
           </AgentBadge>
         ) : null}
-        description={selectedAgent?.description ?? t('settings.piarium.agents.description')}
+        description={selectedAgent?.description ?? t('settings.varin.agents.description')}
         headerEnd={(
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setSettingsPage('fleet')}>
@@ -380,14 +380,14 @@ export const AgentsPage: React.FC = () => {
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={catalogState.loading}>
               <Icon name="refresh" className={cn('size-4', catalogState.loading && 'animate-spin')} />
-              {t('settings.piarium.agents.actions.refresh')}
+              {t('settings.varin.agents.actions.refresh')}
             </Button>
           </div>
         )}
       >
       {catalog.diagnostics.length > 0 ? (
         <SettingsSection
-          title={t('settings.piarium.agents.diagnostics.title')}
+          title={t('settings.varin.agents.diagnostics.title')}
           settingsItem="agents.diagnostics"
         >
           <div className="space-y-2">
@@ -418,33 +418,33 @@ export const AgentsPage: React.FC = () => {
             </div>
 
             <dl className="mt-3 divide-y divide-border/50">
-                  <DetailRow label={t('settings.piarium.agents.detail.provider')} value={selectedProvider?.label ?? selectedAgent.providerId} />
-                  <DetailRow label={t('settings.piarium.agents.detail.kind')} value={displayAgentKind(selectedAgent.kind, t)} />
-                  <DetailRow label={t('settings.piarium.agents.detail.source')} value={displayAgentSourceScope(selectedAgent.source.scope, t)} />
+                  <DetailRow label={t('settings.varin.agents.detail.provider')} value={selectedProvider?.label ?? selectedAgent.providerId} />
+                  <DetailRow label={t('settings.varin.agents.detail.kind')} value={displayAgentKind(selectedAgent.kind, t)} />
+                  <DetailRow label={t('settings.varin.agents.detail.source')} value={displayAgentSourceScope(selectedAgent.source.scope, t)} />
                   {selectedAgent.source.path ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.path')} value={<span className="font-mono typography-micro">{selectedAgent.source.path}</span>} />
+                    <DetailRow label={t('settings.varin.agents.detail.path')} value={<span className="font-mono typography-micro">{selectedAgent.source.path}</span>} />
                   ) : null}
                   {selectedAgent.source.packageName ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.package')} value={selectedAgent.source.packageName} />
+                    <DetailRow label={t('settings.varin.agents.detail.package')} value={selectedAgent.source.packageName} />
                   ) : null}
                   {selectedInvocation ? (
                     <DetailRow
-                      label={t('settings.piarium.agents.detail.invocation')}
+                      label={t('settings.varin.agents.detail.invocation')}
                       value={<code className="font-mono typography-micro">{selectedInvocation}</code>}
                     />
                   ) : null}
                   <DetailRow
-                    label={t('settings.piarium.agents.detail.model')}
-                    value={selectedAgent.model ?? t('settings.piarium.agents.detail.inherited')}
+                    label={t('settings.varin.agents.detail.model')}
+                    value={selectedAgent.model ?? t('settings.varin.agents.detail.inherited')}
                   />
                   {selectedAgent.thinking ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.thinking')} value={displayAgentThinking(selectedAgent.thinking, t)} />
+                    <DetailRow label={t('settings.varin.agents.detail.thinking')} value={displayAgentThinking(selectedAgent.thinking, t)} />
                   ) : null}
                   {selectedAgent.fallbackModels?.length ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.fallbacks')} value={selectedAgent.fallbackModels.join(' → ')} />
+                    <DetailRow label={t('settings.varin.agents.detail.fallbacks')} value={selectedAgent.fallbackModels.join(' → ')} />
                   ) : null}
                   {selectedAgent.aliases?.length ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.aliases')} value={selectedAgent.aliases.join(', ')} />
+                    <DetailRow label={t('settings.varin.agents.detail.aliases')} value={selectedAgent.aliases.join(', ')} />
                   ) : null}
             </dl>
 
@@ -454,7 +454,7 @@ export const AgentsPage: React.FC = () => {
                       {activeProvider.configuration ? (
                         <Button type="button" variant="ghost" size="sm" onClick={() => openConfiguration(activeProvider.configuration)}>
                           <Icon name="settings-3" className="size-4" />
-                          {t('settings.piarium.agents.actions.configure')}
+                          {t('settings.varin.agents.actions.configure')}
                         </Button>
                       ) : null}
                       {activeProvider.actions.map((action) => {
@@ -534,8 +534,8 @@ export const AgentsPage: React.FC = () => {
           <div className="rounded-xl border border-dashed border-border/70 p-5 text-center">
             <div className="typography-ui-label font-medium text-foreground">
               {catalog.agents.length === 0
-                ? t('settings.piarium.agents.empty.title')
-                : t('settings.piarium.agents.catalog.noMatches')}
+                ? t('settings.varin.agents.empty.title')
+                : t('settings.varin.agents.catalog.noMatches')}
             </div>
             {catalog.agents.length === 0 ? (
               <div className="mt-4 flex flex-wrap justify-center gap-2">

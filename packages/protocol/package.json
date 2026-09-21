@@ -1,10 +1,10 @@
 {
-  "name": "@piarium/protocol",
+  "name": "@varin/protocol",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Versioned wire protocol between Piarium clients and Pi host workers.",
+  "description": "Versioned wire protocol between Varin clients and Pi host workers.",
   "files": [
     "dist"
   ],

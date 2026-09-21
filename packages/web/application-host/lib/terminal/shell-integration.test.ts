@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   createShellIntegrationParser,
   encodeShellIntegrationPayload,
-  formatPiariumOscFrame,
+  formatVarinOscFrame,
   parseShellIntegrationBody,
-  piariumShellIntegrationId,
+  varinShellIntegrationId,
 } from "./shell-integration.js";
 
 const osc = (terminalId: string, body: string, generation = 0): string => (
-  formatPiariumOscFrame(piariumShellIntegrationId(terminalId, generation), body)
+  formatVarinOscFrame(varinShellIntegrationId(terminalId, generation), body)
 );
 
 describe("shell integration parser", () => {

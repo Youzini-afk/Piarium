@@ -15,7 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
-import { sliceUtf8ByBytes } from "@piarium/protocol";
+import { sliceUtf8ByBytes } from "@varin/protocol";
 import type {
   ExperimentArtifactState,
   ExperimentArtifactView,
@@ -32,7 +32,7 @@ import type {
   ResourceMachineView,
   ExperimentSpecView,
   ExperimentSubmitParams,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import { HarnessServiceError } from "./service-error.js";
 import {

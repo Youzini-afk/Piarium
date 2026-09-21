@@ -1,5 +1,5 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { sliceUtf8ByBytes, type OutputRef } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type OutputRef } from "@varin/protocol";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 const DEFAULT_VISIBLE_BYTES = 32768;

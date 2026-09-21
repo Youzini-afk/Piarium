@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test';
-import type { PiariumExtensionHostStateSnapshot } from '@piarium/extension-contract';
+import type { VarinExtensionHostStateSnapshot } from '@varin/extension-contract';
 
 let refreshCount = 0;
 const catalogSurfaceRuntime = {
@@ -9,7 +9,7 @@ const catalogSurfaceRuntime = {
 
 const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
 
-const snapshot = (): PiariumExtensionHostStateSnapshot => ({
+const snapshot = (): VarinExtensionHostStateSnapshot => ({
   catalog: {
     authoritative: true,
     diagnostics: [],
@@ -19,7 +19,7 @@ const snapshot = (): PiariumExtensionHostStateSnapshot => ({
       desired: { enabled: false, revision: 1, updatedAt: '2026-08-14T00:00:00.000Z' },
       installedAt: '2026-08-14T00:00:00.000Z',
       manifest: {
-        engines: { piarium: '*' },
+        engines: { varin: '*' },
         id: 'dev.example.removable',
         schemaVersion: 1,
         version: '1.0.0',
@@ -61,16 +61,16 @@ const snapshot = (): PiariumExtensionHostStateSnapshot => ({
   },
 });
 
-const removedCatalog = (): PiariumExtensionHostStateSnapshot['catalog'] => ({
+const removedCatalog = (): VarinExtensionHostStateSnapshot['catalog'] => ({
   ...snapshot().catalog,
   extensions: [],
   revision: 2,
 });
 
 const withRevision = (
-  current: PiariumExtensionHostStateSnapshot,
+  current: VarinExtensionHostStateSnapshot,
   revision: number,
-): PiariumExtensionHostStateSnapshot => ({
+): VarinExtensionHostStateSnapshot => ({
   ...current,
   catalog: { ...current.catalog, revision },
   revision,
@@ -85,9 +85,9 @@ const waitUntil = async (predicate: () => boolean): Promise<void> => {
 };
 
 beforeEach(async () => {
-  const { resetPiariumExtensionCatalogForTests } = await import('./catalog-store');
+  const { resetVarinExtensionCatalogForTests } = await import('./catalog-store');
   refreshCount = 0;
-  resetPiariumExtensionCatalogForTests(catalogSurfaceRuntime);
+  resetVarinExtensionCatalogForTests(catalogSurfaceRuntime);
 });
 
 test('rebuilds the authoritative baseline after a failed wait and resumes long-polling', async () => {
@@ -97,11 +97,11 @@ test('rebuilds the authoritative baseline after a failed wait and resumes long-p
   let hostStateReads = 0;
   let waitCalls = 0;
   const waitRequests: unknown[] = [];
-  let resolveWait: (next: PiariumExtensionHostStateSnapshot) => void = () => undefined;
+  let resolveWait: (next: VarinExtensionHostStateSnapshot) => void = () => undefined;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __PIARIUM_RUNTIME_APIS__: {
+      __VARIN_RUNTIME_APIS__: {
         extensions: {
           hostState: async () => {
             hostStateReads += 1;
@@ -111,7 +111,7 @@ test('rebuilds the authoritative baseline after a failed wait and resumes long-p
             waitCalls += 1;
             waitRequests.push(request);
             if (waitCalls === 1) throw new Error('relay disconnected');
-            return new Promise<PiariumExtensionHostStateSnapshot>((resolve) => {
+            return new Promise<VarinExtensionHostStateSnapshot>((resolve) => {
               resolveWait = resolve;
             });
           },
@@ -120,14 +120,14 @@ test('rebuilds the authoritative baseline after a failed wait and resumes long-p
     },
   });
   const {
-    getPiariumExtensionCatalogState,
-    startPiariumExtensionCatalog,
-    stopPiariumExtensionCatalog,
+    getVarinExtensionCatalogState,
+    startVarinExtensionCatalog,
+    stopVarinExtensionCatalog,
   } = await import('./catalog-store');
 
-  await startPiariumExtensionCatalog();
+  await startVarinExtensionCatalog();
   await waitUntil(() => hostStateReads === 2 && waitCalls === 2);
-  expect(getPiariumExtensionCatalogState().snapshot?.revision).toBe(2);
+  expect(getVarinExtensionCatalogState().snapshot?.revision).toBe(2);
   expect(waitRequests).toEqual([
     { hostId, revision: 1 },
     { hostId, revision: 2 },
@@ -135,9 +135,9 @@ test('rebuilds the authoritative baseline after a failed wait and resumes long-p
 
   resolveWait(changed);
   await waitUntil(() => waitCalls === 3);
-  expect(getPiariumExtensionCatalogState().snapshot?.revision).toBe(3);
+  expect(getVarinExtensionCatalogState().snapshot?.revision).toBe(3);
   expect(waitRequests[2]).toEqual({ hostId, revision: 3 });
-  stopPiariumExtensionCatalog();
+  stopVarinExtensionCatalog();
 });
 
 test('recovers when the initial authoritative Host-state read fails', async () => {
@@ -147,7 +147,7 @@ test('recovers when the initial authoritative Host-state read fails', async () =
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __PIARIUM_RUNTIME_APIS__: {
+      __VARIN_RUNTIME_APIS__: {
         extensions: {
           hostState: async () => {
             hostStateReads += 1;
@@ -163,17 +163,17 @@ test('recovers when the initial authoritative Host-state read fails', async () =
     },
   });
   const {
-    getPiariumExtensionCatalogState,
-    startPiariumExtensionCatalog,
-    stopPiariumExtensionCatalog,
+    getVarinExtensionCatalogState,
+    startVarinExtensionCatalog,
+    stopVarinExtensionCatalog,
   } = await import('./catalog-store');
 
-  await startPiariumExtensionCatalog();
+  await startVarinExtensionCatalog();
   expect(hostStateReads).toBe(2);
   expect(waitCalls).toBe(1);
-  expect(getPiariumExtensionCatalogState().snapshot?.catalog.hostId).toBe(hostId);
-  expect(getPiariumExtensionCatalogState().error).toBeNull();
-  stopPiariumExtensionCatalog();
+  expect(getVarinExtensionCatalogState().snapshot?.catalog.hostId).toBe(hostId);
+  expect(getVarinExtensionCatalogState().error).toBeNull();
+  stopVarinExtensionCatalog();
 });
 
 test('stop cancels the wait and rejects a late completion from the old owner', async () => {
@@ -186,13 +186,13 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
     services: { ...oldSnapshot.services, hostId: newHostId },
     workbench: { ...oldSnapshot.workbench, hostId: newHostId },
   };
-  const waitResolvers: Array<(next: PiariumExtensionHostStateSnapshot) => void> = [];
+  const waitResolvers: Array<(next: VarinExtensionHostStateSnapshot) => void> = [];
   let oldWaitCalls = 0;
   let newHostStateReads = 0;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __PIARIUM_RUNTIME_APIS__: {
+      __VARIN_RUNTIME_APIS__: {
         extensions: {
           hostState: async () => {
             newHostStateReads += 1;
@@ -200,7 +200,7 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
           },
           waitForHostState: async () => {
             oldWaitCalls += 1;
-            return new Promise<PiariumExtensionHostStateSnapshot>((resolve) => {
+            return new Promise<VarinExtensionHostStateSnapshot>((resolve) => {
               waitResolvers.push(resolve);
             });
           },
@@ -209,21 +209,21 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
     },
   });
   const {
-    getPiariumExtensionCatalogState,
-    startPiariumExtensionCatalog,
-    stopPiariumExtensionCatalog,
+    getVarinExtensionCatalogState,
+    startVarinExtensionCatalog,
+    stopVarinExtensionCatalog,
   } = await import('./catalog-store');
 
-  await startPiariumExtensionCatalog();
+  await startVarinExtensionCatalog();
   await waitUntil(() => oldWaitCalls === 1);
-  stopPiariumExtensionCatalog();
-  await startPiariumExtensionCatalog();
-  expect(getPiariumExtensionCatalogState().snapshot?.catalog.hostId).toBe(newHostId);
+  stopVarinExtensionCatalog();
+  await startVarinExtensionCatalog();
+  expect(getVarinExtensionCatalogState().snapshot?.catalog.hostId).toBe(newHostId);
 
   waitResolvers[0]?.({ ...oldSnapshot, revision: 99, catalog: { ...oldSnapshot.catalog, revision: 99 } });
   await new Promise((resolve) => setTimeout(resolve, 5));
-  expect(getPiariumExtensionCatalogState().snapshot?.catalog.hostId).toBe(newHostId);
-  stopPiariumExtensionCatalog();
+  expect(getVarinExtensionCatalogState().snapshot?.catalog.hostId).toBe(newHostId);
+  stopVarinExtensionCatalog();
 });
 
 for (const deleteData of [false, true] as const) {
@@ -233,7 +233,7 @@ for (const deleteData of [false, true] as const) {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
-        __PIARIUM_RUNTIME_APIS__: {
+        __VARIN_RUNTIME_APIS__: {
           extensions: {
             hostState: async () => current,
             removeExtension: async (request: unknown) => {
@@ -245,8 +245,8 @@ for (const deleteData of [false, true] as const) {
         },
       },
     });
-    const { removePiariumExtension } = await import('./catalog-store');
-    await removePiariumExtension('dev.example.removable', deleteData);
+    const { removeVarinExtension } = await import('./catalog-store');
+    await removeVarinExtension('dev.example.removable', deleteData);
     expect(requests).toEqual([{
       deleteData,
       expectedRevision: 1,
@@ -262,7 +262,7 @@ test('setEnabled only mutates catalog desired state', async () => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      __PIARIUM_RUNTIME_APIS__: {
+      __VARIN_RUNTIME_APIS__: {
         extensions: {
           hostState: async () => current,
           setEnabled: async (extensionId: string, enabled: boolean, expectedRevision: number) => {
@@ -282,18 +282,18 @@ test('setEnabled only mutates catalog desired state', async () => {
       },
     },
   });
-  const { setPiariumExtensionEnabled } = await import('./catalog-store');
-  await setPiariumExtensionEnabled('piarium.builtin.agent-workspace', false);
-  expect(calls).toEqual([['piarium.builtin.agent-workspace', false, 1]]);
+  const { setVarinExtensionEnabled } = await import('./catalog-store');
+  await setVarinExtensionEnabled('varin.builtin.agent-workspace', false);
+  expect(calls).toEqual([['varin.builtin.agent-workspace', false, 1]]);
   expect(refreshCount).toBe(0);
 });
 
 test('exposes catalog watch generation so in-flight shell candidates can abort', async () => {
   const {
-    getPiariumExtensionCatalogWatchGeneration,
-    resetPiariumExtensionCatalogForTests,
+    getVarinExtensionCatalogWatchGeneration,
+    resetVarinExtensionCatalogForTests,
   } = await import('./catalog-store');
-  const before = getPiariumExtensionCatalogWatchGeneration();
-  resetPiariumExtensionCatalogForTests();
-  expect(getPiariumExtensionCatalogWatchGeneration()).toBeGreaterThan(before);
+  const before = getVarinExtensionCatalogWatchGeneration();
+  resetVarinExtensionCatalogForTests();
+  expect(getVarinExtensionCatalogWatchGeneration()).toBeGreaterThan(before);
 });

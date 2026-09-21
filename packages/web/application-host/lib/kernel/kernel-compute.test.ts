@@ -13,9 +13,9 @@ import { createTreeSitterStructureProvider } from "../structure/tree-sitter-prov
 import { TYPESCRIPT_DEFINITION_QUERY, TYPESCRIPT_IMPORT_QUERY, TYPESCRIPT_LITERAL_CALL_QUERY } from "../structure/queries.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repo, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repo, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const available = await fs.stat(kernelPath).then(() => true, () => false);
-if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native computation acceptance requires a release kernel");
+if (!available && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native computation acceptance requires a release kernel");
 const it = test.skipIf(!available);
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repo,"package.json"),"utf8")) as { version: string }).version;
 const cleanup: Array<() => Promise<void>> = [];
@@ -23,7 +23,7 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 const data = (r: KernelComputeRecord): Record<string, unknown> => r.data as Record<string, unknown>;
 const sleep = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(),"piarium-compute-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(),"varin-compute-"));
   const workspace = path.join(root,"workspace"); await fs.mkdir(workspace);
   const host = createKernelClient({ hostId:"compute-test",storageRoot:path.join(root,"storage"),kernelPath,buildVersion,allowCargoDevRunner:false });
   cleanup.push(async () => { await host.close(); await fs.rm(root,{recursive:true,force:true}); });

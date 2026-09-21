@@ -3,10 +3,10 @@ import type {
   LanguageSupportInstallResult,
   LanguageSupportStatus,
   LanguageSupportServerInfo,
-} from '@piarium/application-client';
-import { LanguageSupportError, parseLanguageSupportFailureReason } from '@piarium/application-client';
-import { runtimeFetch } from '@piarium/application-client';
-import { getRuntimeEndpointGeneration } from '@piarium/application-client';
+} from '@varin/application-client';
+import { LanguageSupportError, parseLanguageSupportFailureReason } from '@varin/application-client';
+import { runtimeFetch } from '@varin/application-client';
+import { getRuntimeEndpointGeneration } from '@varin/application-client';
 
 const assertGeneration = (generation: number): void => {
   if (generation !== getRuntimeEndpointGeneration()) {

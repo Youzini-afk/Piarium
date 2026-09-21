@@ -1,4 +1,4 @@
-# Piarium 统一文件编辑器平台设计
+# Varin 统一文件编辑器平台设计
 
 Status: current unified editor architecture and acceptance contract
 
@@ -8,15 +8,15 @@ for the editor boundary; it is not a supported integration or compatibility targ
 
 Last updated: 2026-09-02
 
-本文规定 Piarium 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
+本文规定 Varin 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
 集成方式、语言智能契约、扩展边界、性能约束和实施顺序。它取代
 [composable-workbench.md](composable-workbench.md) 中“所有 Surface
 统一使用 CodeMirror 6”的旧引擎决定，但不推翻该文档已经交付的 Document Registry、Editor
-Workbench Kernel、Profile、Piarium 扩展和 Host ownership。
+Workbench Kernel、Profile、Varin 扩展和 Host ownership。
 
 ## 1. 结论
 
-Piarium 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。官方文件编辑路径只有一套能力
+Varin 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。官方文件编辑路径只有一套能力
 内核：
 
 - desktop/web 的 Agent Workspace 与 IDE Workbench 共用 Monaco Editor；
@@ -29,10 +29,10 @@ Piarium 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。�
   CodeMirror。它们不是文件工作台，不建设第二套文件 IDE 能力；
 - 桌面/Web 文件 diff 使用 Monaco diff editor；聊天消息、PR 展示等非文件型只读 diff 可以继续
   使用现有专用 renderer；
-- 不 fork Code OSS，不把外部编辑器扩展误当成 Piarium 扩展；
+- 不 fork Code OSS，不把外部编辑器扩展误当成 Varin 扩展；
 - 社区扩展仍可通过 `editor` contribution 完整替换官方文件编辑器，使用任意框架或渲染技术。
 
-这不是“把 CodeMirror 组件换成 Monaco 组件”。目标是把现有已经正确的 Piarium 文档权威接到
+这不是“把 CodeMirror 组件换成 Monaco 组件”。目标是把现有已经正确的 Varin 文档权威接到
 一个足以承载 VS Code 级交互的文件编辑器平台上，并把当前只接通三项的语言服务补成真实可用的
 能力链。
 
@@ -48,7 +48,7 @@ Piarium 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。�
   分开；
 - Agent 的文件面板与 IDE 中央编辑区都经过 `ResourceEditorHost`，不是两条互不相干的产品路径；
 - Application Host 已拥有 DocumentsAPI、workspace search、LSP、DAP、task 和 test 进程；
-- `editor` contribution 与 `defineEditorMount` 已允许 Piarium 扩展替换资源编辑器；
+- `editor` contribution 与 `defineEditorMount` 已允许 Varin 扩展替换资源编辑器；
 - runtime/workspace generation、expected revision、stale completion 和 owner cleanup 已有明确
   不变量。
 
@@ -117,8 +117,8 @@ Agent 和 IDE 不再用“简版能力”和“完整版能力”区分，而只
 - find/replace、match count、replace all、go to line；
 - folding、word wrap、whitespace、sticky scroll、minimap 与 overview ruler；
 - 单文件与多 view 的稳定 cursor/selection/scroll/fold 恢复；
-- Piarium 主题、字体、字号、tab/space、line ending、format-on-save 等设置；
-- `Mod+S`、统一 Command Palette、Piarium shortcut override 和可见冲突提示；
+- Varin 主题、字体、字号、tab/space、line ending、format-on-save 等设置；
+- `Mod+S`、统一 Command Palette、Varin shortcut override 和可见冲突提示；
 - CJK IME、组合输入、屏幕阅读器、高对比主题和纯键盘操作。
 
 语言 provider 存在时，再增加：
@@ -146,8 +146,8 @@ provider 不能伪装成“0 个结果”或健康状态。
 | Monaco editor view | 当前 view 的 selection、cursor、scroll、focus、可视 widgets 与 decorations | 文档 identity、保存策略、工作区进程 |
 | Editor Workbench Kernel | tabs、groups、provider resolution、view IDs、Profile-independent open state | 正文与语言进程 |
 | `MonacoLanguageBridge` | 把 `RuntimeAPIs.language` 的 typed results 投影成 Monaco providers/markers | spawn、provider selection、私有 LSP transport |
-| Piarium command/shortcut/theme registries | 命令 ID、用户按键覆盖、主题 token 的产品权威 | Monaco 私有配置存储 |
-| Piarium `editor` contribution | 完整替换某类资源的 renderer | 绕过 Document controller 写磁盘 |
+| Varin command/shortcut/theme registries | 命令 ID、用户按键覆盖、主题 token 的产品权威 | Monaco 私有配置存储 |
+| Varin `editor` contribution | 完整替换某类资源的 renderer | 绕过 Document controller 写磁盘 |
 
 Monaco model 是高频交互投影，不是第二个文档权威。任何保存、冲突、Agent 外部修改或 recovery
 判断都由 Document Registry 完成；任何磁盘 mutation 都由 Host 完成。
@@ -160,11 +160,11 @@ Monaco model 是高频交互投影，不是第二个文档权威。任何保存�
 时保留，在 runtime/workspace registry 重建时失效。它不写入项目文件，也不进入公共 extension
 snapshot。
 
-Monaco model URI 使用 Piarium 虚拟 scheme，并至少包含 runtime connection key 与
+Monaco model URI 使用 Varin 虚拟 scheme，并至少包含 runtime connection key 与
 `documentInstanceId`：
 
 ```text
-piarium-document://<runtime-key>/<document-instance-id>
+varin-document://<runtime-key>/<document-instance-id>
 ```
 
 真实 `workspaceId/resourceId` 保存在 binding metadata 中，不放入日志或 worker 名称。这样：
@@ -240,7 +240,7 @@ applyEdits(identity, {
 - Registry 计算新 buffer、dirty 与 `lastChanges`，不让 React 先拼完整字符串再回写；
 - 同步失败保留 model 与 Registry 两份 snapshot 到诊断/recovery，不静默丢弃用户刚输入的内容。
 
-公共 `PiariumEditorDocumentController` 可以增量增加 framework-neutral `applyEdits`，但不暴露
+公共 `VarinEditorDocumentController` 可以增量增加 framework-neutral `applyEdits`，但不暴露
 Monaco 类型。现有 `replaceContent` 继续服务低频或简单 custom editor；是否在下一个公开 SDK major
 删除它，应依据真实消费者而不是在本次迁移中制造兼容层。
 
@@ -339,18 +339,18 @@ built-in semantic worker。必须验证：
 - dev HMR；
 - production Web 相对/绝对 base；
 - PWA precache 与版本更新；
-- Electron `piarium-ui://` packaged assets；
+- Electron `varin-ui://` packaged assets；
 - cloud HTTPS 与严格 CSP；
 - worker 加载失败显示 editor-local failure，并保留 Document buffer 与恢复/重新加载动作。
 
-Piarium 的 Host LSP 不通过 Monaco worker spawn。worker 只承担 Monaco 自身的编辑/本地 tokenization
+Varin 的 Host LSP 不通过 Monaco worker spawn。worker 只承担 Monaco 自身的编辑/本地 tokenization
 工作；语言 server 进程继续由 Application Host 管理。
 
 ## 8. 主题、设置、命令与按键
 
 ### 8.1 单一主题权威
 
-Piarium theme token 是唯一主题来源。新增 `createPiariumMonacoTheme` 投影：
+Varin theme token 是唯一主题来源。新增 `createVarinMonacoTheme` 投影：
 
 - editor background/foreground、line number、selection、cursor、inactive selection；
 - find match、bracket、indent guide、whitespace、gutter、minimap、overview ruler；
@@ -376,24 +376,24 @@ Theme switch 调用 `defineTheme/setTheme`，不重建 model 或 editor。Monaco
 
 ### 8.3 命令与 shortcuts
 
-Piarium command registry 是命令 ID 权威。Monaco action 通过 adapter 注册到同一命令层，菜单、
+Varin command registry 是命令 ID 权威。Monaco action 通过 adapter 注册到同一命令层，菜单、
 Command Palette 和快捷键不维护第二个互不知情的映射。至少接通 save、save all、find、replace、go
 to line/symbol、format、rename、quick fix、definition/references、fold、toggle wrap、toggle minimap、
 multi-cursor 和 editor focus group navigation。
 
 用户 shortcut override 高于官方默认；同一按键冲突必须可见。Monaco 自带默认按键作为 editor
-上下文内的基础层，不能覆盖用户在 Piarium 中显式配置的命令。
+上下文内的基础层，不能覆盖用户在 Varin 中显式配置的命令。
 
 当前已持久化的 Vim 设置实际上还没有文件 editor 消费者；迁移不能把这个既有缺口继续带进新的
 默认 editor。Phase 1 完成候选 adapter 的源码、依赖与打包审查，Phase 2 把 Vim 在目标 Monaco
-版本、IME、search/replace、Piarium commands 和 dispose/re-enable 上真实可用列为 desktop/web
+版本、IME、search/replace、Varin commands 和 dispose/re-enable 上真实可用列为 desktop/web
 cutover 的退出门槛。未通过时不得切换默认文件 renderer。若现成包依赖 Monaco 私有 API，则由
 独立 editor behavior extension 包装并固定兼容证据，不让它成为 Core 文档权威。
 
 2026-08-25 的 Phase 1 审查结论：不直接采用 `monaco-vim@0.4.4`。其发布源码仍导入私有
 `ShiftCommand`，核心 adapter 使用 `@ts-nocheck` 和旧版数值 option ID，`charCoords` 也没有返回
 真实像素坐标。Phase 2 应以现有 `@replit/codemirror-vim` 状态机和 Monaco 0.56 公开 API 建立
-Piarium-owned adapter，或先修正上述问题并取得可复现的上游版本；不能用 private import 绕过
+Varin-owned adapter，或先修正上述问题并取得可复现的上游版本；不能用 private import 绕过
 cutover gate。
 
 ## 9. Language intelligence
@@ -401,7 +401,7 @@ cutover gate。
 ### 9.1 不直接绕过现有 Host
 
 Monaco 0.56 虽提供 native LSP client/transport API，本阶段不让 renderer 直接连接 language server。
-Piarium 已有更重要的 Host 语义：workspace trust、provider owner/generation、remote/cloud execution、
+Varin 已有更重要的 Host 语义：workspace trust、provider owner/generation、remote/cloud execution、
 typed failure、stale rejection、进程清理和扩展 asset resolution。绕开它会制造第二个 LSP owner。
 
 `MonacoLanguageBridge` 在 renderer 内只做公开类型转换：
@@ -429,7 +429,7 @@ Monaco provider request
 - formatting、semantic tokens、inlay hints、document highlights、folding/selection ranges、links、colors；
 - 每个 response 的 provider ID/generation、document version 和 typed absent/stale/failure。
 
-Markdown 一律按不可信内容渲染；URI/commands 经过 Piarium opener/command authority，不直接执行任意
+Markdown 一律按不可信内容渲染；URI/commands 经过 Varin opener/command authority，不直接执行任意
 scheme。Extension/provider disable 后清除自己的 markers 和 registrations，不影响其他 provider。
 
 ### 9.3 WorkspaceEdit
@@ -455,7 +455,7 @@ TypeScript/JavaScript language extension。它通过现有 `defineLanguageProvid
 path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 supervisor。
 
 激活条件是受支持 Surface 上有可见的 JS/TS document；最后一个 owner 消失后按 provider 生命周期
-回收。Python、Rust 等沿相同 Piarium extension contract 接入。其他第一方 language package 应以
+回收。Python、Rust 等沿相同 Varin extension contract 接入。其他第一方 language package 应以
 真实用户需求和维护能力增加，不做 Core 白名单。
 
 ## 10. Debug、test、Git 与 Agent 协作
@@ -478,32 +478,32 @@ path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 s
 
 移动端不是降级成另一套产品状态：
 
-- mobile `piarium.builtin.text` 使用 document-bound CodeMirror adapter；
+- mobile `varin.builtin.text` 使用 document-bound CodeMirror adapter；
 - 读取、编辑、保存、冲突、recovery、Agent attachment 和 language DTO 与 desktop/web 相同；
 - 移动 adapter 只实现适合触屏的呈现和交互，不承诺 minimap、多列布局或 desktop Vim parity；
 - mobile 不下载 Monaco runtime、features、language definitions 或 workers；
 - 官方 IDE Profile 继续不声明 mobile 支持；第三方 mobile editor provider 仍可完整替换官方 adapter。
 
 - Phase 4 更新其 DTO/contract fixtures 只是在保持 Runtime parity，不代表给 webview 增加文件编辑器；
-- 继续拒绝把 `piarium.ide` 或第二套 Settings/Agent Manager/session editor 放回 webview。
+- 继续拒绝把 `varin.ide` 或第二套 Settings/Agent Manager/session editor 放回 webview。
 
 聊天 composer、设置 JSON/JSONC、Prompt、命令参数等嵌入式编辑器继续使用适合其交互的轻量
 组件。它们可以复用 theme/keybinding 基础，但不注册为 workspace document，不启动 LSP，不进入
 Editor Workbench tabs，也不复制文件保存逻辑。
 
-## 12. Piarium 扩展自由度
+## 12. Varin 扩展自由度
 
 ### 12.1 完整替换
 
 现有 `editor` contribution 保持引擎无关。扩展按 language/filename/provider association 选择资源，
-通过 `PiariumEditorDocumentController` 操作文档，可以使用 Monaco、CodeMirror、Canvas、WASM 或
-完全自定义 DOM。官方 Monaco provider 仍使用稳定 ID `piarium.builtin.text`，避免用户 association
+通过 `VarinEditorDocumentController` 操作文档，可以使用 Monaco、CodeMirror、Canvas、WASM 或
+完全自定义 DOM。官方 Monaco provider 仍使用稳定 ID `varin.builtin.text`，避免用户 association
 因内部引擎迁移失效。
 
 ### 12.2 增强官方 Monaco
 
 完整替换不等于每个小增强都要重写 editor。Monaco 主路径稳定后，增加一个由官方 text provider
-拥有的、Surface-local、versioned optional service，例如 `piarium.editor.monaco/v1`。它可以提供：
+拥有的、Surface-local、versioned optional service，例如 `varin.editor.monaco/v1`。它可以提供：
 
 - active view/model 的只读 identity 与生命周期 signal；
 - editor action、context key、keybinding、decoration source、glyph、view zone、content/overlay widget
@@ -522,8 +522,8 @@ extension SDK。
 
 ### 12.3 不混淆两种插件
 
-Pi Package/Pi plugin 继续扩展 Agent runtime；Piarium extension 扩展产品与编辑器。语言 server、
-editor provider、editor augmentation 属于 Piarium extension。不能因为 Monaco 迁移把 Pi plugin
+Pi Package/Pi plugin 继续扩展 Agent runtime；Varin extension 扩展产品与编辑器。语言 server、
+editor provider、editor augmentation 属于 Varin extension。不能因为 Monaco 迁移把 Pi plugin
 设置、生命周期或私有状态拉进 renderer。
 
 ## 13. 性能与可观测性契约
@@ -578,7 +578,7 @@ work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature
 
 - `monaco-editor@0.56.0` 精确依赖；
 - lazy runtime loader、公开 feature/language entrypoints、worker factory；
-- Piarium theme projection 与基础 host component；
+- Varin theme projection 与基础 host component；
 - Web/Electron/PWA asset 与 CSP 适配；
 - bundle/module-graph assertion 和 performance marks；
 - Vim candidate adapter 的源码、依赖、私有 Monaco API 与打包审查；
@@ -590,7 +590,7 @@ work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature
 
 验收：主 entry/preload graph 不含 Monaco；Monaco chunk 不含 `monaco-editor/languages/features/*`
 注册，构建不产出 TS/JS/JSON/CSS/HTML semantic worker；dev HMR、Web base/PWA/cloud CSP 与 packaged
-Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不能把它们后移到 cutover 之后。
+Electron `varin-ui://` worker 矩阵全部通过后才能退出 Phase 1，不能把它们后移到 cutover 之后。
 再跑 UI focused tests/type-check/lint 和 production Web build；无需跑与编辑器无关的全仓 suite。
 
 完成证据（2026-08-25）：
@@ -600,13 +600,13 @@ Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不�
 - source-map module graph 包含公开 editor API、find feature 与 editor worker，不含 root
   `editor.main`、`languages/features/*` 或 TS/JS/JSON/CSS/HTML semantic worker；
 - Vite dev/reload、严格同源 CSP 的 production preview、PWA build 以及 packaged Electron
-  `piarium-ui://` 均完成真实 worker、diff、dispose smoke。Electron 中只创建一个 editor worker，
+  `varin-ui://` 均完成真实 worker、diff、dispose smoke。Electron 中只创建一个 editor worker，
   semantic worker 请求为 0；
 - 50,000 行、1,627,779 字符的诊断样本没有成为产品限制。一次 Windows packaged Electron 基线中，
   CodeMirror 的 model/首绘/编辑到绘制分别为 4.9/19.9/10.9 ms，Monaco 为
   14.6/26.6/8.6 ms。该单次数据只证明样本可用并建立后续比较基线，不作为跨设备性能阈值；
 - Vim 候选审查结论见 §8：不采用依赖 Monaco 私有 API 的 `monaco-vim@0.4.4`，Phase 2 在切换
-  默认 renderer 前交付 Piarium-owned adapter。
+  默认 renderer 前交付 Varin-owned adapter。
 
 ### Phase 2 — Model Registry 与 desktop/web cutover
 
@@ -616,7 +616,7 @@ Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不�
 - incremental `DocumentRegistry.applyEdits`；
 - model ↔ Registry binding、origin/revision/stale 协议；
 - provider-owned view state v2 和一次迁移；
-- Agent/IDE 的 `piarium.builtin.text` desktop/web renderer 改为 Monaco；
+- Agent/IDE 的 `varin.builtin.text` desktop/web renderer 改为 Monaco；
 - 使用现有 `LanguageServicesAPI` DTO 的 baseline Monaco bridge：diagnostics registry → model markers、
   当前 completion 和 hover。Phase 4 在同一 bridge owner 上扩展 rich DTO，不等到 Phase 4 才恢复
   现有能力；
@@ -642,10 +642,10 @@ Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor 
 - workbench snapshot 升级为 v2，视图状态由 provider ID + schema version + JSON payload 持有；v1
   cursor/selection/scroll/fold 字段一次迁移并回写，坏 provider state 只被丢弃，不使工作台快照失效；
 - desktop/Web official text renderer 已切到 Monaco；mobile 使用明确的 CodeMirror adapter，VS Code
-  companion 继续由宿主 editor 持有文件正文且不挂载 Piarium 文件 editor。baseline bridge 恢复
+  companion 继续由宿主 editor 持有文件正文且不挂载 Varin 文件 editor。baseline bridge 恢复
   accepted diagnostics markers、completion、hover、增量
   `didChange` 与成功保存后的 `didSave`，且 completion 不再产生 `docdocument` 前缀重复；
-- `fileEditorKeymap=vim` 由只使用 Monaco 0.56 公共 API 的 Piarium adapter 消费，覆盖 normal/insert/
+- `fileEditorKeymap=vim` 由只使用 Monaco 0.56 公共 API 的 Varin adapter 消费，覆盖 normal/insert/
   visual 基础行为、移动、删除/复制/粘贴、undo/redo、find、`:w`、状态栏和 dispose/re-enable；
 - 聚焦文档/model/workbench/language/Vim 测试通过，UI type-check/lint、i18n parity 与 production Web
   build 通过。三个 HTML 入口仍不静态引用 Monaco，产物只有 editor worker，没有 Monaco semantic
@@ -657,7 +657,7 @@ Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor 
 
 - 官方 editor features、language definitions、syntax、find/replace、fold、多光标、bracket、indent、
   wrap、whitespace、minimap、sticky scroll；
-- Piarium command/shortcut/menu/context-key bridge；
+- Varin command/shortcut/menu/context-key bridge；
 - editor settings projection 与 Agent/IDE presentation presets；
 - accessibility、IME、high contrast；
 - Vim 的扩展配置与高级行为；基础可用性已经是 Phase 2 cutover gate；
@@ -671,18 +671,18 @@ Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor 
 - lazy Monaco runtime 同时装载公开 editor features 与 basic language definitions；TSX/JSX 只在
   Monaco tokenization 侧映射为 `typescript`/`javascript`，Host 请求仍保留原始 language ID。构建
   继续拒绝 `editor.main`、`languages/features/*` 与 TS/JS/JSON/CSS/HTML semantic worker；
-- `default` 与 `piarium.ide` 分别投影 `agent-compact`、`ide-full` 呈现预设。word wrap、minimap、
+- `default` 与 `varin.ide` 分别投影 `agent-compact`、`ide-full` 呈现预设。word wrap、minimap、
   sticky scroll、line numbers、whitespace、indentation、folding、auto closing、ligatures、smooth
   scrolling、format-on-type/save 与 accessibility 由同一设置对象覆盖，切换 Profile 只更新 editor
   options，不重建 model 或清空 undo；
 - 文件编辑设置通过现有 Settings authority 在 Web/Electron 间同步。malformed 字段只被丢弃并保留
   上次有效字段；缺失字段使用产品默认。Agent/mobile/VS Code 不显示无消费者的 Monaco 设置；
-- active editor target 被投影到 Piarium command catalog、legacy workbench menu/context adapter 与
+- active editor target 被投影到 Varin command catalog、legacy workbench menu/context adapter 与
   用户 shortcut override。save/save all、find/replace、line/symbol、format、rename、quick fix、
   definition/references、fold、wrap/minimap、多光标和 editor-group focus 不维护第二套命令元数据；
 - expanded editor toolbar 成为真实消费者，提供 find、go-to-line 与 wrap；所有可见保存入口（手动、
   自动、Vim、extension document save）共用 format-on-save 后再写 Document Registry 的路径；
-- Monaco theme 支持 Piarium `high-contrast` tag；编辑器启用 ARIA、bracket/indent guides、IME-safe
+- Monaco theme 支持 Varin `high-contrast` tag；编辑器启用 ARIA、bracket/indent guides、IME-safe
   Vim handling。Vim 增加 mode cursor、counted motion/edit/paste、相对行号兼容与 clean restore；
 - 聚焦 settings/persistence/options/command/language/theme/Vim 测试通过，UI type-check 与 i18n parity
   通过；production Web build 和 Monaco module-graph assertion 继续只产出 editor worker。
@@ -715,7 +715,7 @@ Web/UI type-check/lint。只有协议或构建入口改变时跑对应 productio
   只要包含无法纳入当前 workspace authority 的目标，就整体失败，不再静默丢掉一部分编辑；
 - 同一个 Monaco bridge owner 注册 completion/resolve、hover、signature、definition、references、
   quick outline、format、semantic、inlay、highlight、folding、selection、link 和 color provider。Markdown
-  保持不可信，内部资源使用 `piarium-resource` URI 交给 Workbench opener，外部链接只经过 Piarium
+  保持不可信，内部资源使用 `varin-resource` URI 交给 Workbench opener，外部链接只经过 Varin
   HTTP(S) opener；VS Code companion 仍保持宿主编辑器权威且不加载 Monaco；
 - diagnostics markers 按 provider/generation 分组。provider disable、restart、runtime switch 会清除旧
   markers/status；新 generation 就绪时，所有已打开文档以当前内存 buffer 精确补发一次 `didOpen`，
@@ -733,7 +733,7 @@ Web/UI type-check/lint。只有协议或构建入口改变时跑对应 productio
 - `DocumentRegistry.applyWorkspaceEdit`、preview 与 transaction undo group；
 - rename、format、quick fix、source action、completion additional edits；
 - language command 的 Host-owned execution；
-- 第一方 TypeScript/JavaScript Piarium language extension、immutable server asset 与 lazy Host
+- 第一方 TypeScript/JavaScript Varin language extension、immutable server asset 与 lazy Host
   registration；
 - enable/disable/update、workspace trust、server crash 与 owner generation 处理。
 
@@ -747,11 +747,11 @@ rename、format、diagnostics、quick fix；扩展 pack/install/enable/disable�
   发布所有 buffer；任一目标陈旧、冲突、保存中、越界或不受支持时整体拒绝。未打开文件会进入
   dirty/recovery/watch 生命周期，磁盘仍等用户保存；resource operation 在 Host batch mutation 落地前
   明确返回 unsupported；
-- Monaco rename 与 code action 只返回 Piarium 内部命令，跨文件或带确认注解的变更进入全局预览，
+- Monaco rename 与 code action 只返回 Varin 内部命令，跨文件或带确认注解的变更进入全局预览，
   单文件 quick fix 直接走同一事务。completion additional edits 保持 Monaco 单 model 原子编辑；语言
   命令等待最新 document sync，再由 Host 校验 provider/generation、document version 和服务器声明的
   `executeCommandProvider` 后执行；
-- 第一方 `piarium.builtin.typescript-language` 是可停用的 brokered Host extension。分发构建将
+- 第一方 `varin.builtin.typescript-language` 是可停用的 brokered Host extension。分发构建将
   `typescript-language-server@5.3.0` 与 `typescript@5.9.3` fallback、许可证和 notices 放进 immutable
   artifact；首次 workspace language 请求才 materialize/activate，最后一个文档关闭即停止 server；
 - 真实 TypeScript 项目 smoke 覆盖 completion resolve + auto-import、hover、definition、references、
@@ -799,7 +799,7 @@ session、dirty patch conflict 和 visible-owner lifecycle。
 
 - mobile CodeMirror adapter 对齐新的 Document/Language DTO；
 - public framework-neutral `applyEdits`（如 Phase 2 证明需要）与 SDK fixtures；
-- `piarium.editor.monaco/v1` optional service、owner cleanup 和 Inspector；
+- `varin.editor.monaco/v1` optional service、owner cleanup 和 Inspector；
 - custom editor replacement/disable/update conformance；
 - authoring docs 与 CLI editor template 更新。
 
@@ -812,11 +812,11 @@ conformance。没有授权不发布 npm。
   conflict、recovery 和保存 authority；CodeMirror 以捕获的 `localEditRevision` 提交 offset edits，
   stale/invalid/unsupported 会恢复最新权威 buffer，只在 applied 后通知 language session。移动端不再
   截断可编辑正文，也不维护第二份 `fileContent`；图片、PDF 和二进制仍走适用的专门预览；
-- public `PiariumEditorDocumentController` 提供 framework-neutral `applyEdits`，并保留同 authority 的
+- public `VarinEditorDocumentController` 提供 framework-neutral `applyEdits`，并保留同 authority 的
   `replaceContent`/`save`。SDK editor fixture 与 CLI template 覆盖 applied、stale、conflict、invalid
   range、overlap 和 unsupported；custom editor 的 managed/isolated/trusted mount、candidate rollback、
   disable 与 owner cleanup 使用现有 Surface transaction 验证；
-- desktop/Web 注入 owner-bound `piarium.editor.monaco@1` optional service。它只暴露序列化的 view
+- desktop/Web 注入 owner-bound `varin.editor.monaco@1` optional service。它只暴露序列化的 view
   identity、selection、focus/reveal/action 和声明式 decorations；`getState`/`waitForState` 以 revisioned
   long poll 跟随后续 view 生命周期，不暴露 raw Monaco/DOM/callback。旧 owner 句柄返回
   `stale: owner-generation-changed`，candidate failure、generation replacement 和 disable 会清理等待者
@@ -900,8 +900,8 @@ mobile smoke 和 dead-code。前面各 Phase 不机械重复这套收敛矩阵�
 - 不把 Monaco model 变成文件或 dirty 权威；
 - 不让 renderer spawn LSP/DAP/task；
 - 不把 raw filesystem path、token 或 server command 放入可见日志/URL；
-- 不为 Monaco 新建第二个 Piarium contribution registry；
+- 不为 Monaco 新建第二个 Varin contribution registry；
 - 不要求第三方 editor provider 使用 Monaco；
 - 不用固定 5,000 行、固定 model 数或猜测性的文件大小限制替代测量与分级 feature 降级；
 - 不在本计划中把所有聊天、设置和资源小编辑器强行改成 Monaco；
-- 不把 Pi package 生命周期并入 Piarium editor extension。
+- 不把 Pi package 生命周期并入 Varin editor extension。

@@ -97,7 +97,7 @@ export interface ExperimentBackend {
     command: string;
     args: string[];
     env: Array<{ name: string; value: string }>;
-    resources: import("@piarium/protocol").ExperimentResourceRequest;
+    resources: import("@varin/protocol").ExperimentResourceRequest;
     gpuAllocation?: GpuAllocation;
   }): Promise<{ handle: BackendJobHandle; observation: BackendObservation }>;
   /**

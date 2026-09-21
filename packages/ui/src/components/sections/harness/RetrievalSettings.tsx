@@ -1,5 +1,5 @@
 import React from 'react';
-import type { LocalSemanticStatus } from '@piarium/protocol';
+import type { LocalSemanticStatus } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';

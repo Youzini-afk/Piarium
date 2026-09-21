@@ -138,7 +138,7 @@ export const registerNotificationStreamRoute = (
 
     try {
       writeSseEvent(res, {
-        type: 'piarium:notification-stream-ready',
+        type: 'varin:notification-stream-ready',
         properties: { uiToken },
       });
       flushSse();

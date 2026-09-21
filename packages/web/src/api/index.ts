@@ -1,11 +1,11 @@
-import type { RuntimeAPIs } from '@piarium/application-client';
+import type { RuntimeAPIs } from '@varin/application-client';
 import {
   createRuntimeUrlResolver,
   getRuntimeUrlResolver,
   setRuntimeUrlResolver,
   type RuntimeUrlResolver,
-} from '@piarium/application-client';
-import { useDirectoryStore } from '@piarium/ui/stores/useDirectoryStore';
+} from '@varin/application-client';
+import { useDirectoryStore } from '@varin/ui/stores/useDirectoryStore';
 import { createWebTerminalAPI } from './terminal';
 import { createWebGitAPI } from './git';
 import { createWebFilesAPI } from './files';

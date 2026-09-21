@@ -1,9 +1,9 @@
 import React from 'react';
-import { runtimeFetch } from '@piarium/application-client';
+import { runtimeFetch } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
@@ -13,7 +13,7 @@ import {
   type HarnessThreadSnapshot,
   type HarnessThreadState,
 } from './harnessThreadPresentation';
-import type { SessionEntriesResult, WorkspaceThreadSpace } from '@piarium/protocol';
+import type { SessionEntriesResult, WorkspaceThreadSpace } from '@varin/protocol';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
@@ -470,7 +470,7 @@ export const HarnessThreadsPanel: React.FC<{
     void reloadSpace(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load thread space:', error);
     });
-    const unsubscribe = subscribePiariumEvents((event) => {
+    const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'stream-ready') {
         void reloadBlocks(controller.signal).catch(() => undefined);
         void reloadKnowledge(controller.signal).catch(() => undefined);

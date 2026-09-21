@@ -88,7 +88,7 @@ const useMcpAdapterRuntime = () => {
       return true;
     } catch (error) {
       console.error(`Failed to execute Pi MCP command ${command}:`, error);
-      toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.commandFailed'));
+      toast.error(error instanceof Error ? error.message : t('settings.varin.mcp.toast.commandFailed'));
       return false;
     }
   }, [currentSessionId, executeCommand, t]);
@@ -168,7 +168,7 @@ const McpServerRows: React.FC<McpServerRowsProps> = ({
                 'mt-0.5 text-muted-foreground',
                 mobileListDensity ? 'typography-meta' : 'typography-micro',
               )}>
-                {t('settings.piarium.mcp.runtime.serverCounts', {
+                {t('settings.varin.mcp.runtime.serverCounts', {
                   tools: server.toolCount,
                   resources: server.resourceCount ?? 0,
                 })}
@@ -218,10 +218,10 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({
   const [isReconnecting, setIsReconnecting] = React.useState(false);
   const [busyName, setBusyName] = React.useState<string | null>(null);
   const emptyMessage = !currentSessionId
-    ? t('settings.piarium.mcp.runtime.noSession')
+    ? t('settings.varin.mcp.runtime.noSession')
     : !status
-      ? t('settings.piarium.mcp.runtime.noStatus')
-      : t('settings.piarium.mcp.runtime.empty');
+      ? t('settings.varin.mcp.runtime.noStatus')
+      : t('settings.varin.mcp.runtime.empty');
 
   const handleReconnect = React.useCallback((event?: React.MouseEvent) => {
     event?.preventDefault();
@@ -255,8 +255,8 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
                 disabled={isReconnecting || !currentSessionId}
                 onClick={handleReconnect}
-                aria-label={t('settings.piarium.mcp.actions.reconnect')}
-                title={t('settings.piarium.mcp.actions.reconnect')}
+                aria-label={t('settings.varin.mcp.actions.reconnect')}
+                title={t('settings.varin.mcp.actions.reconnect')}
               >
                 <Icon name="refresh" className={cn('h-4 w-4', isReconnecting && 'animate-spin')} />
               </button>
@@ -299,10 +299,10 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
     total: servers.length,
   }), [servers, status?.connectedCount]);
   const emptyMessage = !currentSessionId
-    ? t('settings.piarium.mcp.runtime.noSession')
+    ? t('settings.varin.mcp.runtime.noSession')
     : !status
-      ? t('settings.piarium.mcp.runtime.noStatus')
-      : t('settings.piarium.mcp.runtime.empty');
+      ? t('settings.varin.mcp.runtime.noStatus')
+      : t('settings.varin.mcp.runtime.empty');
 
   const handleDropdownOpenChange = React.useCallback((isOpen: boolean) => {
     if (!isOpen) {
@@ -382,8 +382,8 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
                   className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
                   disabled={isReconnecting || !currentSessionId}
                   onClick={handleReconnect}
-                  aria-label={t('settings.piarium.mcp.actions.reconnect')}
-                  title={t('settings.piarium.mcp.actions.reconnect')}
+                  aria-label={t('settings.varin.mcp.actions.reconnect')}
+                  title={t('settings.varin.mcp.actions.reconnect')}
                 >
                   <Icon name="refresh" className={cn('h-4 w-4', isReconnecting && 'animate-spin')} />
                 </button>

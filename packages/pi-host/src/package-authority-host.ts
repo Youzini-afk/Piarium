@@ -11,7 +11,7 @@ import type {
   PackageBootstrapResult,
   PackageDescriptor,
   PiPackageScope,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "./errors.js";
 import {
   packageSourceEnabled,

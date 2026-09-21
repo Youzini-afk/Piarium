@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { SettingsActionOperationStore, SettingsServiceCaller } from './settings-service.js';
 import type { KernelStorageAdapter } from '../kernel/storage-adapter.js';
 
-type OperationState = NonNullable<import('@piarium/protocol').SettingsActionResult['operation']>['state'];
+type OperationState = NonNullable<import('@varin/protocol').SettingsActionResult['operation']>['state'];
 
 interface StoredOperation {
   id: string;

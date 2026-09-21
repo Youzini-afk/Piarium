@@ -18,7 +18,7 @@ type MonacoSmokeState = {
 
 declare global {
   interface Window {
-    __piariumMonacoSmoke?: MonacoSmokeState;
+    __varinMonacoSmoke?: MonacoSmokeState;
   }
 }
 
@@ -27,11 +27,11 @@ if (!(root instanceof HTMLElement)) throw new Error('Missing Monaco smoke root.'
 root.style.height = '100vh';
 root.style.width = '100vw';
 
-window.__piariumMonacoSmoke = { status: 'loading' };
+window.__varinMonacoSmoke = { status: 'loading' };
 root.dataset.monacoSmokeStatus = 'loading';
 
 const publish = (state: MonacoSmokeState): void => {
-  window.__piariumMonacoSmoke = state;
+  window.__varinMonacoSmoke = state;
   root.dataset.monacoSmokeStatus = state.status;
   root.dataset.monacoSmokeResult = JSON.stringify(state);
 };

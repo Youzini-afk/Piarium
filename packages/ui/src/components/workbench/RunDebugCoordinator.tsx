@@ -20,7 +20,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 
-const OWNER = 'piarium.builtin.workbench';
+const OWNER = 'varin.builtin.workbench';
 
 const ATTACH_ERROR_KEYS = {
   'missing-test': 'workbench.attachment.missing-test',
@@ -134,7 +134,7 @@ export const RunDebugCoordinator: React.FC = () => {
           toast.error(error instanceof Error ? error.message : String(error));
         });
       }),
-      registerWorkbenchCommand('piarium.editor.attachTestFailure', OWNER, () => {
+      registerWorkbenchCommand('varin.editor.attachTestFailure', OWNER, () => {
         if (!sessionId || !workspaceId) {
           notify('no-session');
           return;
@@ -167,7 +167,7 @@ export const RunDebugCoordinator: React.FC = () => {
           notify(result.status);
         }
       }),
-      registerWorkbenchCommand('piarium.editor.attachStackFrame', OWNER, () => {
+      registerWorkbenchCommand('varin.editor.attachStackFrame', OWNER, () => {
         if (!sessionId || !workspaceId) {
           notify('no-session');
           return;

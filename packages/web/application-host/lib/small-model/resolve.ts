@@ -1,7 +1,7 @@
 import { getCatalogProvider } from './catalog.js';
 import type { ModelsMetadata } from '../platform/models-metadata.js';
 
-// Piarium's small-model fallback chain:
+// Varin's small-model fallback chain:
 // 1. `smallModel` from the merged Pi settings layers ("provider/model").
 // 2. GitHub Copilot's hidden utility models when Copilot is logged in.
 // 3. Family-priority scan of the authenticated providers' catalog models.
@@ -99,7 +99,7 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
   preferredProviderID?: unknown;
   settingsSmallModel?: unknown;
 }): SmallModelResolution | null {
-  // Piarium's explicit Settings override outranks the native Pi config.
+  // Varin's explicit Settings override outranks the native Pi config.
   const fromSettings = parseModelRef(settingsSmallModel);
   if (fromSettings) {
     return { ...fromSettings, source: 'settings' };

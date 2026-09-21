@@ -2,20 +2,20 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
 import {
-  PIARIUM_DESKTOP_COMMAND_CATALOG,
-  PIARIUM_DESKTOP_COMMAND_LIST,
-  PIARIUM_DESKTOP_EVENT_LIST,
-  PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS,
-  isPiariumDesktopCommand,
-  isPiariumDesktopEvent,
-  type PiariumDesktopCommand,
-  type PiariumDesktopCommandArgs,
-  type PiariumDesktopCommandInvocation,
-  type PiariumDesktopCommandResult,
+  VARIN_DESKTOP_COMMAND_CATALOG,
+  VARIN_DESKTOP_COMMAND_LIST,
+  VARIN_DESKTOP_EVENT_LIST,
+  VARIN_REMOTE_SAFE_DESKTOP_COMMANDS,
+  isVarinDesktopCommand,
+  isVarinDesktopEvent,
+  type VarinDesktopCommand,
+  type VarinDesktopCommandArgs,
+  type VarinDesktopCommandInvocation,
+  type VarinDesktopCommandResult,
   type PreloadBootstrapLocalPayload,
   type PreloadBootstrapRemotePayload,
   type PreloadBootstrapPayload,
-} from '@piarium/application-client/desktop';
+} from '@varin/application-client/desktop';
 
 import { REMOTE_SAFE_DESKTOP_COMMANDS } from './renderer-security-policy.js';
 import { createPreloadBootstrapPayload } from './renderer-security-policy.js';
@@ -25,8 +25,8 @@ import { createPreloadBootstrapPayload } from './renderer-security-policy.js';
 // ---------------------------------------------------------------------------
 
 test('desktop command catalog has no duplicates', () => {
-  const seen = new Set<PiariumDesktopCommand>();
-  for (const cmd of PIARIUM_DESKTOP_COMMAND_LIST) {
+  const seen = new Set<VarinDesktopCommand>();
+  for (const cmd of VARIN_DESKTOP_COMMAND_LIST) {
     assert.equal(seen.has(cmd), false, `duplicate command: ${cmd}`);
     seen.add(cmd);
   }
@@ -37,8 +37,8 @@ test('desktop command catalog has no duplicates', () => {
 // ---------------------------------------------------------------------------
 
 test('remote-safe command set is a subset of the command catalog', () => {
-  const catalog = new Set(PIARIUM_DESKTOP_COMMAND_LIST);
-  for (const cmd of PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS) {
+  const catalog = new Set(VARIN_DESKTOP_COMMAND_LIST);
+  for (const cmd of VARIN_REMOTE_SAFE_DESKTOP_COMMANDS) {
     assert.equal(catalog.has(cmd), true, `remote-safe command ${cmd} not in catalog`);
   }
 });
@@ -46,7 +46,7 @@ test('remote-safe command set is a subset of the command catalog', () => {
 test('Electron REMOTE_SAFE_DESKTOP_COMMANDS matches shared contract', () => {
   assert.deepEqual(
     [...REMOTE_SAFE_DESKTOP_COMMANDS].sort(),
-    [...PIARIUM_REMOTE_SAFE_DESKTOP_COMMANDS].sort(),
+    [...VARIN_REMOTE_SAFE_DESKTOP_COMMANDS].sort(),
   );
 });
 
@@ -55,18 +55,18 @@ test('Electron REMOTE_SAFE_DESKTOP_COMMANDS matches shared contract', () => {
 // ---------------------------------------------------------------------------
 
 test('unknown command is not in the command map', () => {
-  assert.equal(isPiariumDesktopCommand('desktop_nonexistent'), false);
-  assert.equal(isPiariumDesktopCommand('desktop_get_app_version'), true);
+  assert.equal(isVarinDesktopCommand('desktop_nonexistent'), false);
+  assert.equal(isVarinDesktopCommand('desktop_get_app_version'), true);
 });
 
 test('desktop event catalog has no duplicates and rejects unknown events', () => {
   const seen = new Set<string>();
-  for (const event of PIARIUM_DESKTOP_EVENT_LIST) {
+  for (const event of VARIN_DESKTOP_EVENT_LIST) {
     assert.equal(seen.has(event), false, `duplicate event: ${event}`);
-    assert.equal(isPiariumDesktopEvent(event), true, `catalog event rejected by guard: ${event}`);
+    assert.equal(isVarinDesktopEvent(event), true, `catalog event rejected by guard: ${event}`);
     seen.add(event);
   }
-  assert.equal(isPiariumDesktopEvent('piarium:unknown'), false);
+  assert.equal(isVarinDesktopEvent('varin:unknown'), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -76,13 +76,13 @@ test('desktop event catalog has no duplicates and rejects unknown events', () =>
 // ---------------------------------------------------------------------------
 
 // No-args command
-const _noArgs: PiariumDesktopCommandArgs<'desktop_get_app_version'> = undefined;
-const _noArgsResult: PiariumDesktopCommandResult<'desktop_get_app_version'> = '1.0.0';
+const _noArgs: VarinDesktopCommandArgs<'desktop_get_app_version'> = undefined;
+const _noArgsResult: VarinDesktopCommandResult<'desktop_get_app_version'> = '1.0.0';
 void _noArgs; void _noArgsResult;
 
 // Union/optional args command
-const _optArgs: PiariumDesktopCommandArgs<'desktop_capture_page_rect'> = { x: 0, y: 0, width: 100, height: 100 };
-const _optArgsResult: PiariumDesktopCommandResult<'desktop_capture_page_rect'> = {
+const _optArgs: VarinDesktopCommandArgs<'desktop_capture_page_rect'> = { x: 0, y: 0, width: 100, height: 100 };
+const _optArgsResult: VarinDesktopCommandResult<'desktop_capture_page_rect'> = {
   mime: 'image/jpeg',
   base64: '',
   width: 100,
@@ -91,8 +91,8 @@ const _optArgsResult: PiariumDesktopCommandResult<'desktop_capture_page_rect'> =
 void _optArgs; void _optArgsResult;
 
 // Sensitive command (file read — local only)
-const _sensitiveArgs: PiariumDesktopCommandArgs<'desktop_read_file'> = { path: '/tmp/test.txt' };
-const _sensitiveResult: PiariumDesktopCommandResult<'desktop_read_file'> = {
+const _sensitiveArgs: VarinDesktopCommandArgs<'desktop_read_file'> = { path: '/tmp/test.txt' };
+const _sensitiveResult: VarinDesktopCommandResult<'desktop_read_file'> = {
   mime: 'text/plain',
   base64: '',
   size: 0,
@@ -100,7 +100,7 @@ const _sensitiveResult: PiariumDesktopCommandResult<'desktop_read_file'> = {
 void _sensitiveArgs; void _sensitiveResult;
 
 // Structured result command (hosts get)
-const _structuredResult: PiariumDesktopCommandResult<'desktop_hosts_get'> = {
+const _structuredResult: VarinDesktopCommandResult<'desktop_hosts_get'> = {
   hosts: [],
   defaultHostId: null,
   initialHostChoiceCompleted: false,
@@ -110,11 +110,11 @@ void _structuredResult;
 
 // ---------------------------------------------------------------------------
 // 4b. Compile-time catalog exhaustiveness — the catalog value must satisfy
-//     Record<PiariumDesktopCommand, true>. If a new command is added to the
+//     Record<VarinDesktopCommand, true>. If a new command is added to the
 //     map but not the catalog, this assignment fails to compile.
 // ---------------------------------------------------------------------------
 
-const _catalogExhaustive: Record<PiariumDesktopCommand, true> = PIARIUM_DESKTOP_COMMAND_CATALOG;
+const _catalogExhaustive: Record<VarinDesktopCommand, true> = VARIN_DESKTOP_COMMAND_CATALOG;
 void _catalogExhaustive;
 
 // ---------------------------------------------------------------------------
@@ -126,11 +126,11 @@ void _catalogExhaustive;
 // ---------------------------------------------------------------------------
 
 // No-args command: invocation is [] (zero rest parameters)
-const _noArgsInvocation: PiariumDesktopCommandInvocation<'desktop_get_app_version'> = [];
+const _noArgsInvocation: VarinDesktopCommandInvocation<'desktop_get_app_version'> = [];
 // Required-args command: invocation is [{ title: string }]
-const _requiredArgsInvocation: PiariumDesktopCommandInvocation<'desktop_set_window_title'> = [{ title: 'test' }];
+const _requiredArgsInvocation: VarinDesktopCommandInvocation<'desktop_set_window_title'> = [{ title: 'test' }];
 // Optional-args command: invocation is [{ x?: number, ... }] — can be empty object
-const _optionalArgsInvocation: PiariumDesktopCommandInvocation<'desktop_capture_page_rect'> = [{}];
+const _optionalArgsInvocation: VarinDesktopCommandInvocation<'desktop_capture_page_rect'> = [{}];
 void _noArgsInvocation; void _requiredArgsInvocation; void _optionalArgsInvocation;
 
 // ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ void _noArgsInvocation; void _requiredArgsInvocation; void _optionalArgsInvocati
 
 test('local bootstrap payload carries credentials, remote does not', () => {
   const common = {
-    uiProtocol: 'piarium-ui',
+    uiProtocol: 'varin-ui',
     developmentUiOrigin: 'http://127.0.0.1:5173',
     localOrigins: ['http://127.0.0.1:57123'],
     localOrigin: 'http://127.0.0.1:57123',
@@ -161,7 +161,7 @@ test('local bootstrap payload carries credentials, remote does not', () => {
   assert.equal(Object.hasOwn(remote, 'homeDirectory'), false);
   assert.equal(Object.hasOwn(remote, 'relayHostId'), false);
 
-  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'piarium-ui://app/index.html' });
+  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'varin-ui://app/index.html' });
   if (!local.localPage) assert.fail('local bootstrap must be the credential-bearing branch');
   // Local payload must have credential fields
   assert.equal(local.clientToken, 'secret-token');
@@ -171,7 +171,7 @@ test('local bootstrap payload carries credentials, remote does not', () => {
 
 test('bootstrap payload discriminated union narrows correctly', () => {
   const common = {
-    uiProtocol: 'piarium-ui',
+    uiProtocol: 'varin-ui',
     developmentUiOrigin: 'http://127.0.0.1:5173',
     localOrigins: ['http://127.0.0.1:57123'],
     localOrigin: 'http://127.0.0.1:57123',
@@ -195,7 +195,7 @@ test('bootstrap payload discriminated union narrows correctly', () => {
   const _remoteTyped: PreloadBootstrapRemotePayload = remote;
   void _remoteTyped;
 
-  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'piarium-ui://app/index.html' });
+  const local = createPreloadBootstrapPayload({ ...common, senderUrl: 'varin-ui://app/index.html' });
   if (!local.localPage) {
     assert.fail('local should narrow to local payload');
   }

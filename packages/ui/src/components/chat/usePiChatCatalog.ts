@@ -1,7 +1,7 @@
 import React from 'react';
-import type { RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@varin/protocol';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@piarium/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import {
   createPiChatCatalogTargetKey,
   EMPTY_PI_CHAT_CATALOG_ENTRY,

@@ -24,11 +24,11 @@ describe('notification emitter runtime', () => {
       writeSseEvent,
     });
 
-    broadcast({ type: 'piarium:notification' });
+    broadcast({ type: 'varin:notification' });
 
     expect(writeSseEvent).toHaveBeenCalledTimes(2);
-    expect(first.write).toHaveBeenCalledWith({ type: 'piarium:notification' });
-    expect(second.write).toHaveBeenCalledWith({ type: 'piarium:notification' });
+    expect(first.write).toHaveBeenCalledWith({ type: 'varin:notification' });
+    expect(second.write).toHaveBeenCalledWith({ type: 'varin:notification' });
   });
 
   it('reports desktop delivery through the injected native callback', () => {
@@ -55,7 +55,7 @@ describe('notification emitter runtime', () => {
     runtime.broadcastUiNotification({ title: 'Ready' }, { desktopNotificationDelivered: true });
 
     expect(broadcastGlobalUiEvent).toHaveBeenCalledWith({
-      type: 'piarium:notification',
+      type: 'varin:notification',
       properties: {
         title: 'Ready',
         desktopNotificationDelivered: true,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiSessionEntry } from '@piarium/protocol';
+import type { PiSessionEntry } from '@varin/protocol';
 import { projectPiMessageHistory } from './piMessageHistory';
 
 describe('Pi message history', () => {

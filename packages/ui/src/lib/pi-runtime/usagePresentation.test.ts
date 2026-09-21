@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiSessionEntry, PiUsage } from '@piarium/protocol';
+import type { PiSessionEntry, PiUsage } from '@varin/protocol';
 import {
   aggregatePiUsage,
   latestAssistantTurnUsage,

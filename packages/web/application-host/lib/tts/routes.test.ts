@@ -73,44 +73,44 @@ describe('tts routes', () => {
 });
 
 describe('normalizeCustomOpenAIBaseURL', () => {
-  const originalRuntime = process.env.PIARIUM_RUNTIME;
-  const originalAllowRemote = process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  const originalRuntime = process.env.VARIN_RUNTIME;
+  const originalAllowRemote = process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
 
   afterEach(() => {
     // Restore env vars after each test
     if (originalRuntime === undefined) {
-      delete process.env.PIARIUM_RUNTIME;
+      delete process.env.VARIN_RUNTIME;
     } else {
-      process.env.PIARIUM_RUNTIME = originalRuntime;
+      process.env.VARIN_RUNTIME = originalRuntime;
     }
     if (originalAllowRemote === undefined) {
-      delete process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+      delete process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
     } else {
-      process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS = originalAllowRemote;
+      process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS = originalAllowRemote;
     }
   });
 
-  it('rejects remote URLs when PIARIUM_RUNTIME is not set (web)', () => {
-    delete process.env.PIARIUM_RUNTIME;
-    delete process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  it('rejects remote URLs when VARIN_RUNTIME is not set (web)', () => {
+    delete process.env.VARIN_RUNTIME;
+    delete process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
     expect(result.value).toBeUndefined();
   });
 
-  it('allows remote URLs when PIARIUM_RUNTIME is desktop', () => {
-    process.env.PIARIUM_RUNTIME = 'desktop';
-    delete process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+  it('allows remote URLs when VARIN_RUNTIME is desktop', () => {
+    process.env.VARIN_RUNTIME = 'desktop';
+    delete process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toBeUndefined();
     expect(result.value).toBe('https://my-tts-server.example.com/v1');
   });
 
-  it('allows remote URLs when PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS is true', () => {
-    delete process.env.PIARIUM_RUNTIME;
-    process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
+  it('allows remote URLs when VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS is true', () => {
+    delete process.env.VARIN_RUNTIME;
+    process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toBeUndefined();
@@ -118,8 +118,8 @@ describe('normalizeCustomOpenAIBaseURL', () => {
   });
 
   it('allows localhost URLs regardless of runtime', () => {
-    delete process.env.PIARIUM_RUNTIME;
-    delete process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
+    delete process.env.VARIN_RUNTIME;
+    delete process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS;
 
     const result = normalizeCustomOpenAIBaseURL('http://localhost:8880/v1');
     expect(result.error).toBeUndefined();
@@ -127,15 +127,15 @@ describe('normalizeCustomOpenAIBaseURL', () => {
   });
 
   it('strips query strings and trailing slashes', () => {
-    process.env.PIARIUM_RUNTIME = 'desktop';
+    process.env.VARIN_RUNTIME = 'desktop';
 
     const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
     expect(result.value).toBe('https://my-server.com/v1');
   });
 
   it('denies remote URLs on desktop when env var is explicitly false', () => {
-    process.env.PIARIUM_RUNTIME = 'desktop';
-    process.env.PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'false';
+    process.env.VARIN_RUNTIME = 'desktop';
+    process.env.VARIN_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'false';
 
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);

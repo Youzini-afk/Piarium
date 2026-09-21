@@ -14,7 +14,7 @@ afterEach(async () => {
 });
 
 const createHarness = async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-mobile-devices-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-mobile-devices-'));
   roots.push(root);
   const filePath = path.join(root, 'mobile-devices.json');
   const createStore = () => createMobileDeviceStore({ crypto, mobileDevicesFilePath: filePath });

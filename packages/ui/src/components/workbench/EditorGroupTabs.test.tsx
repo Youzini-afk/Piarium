@@ -16,7 +16,7 @@ const group: EditorGroupLeaf = {
     resourceId: 'src/main.ts',
     preview: false,
     pinned: false,
-    providerId: 'piarium.builtin.text',
+    providerId: 'varin.builtin.text',
     viewState: {},
   }],
 };

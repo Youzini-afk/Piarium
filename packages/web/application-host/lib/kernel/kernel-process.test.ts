@@ -14,10 +14,10 @@ import { createKernelClient, type KernelClient, type KernelScopedClient } from "
 import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "varin-kernel.exe" : "varin-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const available = await fs.stat(kernelPath).then(() => true).catch(() => false);
-if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native process acceptance requires the release kernel");
+if (!available && process.env.VARIN_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native process acceptance requires the release kernel");
 const it = vitestIt.skipIf(!available);
 const clients: KernelClient[] = [];
 const roots: string[] = [];
@@ -44,7 +44,7 @@ afterEach(async () => {
   }
 });
 async function fixture(env: NodeJS.ProcessEnv = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-native-process-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-native-process-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   await fs.mkdir(path.join(workspace, "child"), { recursive: true });
@@ -183,7 +183,7 @@ it("native process handles reject another actor and a cwd escaping its admitted 
 
 
 it("native process kill refusal keeps its identity and directory writer active", async () => {
-  const f = await fixture({ PIARIUM_KERNEL_FAIL_PROCESS_PHASE: "kill" });
+  const f = await fixture({ VARIN_KERNEL_FAIL_PROCESS_PHASE: "kill" });
   await f.client.processSpawn(f.spawn("refused", "setInterval(()=>{},1000)"));
   await waitFor(f.client, "refused", (s) => s.pid !== null);
   await assert.rejects(f.client.processKill({ workspaceId: "ws", processId: "refused", force: true }), /injected/);
@@ -348,7 +348,7 @@ it("native terminal and shell consumers expose authority loss without releasing 
 
 
 it("abrupt Host death closes its private kernel pipe and drains the native process tree", async () => {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),"piarium-native-process-host-loss-"));roots.push(root);
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),"varin-native-process-host-loss-"));roots.push(root);
   const workspace=path.join(root,"workspace");await fs.mkdir(workspace,{recursive:true});
   const storageRoot=path.join(root,"storage");
   const source = [

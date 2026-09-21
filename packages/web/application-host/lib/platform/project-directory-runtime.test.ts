@@ -128,7 +128,7 @@ describe('project directory runtime', () => {
   });
 
   describe('resolveProjectDirectory', () => {
-    it('resolves symlinks in x-piarium-directory header', async () => {
+    it('resolves symlinks in x-varin-directory header', async () => {
       const runtime = createTestRuntime({
         fsPromises: {
           stat: async () => ({ isDirectory: () => true }),
@@ -137,7 +137,7 @@ describe('project directory runtime', () => {
       });
 
       const req = {
-        get: (header: string) => header === 'x-piarium-directory' ? '/home/user/workspace/project' : null,
+        get: (header: string) => header === 'x-varin-directory' ? '/home/user/workspace/project' : null,
         query: {},
       };
 
@@ -146,7 +146,7 @@ describe('project directory runtime', () => {
       expect(result).toEqual({ directory: '/real/workspace/project', error: null });
     });
 
-    it('decodes marked x-piarium-directory header values', async () => {
+    it('decodes marked x-varin-directory header values', async () => {
       const pathWithUnicode = '/home/user/测试项目';
       let validatedPath = null;
       const runtime = createTestRuntime({
@@ -161,8 +161,8 @@ describe('project directory runtime', () => {
 
       const req = {
         get: (header: string) => {
-          if (header === 'x-piarium-directory') return encodeURIComponent(pathWithUnicode);
-          if (header === 'x-piarium-directory-encoding') return 'uri';
+          if (header === 'x-varin-directory') return encodeURIComponent(pathWithUnicode);
+          if (header === 'x-varin-directory-encoding') return 'uri';
           return null;
         },
         query: {},
@@ -188,7 +188,7 @@ describe('project directory runtime', () => {
       });
 
       const req = {
-        get: (header: string) => header === 'x-piarium-directory' ? rawPath : null,
+        get: (header: string) => header === 'x-varin-directory' ? rawPath : null,
         query: {},
       };
 
@@ -211,7 +211,7 @@ describe('project directory runtime', () => {
       });
 
       const req = {
-        get: (header: string) => header === 'x-piarium-directory' ? encodeURIComponent(validPath) : null,
+        get: (header: string) => header === 'x-varin-directory' ? encodeURIComponent(validPath) : null,
         query: { directory: validPath },
       };
 
@@ -305,7 +305,7 @@ describe('project directory runtime', () => {
       });
 
       const req = {
-        get: (header: string) => header === 'x-piarium-directory' ? '/symlink/workspace/project' : null,
+        get: (header: string) => header === 'x-varin-directory' ? '/symlink/workspace/project' : null,
         query: {},
       };
 
@@ -328,7 +328,7 @@ describe('project directory runtime', () => {
       });
 
       const req = {
-        get: (header: string) => header === 'x-piarium-directory' ? rawPath : null,
+        get: (header: string) => header === 'x-varin-directory' ? rawPath : null,
         query: {},
       };
 

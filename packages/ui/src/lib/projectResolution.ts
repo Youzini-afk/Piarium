@@ -1,4 +1,4 @@
-import type { ProjectEntry } from "@piarium/application-client";
+import type { ProjectEntry } from "@varin/application-client";
 import type { WorktreeMetadata } from "@/types/worktree";
 
 import { normalizePath } from "@/lib/pathNormalization";

@@ -57,7 +57,7 @@ describe('isUsableAuthEntry', () => {
 });
 
 describe('resolveSmallModel', () => {
-  it('gives the Piarium settings override top priority', () => {
+  it('gives the Varin settings override top priority', () => {
     const result = resolveSmallModel({
       auth: { anthropic: { type: 'api_key', key: 'sk-x' } },
       catalog,

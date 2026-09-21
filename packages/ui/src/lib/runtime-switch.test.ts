@@ -10,8 +10,8 @@ import {
   subscribeRuntimeEndpointWillChange,
   switchRuntimeEndpoint,
   switchRuntimeEndpointSafely,
-} from '@piarium/application-client';
-import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from '@piarium/application-client';
+} from '@varin/application-client';
+import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from '@varin/application-client';
 import {
   activateRelayTunnel,
   deactivateRelayTunnel,
@@ -146,17 +146,17 @@ describe('runtime endpoint switching', () => {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })) as typeof fetch;
-      Object.defineProperty(runtimeWindow, '__PIARIUM_API_BASE_URL__', {
+      Object.defineProperty(runtimeWindow, '__VARIN_API_BASE_URL__', {
         configurable: true,
         value: 'http://127.0.0.1:3000',
         writable: false,
       });
-      Object.defineProperty(runtimeWindow, '__PIARIUM_CLIENT_TOKEN__', {
+      Object.defineProperty(runtimeWindow, '__VARIN_CLIENT_TOKEN__', {
         configurable: true,
         value: '',
         writable: false,
       });
-      Object.defineProperty(runtimeWindow, '__PIARIUM_RUNTIME_HEADERS__', {
+      Object.defineProperty(runtimeWindow, '__VARIN_RUNTIME_HEADERS__', {
         configurable: true,
         value: {},
         writable: false,

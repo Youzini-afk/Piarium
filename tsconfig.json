@@ -13,8 +13,8 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "paths": {
-      "@piarium/ui/*": ["./packages/ui/src/*"],
-      "@piarium/web/*": ["./packages/web/src/*"]
+      "@varin/ui/*": ["./packages/ui/src/*"],
+      "@varin/web/*": ["./packages/web/src/*"]
     }
   }
 }

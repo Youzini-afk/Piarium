@@ -66,7 +66,7 @@ async function resolveTargetPort(options: CliOptions = {}, deps: {
       return DEFAULT_PORT;
     }
     throw new TunnelCliError(
-      `Multiple Piarium instances are running (ports: ${ports.join(', ')}). Choose one with --port <port>.`,
+      `Multiple Varin instances are running (ports: ${ports.join(', ')}). Choose one with --port <port>.`,
       EXIT_CODE.USAGE_ERROR,
     );
   }
@@ -76,7 +76,7 @@ async function resolveTargetPort(options: CliOptions = {}, deps: {
   }
 
   throw new TunnelCliError(
-    'No running Piarium server found. Start one with `piarium serve`, or pass --port <port>.',
+    'No running Varin server found. Start one with `varin serve`, or pass --port <port>.',
     EXIT_CODE.GENERAL_ERROR,
   );
 }

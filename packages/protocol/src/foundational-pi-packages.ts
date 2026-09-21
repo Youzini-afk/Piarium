@@ -9,7 +9,7 @@ export const FOUNDATIONAL_PI_PACKAGE_IDS = [
 export type FoundationalPiPackageId = (typeof FOUNDATIONAL_PI_PACKAGE_IDS)[number];
 
 export interface FoundationalPiPackageManifestEntry {
-  /** Stable Piarium integration identity. It is not a package-source allowlist. */
+  /** Stable Varin integration identity. It is not a package-source allowlist. */
   id: FoundationalPiPackageId;
   introducedRevision: number;
   /** Name declared by the package itself. */
@@ -42,9 +42,9 @@ export const FOUNDATIONAL_PI_PACKAGE_MANIFEST = {
     {
       id: "mcp",
       introducedRevision: 1,
-      packageAliases: ["@piarium/pi-mcp-adapter", "pi-mcp-adapter"],
-      packageName: "@piarium/pi-mcp-adapter",
-      source: "npm:@piarium/pi-mcp-adapter",
+      packageAliases: ["@varin/pi-mcp-adapter", "pi-mcp-adapter"],
+      packageName: "@varin/pi-mcp-adapter",
+      source: "npm:@varin/pi-mcp-adapter",
     },
   ],
   revision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,

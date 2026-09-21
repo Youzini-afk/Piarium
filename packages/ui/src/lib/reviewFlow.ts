@@ -6,7 +6,7 @@ import type {
   SessionSnapshot,
   SessionSummary,
   ThinkingLevel,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
@@ -14,7 +14,7 @@ import {
   captureSurfaceAgentInputContext,
   releaseSurfaceAgentInputContext,
 } from '@/lib/pi-runtime/agent-input-context';
-import { getRuntimeKey } from '@piarium/application-client';
+import { getRuntimeKey } from '@varin/application-client';
 import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
@@ -211,7 +211,7 @@ const waitForSentUserEntry = async (
 
 const requestChatForceScrollBottom = (sessionId: string): void => {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('piarium:chat-force-scroll-bottom', {
+  window.dispatchEvent(new CustomEvent('varin:chat-force-scroll-bottom', {
     detail: { sessionId },
   }));
 };
@@ -245,7 +245,7 @@ const sendPiMessage = async (
   const previousEntryIds = new Set(before.entries.map((entry) => entry.id));
   const startedAt = Date.now();
   const task = modelContext?.agent && instructions
-    ? `${text}\n\n<piarium-review-instructions>\n${instructions}\n</piarium-review-instructions>`
+    ? `${text}\n\n<varin-review-instructions>\n${instructions}\n</varin-review-instructions>`
     : text;
   const promptText = modelContext?.agent
     ? renderPiAgentInvocation(modelContext.agent, task)

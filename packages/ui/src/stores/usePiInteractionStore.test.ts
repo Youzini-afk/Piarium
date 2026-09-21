@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type HostEvent,
   type HostEventData,
   type RuntimeEventEnvelope,
   type RuntimeMethod,
   type RuntimeMethodParams,
   type RuntimeWorkerRole,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   createPiInteractionStore,
   type PiInteractionRuntimeClient,
@@ -54,7 +54,7 @@ class FakeRuntime implements PiInteractionStoreRuntime {
       kind: 'event',
       seq,
       source,
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     } as RuntimeEventEnvelope<E>;
     for (const listener of this.#eventListeners) listener(envelope);
   }

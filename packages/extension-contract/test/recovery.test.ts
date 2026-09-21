@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
-  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
+  VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
   WorkspaceRecoveryContractError,
   createWorkspaceRecoveryAPI,
   parseRecoveryStorageLocation,
@@ -32,8 +32,8 @@ const checkpoint = () => ({
 });
 
 test("owns the affected-file journal service version", () => {
-  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID, "piarium.workspace-recovery");
-  assert.equal(PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION, 5);
+  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_ID, "varin.workspace-recovery");
+  assert.equal(VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION, 5);
   assert.equal(parseWorkspaceRecoveryCheckpointSummary(checkpoint()).changedPathCount, 1);
 });
 
@@ -196,7 +196,7 @@ test("browser-safe API invokes only the v5 checkpoint method", async () => {
   assert.deepEqual(requests, [{
     args: [{ workspaceId: "workspace-1" }],
     method: "listCheckpoints",
-    serviceId: "piarium.workspace-recovery",
+    serviceId: "varin.workspace-recovery",
     version: 5,
   }]);
 });

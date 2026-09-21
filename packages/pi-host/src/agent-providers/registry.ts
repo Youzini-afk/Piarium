@@ -2,7 +2,7 @@ import type {
   JsonValue,
   PiAgentCatalogSnapshot,
   PiAgentProviderActionResult,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import { HostError } from "../errors.js";
 import type { AgentProviderBridge } from "./bridge.js";
 import { findMagicContextExtension, MagicContextProvider } from "./magic-context-provider.js";

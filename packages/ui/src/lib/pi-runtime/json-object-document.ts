@@ -1,4 +1,4 @@
-import type { JsonValue } from '@piarium/protocol';
+import type { JsonValue } from '@varin/protocol';
 
 export type PiJsonObjectDocument = { [key: string]: JsonValue };
 

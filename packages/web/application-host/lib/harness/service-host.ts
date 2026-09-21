@@ -28,7 +28,7 @@ import type {
   HarnessActorIdentity,
   HarnessCapability,
   AgentInputContext,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type {
   SurfaceSnapshotOverlayResult,
   SurfaceSnapshotReadResult,
@@ -112,7 +112,7 @@ export type HarnessDocumentReadLookup =
   | {
     status: "working-branch";
     revision: string;
-    provenance: import("@piarium/protocol").WorkingBranchReadProvenance;
+    provenance: import("@varin/protocol").WorkingBranchReadProvenance;
     base64?: string;
     missing?: true;
     message?: string;
@@ -129,7 +129,7 @@ export type HarnessDocumentWriteGuard = (
   sessionId: string,
   context: AgentInputContext,
   resourceId: string,
-) => Promise<import("@piarium/protocol").DocumentWriteGuardResult>;
+) => Promise<import("@varin/protocol").DocumentWriteGuardResult>;
 
 /** Shared surface-aware mutation plan for root-session write/edit/apply_patch (D-225). */
 export type HarnessDocumentSurfaceWrite = (
@@ -138,29 +138,29 @@ export type HarnessDocumentSurfaceWrite = (
   context: AgentInputContext,
   changes: ReadonlyArray<{
     resourceId: string;
-    action: import("@piarium/protocol").DocumentSurfaceWriteAction;
+    action: import("@varin/protocol").DocumentSurfaceWriteAction;
     content?: string;
     edits?: ReadonlyArray<{ oldText: string; newText: string }>;
   }>,
   signal?: AbortSignal,
-) => Promise<import("@piarium/protocol").DocumentSurfaceWriteResult>;
+) => Promise<import("@varin/protocol").DocumentSurfaceWriteResult>;
 
 export type HarnessDocumentBranchWrite = (
   sessionId: string,
   changes: ReadonlyArray<{
     resourceId: string;
-    action: import("@piarium/protocol").DocumentBranchWriteAction;
+    action: import("@varin/protocol").DocumentBranchWriteAction;
     content?: string;
     edits?: ReadonlyArray<{ oldText: string; newText: string }>;
   }>,
   expectedRevision?: number,
   signal?: AbortSignal,
-) => Promise<import("@piarium/protocol").DocumentBranchWriteResult>;
+) => Promise<import("@varin/protocol").DocumentBranchWriteResult>;
 
 export type HarnessWorkingBranchEnsureMaterialized = (
   sessionId: string,
   signal?: AbortSignal,
-) => Promise<import("@piarium/protocol").WorkingBranchEnsureMaterializedResult>;
+) => Promise<import("@varin/protocol").WorkingBranchEnsureMaterializedResult>;
 
 export type HarnessDocumentPathOverlayLookup =
   | SurfaceSnapshotOverlayResult
@@ -191,7 +191,7 @@ export interface HarnessServiceHost {
    * the excerpt revision, so the provider does not report it. Throwing means
    * "not answered" and must degrade the annotation, not the search (D-112).
    */
-  fileRelations: ((workspaceId: string, path: string) => Promise<Omit<import("@piarium/protocol").ExploreFileRelation, "stale"> | null>) | null;
+  fileRelations: ((workspaceId: string, path: string) => Promise<Omit<import("@varin/protocol").ExploreFileRelation, "stale"> | null>) | null;
   /**
    * Resolve an execution session to its owning, already-open symbol graph.
    * The graph is owned by the project workspace; the execution workspace only
@@ -218,7 +218,7 @@ export interface HarnessServiceHost {
       issueReceipt?: boolean;
       roots?: readonly string[];
       sessionId?: string;
-      inputContext?: import("@piarium/protocol").AgentInputContext;
+      inputContext?: import("@varin/protocol").AgentInputContext;
       threadDocuments?: Array<{ path: string; content: string; revision: string }>;
       threadQuery?: import("./working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
     },
@@ -229,24 +229,24 @@ export interface HarnessServiceHost {
   ) => Promise<import("./working-state/working-branch-lookups.js").WorkingBranchQuerySnapshot | null>;
   harnessSettings?: (
     workspaceId: string,
-  ) => import("@piarium/protocol").PiSettingsSnapshot | null | Promise<import("@piarium/protocol").PiSettingsSnapshot | null>;
+  ) => import("@varin/protocol").PiSettingsSnapshot | null | Promise<import("@varin/protocol").PiSettingsSnapshot | null>;
   rerankExploreViews?: (input: {
     workspaceId: string;
     query: string;
     documents: Array<{ id: string; text: string; revision?: string }>;
-    settings: import("@piarium/protocol").HarnessRerankSettings;
+    settings: import("@varin/protocol").HarnessRerankSettings;
     signal?: AbortSignal;
-  }) => Promise<import("@piarium/protocol").HarnessRerankResult>;
-  permissionAudit: ((record: import("@piarium/protocol").PermissionAuditRecord) => void) | null;
+  }) => Promise<import("@varin/protocol").HarnessRerankResult>;
+  permissionAudit: ((record: import("@varin/protocol").PermissionAuditRecord) => void) | null;
   webFetchService: {
     fetch: (url: string, ctx: {
       workspaceId: string;
-      authority: import("@piarium/protocol").RetrievalReceiptAuthority;
+      authority: import("@varin/protocol").RetrievalReceiptAuthority;
       render?: boolean;
-      domainPolicy?: import("@piarium/protocol").HarnessWebDomainPolicy;
+      domainPolicy?: import("@varin/protocol").HarnessWebDomainPolicy;
       signal?: AbortSignal;
       issueReceipt?: boolean;
-    }) => Promise<import("@piarium/protocol").FetchResult>;
+    }) => Promise<import("@varin/protocol").FetchResult>;
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -269,8 +269,8 @@ export interface HarnessServiceHost {
   todoDepsProvider: ((sessionId: string) => Promise<TodoToolDeps>) | null;
   // Phase 3: Thread registry
   threadRegistry: ThreadRegistry | null;
-  threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@piarium/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
-  threadPrepareIsolatedBranch: ((input: PrepareIsolatedBranchInput) => Promise<{ branchId: string; worktree: import("@piarium/protocol").ThreadWorktree }>) | null;
+  threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@varin/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
+  threadPrepareIsolatedBranch: ((input: PrepareIsolatedBranchInput) => Promise<{ branchId: string; worktree: import("@varin/protocol").ThreadWorktree }>) | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
   /**
    * Capture the parent session's committed input at dispatch time for an
@@ -278,7 +278,7 @@ export interface HarnessServiceHost {
    * rendered as bounded text plus history anchors. Null when the session has
    * no capturable material.
    */
-  threadCaptureInputContext?: ((input: { sessionId: string }) => Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>) | null;
+  threadCaptureInputContext?: ((input: { sessionId: string }) => Promise<Pick<import("@varin/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>) | null;
   /**
    * Start a new Run on a settled Thread for an execution `request`
    * (D-285.5/3.18B): `continue` resumes the retained session; `fresh`
@@ -286,7 +286,7 @@ export interface HarnessServiceHost {
    */
   threadContinueRun?: ((input: {
     workspaceId: string;
-    parent: import("@piarium/protocol").ThreadParent;
+    parent: import("@varin/protocol").ThreadParent;
     threadId: string;
     mode: "continue" | "fresh";
     task: string;
@@ -295,17 +295,17 @@ export interface HarnessServiceHost {
     /** Skip the shared-budget admission check (dequeue path already gated). */
     admitted?: boolean;
     /** Requester identity recorded on a parked continuation. */
-    from?: import("@piarium/protocol").ThreadMessagePeer;
+    from?: import("@varin/protocol").ThreadMessagePeer;
     /** Resolved capability/model re-route frozen for the new Run (7B/D-300). */
-    frozen?: import("@piarium/protocol").ThreadRunFrozenConfig;
+    frozen?: import("@varin/protocol").ThreadRunFrozenConfig;
   }) => Promise<{ runId?: string }>) | null;
   /** Retry lost Runs under a parent scope when the shared budget may have room. */
-  threadResumeLost?: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent) => Promise<void>) | null;
+  threadResumeLost?: ((workspaceId: string, parent: import("@varin/protocol").ThreadParent) => Promise<void>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
   threadApplyWorktreeDiff: ((
     workspaceId: string,
-    parent: import("@piarium/protocol").ThreadParent,
+    parent: import("@varin/protocol").ThreadParent,
     threadId: string,
     resultRevision?: number,
     executionId?: string,
@@ -313,17 +313,17 @@ export interface HarnessServiceHost {
       signal?: AbortSignal;
       sourceOwner?: { ownerId: string; generation: number };
       expectedBindingFingerprint?: string;
-      resolutions?: import("@piarium/protocol").ThreadConflictResolution[];
+      resolutions?: import("@varin/protocol").ThreadConflictResolution[];
     },
   ) => Promise<{
     merged: number;
     conflicts: string[];
     conflictState?: "none" | "markers" | "parent-unchanged";
     changedFiles?: string[];
-    diffStats?: import("@piarium/protocol").ThreadDiffStats;
+    diffStats?: import("@varin/protocol").ThreadDiffStats;
     appliedPaths?: string[];
     surfaceTargetPaths?: string[];
-    preview?: import("@piarium/protocol").ThreadIntegrationPreview;
+    preview?: import("@varin/protocol").ThreadIntegrationPreview;
     status?: "applied" | "conflict" | "compensated" | "needs-attention";
     operationId?: string;
     resultRevision?: number;
@@ -333,7 +333,7 @@ export interface HarnessServiceHost {
    * snapshot overwrite. */
   threadUpdateBaseline?: ((
     workspaceId: string,
-    parent: import("@piarium/protocol").ThreadParent,
+    parent: import("@varin/protocol").ThreadParent,
     threadId: string,
     resultRevision?: number,
     extras?: { signal?: AbortSignal },
@@ -350,7 +350,7 @@ export interface HarnessServiceHost {
   }>) | null;
   threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
-  threadHistoryEntries: ((sessionId: string) => Promise<import("@piarium/protocol").SessionEntriesResult>) | null;
+  threadHistoryEntries: ((sessionId: string) => Promise<import("@varin/protocol").SessionEntriesResult>) | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
   hasActor(identity: HarnessActorIdentity): boolean;
@@ -366,15 +366,15 @@ export interface HarnessServiceHost {
   storeRetrievalArtifact?: (
     workspaceId: string,
     bytes: Buffer,
-    authority?: import("@piarium/protocol").RetrievalReceiptAuthority,
-  ) => Promise<import("@piarium/protocol").RetrievalArtifactRef>;
+    authority?: import("@varin/protocol").RetrievalReceiptAuthority,
+  ) => Promise<import("@varin/protocol").RetrievalArtifactRef>;
   readRetrievalArtifact?: (
     workspaceId: string,
-    artifact: import("@piarium/protocol").RetrievalArtifactRef,
+    artifact: import("@varin/protocol").RetrievalArtifactRef,
   ) => Promise<Buffer | null>;
   readRetrievalArtifactSlice?: (
     workspaceId: string,
-    artifact: import("@piarium/protocol").RetrievalArtifactRef,
+    artifact: import("@varin/protocol").RetrievalArtifactRef,
     offset: number,
     length: number,
   ) => Promise<Buffer | null>;
@@ -382,24 +382,24 @@ export interface HarnessServiceHost {
     workspaceId: string;
     threadId: string;
     runId: string;
-    evidence: import("@piarium/protocol").RetrievalEvidence;
-    receiptAuthority: import("@piarium/protocol").RetrievalReceiptAuthority;
+    evidence: import("@varin/protocol").RetrievalEvidence;
+    receiptAuthority: import("@varin/protocol").RetrievalReceiptAuthority;
   }) => Promise<void>;
   lookupWebFetchReceipt?: (
     workspaceId: string,
-    authority: import("@piarium/protocol").RetrievalReceiptAuthority,
+    authority: import("@varin/protocol").RetrievalReceiptAuthority,
     receiptId: string,
-  ) => Promise<import("@piarium/protocol").RetrievalUrlReceipt | null>;
+  ) => Promise<import("@varin/protocol").RetrievalUrlReceipt | null>;
   releaseWebFetchReceipts?: (sessionId: string, workspaceId: string | null) => Promise<void>;
   releaseRetrievalTemporaryArtifacts?: (
     workspaceId: string,
-    authority: import("@piarium/protocol").RetrievalReceiptAuthority,
+    authority: import("@varin/protocol").RetrievalReceiptAuthority,
   ) => Promise<void>;
   /** Dirty paths this turn's fixed source still owns (D-088). */
-  agentInputDraftPaths?: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => readonly string[];
+  agentInputDraftPaths?: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => readonly string[];
   agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
-  commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
-  releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
+  commitAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { committed: boolean };
+  releaseAgentInputContext: (sessionId: string, context: import("@varin/protocol").AgentInputContext) => { released: boolean };
   verification: VerificationCoordinator;
   // Phase 4: experiment execution and resource facts (7C/7D, D-300)
   experimentService: import("./experiments.js").ExperimentService | null;
@@ -438,7 +438,7 @@ export interface HarnessServiceHostOptions {
   pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
-  permissionAudit?: (record: import("@piarium/protocol").PermissionAuditRecord) => void;
+  permissionAudit?: (record: import("@varin/protocol").PermissionAuditRecord) => void;
   shellSetting?: HarnessShellSetting;
   /**
    * Machine-level discovery. Production passes the Host construction result.

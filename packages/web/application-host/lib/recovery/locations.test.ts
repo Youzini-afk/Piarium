@@ -9,7 +9,7 @@ import {
 
 describe('atomic recovery JSON', () => {
   it('replaces an existing record through a preserved predecessor when direct overwrite is refused', async () => {
-    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-recovery-json-'));
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-recovery-json-'));
     const filePath = path.join(root, 'operation.json');
     await writeRecoveryJsonAtomic(filePath, { revision: 1 });
     let refused = false;
@@ -31,7 +31,7 @@ describe('atomic recovery JSON', () => {
   });
 
   it('reads the preserved predecessor left by an interrupted replacement', async () => {
-    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-recovery-json-'));
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'varin-recovery-json-'));
     const filePath = path.join(root, 'operation.json');
     try {
       await fs.promises.writeFile(`${filePath}.previous`, JSON.stringify({ revision: 1 }), 'utf8');

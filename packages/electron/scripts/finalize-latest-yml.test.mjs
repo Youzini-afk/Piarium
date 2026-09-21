@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./finalize-latest-yml.mjs', import.meta.url));
 
-const artifact = (platform, architecture) => `Piarium-1.2.3-${platform}-${architecture}.${platform === 'mac' ? 'zip' : 'exe'}`;
+const artifact = (platform, architecture) => `Varin-1.2.3-${platform}-${architecture}.${platform === 'mac' ? 'zip' : 'exe'}`;
 const artifactBytes = (platform, architecture) => Buffer.from(`${platform}:${architecture}:artifact`);
 const manifest = (platform, architecture) => {
   const name = artifact(platform, architecture);
@@ -31,7 +31,7 @@ const writeManifestFixture = (artifacts, subdir, filename, platform, architectur
 };
 
 const createFixture = ({ includeArm64 = true } = {}) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-latest-yml-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-latest-yml-'));
   const artifacts = path.join(root, 'artifacts');
   const output = path.join(root, 'output');
   writeManifestFixture(
@@ -58,8 +58,8 @@ const environment = ({ artifacts, output }) => ({
   ...process.env,
   LATEST_YML_DIR: artifacts,
   RUNNER_TEMP: output,
-  GH_REPO: 'Youzini-afk/Piarium',
-  PIARIUM_VERSION: '1.2.3',
+  GH_REPO: 'Youzini-afk/Varin',
+  VARIN_VERSION: '1.2.3',
 });
 
 test('writes separate x64 and ARM64 Windows update channels', (context) => {

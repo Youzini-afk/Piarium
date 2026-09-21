@@ -6,13 +6,13 @@ import {
   createRuntimeRequest,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
-  PIARIUM_PROTOCOL_VERSION,
+  VARIN_PROTOCOL_VERSION,
   type RuntimeWireEnvelope,
-} from '@piarium/protocol';
+} from '@varin/protocol';
 import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
-} from '@piarium/runtime-broker';
+} from '@varin/runtime-broker';
 import { WebSocket } from 'ws';
 import { createPiRuntimeGateway, PI_RUNTIME_WS_PATH } from './gateway.js';
 
@@ -60,7 +60,7 @@ const handshake = async (socket: WebSocket, id = 'handshake'): Promise<RuntimeWi
     clientName: 'gateway-test',
     clientVersion: '0.1.0',
     mode: 'test',
-    protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+    protocolVersions: [VARIN_PROTOCOL_VERSION],
   })));
   return responsePromise;
 };
@@ -87,7 +87,7 @@ const createBroker = (): TestBroker => {
         settings: true,
       },
       hostVersion: '0.1.0',
-      protocolVersion: PIARIUM_PROTOCOL_VERSION,
+      protocolVersion: VARIN_PROTOCOL_VERSION,
       runtime: {
         agentDir: 'C:/agent',
         nodePath: 'node',
@@ -138,7 +138,7 @@ describe('Pi runtime gateway', () => {
       id: 'handshake-1',
       kind: 'response',
       ok: true,
-      result: { protocolVersion: PIARIUM_PROTOCOL_VERSION },
+      result: { protocolVersion: VARIN_PROTOCOL_VERSION },
     });
     socket.close();
   });
@@ -195,7 +195,7 @@ describe('Pi runtime gateway', () => {
       kind: 'request',
       method: 'host.shutdown',
       params: {},
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     }));
 
     expect(await responsePromise).toMatchObject({
@@ -230,7 +230,7 @@ describe('Pi runtime gateway', () => {
       kind: 'request',
       method: 'session.list',
       params: { deploymentOwnedPayload: 'x'.repeat(6 * 1024 * 1024) },
-      v: PIARIUM_PROTOCOL_VERSION,
+      v: VARIN_PROTOCOL_VERSION,
     }));
 
     expect(await responsePromise).toMatchObject({ id: 'large-list', ok: true, result: [] });

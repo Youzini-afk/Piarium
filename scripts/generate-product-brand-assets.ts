@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import {
   LOGO_LEFT_FACE_CELLS,
   LOGO_LEFT_FACE_PATH,
+  LOGO_MARK_PATH,
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
@@ -12,10 +13,11 @@ import {
   LOGO_TOP_FACE_PATH,
   leftFaceCellOpacity,
   rightFaceCellOpacity,
-} from '../packages/ui/src/components/ui/piarium-logo-geometry';
+} from '../packages/ui/src/components/ui/varin-logo-geometry';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronIcons = path.join(repoRoot, 'packages', 'electron', 'resources', 'icons');
+const electronTray = path.join(electronIcons, 'tray');
 const webPublic = path.join(repoRoot, 'packages', 'web', 'public');
 
 const PRODUCT_BACKGROUND = '#151313';
@@ -93,6 +95,38 @@ ${markBody('currentColor', true)}
 </svg>
 `;
 
+/** The tray keeps the moving cube silhouette, with the same V glyph as the full mark on its top face. */
+const trayGlyphSvg = (): string => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"
+     stroke="#000" stroke-linejoin="round" stroke-linecap="round">
+  <g stroke-width="2.3">
+    <path d="M16 2.5 L28.5 9.5 L28.5 23 L16 30 L3.5 23 L3.5 9.5 Z"/>
+    <path d="M3.5 9.5 L16 16.25 L28.5 9.5"/>
+    <path d="M16 16.25 L16 30"/>
+  </g>
+  <path d="${LOGO_MARK_PATH}" transform="translate(16 9.4) rotate(45) scale(0.2)" fill="#000" stroke="none"/>
+</svg>
+`;
+
+/** Small native tray frames use the cube outline and pulse only its translucent faces. */
+const trayFrameSvg = (fillLevel: number): string => {
+  const clampedLevel = Math.min(1, Math.max(0, fillLevel));
+  const faceOpacity = alpha(clampedLevel * 0.58);
+  const markOpacity = alpha(0.7 + clampedLevel * 0.3);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">
+  <g fill="none" stroke="#fff" stroke-linejoin="round" stroke-linecap="round" stroke-width="1.35">
+    <path d="M9 1 L16.2 5 L16.2 13 L9 17 L1.8 13 L1.8 5 Z"/>
+    <path d="M1.8 5 L9 9 L16.2 5"/>
+    <path d="M9 9 L9 17"/>
+  </g>
+  <path d="M9 3.25 L14.1 5.95 L9 8.65 L3.9 5.95 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
+  <path d="M3.1 5.75 L9 9 L14.9 5.75 L14.9 12.7 L9 15.95 L3.1 12.7 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
+  <path d="${LOGO_MARK_PATH}" transform="translate(9 5.95) rotate(45) scale(0.12)" fill="#fff" fill-opacity="${markOpacity}"/>
+</svg>
+`;
+};
+
 const raster = async (svg: string, size: number): Promise<Buffer> => sharp(Buffer.from(svg))
   .resize(size, size, { fit: 'fill' })
   .png()
@@ -145,6 +179,7 @@ const createIcns = async (): Promise<Buffer> => {
 const productSvg = appIconSvg();
 const darkMarkSvg = transparentMarkSvg({ ink: PRODUCT_INK });
 const lightMarkSvg = transparentMarkSvg({ ink: LIGHT_SURFACE_INK });
+const trayGlyph = trayGlyphSvg();
 const productPng = await raster(productSvg, 1024);
 
 await Promise.all([
@@ -154,6 +189,23 @@ await Promise.all([
   save(path.join(electronIcons, 'icon.png'), productPng),
   save(path.join(electronIcons, 'icon.ico'), await createIco()),
   save(path.join(electronIcons, 'icon.icns'), await createIcns()),
+  save(path.join(electronTray, 'tray-glyph.svg'), trayGlyph),
+  save(path.join(electronTray, 'trayTemplate-idle.png'), await raster(trayFrameSvg(0), 18)),
+  save(path.join(electronTray, 'trayTemplate-idle@2x.png'), await raster(trayFrameSvg(0), 36)),
+  save(path.join(electronTray, 'trayTemplate-unseen.png'), await raster(trayFrameSvg(1), 18)),
+  save(path.join(electronTray, 'trayTemplate-unseen@2x.png'), await raster(trayFrameSvg(1), 36)),
+  ...Array.from({ length: 16 }, async (_, index) => {
+    const progress = index <= 8 ? index / 8 : (16 - index) / 8;
+    const frame = String(index).padStart(2, '0');
+    const [normal, retina] = await Promise.all([
+      raster(trayFrameSvg(progress), 18),
+      raster(trayFrameSvg(progress), 36),
+    ]);
+    return Promise.all([
+      save(path.join(electronTray, `trayTemplate-breath-${frame}.png`), normal),
+      save(path.join(electronTray, `trayTemplate-breath-${frame}@2x.png`), retina),
+    ]);
+  }),
   save(path.join(electronIcons, 'AppIcon.icon', 'Assets', 'app-icon-glyph-dark 4.png'), await raster(iconComposerGlyphSvg(PRODUCT_INK), 1024)),
   save(path.join(electronIcons, 'AppIcon.icon', 'Assets', 'app-icon-glyph-light 2.png'), await raster(iconComposerGlyphSvg(LIGHT_SURFACE_INK), 1024)),
 
@@ -165,6 +217,10 @@ await Promise.all([
   save(path.join(webPublic, 'favicon-16.png'), await raster(appIconSvg(true), 16)),
   save(path.join(webPublic, 'favicon-32.png'), await raster(appIconSvg(true), 32)),
   save(path.join(webPublic, 'favicon.png'), await raster(productSvg, 64)),
+  save(path.join(webPublic, 'pwa-192.png'), await raster(productSvg, 192)),
+  save(path.join(webPublic, 'pwa-512.png'), await raster(productSvg, 512)),
+  save(path.join(webPublic, 'pwa-maskable-192.png'), await raster(productSvg, 192)),
+  save(path.join(webPublic, 'pwa-maskable-512.png'), await raster(productSvg, 512)),
   save(path.join(webPublic, 'apple-touch-icon.svg'), productSvg),
   save(path.join(webPublic, 'apple-touch-icon.png'), await raster(productSvg, 180)),
   ...[120, 152, 167, 180].map(async (size) => save(
@@ -174,4 +230,4 @@ await Promise.all([
 
 ]);
 
-console.log('[branding] Generated Piarium desktop and Web assets from the splash mark.');
+console.log('[branding] Generated Varin desktop and Web assets from the splash mark.');

@@ -9,7 +9,7 @@ import { KernelStorageAdapter } from "../kernel/storage-adapter.js";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "./journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
-const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
+const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `varin-kernel${extension}`);
 const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "package.json"), "utf8")).version as string;
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
 const roots: string[] = [];
@@ -36,7 +36,7 @@ const catalogFiles = async (root: string): Promise<string[]> => {
 };
 
 it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kernel restart without a TS recovery catalog", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-combined-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-combined-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   const dataDir = path.join(root, "host-data");

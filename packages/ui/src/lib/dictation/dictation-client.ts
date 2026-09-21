@@ -1,13 +1,13 @@
 /**
- * WebSocket client for the Piarium dictation endpoint (/api/dictation/ws).
+ * WebSocket client for the Varin dictation endpoint (/api/dictation/ws).
  *
  * One shared client per app. The socket is opened lazily when a dictation
  * starts and closed after an idle delay. URLs are resolved at connect time via
  * the runtime URL resolver so runtime switches never leak a stale endpoint.
  */
 
-import { getRuntimeUrlResolver } from '@piarium/application-client';
-import { refreshRuntimeUrlAuthToken } from '@piarium/application-client';
+import { getRuntimeUrlResolver } from '@varin/application-client';
+import { refreshRuntimeUrlAuthToken } from '@varin/application-client';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
@@ -106,7 +106,7 @@ export class DictationClient {
         }
 
         // A WebSocket upgrade can't carry an Authorization header, so it
-        // authenticates via the Piarium URL token query param. Mint/await a valid
+        // authenticates via the Varin URL token query param. Mint/await a valid
         // token BEFORE connecting — the sync getter returns "" while the token
         // is unminted or inside its expiry skew, and the server would reject
         // the upgrade with 401.
@@ -448,7 +448,7 @@ export class DictationClient {
 export const dictationClient = new DictationClient();
 
 if (typeof window !== 'undefined') {
-    window.addEventListener('piarium:runtime-endpoint-changed', () => {
+    window.addEventListener('varin:runtime-endpoint-changed', () => {
         // Drop the socket so the next dictation reconnects to the new runtime.
         dictationClient.cancelAllForRuntimeSwitch();
     });

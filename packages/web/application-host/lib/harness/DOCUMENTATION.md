@@ -70,11 +70,11 @@ children. Read/resource/source capabilities do not grant experiment process cont
 `experiments.ts` owns orchestration over kernel records and the backend contract. A spec keeps ordered
 arguments and a fixed input root; an attempt owns an independent materialized directory under kernel
 storage. `experiment-workspace.ts` captures and checks source bytes through Rust, includes ignored
-files under the declared capture scope, excludes the kernel scan's `.git`/`.piarium` metadata, and
+files under the declared capture scope, excludes the kernel scan's `.git`/`.varin` metadata, and
 rewrites internal absolute links to remain inside the captured tree. It does not promise an OS sandbox.
 Capturing a large dependency/data tree has a real cost; spec reuse keeps the prior input root.
 
-Machine capacity, observations and Piarium commitments share a Host-level kernel catalog domain in
+Machine capacity, observations and Varin commitments share a Host-level kernel catalog domain in
 `resources.ts`. Reservations are serialized across owning workspaces and survive service recreation;
 they do not claim OS isolation from external processes. Resource release can wake queued attempts in
 other workspaces. Unknown CPU/GPU measurements remain unknown. `sources.ts` retains actual object
@@ -82,7 +82,7 @@ references; a path or URI locator alone is provenance, not proof that remote con
 
 `experiment-routes.ts` exposes the same authorized facts to the research panel, including paged logs
 and streamed artifact downloads. The model's `experiment(action:"artifact")` reads collected text by
-byte page; binary bodies stay out of model text. UI refresh uses `/api/piarium/events`, invalidates
+byte page; binary bodies stay out of model text. UI refresh uses `/api/varin/events`, invalidates
 older requests on session changes, and exposes failures without replacing them with empty facts.
 
 Thread kill/delete closes the worker before stopping its independent attempts and reclaiming state.
@@ -148,7 +148,7 @@ seam that wraps the same handle contract. There is not a second production
 process manager.
 
 - One login shell (git-bash / bash / wsl / powershell) per session
-- Commands separated by sentinel markers (`__PIARIUM_SENTINEL_`)
+- Commands separated by sentinel markers (`__VARIN_SENTINEL_`)
 - cwd/env/venv maintained between commands
 - A command that exceeds `wait_ms` keeps its current terminal session as the
   public `sh_N` identity allocated by the global terminal runtime; the next
@@ -306,7 +306,7 @@ Run; a second consecutive crash becomes `stalled` instead of entering a crash
 loop. Interactive child prompts, event silence, and six identical tool
 signatures project to `permission`/`user`, `stalled`, and `looping`. The Web UI
 reads the same registry through `/api/harness/threads` and SSE; the Pi Fleet
-registry exposes it through the `piarium-harness` provider.
+registry exposes it through the `varin-harness` provider.
 
 ### VerificationCoordinator (`verification-coordinator.ts`)
 
@@ -359,7 +359,7 @@ unavailable; none of these operations may fall back to the parent live tree.
 
 The fixed draft is one turn's input, not a standing authority. A confirmed Host-backed disk write
 supersedes that path so later read/search/enumeration/navigation/dispatch return to disk (D-088).
-Piarium-mode Pi mutation tools do not maintain a second worker-local disk journal/writer. A root-session write
+Varin-mode Pi mutation tools do not maintain a second worker-local disk journal/writer. A root-session write
 whose path is still owned by this turn's snapshot goes through `document.surfaceWrite`
 instead: matching uses the fixed text, the live Registry buffer is updated in
 place, and later read/edit in the same turn see the new buffer (D-225). A later
@@ -374,7 +374,7 @@ boundary the recovery journal reports.
 `write` / `edit` / `apply_patch` share one Host plan after `document.branchWrite`
 returns the disk sentinel. Snapshot-owned paths write the Document Registry buffer through
 `requestSurfaceOperation`; unowned disk targets stay in the same Host plan and are applied by
-Documents through the Rust file-resource backend. Piarium does not hand those targets back to a
+Documents through the Rust file-resource backend. Varin does not hand those targets back to a
 worker-local writer. Mixed `apply_patch` batches classify each path, persist `targetKinds`, and under
 one Rust resource lease validate every disk identity before dispatching a surface write. The typed
 recovery operation records external dispatch, compensation intent and observed Registry receipts;
@@ -638,7 +638,7 @@ wanted id and still returns `unsupported` (D-121).
 
 `settings.read`/`settings.update` resolve client-owned preferences from the
 Harness caller's live `sessionId`. The UI first authenticates and binds its
-current session through `/api/piarium/client-settings/bind`; the event stream
+current session through `/api/varin/client-settings/bind`; the event stream
 is targetable only after that Host-side binding and live broker validation.
 Surface ids are returned as facts and are never accepted as model selectors.
 Zero bound Surfaces is `unavailable`; multiple windows bound to one session are

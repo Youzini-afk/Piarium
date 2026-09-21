@@ -5,7 +5,7 @@ import type {
   ThreadReviewProjection,
   ThreadVerificationCommandFact,
   ThreadVerificationProjection,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import type {
   CommandVerificationRecord,
   ParentVerificationBundle,

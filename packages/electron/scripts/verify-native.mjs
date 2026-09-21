@@ -26,7 +26,7 @@ const source = `
   import fs from 'node:fs/promises'; import os from 'node:os'; import path from 'node:path';
   import assert from 'node:assert/strict';
   const { openWorkspaceKnowledge } = await import(${JSON.stringify(knowledge)});
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-knowledge-'));
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-electron-knowledge-'));
   let store;
   try {
     store = await openWorkspaceKnowledge({ dataDir, hostId: 'native-smoke', workspaceId: 'ws', embedding: null });

@@ -20,34 +20,34 @@ const collectTextFiles = (directory, result = []) => {
   return result;
 };
 
-test('native shells use the Piarium application identity', () => {
-  assert.match(read('capacitor.config.ts'), /appId: 'dev\.piarium\.mobile'/);
-  assert.match(read('capacitor.config.ts'), /appName: 'Piarium'/);
-  assert.match(read('android', 'app', 'build.gradle'), /applicationId "dev\.piarium\.mobile"/);
-  assert.match(read('android', 'app', 'src', 'main', 'res', 'values', 'strings.xml'), /<string name="custom_url_scheme">piarium<\/string>/);
+test('native shells use the Varin application identity', () => {
+  assert.match(read('capacitor.config.ts'), /appId: 'dev\.varin\.mobile'/);
+  assert.match(read('capacitor.config.ts'), /appName: 'Varin'/);
+  assert.match(read('android', 'app', 'build.gradle'), /applicationId "dev\.varin\.mobile"/);
+  assert.match(read('android', 'app', 'src', 'main', 'res', 'values', 'strings.xml'), /<string name="custom_url_scheme">varin<\/string>/);
   assert.match(read('android', 'app', 'src', 'main', 'AndroidManifest.xml'), /android\.intent\.category\.BROWSABLE/);
-  assert.ok(existsSync(join(mobileRoot, 'android', 'app', 'src', 'main', 'java', 'dev', 'piarium', 'mobile', 'MainActivity.java')));
+  assert.ok(existsSync(join(mobileRoot, 'android', 'app', 'src', 'main', 'java', 'dev', 'varin', 'mobile', 'MainActivity.java')));
 
   const project = read('ios', 'App', 'App.xcodeproj', 'project.pbxproj');
-  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.piarium\.mobile;/);
-  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.piarium\.mobile\.widget;/);
-  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.piarium\.mobile\.notification-service;/);
-  assert.match(project, /path = PiariumWidget;/);
-  assert.match(project, /path = PiariumNotificationService;/);
-  assert.match(project, /path = PiariumWidgets\.swift;/);
-  assert.match(project, /path = PiariumControl\.swift;/);
-  assert.match(read('ios', 'App', 'App', 'Info.plist'), /<string>piarium<\/string>/);
+  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.varin\.mobile;/);
+  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.varin\.mobile\.widget;/);
+  assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER = dev\.varin\.mobile\.notification-service;/);
+  assert.match(project, /path = VarinWidget;/);
+  assert.match(project, /path = VarinNotificationService;/);
+  assert.match(project, /path = VarinWidgets\.swift;/);
+  assert.match(project, /path = VarinControl\.swift;/);
+  assert.match(read('ios', 'App', 'App', 'Info.plist'), /<string>varin<\/string>/);
   for (const relative of [
     ['ios', 'App', 'App', 'App.entitlements'],
-    ['ios', 'App', 'PiariumWidget', 'PiariumWidget.entitlements'],
-    ['ios', 'App', 'PiariumNotificationService', 'PiariumNotificationService.entitlements'],
+    ['ios', 'App', 'VarinWidget', 'VarinWidget.entitlements'],
+    ['ios', 'App', 'VarinNotificationService', 'VarinNotificationService.entitlements'],
   ]) {
-    assert.match(read(...relative), /group\.dev\.piarium\.mobile/);
+    assert.match(read(...relative), /group\.dev\.varin\.mobile/);
   }
-  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'App.xcodeproj', 'xcshareddata', 'xcschemes', 'PiariumWidget.xcscheme')));
-  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'PiariumWidget', 'PiariumWidgets.swift')));
-  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'PiariumWidget', 'PiariumControl.swift')));
-  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'PiariumNotificationService', 'NotificationService.swift')));
+  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'App.xcodeproj', 'xcshareddata', 'xcschemes', 'VarinWidget.xcscheme')));
+  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'VarinWidget', 'VarinWidgets.swift')));
+  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'VarinWidget', 'VarinControl.swift')));
+  assert.ok(existsSync(join(mobileRoot, 'ios', 'App', 'VarinNotificationService', 'NotificationService.swift')));
 
   const definitions = new Set(
     [...project.matchAll(/^\s*([A-F0-9]{24}) \/\*.*\*\/ = \{/gm)].map((match) => match[1]),
@@ -83,7 +83,7 @@ test('source tree contains no inherited mobile product identity', () => {
   assert.equal(existsSync(join(mobileRoot, 'android', 'app', 'google-services.json')), false);
 });
 
-test('committed primary mobile icons use one generated Piarium source', () => {
+test('committed primary mobile icons use one generated Varin source', () => {
   const mobileIcon = readFileSync(join(mobileRoot, 'assets', 'icon-only.png'));
   const iosIcon = readFileSync(join(mobileRoot, 'ios', 'App', 'App', 'Assets.xcassets', 'AppIcon.appiconset', 'AppIcon-512@2x.png'));
   assert.deepEqual(iosIcon, mobileIcon);

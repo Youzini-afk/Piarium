@@ -1,7 +1,7 @@
 /**
  * Bundle the TypeScript Electron runtime into deployable ESM files. Small electron-* helper deps are
  * inlined; everything else — including the in-process web server
- * (@piarium/web) and native modules — stays external so it resolves
+ * (@varin/web) and native modules — stays external so it resolves
  * from node_modules at runtime inside the packaged app.
  *
  * The Host remains external so packaged assets, Pi workers and the Rust
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const outdir = path.join(root, 'dist-bundle');
-const updaterE2eBuild = process.env.PIARIUM_UPDATER_E2E_BUILD === '1';
+const updaterE2eBuild = process.env.VARIN_UPDATER_E2E_BUILD === '1';
 
 // dist-bundle is generated output. Replace it as one unit so a removed entry
 // cannot survive from an older build and later enter a package.
@@ -28,18 +28,18 @@ const result = await Bun.build({
   format: 'esm',
   external: [
     'electron',
-    '@piarium/web',
-    '@piarium/web/*',
-    '@piarium/pi-host',
-    '@piarium/pi-host/*',
-    '@piarium/runtime-broker',
-    '@piarium/runtime-broker/*',
+    '@varin/web',
+    '@varin/web/*',
+    '@varin/pi-host',
+    '@varin/pi-host/*',
+    '@varin/runtime-broker',
+    '@varin/runtime-broker/*',
   ],
   minify: false,
   sourcemap: 'none',
   naming: '[name].mjs',
   define: {
-    __PIARIUM_UPDATER_E2E_BUILD__: updaterE2eBuild ? 'true' : 'false',
+    __VARIN_UPDATER_E2E_BUILD__: updaterE2eBuild ? 'true' : 'false',
   },
 });
 
@@ -51,7 +51,7 @@ if (!result.success) {
 // Verify both entry bundles exist and are accepted by the same Node parser
 // used by Electron's main-process runtime.
 const expectedEntries = ['main.mjs', 'preload.mjs'];
-const nodeExecutable = process.env.PIARIUM_PACKAGING_NODE || 'node';
+const nodeExecutable = process.env.VARIN_PACKAGING_NODE || 'node';
 for (const entry of expectedEntries) {
   const entryPath = path.join(outdir, entry);
   if (!fs.existsSync(entryPath)) {

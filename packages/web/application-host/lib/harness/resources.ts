@@ -17,7 +17,7 @@ import type {
   ResourceCommitmentView,
   ResourceListResult,
   ResourceMachineView,
-} from "@piarium/protocol";
+} from "@varin/protocol";
 import {
   allocateGpuDevices,
   probeNvidiaSmi,
@@ -31,7 +31,7 @@ const COMMITMENT_PREFIX = "resource.commitment:";
 const SAMPLE_PREFIX = "resource.sample:";
 const LOCAL_MACHINE_ID = "local";
 /** Host-local catalog namespace shared by every owning workspace. */
-const RESOURCE_WORKSPACE_ID = "__piarium_host_resources__";
+const RESOURCE_WORKSPACE_ID = "__varin_host_resources__";
 const SAMPLE_STALE_MS = 120_000;
 
 export interface LocalMachineProbe {
@@ -96,7 +96,7 @@ export interface ExternalResourceAuthority {
 
 /**
  * Registration of a non-local execution target by connection management
- * (SSH instance, remote Piarium Host, cluster). A freshly registered machine
+ * (SSH instance, remote Varin Host, cluster). A freshly registered machine
  * is offline with unknown connection until a real probe reports otherwise —
  * registration alone never claims capacity or reachability.
  */
@@ -105,7 +105,7 @@ export interface ResourceMachineRegistration {
   machineId?: string;
   kind: string;
   label?: string;
-  /** Which experiment backend reaches this machine (e.g. "piarium-host", "slurm"). */
+  /** Which experiment backend reaches this machine (e.g. "varin-host", "slurm"). */
   backend?: string;
   state?: "available" | "degraded" | "offline";
   capacity?: {

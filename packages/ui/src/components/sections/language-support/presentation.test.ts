@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { LanguageSupportLanguageRow } from '@piarium/application-client';
+import type { LanguageSupportLanguageRow } from '@varin/application-client';
 import {
   canImportGrammar,
   canInstallGrammar,

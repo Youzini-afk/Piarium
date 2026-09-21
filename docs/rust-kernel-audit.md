@@ -109,7 +109,7 @@ kernel 能恢复目录，不代表 Host 能证明“这是哪个固定输入、G
 
 R2：kernel 新增 typed `file.operation.list/reconcile`，Host `KernelFileAuthorityContext` 保留每个未决 operation 的 operationId、kind、paths、disposition 与 reason，并暴露显式 reconcile。真实 release-kernel audit 注入目录 rename 在 side effect 后丢失 terminal finish，重启后 operation 仍可列举；由于目录元数据不足以证明整树来源，显式 reconcile 继续保留 needs-attention，而不是重放 rename 或制造成功。
 
-R3：Thread Registry 持久化 `materializationHandoff`，固定 source root/revision/writeRevision、operationId、pinId、stage 和 Git receipt；current-root handoff 使用 maintenance-scoped persistent pin 跨 kernel/Host restart 保活。native materialize 与 Git attach 均以同一 handoff 重入，Piarium-owned Git baseline attach 幂等；进入 `git-attached` 后必须先成功释放 durable pin 才清 Registry intent，失败则保留 receipt 供下次恢复。setup timeout/abort 发送 kill 后等待 child `close` 再结束。
+R3：Thread Registry 持久化 `materializationHandoff`，固定 source root/revision/writeRevision、operationId、pinId、stage 和 Git receipt；current-root handoff 使用 maintenance-scoped persistent pin 跨 kernel/Host restart 保活。native materialize 与 Git attach 均以同一 handoff 重入，Varin-owned Git baseline attach 幂等；进入 `git-attached` 后必须先成功释放 durable pin 才清 Registry intent，失败则保留 receipt 供下次恢复。setup timeout/abort 发送 kill 后等待 child `close` 再结束。
 
 复核证据：统一 `bun run test:kernel` 57 passed：真实 release kernel child-process 25/25、file-resource audit 26/26、storage adapter 5/5、kernel-backed combined Recovery 1/1；IntegrationCoordinator 37/37（已移除对退役 SQLite 内部表的依赖，改用 current durable port），ThreadRuntime/ThreadWorktree 91 passed / 1 platform skip；Application Host type-check、protocol drift、release build 与 diff check 通过。由此 D-278 的 R2/R3 reopen gate 均关闭。
 
