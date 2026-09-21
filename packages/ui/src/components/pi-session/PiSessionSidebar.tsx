@@ -394,6 +394,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
   const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  const scheduledTasksOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setArchivePageOpen = useUIStore((state) => state.setArchivePageOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -851,10 +852,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                 <Icon name="folder-add" className="size-4" />
                 {t('sessions.sidebar.header.actions.addProject')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleOpenScheduledTasks}>
-                <Icon name="calendar-schedule" className="size-4" />
-                {t('sessions.sidebar.header.actions.scheduledTasks')}
-              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleOpenMultiRun}>
                 <Icon name="git-merge" className="size-4" />
                 {t('sessions.sidebar.header.actions.newMultiRun')}
@@ -920,6 +917,18 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+
+        <div className="shrink-0 px-2.5 pb-2">
+          <button
+            type="button"
+            onClick={handleOpenScheduledTasks}
+            aria-current={scheduledTasksOpen ? 'page' : undefined}
+            className={cn('flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', scheduledTasksOpen ? 'bg-interactive-selection text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground')}
+          >
+            <Icon name="calendar-schedule" className="size-4 shrink-0" />
+            <span className="truncate">{t('tasksHub.title')}</span>
+          </button>
         </div>
 
         {searchOpen ? (

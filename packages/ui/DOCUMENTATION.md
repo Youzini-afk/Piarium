@@ -37,6 +37,15 @@ sessions show selected and applied focus separately. A change applies before the
 the current Run and its follow-up queue retain their configuration. Session metadata, not the active
 project or UI profile, owns the durable choice. Project defaults use the existing settings/autosave path.
 
+The session sidebar places “Scheduled & follow-ups” directly below New session. Its existing page slot
+(`ScheduledTasksDialog`) contains separate schedule and follow-up sections on desktop and mobile.
+Schedules keep project selection and their existing editors. `FollowUpTasksPanel` reads an authenticated
+Host-wide overview, separates active waits from history, and exposes source checks, explicit invocation,
+cancellation and navigation back to the target conversation. Mutations reuse the original session-scoped
+routes and revisions. Overview reads do not invoke models or install another scheduler. The panel loads
+only while visible, follows existing follow-up events, and aborts stale reads on unmount/runtime changes;
+load failures stay distinguishable from an empty list. `followUpsApi` is shared with the conversation strip.
+
 `WorkbenchProfileSwitcher` exposes two adjacent presentation controls: Agent/IDE and a General/Research
 workspace menu (plus installed custom profiles). IDE never appears as an item in that workspace menu.
 `useUIStore.agentWorkbenchProfileByHost` remembers the Agent return destination per Host across shell

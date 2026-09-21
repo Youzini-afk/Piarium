@@ -3820,15 +3820,34 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
    * workspace ids only; definition reads stay scoped per workspace.
    */
   const definitionWorkspaces = async (): Promise<string[]> => {
+    const grantId = `followup:enumerate:${randomUUID()}`;
     const grant = await deps.client.issueGrant({
-      grantId: `followup:enumerate:${randomUUID()}`,
+      grantId,
       capabilities: [...SERVICE_CAPABILITIES],
       owningWorkspace: null,
       executionWorkspace: null,
       pathScopes: [],
     });
-    const result = await deps.client.recordWorkspaces({ recordType: "followup.definition" }, grant);
-    return result.workspaceIds;
+    try {
+      const result = await deps.client.recordWorkspaces({ recordType: "followup.definition" }, grant);
+      return result.workspaceIds;
+    } finally {
+      await deps.client.revokeGrant(grantId);
+    }
+  };
+
+  /** Authenticated Host UI overview only; never exposed as an Agent service. */
+  const listForHost = async (params: FollowUpListParams): Promise<FollowUpListResult> => {
+    const followUps: FollowUpDefinitionView[] = [];
+    for (const workspaceId of await definitionWorkspaces()) {
+      const records = await listDefinitions(workspaceId);
+      for (const record of records) {
+        if ((payloadOf(record) as unknown as DefinitionPayload).internalSource) continue;
+        const view = toView(record);
+        if (params.includeInactive === true || ACTIVE_STATUSES.has(view.status)) followUps.push(view);
+      }
+    }
+    return { followUps: followUps.sort((left, right) => right.updatedAt - left.updatedAt) };
   };
 
   /**
@@ -3864,6 +3883,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   return {
     register,
     list,
+    listForHost,
     get,
     update,
     cancel,

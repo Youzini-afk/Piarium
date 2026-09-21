@@ -25,7 +25,7 @@ const scope = {
   snapshot: null,
 };
 
-const fixture = (options: { bound?: boolean } = {}) => {
+const fixture = (options: { bound?: boolean; authenticated?: boolean } = {}) => {
   const bound = options.bound ?? true;
   const registry = {
     getSessionBinding: vi.fn(async () => bound ? { threadId: "thread-1", runId: "run-1" } : null),
@@ -40,6 +40,7 @@ const fixture = (options: { bound?: boolean } = {}) => {
     fire: vi.fn(async () => ({ followUp: { ...followUp, status: "delivered" }, occurrences: [] })),
     get: vi.fn(async () => ({ followUp, occurrences: [] })),
     list: vi.fn(async () => ({ followUps: [followUp] })),
+    listForHost: vi.fn(async () => ({ followUps: [followUp] })),
     update: vi.fn(async () => ({ followUp: { ...followUp, instruction: "revised" } })),
   };
   const runtime = { scopeForSession: vi.fn(async () => scope) };
@@ -49,11 +50,29 @@ const fixture = (options: { bound?: boolean } = {}) => {
     followUps: followUps as never,
     registry: registry as never,
     runtime: runtime as never,
+    requireAuth: (_request, response, next) => {
+      if (options.authenticated === false) response.sendStatus(401);
+      else next();
+    },
   });
   return { app, followUps, registry };
 };
 
 describe("harness follow-up routes", () => {
+  it("provides an authenticated Host overview without changing session-scoped actions", async () => {
+    const { app, followUps } = fixture();
+    const response = await request(app).get("/api/harness/follow-ups?includeInactive=true").expect(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body.followUps[0].sessionId).toBe("session-1");
+    expect(followUps.listForHost).toHaveBeenCalledWith({ includeInactive: true });
+    expect(followUps.list).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unauthenticated overview before reading registrations", async () => {
+    const { app, followUps } = fixture({ authenticated: false });
+    await request(app).get("/api/harness/follow-ups").expect(401);
+    expect(followUps.listForHost).not.toHaveBeenCalled();
+  });
   it("lists the session's follow-ups through its owning workspace", async () => {
     const { app, followUps } = fixture();
     const response = await request(app)

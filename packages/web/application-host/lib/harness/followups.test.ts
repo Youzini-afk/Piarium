@@ -1547,6 +1547,12 @@ describe("follow-up service on the real kernel", () => {
       source: { at: Date.now() + 60_000, kind: "time" },
     });
     assert.deepEqual(await f.service.definitionWorkspaces(), ["ws"]);
+    const otherSession = { ...sessionCaller(), sessionId: "s-2", rootSessionId: "s-2" };
+    await f.service.register(otherSession, { instruction: "root wait", source: { kind: "manual" } });
+    const overview = await f.service.listForHost({ includeInactive: true });
+    assert.equal(overview.followUps.length, 2);
+    assert.equal((await f.service.list(caller(), {})).followUps.length, 1);
+    assert.equal((await f.service.list(otherSession, {})).followUps.length, 1);
   });
 
   it("settleTarget cancels waits whose thread or session is gone", async () => {

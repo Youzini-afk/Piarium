@@ -138,6 +138,9 @@ const applyPiSessionLocation = (
     directoryState.setDirectory(cwd, { showOverlay: false });
   }
   const uiState = useUIStore.getState();
+  // Explicit navigation also leaves a task page when reselecting the same
+  // conversation or opening another draft (no session-id change to observe).
+  uiState.closeMainSurfaces();
   uiState.setActiveMainTab('chat');
   uiState.setSessionSwitcherOpen(false);
 };

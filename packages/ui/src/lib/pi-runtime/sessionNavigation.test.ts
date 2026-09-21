@@ -106,7 +106,7 @@ describe('Pi session navigation', () => {
         },
         currentSessionId: 'existing-session',
       });
-      useUIStore.setState({ activeMainTab: 'files', isSessionSwitcherOpen: true });
+      useUIStore.setState({ activeMainTab: 'files', isSessionSwitcherOpen: true, isScheduledTasksDialogOpen: true });
 
       await startPiSessionDraftFromNavigation({
         directory: 'D:/repo/worktrees/feature',
@@ -119,6 +119,7 @@ describe('Pi session navigation', () => {
       expect(useProjectsStore.getState().activeProjectId).toBe('draft-project');
       expect(useUIStore.getState().activeMainTab).toBe('chat');
       expect(useUIStore.getState().isSessionSwitcherOpen).toBe(false);
+      expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(false);
     } finally {
       useDirectoryStore.setState(originalDirectory, true);
       useProjectsStore.setState(originalProjects, true);

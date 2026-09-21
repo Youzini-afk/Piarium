@@ -67,6 +67,17 @@ export function registerHarnessFollowUpRoutes(
     };
   };
 
+  // Same authenticated Host user who manages the session catalog. Actions below
+  // remain session-scoped and re-resolve ownership; this endpoint is read-only.
+  app.get("/api/harness/follow-ups", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      response.json(await followUps.listForHost({ includeInactive: request.query.includeInactive === "true" }));
+    } catch (error) {
+      sendError(response, error, "Unable to list follow-ups");
+    }
+  });
+
   app.get("/api/harness/sessions/:sessionId/follow-ups", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {

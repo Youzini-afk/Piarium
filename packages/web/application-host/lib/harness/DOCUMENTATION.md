@@ -31,6 +31,13 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 ## Components
 
+The authenticated UI can read `/api/harness/follow-ups` for the current Host's follow-up overview.
+`FollowUpService.listForHost` enumerates the owning workspaces from the kernel and projects visible
+definitions; internal composite leaves stay hidden. This read-only management method is not registered
+as an Agent tool. The overview uses the same durable authority as per-session strips and does not reconcile
+or trigger a model merely by being opened. Mutations still resolve the target session and retain the existing
+ownership/revision checks. Temporary enumeration grants are revoked after the query.
+
 ### Research root (`research-root-runtime.ts`, phase 7A)
 
 The research work focus uses the user's existing Pi session and selected model. On a real

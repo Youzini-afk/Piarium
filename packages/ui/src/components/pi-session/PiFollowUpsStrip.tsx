@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { runtimeFetch } from '@piarium/application-client';
-import type { FollowUpDefinitionView, FollowUpListResult } from '@piarium/protocol';
+import type { FollowUpDefinitionView } from '@piarium/protocol';
+import { fetchFollowUps, postFollowUpAction } from '@/lib/followUpsApi';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { subscribePiariumEvents } from '@/lib/piariumEvents';
@@ -12,47 +12,6 @@ import { toast } from '@/components/ui/toast';
  * a program-side source evaluation; fire invokes the agent; cancel only stops
  * the wait, never the watched work.
  */
-
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-);
-
-const parseView = (value: unknown): FollowUpDefinitionView | null => {
-  if (!isRecord(value)) return null;
-  if (typeof value.id !== 'string' || typeof value.status !== 'string') return null;
-  if (typeof value.waitingSummary !== 'string' || typeof value.instruction !== 'string') return null;
-  return value as unknown as FollowUpDefinitionView;
-};
-
-const loadFollowUps = async (sessionId: string, signal?: AbortSignal): Promise<FollowUpDefinitionView[] | null> => {
-  const response = await runtimeFetch(
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/follow-ups`,
-    { cache: 'no-store', ...(signal ? { signal } : {}) },
-  );
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Follow-up list failed (${response.status})`);
-  const body = await response.json() as unknown;
-  if (!isRecord(body) || !Array.isArray(body.followUps)) return [];
-  return (body as unknown as FollowUpListResult).followUps
-    .map(parseView)
-    .filter((entry): entry is FollowUpDefinitionView => entry !== null);
-};
-
-const postFollowUpAction = async (
-  sessionId: string,
-  id: string,
-  action: 'cancel' | 'check' | 'fire',
-): Promise<void> => {
-  const response = await runtimeFetch(
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/follow-ups/${encodeURIComponent(id)}/${action}`,
-    { method: 'POST', cache: 'no-store' },
-  );
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    const message = isRecord(body) && typeof body.error === 'string' ? body.error : `${action} failed (${response.status})`;
-    throw new Error(message);
-  }
-};
 
 const STATUS_TONE: Record<string, string> = {
   waiting: 'text-[var(--status-warning)]',
@@ -70,7 +29,7 @@ export const PiFollowUpsStrip: React.FC<{ sessionId: string }> = ({ sessionId })
 
   const refresh = React.useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await loadFollowUps(sessionId, signal);
+      const result = await fetchFollowUps({ sessionId, signal });
       if (!signal?.aborted) setFollowUps(result);
     } catch {
       if (!signal?.aborted) setFollowUps(null);

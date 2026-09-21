@@ -31,6 +31,7 @@ import {
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { ScheduledTaskLoopEditorDialog } from './ScheduledTaskLoopEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { FollowUpTasksPanel } from './FollowUpTasksPanel';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -180,10 +181,13 @@ export function ScheduledTasksDialog() {
   const { currentTheme } = useThemeSystem();
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
+  const [view, setView] = React.useState<'scheduled' | 'followups'>('scheduled');
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
   // not an empty/select-project flash before the fetch effect runs.
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const reloadGeneration = React.useRef(0);
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [loopEditorTask, setLoopEditorTask] = React.useState<ScheduledTask | null>(null);
@@ -228,6 +232,7 @@ export function ScheduledTasksDialog() {
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
   const reloadTasks = React.useCallback(async (projectID: string, options?: { silent?: boolean }) => {
+    const generation = ++reloadGeneration.current;
     if (!projectID) {
       setTasks([]);
       return;
@@ -237,6 +242,7 @@ export function ScheduledTasksDialog() {
     }
     try {
       const nextTasks = await fetchScheduledTasks(projectID);
+      if (generation !== reloadGeneration.current) return;
       nextTasks.sort((a, b) => {
         if (a.enabled !== b.enabled) {
           return a.enabled ? -1 : 1;
@@ -248,20 +254,22 @@ export function ScheduledTasksDialog() {
         return (a.state?.nextRunAt || Number.MAX_SAFE_INTEGER) - (b.state?.nextRunAt || Number.MAX_SAFE_INTEGER);
       });
       setTasks(nextTasks);
+      setLoadError(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.loadFailed'));
+      if (generation !== reloadGeneration.current) return;
+      setLoadError(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.loadFailed'));
       if (!options?.silent) {
         setTasks([]);
       }
     } finally {
-      if (!options?.silent) {
+      if (generation === reloadGeneration.current && !options?.silent) {
         setLoading(false);
       }
     }
   }, [t]);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open || view !== 'scheduled') {
       return;
     }
     const preferredProjectID = activeProject?.id || projects[0]?.id || '';
@@ -271,11 +279,13 @@ export function ScheduledTasksDialog() {
     } else {
       setTasks([]);
       setLoading(false);
+      setLoadError(null);
     }
-  }, [open, activeProject, projects, reloadTasks]);
+    return () => { reloadGeneration.current += 1; };
+  }, [open, view, activeProject, projects, reloadTasks]);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!open || view !== 'scheduled') {
       return;
     }
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
@@ -299,7 +309,7 @@ export function ScheduledTasksDialog() {
       }
       unsubscribe();
     };
-  }, [open, selectedProjectID, reloadTasks]);
+  }, [open, view, selectedProjectID, reloadTasks]);
 
   const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>) => {
     if (!selectedProjectID) {
@@ -405,7 +415,7 @@ export function ScheduledTasksDialog() {
           }
         }}
       >
-        <SelectTrigger size="lg" className={isMobile ? 'w-full' : undefined}>
+        <SelectTrigger size="lg" className="w-full max-w-full sm:w-72">
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
@@ -429,18 +439,11 @@ export function ScheduledTasksDialog() {
     setEditorOpen(true);
   };
 
-  const selectProject = (nextProjectID: string) => {
-    setSelectedProjectID(nextProjectID);
-    if (nextProjectID) {
-      void reloadTasks(nextProjectID);
-    } else {
-      setTasks([]);
-    }
-  };
-
   const tasksList = (
       <div className="min-h-[280px]">
-      {loading ? (
+      {loadError ? (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-border p-3 typography-meta text-[var(--status-error)]"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void reloadTasks(selectedProjectID)}>{t('tasksHub.refresh')}</Button></div>
+      ) : loading ? (
         <div className="flex items-center gap-2 typography-meta text-muted-foreground">
           <Icon name="loader-4" className="h-4 w-4 animate-spin" /> {t('sessions.scheduledTasks.dialog.loading')}
         </div>
@@ -609,10 +612,17 @@ export function ScheduledTasksDialog() {
       </div>
   );
 
+  const sectionTabs = (
+    <div className="flex items-center gap-1" role="group" aria-label={t('tasksHub.title')}>
+      <Button size="sm" variant={view === 'scheduled' ? 'secondary' : 'ghost'} aria-pressed={view === 'scheduled'} onClick={() => setView('scheduled')}><Icon name="calendar-schedule" className="mr-1.5 size-4" />{t('tasksHub.scheduled')}</Button>
+      <Button size="sm" variant={view === 'followups' ? 'secondary' : 'ghost'} aria-pressed={view === 'followups'} onClick={() => setView('followups')}><Icon name="timer" className="mr-1.5 size-4" />{t('tasksHub.followUps')}</Button>
+    </div>
+  );
+
   const tasksContent = (
     <div className="space-y-4">
-      {projectSelector}
-      {tasksList}
+      {sectionTabs}
+      {view === 'scheduled' ? <>{projectSelector}{tasksList}</> : open ? <FollowUpTasksPanel /> : null}
     </div>
   );
 
@@ -621,21 +631,18 @@ export function ScheduledTasksDialog() {
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title={t('sessions.scheduledTasks.dialog.title')}
+          title={t('tasksHub.title')}
           onClose={() => setOpen(false)}
           contentMaxHeightClassName="max-h-[min(80vh,640px)]"
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">{t('sessions.scheduledTasks.dialog.title')}</h2>
+                <h2 className="typography-ui-label font-semibold text-foreground">{t('tasksHub.title')}</h2>
                 {closeButton}
               </div>
-              <p className="typography-micro text-muted-foreground">
-                {t('sessions.scheduledTasks.dialog.description')}
-              </p>
             </div>
           )}
-          footer={(
+          footer={view === 'scheduled' ? (
             <Button
               className="w-full"
               onClick={openNewTaskEditor}
@@ -643,53 +650,22 @@ export function ScheduledTasksDialog() {
             >
               <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
             </Button>
-          )}
+          ) : undefined}
         >
           {tasksContent}
         </MobileOverlayPanel>
       ) : open ? (
-        // Full-page surface replacing the chat area (mounted inside <main>).
-        // Master-detail: a scrollable project filter panel at the left, the
-        // selected project's tasks at the right. The app Header shows the
-        // surface title, so the page itself only carries the close affordance.
+        // The shared surface stays inside the existing chat-area page slot.
         <div className="absolute inset-0 z-10 flex flex-col bg-background">
-          <div className="flex min-h-0 flex-1">
-            <div className="flex w-60 flex-shrink-0 flex-col border-r border-border/50">
-              <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
-                {projects.length === 0 ? (
-                  <div className="px-2 py-2 typography-meta text-muted-foreground">
-                    {t('sessions.scheduledTasks.dialog.project.empty')}
-                  </div>
-                ) : projects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => selectProject(project.id)}
-                    className={cn(
-                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                      selectedProjectID === project.id
-                        ? 'bg-interactive-selection text-foreground'
-                        : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-                    )}
-                  >
-                    {renderProjectLabel(project)}
-                  </button>
-                ))}
-              </div>
+          <div className="shrink-0 border-b border-border/50 px-4 py-3 sm:px-6">
+            <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-3">
+              {sectionTabs}
+              {view === 'scheduled' ? <Button size="sm" onClick={openNewTaskEditor} disabled={!selectedProjectID}><Icon name="add" className="mr-1 size-4" />{t('sessions.scheduledTasks.dialog.actions.newTask')}</Button> : null}
             </div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              {/* Pages have no close button: you leave by picking a session,
-                  a draft, or another surface in the sidebar. */}
-              <div className="flex items-center px-6 pt-3">
-                <Button size="sm" onClick={openNewTaskEditor} disabled={!selectedProjectID}>
-                  <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-                </Button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-                <div className="mx-auto w-full max-w-3xl">
-                  {tasksList}
-                </div>
-              </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            <div className="mx-auto w-full max-w-4xl space-y-5">
+              {view === 'scheduled' ? <>{projectSelector}{tasksList}</> : <FollowUpTasksPanel />}
             </div>
           </div>
         </div>
