@@ -48,7 +48,7 @@ export class IpcHostTransport implements HostTransport {
     if (this.#disconnectHandler) process.off("disconnect", this.#disconnectHandler);
     this.#messageHandler = undefined;
     this.#disconnectHandler = undefined;
-    if (process.connected) process.disconnect();
+    if (process.connected) process.disconnect?.();
   }
 }
 

@@ -8,7 +8,7 @@ import {
 } from '@simplewebauthn/server';
 import type {
   AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
+  AuthenticatorTransport,
   Base64URLString,
   CredentialDeviceType,
   RegistrationResponseJSON,
@@ -35,7 +35,7 @@ interface StoredPasskey {
   lastUsedAt: number | null;
   publicKey: string;
   rpID: string;
-  transports: AuthenticatorTransportFuture[];
+  transports: AuthenticatorTransport[];
 }
 
 interface PasskeyStore extends Record<string, unknown> {
@@ -169,7 +169,7 @@ const parseStoredPasskey = (value: unknown): StoredPasskey | null => {
     publicKey: record.publicKey,
     counter: typeof record.counter === 'number' && Number.isFinite(record.counter) ? record.counter : 0,
     transports: Array.isArray(record.transports)
-      ? record.transports.filter((value): value is AuthenticatorTransportFuture => (
+      ? record.transports.filter((value): value is AuthenticatorTransport => (
         value === 'ble' || value === 'cable' || value === 'hybrid' || value === 'internal'
         || value === 'nfc' || value === 'smart-card' || value === 'usb'
       ))
@@ -459,7 +459,9 @@ export const createUiPasskeys = ({
         id: credential.id,
         publicKey: Buffer.from(credential.publicKey).toString('base64url'),
         counter: credential.counter,
-        transports: Array.isArray(credential.transports) ? credential.transports.filter((value) => typeof value === 'string') : [],
+        transports: Array.isArray(credential.transports)
+          ? credential.transports.filter((value): value is AuthenticatorTransport => typeof value === 'string')
+          : [],
         deviceType: credentialDeviceType,
         backedUp: credentialBackedUp,
         createdAt: Date.now(),
