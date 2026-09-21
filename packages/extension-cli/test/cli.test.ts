@@ -56,7 +56,7 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
   const project = join(root, "sample");
   await initProject({ directory: project, id: "dev.example.sample", name: "Sample Extension" });
   const files = await readdir(project);
-  assert.deepEqual(files.sort(), ["README.md", "package.json", "varin.extension.json", "src", "tsconfig.json"]);
+  assert.deepEqual(files.sort(), ["README.md", "package.json", "src", "tsconfig.json", "varin.extension.json"]);
   await assert.rejects(
     initProject({ directory: project, id: "dev.example.other", name: "Other" }),
     /non-empty target directory/,
