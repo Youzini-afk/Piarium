@@ -4,6 +4,9 @@ import { settingsDict } from './ja.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'workbench.switcher.presentation': '表示形式',
+  'workbench.switcher.workspace': 'ワークスペース',
+  'workbench.switcher.general': '汎用',
   'research-workbench.profile.label': "研究",
   'research-workbench.mainline': "研究の主軸",
   'research-workbench.latestFinding': "最新の結果",

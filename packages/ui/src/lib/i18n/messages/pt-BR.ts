@@ -3,6 +3,9 @@ import { settingsDict } from './pt-BR.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  'workbench.switcher.presentation': 'Apresentação',
+  'workbench.switcher.workspace': 'Espaço de trabalho',
+  'workbench.switcher.general': 'Geral',
   'research-workbench.profile.label': "Pesquisa",
   'research-workbench.mainline': "Linha principal de pesquisa",
   'research-workbench.latestFinding': "Resultado mais recente",

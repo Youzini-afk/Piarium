@@ -39,6 +39,17 @@ export const workbenchProfileLabel = (
   return profile.label;
 };
 
+/** The default profile is the general workspace; Agent names the presentation toggle. */
+export const workbenchWorkspaceLabel = (
+  profile: { id: string; label: string },
+  t: (key: I18nKey) => string,
+): string => {
+  if (profile.id === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID && officialDefaultProfileLabels.has(profile.label)) {
+    return t('workbench.switcher.general');
+  }
+  return workbenchProfileLabel(profile, t);
+};
+
 export const workbenchExtensionDisplayName = (
   entry: { manifest: { id: string; displayName?: string } },
   t: (key: I18nKey) => string,

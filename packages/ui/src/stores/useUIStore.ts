@@ -466,6 +466,7 @@ interface UIStore {
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
   isContextRailOpen: boolean;
+  agentWorkbenchProfileByHost: Record<string, string>;
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
@@ -611,6 +612,7 @@ interface UIStore {
   setSidebarWidth: (width: number) => void;
   setContextRailOrder: (order: string[]) => void;
   toggleContextRail: () => void;
+  rememberAgentWorkbenchProfile: (hostId: string, profileId: string) => void;
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
@@ -795,6 +797,7 @@ export const useUIStore = create<UIStore>()(
         contextPanelByDirectory: {},
         contextRailOrder: [],
         isContextRailOpen: false,
+        agentWorkbenchProfileByHost: {},
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
@@ -973,6 +976,13 @@ export const useUIStore = create<UIStore>()(
         },
 
         toggleContextRail: () => set((state) => ({ isContextRailOpen: !state.isContextRailOpen })),
+
+        rememberAgentWorkbenchProfile: (hostId, profileId) => {
+          if (get().agentWorkbenchProfileByHost[hostId] === profileId) return;
+          set((state) => ({
+            agentWorkbenchProfileByHost: { ...state.agentWorkbenchProfileByHost, [hostId]: profileId },
+          }));
+        },
 
         setContextRailOrder: (order) => {
           const sanitized = Array.isArray(order)
@@ -2246,6 +2256,7 @@ export const useUIStore = create<UIStore>()(
           contextPanelByDirectory: state.contextPanelByDirectory,
           contextRailOrder: state.contextRailOrder,
           isContextRailOpen: state.isContextRailOpen,
+          agentWorkbenchProfileByHost: state.agentWorkbenchProfileByHost,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,

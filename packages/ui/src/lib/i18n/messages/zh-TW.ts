@@ -4,6 +4,9 @@ import { settingsDict } from './zh-TW.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'workbench.switcher.presentation': '介面形態',
+  'workbench.switcher.workspace': '工作台',
+  'workbench.switcher.general': '通用',
   'research-workbench.profile.label': "科研",
   'research-workbench.mainline': "科研主線",
   'research-workbench.latestFinding': "最近結果",

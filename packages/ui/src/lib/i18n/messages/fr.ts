@@ -2,6 +2,9 @@ import { settingsDict } from './fr.settings';
 
 export const dict = {
   ...settingsDict,
+  'workbench.switcher.presentation': 'Présentation',
+  'workbench.switcher.workspace': 'Espace de travail',
+  'workbench.switcher.general': 'Général',
   'research-workbench.profile.label': "Recherche",
   'research-workbench.mainline': "Fil principal de recherche",
   'research-workbench.latestFinding': "Dernier résultat",

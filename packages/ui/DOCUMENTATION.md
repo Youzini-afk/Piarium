@@ -37,6 +37,14 @@ sessions show selected and applied focus separately. A change applies before the
 the current Run and its follow-up queue retain their configuration. Session metadata, not the active
 project or UI profile, owns the durable choice. Project defaults use the existing settings/autosave path.
 
+`WorkbenchProfileSwitcher` exposes two adjacent presentation controls: Agent/IDE and a General/Research
+workspace menu (plus installed custom profiles). IDE never appears as an item in that workspace menu.
+`useUIStore.agentWorkbenchProfileByHost` remembers the Agent return destination per Host across shell
+remounts and app restarts. Choosing a workspace while in IDE updates that return destination and keeps
+IDE open. The Host profile document remains the sole active-shell authority; committed Agent profiles
+refresh the return preference, while failed switches preserve it. Both controls leave work focus alone
+and actual shell changes use the existing staged transition and animation.
+
 Piarium themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,
 primary describes an action, status colors describe feedback, and syntax colors remain code-specific.

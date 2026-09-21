@@ -4,6 +4,9 @@ import { settingsDict } from './ko.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'workbench.switcher.presentation': '화면 구성',
+  'workbench.switcher.workspace': '작업 공간',
+  'workbench.switcher.general': '일반',
   'research-workbench.profile.label': "연구",
   'research-workbench.mainline': "연구 주 흐름",
   'research-workbench.latestFinding': "최근 결과",

@@ -454,10 +454,10 @@ The capability matrix records the remaining implementation boundaries.
 
 The product UI is not a fixed shell. A Workbench Profile selects which extension provides
 `workbench.shell` and which contributions fill the activity bar, sidebars, editor area, panel, and
-status bar. Two profiles ship: `default` (Agent Workspace, labelled `Agent`) and `piarium.ide` (IDE
-Workbench). Both shells are ordinary built-in Piarium extensions —
-`piarium.builtin.agent-workspace` and `piarium.builtin.ide-workbench` — so a community extension can
-replace either one, or any individual seam, without a product build. There is no global `ideMode`
+status bar. Three profiles ship: `default` (general Agent Workspace), `piarium.ide` (IDE Workbench),
+and `piarium.research` (Research Workbench). Their shells are ordinary built-in Piarium extensions —
+`piarium.builtin.agent-workspace`, `piarium.builtin.ide-workbench`, and `piarium.builtin.research-workbench` — so a community extension can
+replace any shell, or any individual seam, without a product build. There is no global `ideMode`
 branch. `@piarium/extension-contract` is the single owner of the target, slot, and context-key
 constants, and the profile document is revisioned so every mutation is expected-revision checked.
 
@@ -498,8 +498,11 @@ and workspace-scoped extension storage; missing and empty documents fall back to
 default without writing it, while malformed or failed reads keep the last valid in-memory document
 and raise a diagnostic rather than overwriting host state.
 
-D-298 implements the first D-297 slice (7A): Research joins Agent/IDE in the existing switcher and Motion
-transition transaction. The Research shell composes shared application chrome and resource panels around
+D-298 implements the first D-297 slice (7A). The titlebar exposes separate Agent/IDE and General/Research
+controls, using the existing Profile and Motion transition transaction for shell changes. The UI remembers
+the Agent return profile per Host while IDE is open; choosing a workspace in IDE updates only that return
+destination. This preference survives reloads and never overrides the Host's active Profile. The Research
+shell composes shared application chrome and resource panels around
 the actual research-root and branch projection. Work focus lives independently in broker-owned session
 metadata. Creation resolves explicit selection, then the project default, then general/code. Later project
 changes do not overwrite existing sessions. A focus change stages the worker configuration and commits

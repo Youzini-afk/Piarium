@@ -4,6 +4,9 @@ import { settingsDict } from './pl.settings';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...settingsDict,
+  'workbench.switcher.presentation': 'Widok',
+  'workbench.switcher.workspace': 'Obszar roboczy',
+  'workbench.switcher.general': 'Ogólny',
   'research-workbench.profile.label': "Badania",
   'research-workbench.mainline': "Główny wątek badań",
   'research-workbench.latestFinding': "Ostatni wynik",
