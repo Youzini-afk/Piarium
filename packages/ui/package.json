@@ -70,7 +70,7 @@
     "marked": "^17.0.3",
     "monaco-editor": "0.56.0",
     "morphdom": "^2.7.7",
-    "motion": "^12.23.24",
+    "motion": "^13.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
