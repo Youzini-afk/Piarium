@@ -19,7 +19,7 @@ D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run �
 
 D-292 的全仓工程阶段 Q：[测试与 CI 体系重整](testing-ci-design.md) 与 D-296 的旧伴侧插件清理已完成。
 D-297 明确 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研执行与协作已推进至 D-305，实际交付见 status。
-D-312 接受快速决策模型与渐进检索设计，尚未实施，顺序见 plan 阶段 F。
+D-312 的快速决策模型与渐进检索已交付并接线（F0–F4），`explore` 为首个消费者；实测边界见 status。
 D-313 的 [Varin 全面更名](varin-rebrand-design.md) 已落地：自有产品/代码/配置/发行配置与 GitHub 仓库
 一次切换，不留旧名兼容；Pi 的实际依赖与原生数据保留。首次新品牌发行边界见 status，下一实施阶段为 F。
 
@@ -657,10 +657,11 @@ set/reset 保留真实字段所有权与 revision，普通修改沿已有授权�
 
 ### 6.1 第一层：文件里有什么
 
-**后续扩展（D-312，设计已接受、尚未实施）。** [快速决策模型与渐进检索](fast-decision-model-design.md)
-在本节现有 query 中加入供应商无关的快速决策能力，用于选材及动态下一步选择；分别判断返回价值与探索价值。
-Jev 是首个适配目标，生成式 `models.explore` 保留搜索表达职责。该设计修订后续实现目标，不改写下文已接线事实；
-交付按阶段 F 与 status 更新，同一次选择不叠加快速决策、LLM 选择和普通重排。
+**快速决策扩展（D-312，已接线）。** [快速决策模型与渐进检索](fast-decision-model-design.md)
+在本节现有 query 中加入供应商无关的快速决策能力：渐进循环分别判断材料返回价值与下一步探索价值，
+动作候选由已读材料的真实符号/关系/路径生成并沿原执行 authority 展开。Jev（TypeSafe System One）是首个适配目标，
+生成式 `models.explore` 保留搜索表达职责；绑定 ready 时同一次选择不叠加 LLM 选择和普通重排。
+交付事实与未实测边界见 status。
 
 本节是 D-173 收敛、D-174 纠正 LLM 范围、D-175 补齐局部取证与查询契约后的现行设计；历史规则与观察保存在决策日志，交付
 事实见 status。目标是让主 agent 用自然语言和已有线索发现相关实现，得到能直接阅读、继续判断的当前原文。检索同时优化
@@ -1487,9 +1488,9 @@ suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只
 
 槽位选择遵循用户配置；前缀一致只是可能获得缓存收益的条件。设置明确续接摘要的活动模型归属及自动 review 的启用状态。
 
-**快速决策模型（D-312，计划中）。** 拟增加独立的 `harness.fastDecision` 配置种类与 `FastDecisionModel`
-能力合同，支持通用默认绑定和已注册用途覆盖/关闭；当前十个普通槽位及 embedding/rerank 的生产状态不变。
-名称用于跨检索、未来 Computer Use 等消费者，Jev 只作为首个 provider adapter。能力、凭据归属、配置解析和
+**快速决策模型（D-312，已交付 `explore` 消费者）。** `harness.fastDecision` 是独立配置种类与
+`FastDecisionModel` 能力合同，支持通用默认绑定和已注册用途覆盖/关闭；当前普通槽位及 embedding/rerank 不变。
+Jev 只作为首个 provider adapter；凭据留在 Pi provider/auth，绑定在 query 开始时冻结。能力、凭据归属、配置解析和
 同 query 的模型职责分配见 [专门设计](fast-decision-model-design.md)，不把自由文本生成或可靠概率设为所有后端的共同能力。
 
 ### 8.6 度量

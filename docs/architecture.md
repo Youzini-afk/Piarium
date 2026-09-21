@@ -435,13 +435,17 @@ MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and 
 mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and
 is skipped when `models.explore` already selected candidates. See harness sections 6.1, 7.5, and 8.5.
 
-D-312 accepts the next [Fast Decision Model design](fast-decision-model-design.md), not yet implemented.
-A provider-neutral capability and user-owned binding will support candidate assessment, selection and scoring;
-Jev is the first adapter target. The existing Host explore query will own iterative, source-grounded action
-selection and parallel expansion, distinguishing material worth returning from clues worth following.
+D-312 delivers the [Fast Decision Model](fast-decision-model-design.md) capability with the `explore`
+consumer wired (F0–F4). `harness.fastDecision` is a user-owned default binding with per-purpose override or
+`"off"`; the Pi side resolves it into a credential-free `configurationId` binding that each query freezes.
+`explore-fast-decision.ts` runs a progressive loop inside the live query: typed judgments decide which real
+views enter the answer and which issued action candidates execute — `followup({actions})` runs them through
+the existing search, graph, and file authorities. The first adapter is TypeSafe System One
+(`pi-host/src/harness/typesafe-systemone.ts`); a ready binding replaces the overlapping LLM select and rerank
+for that query, while unconfigured, disabled, failed, or cancelled paths keep source-ranked material.
 Generative search planning remains separate. Pi inference retains credentials and provider transport; the
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
-future integrations, not delivered features. See Stage F and harness status for implementation boundaries.
+future integrations, not delivered features. See harness status for verification and untested boundaries.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
 query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their

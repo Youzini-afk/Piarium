@@ -127,7 +127,8 @@ delivery closure. Fast Decision Model is the shared product category; Jev is the
 The existing explore query keeps its scope, source identity and execution authority. Fast decisions assess
 what to return and what to investigate next; generative models still supply new search expressions when needed.
 Future Computer Use and other consumers can reuse the capability, but are outside this implementation phase.
-Current implementation and provider evidence remain explicitly absent in harness status.
+F0–F4 are delivered and wired for the `explore` consumer; real paid-provider calls, cross-platform checks,
+and retrieval-quality evidence are recorded as untested in harness status.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

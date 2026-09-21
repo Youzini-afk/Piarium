@@ -428,6 +428,18 @@ gaps. OutputStore keeps the full pack plus unread-candidate refs, and the tool t
 handle only when more content remains. Symbol expansion and optional model enrichment remain
 separate planned sources.
 
+Fast Decision (D-312, `explore-fast-decision.ts`): when `explore.query.start` resolves a ready
+`harness.fastDecision` purpose binding, the query freezes the credential-free `configurationId` and runs a
+progressive loop inside the same query lifetime. Each round turns fresh materialized views into `m:` keep/drop
+questions and pending action candidates into `a:` execute/skip questions, sends them through
+`harness.fastDecision` (Host → workspace inference → Pi background inference → TypeSafe System One adapter),
+applies kept views via `applySelection`, and executes chosen actions through `followup({actions})` — which
+rejects unknown or stale ids and reuses the existing search, graph, and file-read authorities. Action
+candidates are generated from real material already read (`actionCandidates`): `read`/`path`/`symbol`/
+`connect`/`importers`/`callers`/`references`/`calls`, deduplicated by deterministic identity. A ready binding
+replaces the overlapping LLM select and HTTP rerank for that query; unconfigured, disabled, failed, or
+cancelled runs keep source-ranked material and report `details.fastDecision` honestly.
+
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
 The context runtime fans committed user-originated Documents changes, version-bound diagnostics, existing Git refreshes, and generation-tagged user-terminal commands to the Pi sessions that own that workspace. Harness writes do not masquerade as user edits. Agent shell completion is a separate source keyed by execution identity, projected as a short terminal fact and output reference. It is distinct from user-terminal history and from the shell output byte cursor; raw retained tool-result receipts suppress duplicate completion notices.

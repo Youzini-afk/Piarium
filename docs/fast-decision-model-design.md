@@ -1,6 +1,6 @@
 # 快速决策模型与渐进检索
 
-Status: accepted design / planned; D-312; no implementation claimed
+Status: implemented and wired for the `explore` consumer (D-312, F0–F4); provider-call quality and cross-platform evidence not yet collected
 
 Last updated: 2026-09-21
 

@@ -25,7 +25,7 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 产品、自有代码/协议/配置、构建发行和当前文档一次切换为 Varin，不留旧名称兼容层；
 真实 Pi 依赖、已有成果与历史记录按原归属保留。完整设计见 [varin-rebrand-design.md](varin-rebrand-design.md)。
 
-**下一阶段 F：快速决策模型与渐进检索（D-312，设计已接受，尚未实施）。**
+**阶段 F：快速决策模型与渐进检索（D-312）已交付并接线；下一阶段待排。**
 通用能力与首个 Jev 适配、模型配置、`explore` 选材和动态下一步选择按 F0 → F1 → F2 → F3 → F4 推进。
 完整合同见 [fast-decision-model-design.md](fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
 
@@ -1891,7 +1891,7 @@ B0–B4 的内部实现完成，后续进入 F；没有新旧共存机制，也�
 
 ## 阶段 F：快速决策模型与渐进检索（D-312）
 
-状态：**accepted design / not implemented**。承接 S/W 收口，并在 D-313 阶段 B 完成后使用新产品命名；设计 authority 为
+状态：**F0–F4 已实施并进入生产调用链（wired）；交付事实与未实测项见 status**。承接 S/W 收口，并在 D-313 阶段 B 完成后使用新产品命名；设计 authority 为
 [快速决策模型与渐进检索](fast-decision-model-design.md)。本阶段交付通用能力及代码检索消费者，
 Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent runtime。
 

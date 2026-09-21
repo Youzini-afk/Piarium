@@ -38,11 +38,33 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
   `@varin/*` 首次公开发布仍需有效发布身份及 scope 权限；新安装包、可选语义组件和 GHCR 镜像需由新坐标的
   发行工作流生成。未声称已有新品牌下载产物，也未进行真实浏览器、macOS/iOS 或 Android 原生构建验收。
 
-**D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），accepted design / not implemented。**
-设计见 [fast-decision-model-design.md](fast-decision-model-design.md)，计划为 F0–F4。
-通用能力/配置、Jev adapter、快速选材与动态多步探索均尚未实现或接线；现有 `models.explore`、
-算法/向量检索和 HTTP rerank 保持下表所记状态。本次只有设计文档，没有真实 Jev 调用、速度或检索质量证据。
-Computer Use、工具/技能路由等是未来可复用用途，不属于本阶段交付。
+**D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），F0–F4 已交付并进入生产调用链（wired）。**
+设计见 [fast-decision-model-design.md](fast-decision-model-design.md)。
+
+已接线：
+
+- `harness.fastDecision` 独立配置种类（默认绑定 + `purposes.explore` 覆盖或 `"off"`）进入设置目录、检索设置页与
+  全部 locale；user 级所有，project 级被剥离。`parseHarnessFastDecisionSettings` 拒绝非法 protocol、空 id、
+  绝对/反斜杠 endpoint 与未注册 purpose。未配置时原检索路径不变。
+- `harness.fastDecision` RPC：Host → `workspace-inference` → Pi session-host/host-controller →
+  `background-inference.ts` → `typesafe-systemone.ts`（TypeSafe System One 原生 `noul`/`choice`/`score`
+  questions 协议）。凭据留在 Pi provider/auth；`harness.inference.describe` 返回无凭据 `configurationId` 绑定；
+  请求与冻结绑定不符（protocol/provider/model/endpoint/configurationId）在 HTTP 前拒绝；missing answers 不解释为
+  false/0；取消沿用既有 inference cancel。
+- `explore.query.start` 冻结 Pi describe 的 purpose 状态并回报；`explore-fast-decision.ts` 在同一 query 内渐进运行：
+  `m:` 判定材料是否进入答案、`a:` 判定动作是否值得执行，执行走 `followup({actions})` 与既有
+  search/graph/readFile authority。动作候选从已读材料的真实关系生成（read/path/symbol/connect/importers/callers/
+  references/calls），确定性 id 去重，未知/过期 id 拒绝，目标与行界经确定性校验。
+- 绑定 ready 时 `explore` 跳过同目的 LLM 选材与 HTTP rerank（设计 §4.4）；关闭/失败/取消时保留算法检索与来源排序。
+  `details.fastDecision` 记录 status/batches/rounds/viewsJudged/actionsOffered/actionsExecuted/missing/
+  unevaluated/usage，`model.fastDecision` 如实呈现 used/failed/cancelled。
+
+验证：protocol/pi-host/web/ui/application-client tsc 全绿；`typesafe-systemone.test.ts` 适配器契约、
+`background-inference.test.ts` 绑定/冻结/disabled/invalid、`explore-fast-decision.test.ts` 循环执行与 stale id
+拒绝、`explore-query-services.test.ts` 集成与未配置兜底通过；既有 explore 套件 142 项与 i18n parity 通过。
+
+未实测：真实 TypeSafe/Jev 付费往返、跨平台、完整桌面 E2E；检索质量与延迟收益无证据。Computer Use、
+工具路由等其他消费者未注册为可用能力。
 
 **D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），经 D-308/D-310/D-311 收口，当前产品范围已完成并进入生产调用链。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
