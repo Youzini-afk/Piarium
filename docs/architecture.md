@@ -8,7 +8,7 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 ## 1. Context
 
@@ -428,6 +428,14 @@ a derived generation directory, and stays text-only when remote is unset — it 
 MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and does not silently
 mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and
 is skipped when `models.explore` already selected candidates. See harness sections 6.1, 7.5, and 8.5.
+
+D-312 accepts the next [Fast Decision Model design](fast-decision-model-design.md), not yet implemented.
+A provider-neutral capability and user-owned binding will support candidate assessment, selection and scoring;
+Jev is the first adapter target. The existing Host explore query will own iterative, source-grounded action
+selection and parallel expansion, distinguishing material worth returning from clues worth following.
+Generative search planning remains separate. Pi inference retains credentials and provider transport; the
+decision service does not own search, permissions or action execution. Computer Use and other consumers are
+future integrations, not delivered features. See Stage F and harness status for implementation boundaries.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
 query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their

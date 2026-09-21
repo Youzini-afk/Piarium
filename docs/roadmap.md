@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage F planned at D-312
 
 Last updated: 2026-09-21
 
@@ -29,6 +29,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
 | S | Conversational settings and Agent administration | Complete (D-306–D-311): owner-backed catalog/actions, session-bound authenticated Surfaces, typed operations, per-owner compound updates and product Skills |
 | W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
+| F | Fast Decision Models and progressive retrieval | Accepted design (D-312), not implemented: shared capability/binding, first Jev adapter, source selection and iterative exploration in `explore` |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -110,6 +111,14 @@ Goal auto-continuation. Active/idle targets reuse existing context delivery and 
 with durable trigger identity, cancellation and recovery. Calendar tasks still support new work, while
 their results must follow actual execution rather than merely dispatch acceptance. See
 [plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered durable source/continuation slice from ordinary-shell durability, composite/shared observation and remaining recovery limits.
+
+Stage F follows S/W and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
+F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
+delivery closure. Fast Decision Model is the shared product category; Jev is the first adapter target.
+The existing explore query keeps its scope, source identity and execution authority. Fast decisions assess
+what to return and what to investigate next; generative models still supply new search expressions when needed.
+Future Computer Use and other consumers can reuse the capability, but are outside this implementation phase.
+Current implementation and provider evidence remain explicitly absent in harness status.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

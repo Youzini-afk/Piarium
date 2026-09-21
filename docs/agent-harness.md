@@ -2,7 +2,7 @@
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
-Last updated: 2026-09-19
+Last updated: 2026-09-21
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -18,7 +18,8 @@ D-285 接受以工作为中心的可续做线程、可选预设、定向通信�
 D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run 准入、消息提交边界和物化 baseline handoff；证据见 status 与验收记录。
 
 D-292 的全仓工程阶段 Q：[测试与 CI 体系重整](testing-ci-design.md) 与 D-296 的旧伴侧插件清理已完成。
-D-297 明确下一阶段 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研能力尚待实施，顺序见 plan。
+D-297 明确 AI4S 的工作台 UIUX 与 Agent 工作侧重独立，设计见第 10 节；科研执行与协作已推进至 D-305，实际交付见 status。
+D-312 接受快速决策模型与渐进检索设计，尚未实施，顺序见 plan 阶段 F。
 
 ## 1. 决定
 
@@ -653,6 +654,11 @@ set/reset 保留真实字段所有权与 revision，普通修改沿已有授权�
 有正文盲区；Piarium 的全文切块也只有在有效编码、及时发布并被查询正确使用时才有价值。两者都不能仅凭表示形状宣称召回更好。
 
 ### 6.1 第一层：文件里有什么
+
+**后续扩展（D-312，设计已接受、尚未实施）。** [快速决策模型与渐进检索](fast-decision-model-design.md)
+在本节现有 query 中加入供应商无关的快速决策能力，用于选材及动态下一步选择；分别判断返回价值与探索价值。
+Jev 是首个适配目标，生成式 `models.explore` 保留搜索表达职责。该设计修订后续实现目标，不改写下文已接线事实；
+交付按阶段 F 与 status 更新，同一次选择不叠加快速决策、LLM 选择和普通重排。
 
 本节是 D-173 收敛、D-174 纠正 LLM 范围、D-175 补齐局部取证与查询契约后的现行设计；历史规则与观察保存在决策日志，交付
 事实见 status。目标是让主 agent 用自然语言和已有线索发现相关实现，得到能直接阅读、继续判断的当前原文。检索同时优化
@@ -1478,6 +1484,11 @@ suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只
   继续由自身 `ThreadRun` 记录，普通会话已有统计保持。
 
 槽位选择遵循用户配置；前缀一致只是可能获得缓存收益的条件。设置明确续接摘要的活动模型归属及自动 review 的启用状态。
+
+**快速决策模型（D-312，计划中）。** 拟增加独立的 `harness.fastDecision` 配置种类与 `FastDecisionModel`
+能力合同，支持通用默认绑定和已注册用途覆盖/关闭；当前十个普通槽位及 embedding/rerank 的生产状态不变。
+名称用于跨检索、未来 Computer Use 等消费者，Jev 只作为首个 provider adapter。能力、凭据归属、配置解析和
+同 query 的模型职责分配见 [专门设计](fast-decision-model-design.md)，不把自由文本生成或可靠概率设为所有后端的共同能力。
 
 ### 8.6 度量
 

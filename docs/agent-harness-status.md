@@ -18,6 +18,12 @@ Last updated: 2026-09-21
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），accepted design / not implemented。**
+设计见 [fast-decision-model-design.md](fast-decision-model-design.md)，计划为 F0–F4。
+通用能力/配置、Jev adapter、快速选材与动态多步探索均尚未实现或接线；现有 `models.explore`、
+算法/向量检索和 HTTP rerank 保持下表所记状态。本次只有设计文档，没有真实 Jev 调用、速度或检索质量证据。
+Computer Use、工具/技能路由等是未来可复用用途，不属于本阶段交付。
+
 **D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），经 D-308/D-310/D-311 收口，当前产品范围已完成并进入生产调用链。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
 [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
