@@ -364,6 +364,11 @@ export class ExtensionArtifactStore {
             `Local Piarium extension dependencies are not installed: ${source.display}. Run npm install in the extension project before reloading it. Piarium will not modify the working tree.`,
           );
         }
+        if (source.kind === "builtin") {
+          throw new Error(
+            `Built-in Piarium extension dependencies are missing from its read-only distribution: ${source.display}. Rebuild the bundled extension package before using it.`,
+          );
+        }
         const npm = await resolveNpmLaunchTarget();
         await this.#run(npm.executable, [...npm.argsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
           cwd: sourceRoot,

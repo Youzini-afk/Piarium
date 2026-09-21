@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, cp, mkdir, realpath, rm } from "node:fs/promises";
+import { access, mkdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { x as extractTar } from "tar";
 import type {
@@ -239,12 +239,21 @@ export class BuiltinExtensionPackageSourceResolver implements PiariumExtensionPa
     this.#roots = roots instanceof Map ? roots : new Map(Object.entries(roots));
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string): Promise<string> {
+  async materialize(
+    source: PiariumExtensionPackageSource,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const configured = this.#roots.get(source.specifier);
     if (!configured) throw new Error(`Unknown built-in Piarium extension package: ${source.specifier}`);
+    // Distribution packages are already immutable, self-contained artifacts. Resolve the
+    // physical directory in place so prepare() copies it only once into its content-addressed
+    // artifact. In particular, never materialize or install into the distribution directory.
+    void destination;
+    signal?.throwIfAborted();
     const sourcePath = await realpath(configured);
-    await cp(sourcePath, destination, { dereference: false, recursive: true, verbatimSymlinks: true });
-    return destination;
+    signal?.throwIfAborted();
+    return sourcePath;
   }
 }
 

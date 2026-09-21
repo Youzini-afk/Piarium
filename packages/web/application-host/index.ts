@@ -1303,7 +1303,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const managedLanguageServers = createManagedLanguageServers({ directory: PIARIUM_DATA_DIR, spawn: languageToolProcesses.spawn });
   const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`piarium.managed.${languageId}`, languageId]));
   const languageSupervisor = createLanguageSupervisor({
-    activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
+    activateProviders: ({ languageId }) => extensionRuntime.activateForEvent('workspace-match', { languageId }),
     prepareProvider: (providerId, root, signal) => {
       const languageId = nativeLanguageProviders.get(providerId);
       return languageId ? managedLanguageServers.ensure(languageId, root, signal) : Promise.resolve(null);

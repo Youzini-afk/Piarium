@@ -23,6 +23,14 @@ extensions. Their requested Host capabilities are granted only while reconciling
 definition; executable artifacts are materialized lazily when their activation event is first requested,
 so declarative built-ins do not add startup I/O.
 
+Language activation carries the requested language ID. The distribution's provider catalog identifies
+which built-in extension owns it, so opening a TypeScript document does not first prepare the unrelated
+Python and other language pack. Third-party extensions retain their declared workspace activation.
+
+Built-in source directories are read-only distribution assets. Preparation copies them once into the
+managed immutable artifact; it does not first duplicate the whole package into another temporary source
+tree or install missing dependencies into the application directory.
+
 Registered built-in package roots must identify physical directories that the Host can canonicalize and
 copy. Archive-backed distributions resolve their logical module address to the corresponding unpacked
 directory before constructing the package manager; brokered processes are launched only from the

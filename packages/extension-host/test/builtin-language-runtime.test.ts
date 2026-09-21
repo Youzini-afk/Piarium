@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
 } from "@piarium/extension-builtins";
 import {
   resolvePiariumBuiltinPackageRoot,
@@ -47,7 +48,7 @@ test("the built-in TypeScript language extension materializes lazily and unregis
     assert.equal(entry?.integrity, undefined);
     assert.equal(calls.length, 0);
 
-    await runtime.activateForEvent("workspace-match");
+    await runtime.activateForEvent("workspace-match", { languageId: "typescript" });
     const registration = calls.find((call) => (
       call.method === "registerProvider"
       && (call.params as { providerId?: unknown } | undefined)?.providerId === "piarium.typescript-language"
@@ -68,6 +69,9 @@ test("the built-in TypeScript language extension materializes lazily and unregis
       candidate.manifest.id === PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID
     ));
     assert.match(activeEntry?.integrity ?? "", /^sha256-[0-9a-f]{64}$/);
+    assert.equal(active.catalog.extensions.find((candidate) => (
+      candidate.manifest.id === PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID
+    ))?.integrity, undefined, "TypeScript activation does not materialize the unrelated language pack");
 
     await runtime.setEnabled(
       PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,

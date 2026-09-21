@@ -51,6 +51,7 @@ export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "piarium.builtin.
 export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
 export interface PiariumBundledLanguageServer {
+  extensionId: string;
   id: string;
   name: string;
   languageIds: readonly string[];
@@ -62,36 +63,43 @@ export interface PiariumBundledLanguageServer {
  */
 export const PIARIUM_BUNDLED_LANGUAGE_SERVERS: readonly PiariumBundledLanguageServer[] = [
   {
+    extensionId: PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
     id: "piarium.typescript-language",
     name: "TypeScript and JavaScript",
     languageIds: ["javascript", "javascriptreact", "typescript", "typescriptreact"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.python-language",
     name: "Python (Pyright)",
     languageIds: ["python"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.html-language",
     name: "HTML",
     languageIds: ["html"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.css-language",
     name: "CSS, SCSS, and LESS",
     languageIds: ["css", "scss", "less"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.json-language",
     name: "JSON and JSONC",
     languageIds: ["json", "jsonc"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.yaml-language",
     name: "YAML",
     languageIds: ["yaml"],
   },
   {
+    extensionId: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
     id: "piarium.bash-language",
     name: "Bash",
     languageIds: ["shellscript"],

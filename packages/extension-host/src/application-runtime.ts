@@ -41,6 +41,7 @@ import {
 import {
   PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
   PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  PIARIUM_BUNDLED_LANGUAGE_SERVERS,
 } from "@piarium/extension-builtins";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
@@ -286,12 +287,19 @@ export class ApplicationExtensionRuntime {
     });
   }
 
-  activateForEvent(event: PiariumExtensionActivationEvent): Promise<void> {
+  activateForEvent(event: PiariumExtensionActivationEvent, { languageId }: { languageId?: string } = {}): Promise<void> {
     return this.#mutate(async () => {
       const snapshot = await this.catalog.snapshot();
       if (!snapshot.authoritative) throw new Error("Cannot activate extensions from a stale catalog");
       for (const entry of snapshot.extensions) {
         if (!entry.desired.enabled || !entry.manifest.entrypoints?.host?.activation?.includes(event)) continue;
+        // Built-in language ownership is known before activation. A TypeScript
+        // request must not first materialize the unrelated Python/tooling pack.
+        // Third-party workspace activations keep their declared event behavior.
+        if (event === "workspace-match" && languageId && entry.source.kind === "builtin") {
+          const bundled = PIARIUM_BUNDLED_LANGUAGE_SERVERS.filter((server) => server.extensionId === entry.manifest.id);
+          if (bundled.length > 0 && !bundled.some((server) => server.languageIds.includes(languageId))) continue;
+        }
         await this.#ensureBuiltinArtifact(entry.manifest.id);
         await this.supervisor.activateExtension(entry.manifest.id);
       }

@@ -8,6 +8,7 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 import {
   ApplicationExtensionCatalog,
+  BuiltinExtensionPackageSourceResolver,
   ExtensionArtifactStore,
   ExtensionPackageManager,
   LocalExtensionPackageSourceResolver,
@@ -111,6 +112,22 @@ test("resolves local sources in place without copying the working tree", async (
   await assert.rejects(access(destination), { code: "ENOENT" });
 });
 
+test("resolves built-in sources in place without copying the distribution", async () => {
+  const source = await temporaryDirectory("piarium-builtin-resolver-source-");
+  const materializationRoot = await temporaryDirectory("piarium-builtin-resolver-materialization-");
+  const destination = join(materializationRoot, "source");
+  const id = "piarium.builtin.in-place";
+  await writeExtension(source, id, "1.0.0");
+
+  const resolved = await new BuiltinExtensionPackageSourceResolver(new Map([[id, source]])).materialize(
+    { kind: "builtin", specifier: id, display: "Built-in" },
+    destination,
+  );
+
+  assert.equal(resolved, await realpath(source));
+  await assert.rejects(access(destination), { code: "ENOENT" });
+});
+
 test("refuses to install missing local dependencies without modifying the working tree", async () => {
   const dataDir = await temporaryDirectory("piarium-local-dependencies-data-");
   const source = await temporaryDirectory("piarium-local-dependencies-source-");
@@ -127,6 +144,35 @@ test("refuses to install missing local dependencies without modifying the workin
   await assert.rejects(
     packages.installOrStage({ kind: "local", specifier: source, display: "Dependencies" }, 0),
     /Run npm install in the extension project before reloading it.*will not modify the working tree/,
+  );
+
+  assert.deepEqual(await snapshotDirectory(source), before);
+  await assert.rejects(access(join(source, "node_modules")), { code: "ENOENT" });
+  assert.deepEqual((await catalog.snapshot()).extensions, []);
+});
+
+test("refuses to install missing built-in dependencies into the read-only distribution", async () => {
+  const dataDir = await temporaryDirectory("piarium-builtin-dependencies-data-");
+  const source = await temporaryDirectory("piarium-builtin-dependencies-source-");
+  const id = "piarium.builtin.dependencies";
+  await writeExtension(source, id, "1.0.0");
+  await writeFile(join(source, "package.json"), JSON.stringify({
+    dependencies: { "fixture-dependency": "1.0.0" },
+    name: id,
+    version: "1.0.0",
+  }), "utf8");
+  const before = await snapshotDirectory(source);
+  const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const artifacts = new ExtensionArtifactStore({
+    builtinRoots: new Map([[id, source]]),
+    dataDir,
+    piariumVersion: PIARIUM_VERSION,
+  });
+  const packages = new ExtensionPackageManager({ artifacts, catalog, dataDir, piariumVersion: PIARIUM_VERSION });
+
+  await assert.rejects(
+    packages.installOrStage({ kind: "builtin", specifier: id, display: "Built-in dependencies" }, 0),
+    /read-only distribution.*Rebuild the bundled extension package/,
   );
 
   assert.deepEqual(await snapshotDirectory(source), before);
@@ -393,6 +439,7 @@ test("refreshes a built-in Host artifact when its distribution fingerprint chang
   await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"1".repeat(64)}\n`, "utf8");
 
   const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const before = await snapshotDirectory(source);
   const reconciled = await catalog.reconcileBuiltins([definition], PIARIUM_BUILTIN_EXTENSION_PREFIX);
   const artifacts = new ExtensionArtifactStore({
     builtinRoots: new Map([[id, source]]),
@@ -403,9 +450,11 @@ test("refreshes a built-in Host artifact when its distribution fingerprint chang
   const first = await packages.reconcileBuiltinArtifacts([definition], reconciled);
   const firstEntry = first.extensions.find((entry) => entry.manifest.id === id);
   assert.ok(firstEntry?.integrity);
+  assert.deepEqual(await snapshotDirectory(source), before);
 
   await writeFile(join(source, "host.cjs"), "module.exports={activate(){return 'v2';}};", "utf8");
   await writeFile(join(source, PIARIUM_BUILTIN_ARTIFACT_FINGERPRINT_FILE), `sha256-${"2".repeat(64)}\n`, "utf8");
+  const beforeRefresh = await snapshotDirectory(source);
   const second = await packages.reconcileBuiltinArtifacts([definition], first);
   const secondEntry = second.extensions.find((entry) => entry.manifest.id === id);
   assert.equal(secondEntry?.selectedVersion, manifest.version);
@@ -414,6 +463,7 @@ test("refreshes a built-in Host artifact when its distribution fingerprint chang
     await readFile((await packages.resolveBrokeredHostEntrypoint(id, "selected", secondEntry?.integrity ?? "")).modulePath, "utf8"),
     /return 'v2'/,
   );
+  assert.deepEqual(await snapshotDirectory(source), beforeRefresh);
 
   const unchanged = await packages.reconcileBuiltinArtifacts([definition], second);
   assert.equal(unchanged.revision, second.revision);
