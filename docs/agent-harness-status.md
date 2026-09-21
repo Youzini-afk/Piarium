@@ -18,6 +18,12 @@ Last updated: 2026-09-21
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**D-313 / 阶段 B：Varin 全面更名（2026-09-21），accepted design / not implemented。**
+设计见 [varin-rebrand-design.md](varin-rebrand-design.md)，计划 B0–B4，优先于尚未实施的 F。
+已确定产品名 Varin，当前没有用户迁移需求：自有命名、包/协议/配置、品牌资源和发行入口一次切换，
+不新增旧名别名、回退、双写或自动迁移。真实 Pi 依赖、原生数据和历史归属保留。
+本次只写设计：代码、Logo、仓库/包/镜像等外部资源和发布产物尚未更名，未宣称目标地址或 npm scope 已可用。
+
 **D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），accepted design / not implemented。**
 设计见 [fast-decision-model-design.md](fast-decision-model-design.md)，计划为 F0–F4。
 通用能力/配置、Jev adapter、快速选材与动态多步探索均尚未实现或接线；现有 `models.explore`、

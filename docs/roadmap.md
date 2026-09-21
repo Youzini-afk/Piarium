@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage F planned at D-312
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B rebrand planned at D-313 before Stage F (D-312)
 
 Last updated: 2026-09-21
 
@@ -29,7 +29,8 @@ authoritative record of delivery, and each phase names the design document that 
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
 | S | Conversational settings and Agent administration | Complete (D-306–D-311): owner-backed catalog/actions, session-bound authenticated Surfaces, typed operations, per-owner compound updates and product Skills |
 | W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
-| F | Fast Decision Models and progressive retrieval | Accepted design (D-312), not implemented: shared capability/binding, first Jev adapter, source selection and iterative exploration in `explore` |
+| B | Varin product-wide rebrand | Accepted design (D-313), not implemented; clean cutover of product, owned identities and distribution, without old-name compatibility; before F |
+| F | Fast Decision Models and progressive retrieval | Accepted design (D-312), not implemented: shared capability/binding, first Jev adapter, source selection and iterative exploration in `explore`; follows B |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -112,7 +113,14 @@ with durable trigger identity, cancellation and recovery. Calendar tasks still s
 their results must follow actual execution rather than merely dispatch acceptance. See
 [plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered durable source/continuation slice from ordinary-shell durability, composite/shared observation and remaining recovery limits.
 
-Stage F follows S/W and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
+Stage B follows S/W and is specified in [varin-rebrand-design.md](varin-rebrand-design.md).
+B0–B4 cover the naming map, package/runtime/storage cutover, product identity and assets, distribution/docs,
+and focused closure. The new brand is Varin; there are no existing-user compatibility requirements, so
+old aliases, fallback paths, dual writes and migration helpers are excluded. Actual Pi dependencies,
+developer assets and historical attribution remain intact. Repository and external publishing resources
+are targets pending implementation, not already available endpoints. Stage B precedes the unimplemented F.
+
+Stage F follows B and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
 F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
 delivery closure. Fast Decision Model is the shared product category; Jev is the first adapter target.
 The existing explore query keeps its scope, source identity and execution authority. Fast decisions assess

@@ -8,6 +8,9 @@ Last updated: 2026-09-21
 [阶段 F](agent-harness-plan.md#阶段-f快速决策模型与渐进检索d-312)，实际交付只记入
 [能力状态](agent-harness-status.md)。本文定义通用能力与首个检索消费者，不代表 Jev 已接入。
 
+D-313 的 [Varin 全面更名](varin-rebrand-design.md) 阶段 B 优先实施；阶段 F 随后采用新产品命名。
+更名不改变本设计的能力合同、Pi 推理归属与检索目标。
+
 ## 1. 产品决定
 
 产品统一名称为 **快速决策模型（Fast Decision Model）**。它根据给定目标和材料，完成候选选择、相关性判断、评分、

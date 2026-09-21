@@ -18,6 +18,12 @@ the Agent loop, model/provider stack, native session tree, and extension ecosyst
 originated from the maintainer's OpenChamber fork, whose product capabilities are retained. That
 source fork remains read-only; all Piarium edits and history live in this repository.
 
+Planned identity change (D-313): [Varin rebrand](varin-rebrand-design.md) defines a complete cutover of
+owned package, runtime, storage, product and distribution names without old-name aliases or migration
+layers. The current code still uses Piarium. Actual Pi dependencies and native data retain their names
+and owners; process boundaries and capabilities do not change. Stage B precedes the planned Fast Decision
+Model implementation. External resource changes and delivery evidence belong to harness status.
+
 The production architecture separates a Rust system kernel from the TypeScript product and Agent
 orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the implemented responsibilities;
 [agent-harness-plan.md](agent-harness-plan.md) stage R records the completed R0–R6 transition. Current release and

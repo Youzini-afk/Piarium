@@ -28,7 +28,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
-| [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 16 |
+| [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范、产品身份与阶段小结。 | 17 |
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置、阶段 W 会话等待与续接。 | 40 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
@@ -351,3 +351,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-310 | 2026-09-21 | 阶段 S/W 第二轮生产验收：认证 Surface、真实 CAS/结果、观察恢复与 calendar 状态机修正 | implemented correction / focused integration validation / S+W remain partial | 更正 D-309 的完成边界；保留真实 owner 纵切，撤回全部来源/session-Surface/attempt-delete/全局文件 CAS 的过高声明 | settings/follow-up design；plan S/W；status；architecture；roadmap；scheduler module | [tool-environment](decisions/tool-environment.md) |
 | D-311 | 2026-09-21 | 阶段 S/W 生产收口：session-Surface、typed operation、复合/共享观察、普通 shell 与统一 Thread 投递 | implemented / wired / focused validation / S+W complete | 完成 D-310 的实际缺口；外部/跨平台/完整桌面/真实模型现场未实测但不作为阶段门槛 | settings/follow-up design；plan S/W；status；architecture；roadmap；Harness module | [tool-environment](decisions/tool-environment.md) |
 | D-312 | 2026-09-21 | 快速决策模型：供应商无关能力、Jev 首个适配、材料价值与探索价值分离、动态渐进检索 | accepted design / not implemented | 扩展 D-174–D-193；生成式规划保留，Computer Use 等用途以后接入，不预设性能效果 | fast-decision-model-design；plan F0–F4；harness 6.1/8.5；status；architecture；roadmap | [retrieval](decisions/retrieval.md) |
+| D-313 | 2026-09-21 | Varin 全面更名：自有产品/工程/配置/发行身份一次切换，不留旧名称兼容层 | accepted design / not implemented | 明确当前无用户迁移需求；真实 Pi 依赖、已有成果和历史归属保留；B 优先于 F | varin-rebrand-design；plan B0–B4；harness；status；architecture；roadmap；development | [foundation-governance](decisions/foundation-governance.md) |

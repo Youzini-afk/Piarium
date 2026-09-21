@@ -24,6 +24,7 @@ or implementation in the same coherent change.
 | Area | Current authority |
 | --- | --- |
 | Product/process/data architecture | [architecture.md](architecture.md) |
+| Planned Varin rebrand and clean naming cutover | [varin-rebrand-design.md](varin-rebrand-design.md), Stage B in the harness plan; not implemented |
 | Agent harness contract, plan, status, decision log | [agent-harness.md](agent-harness.md), [agent-harness-plan.md](agent-harness-plan.md), [agent-harness-status.md](agent-harness-status.md), [agent-harness-decisions.md](agent-harness-decisions.md) |
 | Rust system kernel | [rust-kernel-design.md](rust-kernel-design.md), [rust-kernel-audit.md](rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
 | OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](openchamber-pi-migration.md) |
