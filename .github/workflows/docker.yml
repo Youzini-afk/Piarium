@@ -21,7 +21,6 @@ on:
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
       - scripts/cloud-runtime.bun.lock
-      - scripts/docker-cloud-tools.test.js
       - scripts/docker-build-only-wrapper.sh
       - scripts/docker-entrypoint.sh
       - .github/workflows/docker.yml
@@ -43,7 +42,6 @@ on:
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
       - scripts/cloud-runtime.bun.lock
-      - scripts/docker-cloud-tools.test.js
       - scripts/docker-build-only-wrapper.sh
       - scripts/docker-entrypoint.sh
       - .github/workflows/docker.yml

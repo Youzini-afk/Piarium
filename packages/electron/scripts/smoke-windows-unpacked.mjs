@@ -2,7 +2,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import fsp from 'node:fs/promises';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -26,54 +26,19 @@ for (const variable of [
 ]) {
   delete smokeEnvironment[variable];
 }
-const packagedResourcesRoot = path.join(path.dirname(appPath), 'resources');
-const packagedNodeModulesRoot = path.join(packagedResourcesRoot, 'app.asar.unpacked', 'node_modules');
-const packagedWebServerRoot = path.join(
-  packagedResourcesRoot,
-  'app.asar.unpacked',
-  'node_modules',
-  '@piarium',
-  'web',
-  'server',
-);
-const packagedWebRoot = path.dirname(packagedWebServerRoot);
-const packagedKernelRoot = path.join(packagedResourcesRoot, 'kernel');
-
 if (process.platform !== 'win32') {
   throw new Error('The unpacked Windows smoke test must run on Windows.');
 }
 if (!existsSync(appPath)) {
   throw new Error(`Missing unpacked Piarium executable at ${appPath}`);
 }
-const packagedWebManifest = JSON.parse(readFileSync(path.join(packagedWebRoot, 'package.json'), 'utf8'));
-for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
-  if (packagedWebManifest.dependencies?.[legacy] || existsSync(path.join(packagedNodeModulesRoot, legacy))) {
-    throw new Error(`Obsolete native authority entered the unpacked Windows application: ${legacy}`);
-  }
-}
-const packagedTrivium = path.join(packagedNodeModulesRoot, 'triviumdb', `triviumdb.win32-${process.arch}-msvc.node`);
-if (!existsSync(packagedTrivium)) throw new Error(`Missing packaged TriviumDB native binary at ${packagedTrivium}`);
-for (const required of [path.join(packagedKernelRoot, 'piarium-kernel.exe'), path.join(packagedKernelRoot, 'manifest.json')]) {
-  if (!existsSync(required) || statSync(required).size === 0) throw new Error(`Missing packaged Rust kernel resource at ${required}`);
-}
-if (!existsSync(path.join(packagedWebServerRoot, 'production-boundary.json'))) {
-  throw new Error('Packaged Host is missing its production-boundary audit manifest.');
-}
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const DEVTOOLS_REQUEST_TIMEOUT_MS = 20_000;
-const LAYOUT_TOLERANCE_PX = 1;
-const MAX_COMPOSER_FRAME_WIDTH_PX = 48 * 16;
 const MONACO_SMOKE_ENABLED = process.env.PIARIUM_MONACO_SMOKE === '1';
 const localSemanticPack = process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK?.trim()
   ? path.resolve(process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK.trim())
   : null;
-
-const assertNear = (actual, expected, label) => {
-  if (!Number.isFinite(actual) || Math.abs(actual - expected) > LAYOUT_TOLERANCE_PX) {
-    throw new Error(`${label} expected ${expected}px, received ${actual}px.`);
-  }
-};
 
 const formatConsoleArg = (arg) => {
   if (arg == null) return String(arg);
@@ -542,21 +507,6 @@ const waitForRenderer = async (userDataDir) => {
     let continuedFromBundledWelcome = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => {
-        const readElement = (selector) => {
-          const element = document.querySelector(selector);
-          if (!(element instanceof HTMLElement)) return null;
-          const rect = element.getBoundingClientRect();
-          const style = window.getComputedStyle(element);
-          return {
-            bottom: rect.bottom,
-            height: rect.height,
-            left: rect.left,
-            right: rect.right,
-            top: rect.top,
-            width: rect.width,
-            borderTopWidth: Number.parseFloat(style.borderTopWidth) || 0,
-          };
-        };
         let diagnostics = null;
         try {
           diagnostics = window.__piariumStartupDiagnostics ?? null;
@@ -566,16 +516,8 @@ const waitForRenderer = async (userDataDir) => {
         return {
           bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
           diagnostics,
-          href: window.location.href,
-          layout: {
-            closeControl: readElement('[data-window-control="close"]'),
-            composerFrame: readElement('[data-pi-composer-input-frame="true"]'),
-            composerShell: readElement('[data-pi-composer-shell="true"]'),
-            innerHeight: window.innerHeight,
-            innerWidth: window.innerWidth,
-            localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
-            pendingDraft: document.querySelector('[data-pi-pending-draft="true"]') !== null,
-          },
+          localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
+          mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
           ready: window.__piariumAppReady === true,
         };
       })()`);
@@ -593,31 +535,28 @@ const waitForRenderer = async (userDataDir) => {
           lastState,
         });
       }
-      if (lastState?.ready === true) {
-        const layoutReady = lastState.layout?.closeControl && lastState.layout?.composerShell && lastState.layout?.composerFrame;
-        if (layoutReady) {
-          const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
-          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
+      if (lastState?.ready === true && lastState?.mainWorkspace === true) {
+        const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
+        return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
+      }
+      const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
+      const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
+        && runtimeSnapshot.active?.id === 'bundled'
+        && runtimeSnapshot.active?.source === 'bundled';
+      if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState?.localRuntimeContinueReady === true) {
+        const continuation = await devTools.evaluate(`(() => {
+          const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
+          if (!(action instanceof HTMLButtonElement)) return false;
+          action.click();
+          return true;
+        })()`);
+        if (continuation?.exceptionDetails) {
+          throw describeSmokeFailure(
+            `Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`,
+            { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
+          );
         }
-        const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
-        const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
-          && runtimeSnapshot.active?.id === 'bundled'
-          && runtimeSnapshot.active?.source === 'bundled';
-        if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState.layout?.localRuntimeContinueReady === true) {
-          const continuation = await devTools.evaluate(`(() => {
-            const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
-            if (!(action instanceof HTMLButtonElement)) return false;
-            action.click();
-            return true;
-          })()`);
-          if (continuation?.exceptionDetails) {
-            throw describeSmokeFailure(
-              `Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`,
-              { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
-            );
-          }
-          continuedFromBundledWelcome = continuation?.result?.value === true;
-        }
+        continuedFromBundledWelcome = continuation?.result?.value === true;
       }
       await delay(250);
     }
@@ -720,40 +659,6 @@ try {
   if (closed?.success !== true) throw new Error(`Packaged terminal close returned ${JSON.stringify(closed)}`);
 
   const renderer = await waitForRenderer(userDataDir);
-  const layout = renderer.state?.layout;
-  if (!layout || !Number.isFinite(layout.innerWidth) || !Number.isFinite(layout.innerHeight)) {
-    throw describeSmokeFailure(
-      `Packaged renderer did not report viewport geometry: ${JSON.stringify(layout)}`,
-      renderer,
-    );
-  }
-  if (!layout.closeControl) {
-    throw describeSmokeFailure('Packaged renderer did not expose the Windows close control.', renderer);
-  }
-  const closeControlIsRight = layout.closeControl.left >= layout.innerWidth / 2;
-  if (!closeControlIsRight) {
-    throw describeSmokeFailure(
-      `Clean profile placed the Windows close control on the unexpected side: ${JSON.stringify(layout.closeControl)}`,
-      renderer,
-    );
-  }
-  if (closeControlIsRight) {
-    assertNear(layout.closeControl.right, layout.innerWidth, 'Right-side close control edge');
-  }
-  if (!layout.composerShell || !layout.composerFrame) {
-    throw describeSmokeFailure(
-      `Packaged renderer reported incomplete composer geometry: ${JSON.stringify(layout)}`,
-      renderer,
-    );
-  }
-  if (layout.pendingDraft !== true) {
-    throw describeSmokeFailure('Clean packaged renderer did not open the pending Pi draft welcome state.', renderer);
-  }
-  assertNear(layout.composerShell.bottom, layout.innerHeight, 'Composer shell bottom edge');
-  assertNear(layout.composerShell.borderTopWidth, 0, 'Composer shell top border');
-  if (layout.composerFrame.width > MAX_COMPOSER_FRAME_WIDTH_PX + LAYOUT_TOLERANCE_PX) {
-    throw new Error(`Composer frame is wider than the fork-derived 48rem column: ${layout.composerFrame.width}px.`);
-  }
   const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
   if (
     runtimeSnapshot?.status !== 'ready'
@@ -769,7 +674,6 @@ try {
     builtinRecovery,
     health: 'ok',
     localSemantic,
-    layout,
     piVersion,
     profile: 'clean',
     renderer: renderer.state?.ready === true ? 'app-ready' : 'not-ready',

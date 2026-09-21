@@ -3,12 +3,9 @@
  *
  * `packages/web/index.html` and `packages/web/mini-chat.html` have to paint before any module is
  * evaluated, so they cannot import the splash modules the way the React component does.
- * They embed generated output instead, between sentinels, and
- * `packages/ui/src/components/ui/piarium-splash-lattice.test.ts` asserts each embedded block still
- * equals what the generator produces, character for character.
+ * They embed generated output instead, between sentinels.
  *
- * So: change the splash modules, run `bun run splash:emit`, commit both. Skipping the emit fails the
- * tests rather than shipping a floor that no longer meets the cube, which is what the sentinels are for.
+ * After changing the splash modules, run `bun run splash:emit` and commit the generated blocks.
  *
  * Three blocks per host, because they answer to three different generators:
  *   SPLASH-CSS   the shared stylesheet, including the camera transform and the cube's placement

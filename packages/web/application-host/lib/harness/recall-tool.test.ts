@@ -5,9 +5,7 @@ import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRecall, openUserKnowledgeStore, RECALL_PROMPT_SNIPPET } from "./recall-tool.js";
 
-// Scratch stores go to the OS temp dir, never into the source tree:
-// architecture.test.ts walks application-host/** and fails when a test
-// directory appears or disappears under it mid-scan.
+// Keep scratch stores separate from the source tree.
 const TEST_DIR = join(tmpdir(), "piarium-test-recall");
 function cleanup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });

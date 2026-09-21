@@ -10,15 +10,7 @@
  * for merely being stable.
  */
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-
-const addDays = (isoDate, days) => {
-  const shifted = new Date(`${isoDate}T00:00:00Z`)
-  shifted.setUTCDate(shifted.getUTCDate() + days)
-  return shifted.toISOString().slice(0, 10)
-}
-
-/** Documents that must keep a `Status:` and `Last updated:` header. */
+/** Documents that state their delivery status at the top. */
 export const REQUIRED_STATUS_HEADER_DOCS = ["docs/architecture.md", "docs/roadmap.md"]
 
 /**
@@ -56,32 +48,10 @@ export const collectLocalLinkTargets = (markdown) => {
   return targets
 }
 
-/** Extract the `Status:` and `Last updated:` header values, when present. */
+/** Extract the delivery status, when present. */
 export const readStatusHeader = (markdown) => {
   const status = /^Status:\s*(.+?)\s*$/m.exec(markdown)
-  const updated = /^Last updated:\s*(.+?)\s*$/m.exec(markdown)
-  return {
-    status: status ? status[1] : null,
-    lastUpdated: updated ? updated[1] : null,
-  }
-}
-
-/**
- * Check a `Last updated:` header for well-formedness: ISO date, not in the future.
- * The header is a human freshness hint, not a contract — commit-date comparison used to force
- * contributors to bump it on every edit, which blocked unrelated work without proving anything.
- */
-export const checkLastUpdated = ({ lastUpdated, today }) => {
-  if (lastUpdated === null) return null
-  if (!ISO_DATE.test(lastUpdated)) {
-    return `'Last updated: ${lastUpdated}' is not an ISO YYYY-MM-DD date`
-  }
-  // `today` is UTC while an author writes their local date, so allow one day of timezone slack
-  // rather than failing contributors who are ahead of UTC.
-  if (lastUpdated > addDays(today, 1)) {
-    return `'Last updated: ${lastUpdated}' is in the future (today is ${today})`
-  }
-  return null
+  return status ? status[1] : null
 }
 
 /**

@@ -95,9 +95,7 @@ export const dismissInitialSplash = (): void => {
 };
 
 /**
- * The hooks this module depends on. `piarium-logo-geometry.test.ts` asserts that every host still
- * provides them, because a rename there would silently stop status messages appearing or leave the
- * cover on screen rather than failing anywhere a reader would notice.
+ * Shared hooks for the React splash and generated pre-paint HTML hosts.
  */
 export const INITIAL_SPLASH_IDS = {
   root: SPLASH_ID,

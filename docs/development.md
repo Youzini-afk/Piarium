@@ -57,8 +57,8 @@ Verification should answer a concrete regression question:
 | Change shape | Evidence that usually changes the decision |
 | --- | --- |
 | Documentation only | Link/status validation and the relevant documentation test |
-| Local implementation | A focused regression test, plus owner-package type/lint checks when static shape changed |
-| Shared contract or persisted schema | Consumer/contract tests for every affected runtime and explicit failure/stale/migration cases |
+| Local implementation | Existing direct behavior coverage where useful; type/lint checks when static shape changed. Small presentation edits need no automatic new test. |
+| Shared contract or persisted schema | Actual consumers and the changed data behavior; type checking already covers static shape. Test distinct failure consequences rather than mirroring DTOs. |
 | Platform, process, packaging, or native behavior | The relevant bundled, packaged, or platform smoke; static checks alone do not prove it |
 | Performance work | A representative reproduction and measurement of the reported interaction, plus correctness coverage for the structural change |
 
@@ -69,10 +69,11 @@ coverage gaps instead of converting them into a false pass.
 Stage Q, specified in [testing-ci-design.md](testing-ci-design.md) and the
 [harness implementation plan](agent-harness-plan.md), is the completed engineering phase before the
 AI4S implementation stage. It reassessed test responsibilities, fixtures, discovery, repeated
-builds and CI execution across the repository. The result is accepted; current scripts remain the
-command authority. Its success is useful regression protection and faster, clearer feedback, not a
-deletion quota or a required number of checks. Do not turn its one-time cleanup plan into a checklist
-for every change.
+builds and CI execution across the repository. The 2026-09-21 follow-up removes source-text, type-literal,
+retired migration and release-layout checks that remained after Q; the dispositions are recorded in
+[the audit addendum](testing-ci-audit.md#11-test-content-reduction-2026-09-21). Current scripts remain the
+command authority. Do not turn cleanup into a checklist for every change or replace every deleted
+assertion with a new test. Prefer fewer tests that exercise distinct product behavior.
 
 ## Companion retirement and current AI4S stage
 
@@ -108,8 +109,9 @@ the phase 7 plan and current harness status for subsequent capability routing an
   still require Electron tests or an actual smoke.
 - The 58 `desktop_*` IPC commands, preload bootstrap payload, desktop events, and shared DTOs are
   typed in `packages/application-client/src/desktop.ts` — the single framework-neutral contract
-  consumed by Electron main, preload, and the UI. `desktop-contract.test.ts` and
-  `architecture.test.ts` guard the catalog, remote-safe subset, and source boundaries.
+  consumed by Electron main, preload, and the UI. Runtime contract tests protect command recognition
+  and the remote-safe subset. Source language
+  and compiler/lint policy are not duplicated in a separate architecture test.
 - Engineering docs are checked by `bun run test:docs`; public docs-site content is checked by
   `bun run docs:validate`.
 - Adding or removing source/export shapes may warrant `bun run dead-code`, but its output is diagnostic:

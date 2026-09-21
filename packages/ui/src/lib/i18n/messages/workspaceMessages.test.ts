@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './en';
@@ -89,7 +86,6 @@ const WORKSPACE_KEYS = [
   'workspace.git.toast.committed',
 ] as const;
 
-const testDir = dirname(fileURLToPath(import.meta.url));
 const SAME_IN_CHINESE = new Set<string>([
   'workspace.git.title',
 ]);
@@ -105,28 +101,4 @@ describe('workspace overlay messages', () => {
     }
   });
 
-  test('workspace terminal and git overlays use localized messages', () => {
-    const terminalSource = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceTerminalDialog.tsx'),
-      'utf8',
-    );
-    const gitSource = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceGitPanel.tsx'),
-      'utf8',
-    );
-
-    expect(terminalSource).toContain("t('workspace.terminal.actions.restart')");
-    expect(gitSource).toContain("t('workspace.git.actions.refresh')");
-  });
-
-  test('workspace terminal stream does not reconnect on ordinary re-renders', () => {
-    const source = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceTerminalDialog.tsx'),
-      'utf8',
-    );
-
-    expect(source).toContain('activeTerminalIdRef.current === sessionId');
-    expect(source).toContain('startStream(dialog.directoryKey, activeTabId, terminalSessionId)');
-    expect(source).not.toContain('cleanupRef.current?.();');
-  });
 });

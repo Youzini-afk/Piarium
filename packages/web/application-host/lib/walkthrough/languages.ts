@@ -61,9 +61,4 @@ export function languageName(language: unknown): string {
     : LANGUAGE_NAMES[DEFAULT_LANGUAGE];
 }
 
-// The tags this list must agree with live in `packages/ui/src/lib/i18n`, which
-// the server cannot import. `languages.test.js` compares the two by reading
-// that file, because a locale added on one side only fails silently: the picker
-// offers the language and the walkthrough comes back in English.
-export const __testing = { LANGUAGE_NAMES };
 import type { WalkthroughLanguage } from './types.js';

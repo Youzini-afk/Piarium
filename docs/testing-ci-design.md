@@ -2,7 +2,11 @@
 
 Status: accepted design (D-292); Stage Q implemented and accepted (D-293/D-295), locally verified; the former VS Code companion was retired under D-296 and locally verified
 
-Last updated: 2026-09-19
+Last updated: 2026-09-21
+
+2026-09-21 补充：阶段 Q 主要修正了测试装配与执行归属，未充分清理验证内容本身。
+本轮直接删除源码/样式字面量、手写 DTO 自证和退休迁移检查，收窄发布 smoke；具体去向见
+[审计补充](testing-ci-audit.md#11-test-content-reduction-2026-09-21)。本设计中的历史基线不代表现存文件或待执行的固定清单。
 
 本文定义全仓测试、测试装配、构建与 CI 的重整目标。实施顺序见
 [agent-harness-plan.md 的阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292待实施)，
@@ -31,10 +35,10 @@ Last updated: 2026-09-19
 | CI 次数、桌面命令数量、源码措辞与文档日期被固定断言 | 存在锁死实现方式、与产品结果无直接关系的检查 |
 | 最新 CI 源码/Windows 检查通过，云运行时首次部署启动失败 | 存在真实成品故障，不能把所有红灯归咎于测试或通过取消检查消除 |
 
-具体入口包括 [CI 源码断言](../scripts/docker-cloud-tools.test.js)、部署源码断言 `scripts/cloud-remote-deploy.test.js`（已按审计删除，改由真实部署 smoke 覆盖）、
+历史调查入口包括 CI 源码断言 `scripts/docker-cloud-tools.test.js`（已删除，容器构建与启动检查验证产物）、部署源码断言 `scripts/cloud-remote-deploy.test.js`（已删除）、
 [桌面契约测试](../packages/electron/desktop-contract.test.ts)、[文档检查](../scripts/docs/engineering-docs.mjs)、
 [上下文稳定性测试](../packages/pi-host/test/zone0-stability.test.ts) 和 [原生验收入口](../scripts/test-kernel-authority.mjs)。
-这些是实施时的定位线索，不是必须保持原名或固定数量的契约；清理后同步或移除失效链接。
+这些是历史定位线索，不是必须保持原名或固定数量的契约；清理后同步或移除失效链接。
 
 Zone 0 测试的模拟回复不足以覆盖其完整 prompt/tool 继续流程，断言只检查此前采集的请求，存在错误结局未被判失败的缺口。
 上游 faux provider 在回复耗尽时返回错误；125 秒中有多少来自重试仍需复现，不能仅凭耗时认定根因。

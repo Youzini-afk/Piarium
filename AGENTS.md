@@ -87,5 +87,12 @@ Do not repeat broad checks that cannot change the decision. The command source o
 `package.json`; repository development and validation details live in
 [docs/development.md](docs/development.md).
 
+Do not add a test automatically for every edit or fix. Reuse existing behavior coverage; simple
+presentation changes and static type shapes often need no new test. Tests must exercise product
+behavior, not copy implementation text, CSS classes, enum lists, or assert values from a literal they
+just constructed. Remove obsolete and redundant tests without requiring one-for-one replacements.
+Keep release smoke focused on the installed product's startup and working capabilities; detailed
+failure combinations belong to their owning behavior tests, and visual preferences are not release gates.
+
 Preserve unrelated user changes and avoid destructive Git operations. Keep coherent phases reviewable,
 commit and push completed phases, and report what was and was not verified.

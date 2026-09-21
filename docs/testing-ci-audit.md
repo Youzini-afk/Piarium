@@ -1,6 +1,8 @@
 # Testing and CI audit — Stage Q (D-292)
 
 Baseline: `a92140df` (`docs: plan testing and CI redesign before AI4S`).
+The sections below record Stage Q's historical findings and dispositions. Current test-content
+reduction, including corrections to retained checks, is recorded in §11.
 Scope covered: every `packages/*/package.json` test/build entry, all Vitest
 configs, `scripts/test-*.mjs`, `.github/workflows/*`, and the representative
 files listed in the stage plan. This is an entry-and-family audit, not a
@@ -398,3 +400,36 @@ was never the CI cause.
 - `thread-runtime.test.ts` (4,007 lines) and the `explore*` family were
   not restructured — spot checks show real behavior tests, not fixtures
   worth touching without a concrete defect.
+
+## 11. Test-content reduction (2026-09-21)
+
+The follow-up addresses maintenance burden inside the tests and smoke programs. Stage Q's runner
+and ownership cleanup did not remove all tests that merely froze implementation details. At this
+pass's baseline (`8ba91026`), there were 816 JS/TS `.test`/`.spec` files with 158,778 lines, excluding
+Rust tests, helpers and standalone verification scripts. After this pass: 809 files, 157,090 lines.
+These counts describe source content, not executed test cases or a deletion target.
+
+| Area | Disposition and remaining evidence |
+| --- | --- |
+| UI source scans | Deleted sidebar, language-page and model-selector source-text tests and the retired kernel migration scan. UI behavior tests remain; normal component extraction and CSS changes no longer have to satisfy copied JSX. |
+| Splash/logo/localization | Removed renderer `toString()`, generated CSS/HTML, SVG source and component-call text assertions. Retained projection, tile coverage, playback lifecycle and dictionary consistency tests. Regeneration remains `bun run splash:emit`. |
+| Protocol/application-client | Removed DTO-literal self-checks, enum/constant/catalog mirrors and duplicate export checks. Runtime parsing, known/unknown guards, settings merging, capability resolution and error behavior remain. |
+| Host/Electron architecture | Removed completed TypeScript-migration and duplicate lint scans. CLI checks for accidentally importing generated artifacts remain because source-tool resolution can otherwise hide a clean-install failure. |
+| Docker/cloud | Deleted `docker-cloud-tools.test.js`, which duplicated Dockerfile commands, tool versions, Compose strings and workflow job names. Actual image build/start smokes remain. Cloud layout tests retain manifest/lock dependency agreement, dependency closure and real verifier behavior; fixed workspace lists are gone. |
+| Documentation dates | Removed date presence/format/future-date gates, their timezone-slack helper and seven dedicated cases. Human dates remain metadata; local links, document reachability, site routes and delivery-status headers are still checked. |
+| Shell integration | Deleted injected-script spelling/order assertions already covered by real Bash, PowerShell and zsh behavior tests. Launch argument and interpreter behavior checks remain. |
+| Walkthrough locales | One check calls normalization with the actual UI locale values. Removed the source regex, redundant list comparisons, naming-style gate and test-only export of the private map. |
+| Harness bridge fixture | Replaced its recursive mock search engine with boundary responses and moved large-output setup into its consumer case. Initial cwd and persistent cwd share one shell lifecycle; background output, paging and diagnostics still traverse the real bridge. |
+| Windows package smoke | Removed composer width/borders/placement, control placement and pending-draft layout gates, including geometry collection. Kept real renderer, bundled Pi, language/recovery and terminal checks. Package completeness belongs to `after-pack`, rather than repeating it in the Windows smoke. |
+| Release kernel smoke | One emitted-adapter/install-binary pass checks startup, actual file write, fixed search/structure, process output/exit, health and bad-manifest rejection. Removed a second copied-install run and conflict repetition; native kernel tests retain durable restart and conflict semantics. No longer reports `relocatedRestart`. |
+| Linux package smoke | AppImage payload verification and desktop startup now consume the same extraction. Both architecture verification and real startup remain. |
+
+No replacement-test quota, new test framework, skip-to-green behavior or timeout increase was introduced.
+Production permissions and data-integrity behavior are unchanged. The large thread/runtime, file-authority and recovery suites were
+not deleted by size: sampled cases exercise distinct preservation, conflict and lifecycle failures.
+This pass does not claim a line-by-line review of every retained test or a measured overall CI speedup.
+
+Validation used the changed behavior suites and scripts: protocol/application-client, retained UI
+geometry/playback and localization, Electron runtime, cloud layout, CLI/shell/locale tests, the real
+Harness bridge and the simplified release-kernel smoke against existing Windows x64 artifacts.
+No new installers, full source-suite rerun or cross-platform desktop launch was required for this cleanup.

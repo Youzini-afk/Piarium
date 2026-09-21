@@ -215,13 +215,18 @@ jobs:
           if [ "${{ matrix.architecture }}" = "arm64" ]; then
             manifest="packages/electron/dist/latest-linux-arm64.yml"
           fi
-          node .release-automation/packages/electron/scripts/verify-linux-appimage.mjs "$appimage"
           node packages/electron/scripts/verify-update-manifest.mjs \
             "$manifest" "$appimage" "${{ steps.source.outputs.version }}"
           extract_root="$(mktemp -d)"
           trap 'rm -rf "$extract_root"' EXIT
           chmod +x "$appimage"
           (cd "$extract_root" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
+          node --input-type=module -e '
+            import { assertElfArchitecture, verifyExtractedPayload } from "./.release-automation/packages/electron/scripts/verify-linux-appimage.mjs";
+            const targetArchitecture = process.env.PIARIUM_TARGET_ARCH;
+            assertElfArchitecture(process.argv[1], targetArchitecture, "AppImage");
+            verifyExtractedPayload({ root: process.argv[2], targetArchitecture });
+          ' "$appimage" "$extract_root/squashfs-root"
           xvfb-run --auto-servernum node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs \
             "$extract_root/squashfs-root/AppRun" --no-sandbox
 

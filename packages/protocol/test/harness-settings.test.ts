@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  DEFAULT_HARNESS_SETTINGS,
   mergeHarnessSettings,
   resolveHarnessContextSettings,
   resolveHarnessReviewSettings,
@@ -12,11 +11,6 @@ import {
 } from "../src/index.js";
 
 describe("harness settings", () => {
-  it("returns defaults when both user and workspace are empty", () => {
-    const merged = mergeHarnessSettings({}, {});
-    assert.deepEqual(merged, DEFAULT_HARNESS_SETTINGS);
-  });
-
   it("workspace overrides user for top-level keys", () => {
     const merged = mergeHarnessSettings(
       { shell: "powershell" },

@@ -75,6 +75,7 @@ module.exports = (context) => {
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript-language-server.mjs'),
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'package.json'),
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'lib', 'tsserver.js'),
+    path.join('node_modules', '@piarium', 'web', 'server', 'production-boundary.json'),
   ];
   for (const relativePath of requiredApplicationHostFiles) {
     const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);

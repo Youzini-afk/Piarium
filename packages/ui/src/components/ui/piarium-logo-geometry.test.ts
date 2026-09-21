@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
   LEFT_FACE_CELL_OPACITIES,
   LOGO_GRID_SIZE,
   LOGO_LEFT_FACE_CELLS,
-  LOGO_LEFT_FACE_PATH,
   LOGO_MARK_PATH,
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
@@ -16,8 +13,6 @@ import {
   leftFaceCellOpacity,
   rightFaceCellOpacity,
 } from './piarium-logo-geometry';
-
-const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..');
 
 /**
  * The published mark is the startup cube frozen in its initial camera pose. These tests guard the shared
@@ -77,21 +72,4 @@ describe('logo geometry', () => {
     expect(rightFaceCellOpacity({ path: '', row: 3, col: 3 })).toBe(RIGHT_FACE_CELL_OPACITIES[15]);
   });
 
-  test('committed product vectors are generated from this projected mark', () => {
-    const fullVectors = [
-      ['packages', 'electron', 'resources', 'icons', 'app-icon.svg'],
-      ['packages', 'web', 'public', 'logo-dark-512x512.svg'],
-      ['packages', 'web', 'public', 'logo-light-512x512.svg'],
-    ].map((segments) => readFileSync(path.join(repoRoot, ...segments), 'utf8'));
-    for (const vector of fullVectors) {
-      expect(vector).toContain(LOGO_LEFT_FACE_PATH);
-      expect(vector).toContain(LOGO_PROJECTED_MARK_PATH);
-      expect(vector).not.toContain('OpenChamber');
-      expect(vector).not.toContain('O logo');
-    }
-    const firstRightCell = LOGO_RIGHT_FACE_CELLS[0];
-    expect(firstRightCell).toBeDefined();
-    if (!firstRightCell) throw new Error('Projected logo is missing its first right-face cell');
-    for (const vector of fullVectors) expect(vector).toContain(firstRightCell.path);
-  });
 });

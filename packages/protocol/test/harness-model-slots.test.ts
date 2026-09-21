@@ -1,19 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  HARNESS_MODEL_ROLES,
   applyHarnessModelPreset,
   resolveHarnessModelSlot,
 } from "../src/index.js";
 
 describe("Harness model slots", () => {
-  it("keeps the complete slot catalog explicit and defaults only implementation/review to main", () => {
-    assert.deepEqual(HARNESS_MODEL_ROLES, [
-      "explore", "retrievalAgent", "quickImplement", "hardImplement", "frontend",
-      "review", "check", "reader", "suggestions", "permissionJudge",
-      "researchInvestigation", "researchExperimentalDesign", "researchFastExploration",
-      "researchHighThroughputExecution",
-    ]);
+  it("defaults implementation/review to main and resolves configured auxiliary slots", () => {
     const main = { providerId: "openai", modelId: "gpt-main" };
     assert.deepEqual(resolveHarnessModelSlot("hardImplement", {}, main), main);
     assert.deepEqual(resolveHarnessModelSlot("review", {}, main), main);

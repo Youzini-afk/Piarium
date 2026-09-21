@@ -47,9 +47,8 @@ import the modules that define it. They embed generated output instead, between 
 bun run splash:emit
 ```
 
-`piarium-splash-lattice.test.ts` asserts each embedded block still equals its generator's output
-character for character, so forgetting the regeneration fails the tests rather than shipping a floor
-that no longer meets the cube standing on it.
+Commit the generated HTML changes with the generator changes. Splash tests cover projection and
+playback behavior; they do not freeze the generated CSS/HTML or the renderer's source text.
 
 ## Cloud and remote deployment
 

@@ -46,26 +46,6 @@ describe("shell integration launch", () => {
     expect(shellIntegrationLaunch("/bin/sh", ["-l"], false, "term-sh:1")).toBeNull();
   });
 
-  it("preserves user Bash PROMPT_COMMAND arrays and DEBUG traps in the injected script", () => {
-    const bash = shellIntegrationLaunch("/usr/bin/bash", [], false, "term-bash:1");
-    const script = readFileSync(String(bash?.args[1]), "utf8");
-    expect(script).toContain('[[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]');
-    expect(script).toContain('PROMPT_COMMAND=(__piarium_prompt_command "${PROMPT_COMMAND[@]}")');
-    expect(script).toContain("trap -p DEBUG");
-    expect(script).toContain('trap \'__piarium_debug_trap; eval "$__piarium_prev_debug"\' DEBUG');
-    expect(script).toContain("pi;%s;%s");
-  });
-
-  it("materializes zsh env/profile/login files so replacing ZDOTDIR still sources the user tree", () => {
-    const zsh = shellIntegrationLaunch("/bin/zsh", ["-l"], true, "term-zsh:2");
-    const directory = String(zsh?.env.ZDOTDIR);
-    expect(readFileSync(join(directory, ".zshenv"), "utf8")).toContain(".zshenv");
-    expect(readFileSync(join(directory, ".zprofile"), "utf8")).toContain(".zprofile");
-    expect(readFileSync(join(directory, ".zlogin"), "utf8")).toContain(".zlogin");
-    expect(readFileSync(join(directory, ".zshrc"), "utf8")).toContain(".zshrc");
-    expect(readFileSync(join(directory, ".zprofile"), "utf8")).not.toContain('source "${ZDOTDIR:-$HOME}/.zshrc"');
-  });
-
   it.skipIf(!hasZsh)("lets each user zsh file observe the original ZDOTDIR", () => {
     const candidate = zshCandidate;
     const userDir = mkdtempSync(join(tmpdir(), "piarium-zsh-user-"));
@@ -91,17 +71,6 @@ describe("shell integration launch", () => {
       else process.env.ZDOTDIR = previousZdotdir;
       rmSync(userDir, { recursive: true, force: true });
     }
-  });
-
-  it("does not replace the PowerShell Enter key handler and captures $? before other prompt work", () => {
-    const pwsh = shellIntegrationLaunch("powershell.exe", [], false, "term-ps:2");
-    const script = readFileSync(String(pwsh?.args[4]), "utf8");
-    expect(script).toContain(POWERSHELL_COMMAND_START_CAPTURE);
-    expect(script).toContain(POWERSHELL_EXIT_CAPTURE);
-    expect(script).toContain("Set-PSReadLineOption -AddToHistoryHandler");
-    expect(script).toContain("$__PiariumPreviousHistoryHandler");
-    expect(script).not.toContain("Set-PSReadLineKeyHandler -Key Enter");
-    expect(script.indexOf("$__piarium_success = $?")).toBeLessThan(script.indexOf("if ($global:__PiariumAwaitingFinish)"));
   });
 
   it("does not reuse native exit 7 for a later failed cmdlet", () => {

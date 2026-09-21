@@ -50,47 +50,17 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
     "}",
   ].join("\n"));
 
-  const bigFile = Array.from({ length: 5000 }, (_, i) => `line ${i + 1}`).join("\n");
-  writeFileSync(join(workspaceRoot, "big.txt"), bigFile);
-  mkdirSync(join(workspaceRoot, "packages"), { recursive: true });
-
   // Host side: create service host with mock search (real shell + output store)
   const terminal = createIsolatedTerminalSessionApi();
   const harnessServiceHost = createHarnessServiceHost({
-    search: async (request, _options) => {
-      // Simple mock search: read files and search for the pattern
-      const { readdirSync, readFileSync, statSync } = await import("node:fs");
-      const hits: Array<{ column: number; line: number; preview: string; resource: { resourceId: string; workspaceId: string } }> = [];
-      const searchDir = (dir: string) => {
-        for (const entry of readdirSync(dir)) {
-          const fullPath = join(dir, entry);
-          const stat = statSync(fullPath);
-          if (stat.isDirectory()) {
-            if (entry === ".piarium-data" || entry === ".git") continue;
-            searchDir(fullPath);
-          } else {
-            const content = readFileSync(fullPath, "utf8");
-            const lines = content.split("\n");
-            for (let i = 0; i < lines.length; i++) {
-              const lineText = lines[i] ?? "";
-              if (lineText.includes(request.query)) {
-                hits.push({
-                  column: 0,
-                  line: i + 1,
-                  preview: lineText,
-                  resource: { resourceId: fullPath, workspaceId: request.workspaceId },
-                });
-              }
-            }
-          }
-        }
-      };
-      searchDir(workspaceRoot);
-      if (hits.length === 0) {
-        return { status: "empty" as const, generation: undefined };
-      }
-      return { status: "ready" as const, generation: undefined, hits };
-    },
+    // This suite tests bridge delivery. Search matching belongs to the search
+    // service tests; the boundary supplies a hit or a miss without another engine.
+    search: async (request) => request.query === "hello"
+      ? { status: "ready" as const, generation: undefined, hits: [{
+          column: 0, line: 1, preview: "function hello() {",
+          resource: { resourceId: join(workspaceRoot, "searchable.ts"), workspaceId: request.workspaceId },
+        }] }
+      : { status: "empty" as const, generation: undefined },
     resolveWorkspaceRoot: async () => workspaceRoot,
     ...(options.diagnosticsProvider ? { diagnosticsProvider: options.diagnosticsProvider } : {}),
     discoveredShells: {
@@ -103,7 +73,6 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   // Router with respond callback that feeds back to bridge
-  let bridge: HostServicesBridge;
   const router = createHarnessRouter({
     respond: async (sessionId, requestId, outcome) => {
       bridge.respond(sessionId, requestId, outcome);
@@ -120,7 +89,7 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
   registerHarnessServices(router, harnessServiceHost);
 
   // pi-host side: bridge — emits events that the router processes
-  bridge = new HostServicesBridge({
+  const bridge = new HostServicesBridge({
     emit: (_event, data) => {
       void router.processEvent({
         actor: ACTOR,
@@ -160,30 +129,21 @@ async function executeTool(
 let toolCallSequence = 0;
 
 describe("harness e2e integration", () => {
-  it("1. bash pwd outputs workspace root", async () => {
+  it("bash starts at the workspace and retains cwd across calls", async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const text = await executeTool(bashTool, { command: "pwd" });
       const dirName = workspaceRoot.split(/[\\/]/).pop();
       assert.ok(text.includes(dirName!), `bash pwd output should contain workspace dir name "${dirName}": got "${text}"`);
-    } finally {
-      await dispose();
-      try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
-    }
-  });
-
-  it("2. bash cd packages then pwd outputs .../packages (two independent calls)", async () => {
-    const { workspaceRoot, bridge, dispose } = await setupE2E();
-    try {
-      const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
+      mkdirSync(join(workspaceRoot, "packages"));
       // First call: cd packages
       await executeTool(bashTool, { command: "cd packages" });
       // Second call: pwd — output should contain the packages path
-      const text = await executeTool(bashTool, { command: "pwd" });
+      const afterCd = await executeTool(bashTool, { command: "pwd" });
       // The output includes the path plus [exit N] suffix; extract the path line
-      const pwdLine = text.split("\n").find((l) => l.includes("packages"));
-      assert.ok(pwdLine, `pwd output should contain a line with "packages": got "${text}"`);
+      const pwdLine = afterCd.split("\n").find((l) => l.includes("packages"));
+      assert.ok(pwdLine, `pwd output should contain a line with "packages": got "${afterCd}"`);
       assert.ok(pwdLine!.trim().endsWith("packages"), `pwd path should end with "packages": got "${pwdLine!.trim()}"`);
     } finally {
       await dispose();
@@ -191,7 +151,7 @@ describe("harness e2e integration", () => {
     }
   });
 
-  it("3. background command + get_output retrieves output", { timeout: 30_000 }, async () => {
+  it("background command + get_output retrieves output", { timeout: 30_000 }, async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
@@ -234,7 +194,7 @@ describe("harness e2e integration", () => {
     }
   });
 
-  it("4. grep hit finds text and miss returns 0 hits", async () => {
+  it("grep hit finds text and miss returns 0 hits", async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const grepTool = createGrepTool(bridge, SESSION_ID);
@@ -249,9 +209,10 @@ describe("harness e2e integration", () => {
     }
   });
 
-  it("5. read 5000-line file returns truncated text with get_output handle", async () => {
+  it("read 5000-line file returns truncated text with get_output handle", async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
+      writeFileSync(join(workspaceRoot, "big.txt"), Array.from({ length: 5000 }, (_, i) => `line ${i + 1}`).join("\n"));
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
       // Read the big file via bash cat — the truncation extension should kick in
@@ -272,7 +233,7 @@ describe("harness e2e integration", () => {
     }
   });
 
-  it("6. grep disabled in settings → selectHarnessTools omits grep; default includes it", async () => {
+  it("grep disabled in settings → selectHarnessTools omits grep; default includes it", async () => {
     const { mergeHarnessSettings, DEFAULT_HARNESS_SETTINGS } = await import("@piarium/protocol");
     const { selectHarnessTools } = await import("../../src/harness/select-tools.js");
 
@@ -300,7 +261,7 @@ describe("harness e2e integration", () => {
     assert.ok(defaultTools.some((t) => t.name === "grep"), "default settings should include grep tool");
   });
 
-  it("7. diagnostics returns added and resolved changes through the complete bridge", async () => {
+  it("diagnostics returns added and resolved changes through the complete bridge", async () => {
     const issue: DiagnosticItem = {
       line: 2,
       character: 4,

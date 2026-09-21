@@ -55,7 +55,7 @@
     "test:kernel": "node scripts/test-kernel-authority.mjs",
     "kernel:protocol": "node scripts/generate-kernel-protocol.mjs",
     "check:pi": "bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",
-    "test:cloud": "bunx vitest run scripts/cloud-runtime-layout.test.js scripts/docker-cloud-tools.test.js",
+    "test:cloud": "bunx vitest run scripts/cloud-runtime-layout.test.js",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "dev:web:full": "node ./scripts/dev-web-full.mjs",

@@ -24,24 +24,6 @@ const relativeCliPath = (absolutePath: string): string => (
 );
 
 describe('Web CLI source boundary', () => {
-  it('keeps CLI source fully TypeScript', () => {
-    const javascriptSources = listFiles(cliRoot)
-      .filter((file) => /\.(?:js|mjs|cjs)$/u.test(file))
-      .map(relativeCliPath)
-      .sort();
-
-    expect(javascriptSources).toEqual([]);
-  });
-
-  it('does not disable TypeScript checking in CLI files', () => {
-    const offenders = listFiles(cliRoot)
-      .filter((file) => file.endsWith('.ts'))
-      .filter((file) => /@ts-(?:nocheck|ignore)/u.test(readFileSync(file, 'utf8')))
-      .map(relativeCliPath);
-
-    expect(offenders).toEqual([]);
-  });
-
   it('reaches the Application Host through a private package import', () => {
     // A relative specifier resolves the same way from cli/lib/ and the emitted bin/lib/,
     // so reaching '../../server/...' type-checked and tested only while a local build

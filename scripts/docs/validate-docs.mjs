@@ -5,7 +5,6 @@ import { promisify } from "node:util"
 
 import {
   REQUIRED_STATUS_HEADER_DOCS,
-  checkLastUpdated,
   collectLocalLinkTargets,
   findOrphanDocs,
   readStatusHeader,
@@ -99,8 +98,6 @@ async function validateEngineeringDocs(errors) {
     return { checked: 0, links: 0 }
   }
 
-  const today = new Date().toISOString().slice(0, 10)
-
   const referencedPaths = new Set()
   let linkCount = 0
 
@@ -119,14 +116,11 @@ async function validateEngineeringDocs(errors) {
       if (resolved !== file) referencedPaths.add(resolved)
     }
 
-    const { status, lastUpdated } = readStatusHeader(body)
+    const status = readStatusHeader(body)
     if (REQUIRED_STATUS_HEADER_DOCS.includes(file)) {
       if (status === null) errors.push(`${file}: missing a 'Status:' header line`)
-      if (lastUpdated === null) errors.push(`${file}: missing a 'Last updated:' header line`)
     }
 
-    const problem = checkLastUpdated({ lastUpdated, today })
-    if (problem) errors.push(`${file}: ${problem}`)
   }
 
   // A document nothing links to cannot be noticed when it goes stale. `docs/` is the index surface,

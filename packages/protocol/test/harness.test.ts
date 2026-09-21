@@ -5,13 +5,6 @@ import {
   HOST_EVENTS,
   isHarnessMethod,
   isHostEvent,
-  type HarnessMethod,
-  type HarnessRequestData,
-  type HarnessError,
-  type HarnessServiceMap,
-  type FsLockParams,
-  type FsLockResult,
-  type HarnessRuntimeState,
 } from "../src/index.js";
 
 describe("harness protocol", () => {
@@ -26,52 +19,10 @@ describe("harness protocol", () => {
   });
 
   it("isHarnessMethod recognizes all defined methods", () => {
-    const expected = Object.keys(HARNESS_METHOD_CAPABILITY) as HarnessMethod[];
+    const expected = Object.keys(HARNESS_METHOD_CAPABILITY);
     for (const method of expected) {
       assert.ok(isHarnessMethod(method), `${method} should be a harness method`);
     }
-  });
-
-  it("keeps session identity out of worker request payloads", () => {
-    const request = {
-      method: "output.read",
-      params: { handle: "out_example" },
-      requestId: "request-1",
-    } satisfies HarnessRequestData;
-    assert.equal("sessionId" in request, false);
-    assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
-    const todo = { items: [], branchEntryIds: [] } satisfies HarnessServiceMap["todo.upsert"]["params"];
-    const compact = {
-      retainedObservationRefs: [],
-      retainedGit: false,
-    } satisfies HarnessServiceMap["context.retained"]["params"];
-    assert.equal("sessionId" in todo, false);
-    assert.equal("sessionId" in compact, false);
-  });
-
-  it("keeps authorization, expiry, absence, and service failure distinct", () => {
-    const codes: HarnessError["code"][] = ["forbidden", "denied", "expired", "not-found", "unavailable", "failed"];
-    assert.equal(new Set(codes).size, codes.length);
-  });
-
-  it("defines the optional snapshot projection for context runtime state", () => {
-    const harness = {
-      context: {
-        backgroundPreparation: true,
-        candidate: "preparing",
-        lastFailure: { phase: "commit", message: "summary failed", at: 1 },
-      },
-    } satisfies HarnessRuntimeState;
-    assert.equal(harness.context.candidate, "preparing");
-  });
-
-  it("uses a batch acquire and lease-only release contract for path locks", () => {
-    const acquire = { action: "acquire", paths: ["a.ts", "b.ts"] } satisfies FsLockParams;
-    const release = { action: "release", leaseId: "lease-1" } satisfies FsLockParams;
-    const acquired = { held: true, leaseIds: ["lease-1", "lease-2"] } satisfies FsLockResult;
-    assert.equal(acquire.paths.length, 2);
-    assert.equal(release.leaseId, "lease-1");
-    assert.equal(acquired.leaseIds.length, 2);
   });
 
   it("isHarnessMethod rejects unknown methods", () => {

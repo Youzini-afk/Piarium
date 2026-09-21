@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLOUD_RUNTIME_PACKAGE_DIRS,
   CLOUD_RUNTIME_SCHEMA_VERSION,
-  CLOUD_RUNTIME_TRUSTED_DEPENDENCIES,
   findUndeclaredWorkspaceImports,
   verifyCloudRuntimeLayout,
   verifyCloudRuntimeIdentity,
@@ -103,23 +102,6 @@ afterEach(() => {
 });
 
 describe('Piarium cloud runtime layout', () => {
-  it('keeps a committed production lock for reproducible image and SSH installs', () => {
-    const lockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock');
-    expect(fs.existsSync(lockPath)).toBe(true);
-    const lockText = fs.readFileSync(lockPath, 'utf8');
-    expect(lockText).toContain('"name": "piarium-cloud-runtime"');
-    expect(lockText).toContain('"packages/application-client"');
-    expect(lockText).toContain('"packages/extension-builtins"');
-    expect(lockText).toContain('"packages/extension-contract"');
-    expect(lockText).toContain('"packages/extension-host"');
-    expect(lockText).toContain('"packages/runtime-broker"');
-    expect(lockText).toContain('"packages/settings-store"');
-    expect(lockText).toContain('"packages/pi-host"');
-    expect(lockText).toContain('"packages/protocol"');
-    expect(lockText).toContain('"packages/web"');
-    expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual([]);
-  });
-
   it('keeps the committed lock in sync with each staged production manifest', () => {
     // `--frozen-lockfile` only proves the lock resolves; it does not fail when a
     // manifest gains a production dependency the lock never recorded. That gap
@@ -176,17 +158,6 @@ describe('Piarium cloud runtime layout', () => {
       readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name
     )));
 
-    expect(CLOUD_RUNTIME_PACKAGE_DIRS).toEqual([
-      'extension-contract',
-      'application-client',
-      'extension-builtins',
-      'extension-host',
-      'protocol',
-      'pi-host',
-      'runtime-broker',
-      'settings-store',
-      'web',
-    ]);
     for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
       const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
       for (const dependencyName of Object.keys(manifest.dependencies || {})) {
