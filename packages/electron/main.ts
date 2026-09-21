@@ -2020,8 +2020,10 @@ const buildStartupSplashHtml = (): string => {
         <path d="M70.784 74 L81.176 68 L81.176 80 L70.784 86 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
         <path d="M81.176 68 L91.568 62 L91.568 74 L81.176 80 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
         <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
+        <!-- Keep this pre-paint copy in sync with packages/ui/src/components/ui/varin-mark.ts. -->
         <g transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-          <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="var(--splash-logo-fill)"/>
+          <path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z" fill="var(--splash-logo-fill)"/>
+          <path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z" fill="var(--splash-logo-fill)" opacity="0.6"/>
         </g>
       </svg>
     </div>
