@@ -987,7 +987,15 @@ describe("follow-up service on the real kernel", () => {
     f.harness.files.set("ws:data/input.csv", { exists: true, mtimeMs: 2, size: 2 });
     emitFile(f.harness, "ws", "data/input.csv", "changed", 2);
     await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
-    assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, "waiting");
+    // `continued` is recorded by the harness before the service finishes its
+    // durable occurrence delivery and re-arms the definition. Observe the
+    // persisted completion boundary instead of racing that handoff.
+    await until(async () => {
+      const detail = await f.service.get(caller(), { id: registered.followUp.id });
+      return detail.followUp.status === "waiting"
+        && detail.occurrences.length === 2
+        && detail.occurrences[1]?.delivery === "continued";
+    }, 4_000, f.harness.errors);
 
     f.harness.files.set("ws:data/input.csv", { exists: true, mtimeMs: 3, size: 3 });
     emitFile(f.harness, "ws", "data/input.csv", "changed", 3);
