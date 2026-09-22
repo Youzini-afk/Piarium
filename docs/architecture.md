@@ -8,7 +8,7 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 ## 1. Context
 
@@ -331,6 +331,15 @@ After compaction, observation receipts and material revisions are retained only 
 active context; Zone 2 then emits changed material instead of rebuilding a dashboard every turn. Background preparation is on by default and can be disabled independently of Pi's own automatic
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
+
+D-314 accepts a subsequent [compaction Agent design](context-compaction-agent-design.md), not yet implemented.
+An internal child worker will reuse the Pi loop, provider/auth and process lifecycle to read scoped historical
+messages, tool output and task records when needed. The owning session will keep the fixed source boundary
+and sole commit authority. Retained recent messages become reference material for semantic understanding;
+user intent is extracted rather than mechanically pinning the last user message. Parent request admission
+and waiting continue to use D-284; the auxiliary worker also needs capacity for queries and final output,
+without recursively compacting itself or depending on a business-thread slot held by its waiting parent.
+Current production still performs one summary call with no tool executor.
 
 D-301's 7G request preparation is implemented at D-305. It runs before every actual Agent model request:
 new environment facts become replayable

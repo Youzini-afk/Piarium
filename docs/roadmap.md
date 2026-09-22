@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) next
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) wired; Stage C (D-314) planned
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -30,7 +30,8 @@ authoritative record of delivery, and each phase names the design document that 
 | S | Conversational settings and Agent administration | Complete (D-306–D-311): owner-backed catalog/actions, session-bound authenticated Surfaces, typed operations, per-owner compound updates and product Skills |
 | W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
 | B | Varin product-wide rebrand | Source, product assets, build/distribution configuration and GitHub repository switched (D-313); first new-brand publication pending; no old-name compatibility |
-| F | Fast Decision Models and progressive retrieval | Accepted design (D-312), not implemented: shared capability/binding, first Jev adapter, source selection and iterative exploration in `explore`; follows B |
+| F | Fast Decision Models and progressive retrieval | Implemented/wired (D-312): shared capability/binding, first Jev adapter and iterative `explore`; evidence and untested quality/latency in harness status |
+| C | Background compaction Agent and semantic continuation | Accepted design (D-314), not implemented: internal worker, scoped history/output queries, semantic retention, capacity waiting and fixed-boundary commit |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -119,7 +120,7 @@ and focused closure. The new brand is Varin; there are no existing-user compatib
 old aliases, fallback paths, dual writes and migration helpers are excluded. Actual Pi dependencies,
 developer assets and historical attribution remain intact. The repository is now `Youzini-afk/Varin`;
 new npm packages and release assets have not been published. Source/build/startup evidence and these
-distribution boundaries are recorded in harness status. Stage F is the next implementation stage.
+distribution boundaries are recorded in harness status. Stage F is delivered; Stage C is the next implementation stage.
 
 Stage F follows B and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
 F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
@@ -129,6 +130,14 @@ what to return and what to investigate next; generative models still supply new 
 Future Computer Use and other consumers can reuse the capability, but are outside this implementation phase.
 F0–F4 are delivered and wired for the `explore` consumer; real paid-provider calls, cross-platform checks,
 and retrieval-quality evidence are recorded as untested in harness status.
+
+Stage C follows F and is specified in [context-compaction-agent-design.md](context-compaction-agent-design.md).
+C0–C4 cover frozen source/reference material and shared semantic instructions, an internal compaction worker
+with scoped queries, candidate generation, capacity/wait/commit integration, and consumer/document closure.
+D-314 is accepted design only: current production still uses D-284's single summary call. The new worker
+will interpret valid user intent rather than pin the last user message, use retained recent text as reference,
+and preserve all later appends through the existing session-owned commit boundary. Paid-model quality and
+full platform observations are separate from proving the production path is connected.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,14 @@ Last updated: 2026-09-21
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），设计已接受，尚未实施。**
+设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)，计划为 C0–C4。
+当前仍是 `context-preparation.ts` 的一次摘要调用，没有独立压缩子进程或可执行查询工具；切点按预算与完整交互边界，
+不保证最后一条 user 原文保留。当前摘要请求不含作为参考的近期原文 B，后续提示也比首次简略。
+已交付的固定候选、后台准备、请求前容量/输出预留、复用在飞候选等待及 Pi 提交继续有效。
+新阶段将按语义提炼有效要求，以 B 理解续接位置，按需查询历史/输出/任务记录，再沿现有机制接上 B/N；
+本次仅文档变更，无新运行证据，不声称子进程、语义质量或缓存/速度收益已经实现。
 
 **D-313 / 阶段 B：Varin 全面更名（2026-09-21），产品源码与仓库切换完成；首次新品牌发行待发布。**
 设计见 [varin-rebrand-design.md](varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。

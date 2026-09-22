@@ -2,7 +2,7 @@
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 正文为中文。English readers: this document specifies the Varin-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -1241,7 +1241,12 @@ D-302 / 7H 已将后台命令的新完成事实接到这里的环境增量：执
 
 材料按需读取，新事实按增量送达；不对历史每轮打分、排序或替换，不按文件后来变化回改模型当时看到的正文。
 
-### 8.4 容量驱动的后台续接压缩（D-284）
+### 8.4 容量驱动的后台续接压缩（D-284；D-314 后续增强待实施）
+
+D-284 的固定候选/容量检查/原文接续已交付。D-314 接受下一阶段的
+[后台压缩 Agent 与语义续接设计](context-compaction-agent-design.md)：独立内部子进程按需查阅历史、输出与任务记录，
+共用首次/更新提示，以近期原文理解工作位置，按语义整理有效用户要求。它取代 8.4.3 的单次无执行器限制，
+不改变本节的 Pi 历史权威、候选范围及 B/N 原文保留。新阶段尚未实施，交付事实以 status 为准。
 
 正常工作中，前台没有明显的“整理上下文”窗口期。后台摘要准备是首版主线：在容量将要不足时生成固定区间的摘要，前台
 继续执行，到真正需要空间时提交。平时不运行滚动 keeper，不要求主 agent 写工作日报。provider 异常变慢、输入突增或窗口
@@ -1308,7 +1313,12 @@ entry 持久化。plan/todo 与用户笔记仍在原有 Host block authority，�
 配额。S1 较短时可以保留更多已纳入收束范围的原文；**不能为了给较长摘要腾位置，事后从未被摘要覆盖的 B/N 中删内容**。
 60% 装不下必须保留的交互时优先连续性，记录实际规模；可行请求不为凑比例再次摘要。
 
-#### 8.4.3 缓存友好的单次摘要调用
+#### 8.4.3 已交付的单次摘要与待实施的 Agent 增强
+
+本小节的单次调用、无工具执行器描述记录 D-284 当前实现。D-314 的目标与共同提示词见独立设计 §4–§6：
+同一固定压缩任务允许按需多步查询，B 必须实际提供为只读参考；工具和系统配置变化对缓存的影响如实处理。
+最近 user 可能是材料或补充，不能机械钉住全文；有效要求、纠正与必要短引用由压缩 Agent 结合上下文判断。
+首次与后续压缩保留同一份完整职责，不增加强制调查轮次、摘要审查模型或另一套记忆库。
 
 摘要请求从主请求的实际构造路径派生：保持可复用的 system、工具定义、原消息序列及适用的缓存路由，末尾追加一次摘要
 指令，明确 S0/A/B 范围。模型、凭据和 provider 转换继续由该 session 的 ModelRuntime 拥有；不把对话重包装成一条巨大 user
