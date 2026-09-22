@@ -261,7 +261,7 @@ test("external Pi package root starts the host and creates a session", async () 
   }
 });
 
-test("external load failure names the missing Pi SDK module", async () => {
+test("external load failure identifies the missing Pi SDK module and package root", async () => {
   const root = await mkdtemp(join(tmpdir(), "varin-external-missing-"));
   try {
     const packageRoot = await materializeIncompletePiFixture(root);
@@ -291,7 +291,8 @@ test("external load failure names the missing Pi SDK module", async () => {
       `Host did not exit after a missing SDK module\n${stderr}`,
     );
     assert.notEqual(exited.code, 0);
-    assert.match(stderr, /@earendil-works\/pi-ai/);
+    assert.match(stderr, /Unable to resolve @earendil-works\/pi-[a-z-]+ from Pi package root/);
+    assert.match(stderr, new RegExp(packageRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
