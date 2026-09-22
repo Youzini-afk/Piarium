@@ -244,6 +244,7 @@ const logPaths = [
     path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Varin', 'logs', 'main.log'),
   ] : []),
 ];
+let processOutput = '';
 const child = spawn(appPath, [
   `--user-data-dir=${userDataDir}`,
   '--remote-debugging-port=0',
@@ -259,8 +260,13 @@ const child = spawn(appPath, [
     VARIN_DATA_DIR: userDataDir,
     VARIN_WORKSPACE_ROOT: workspaceRoot,
   },
-  stdio: 'ignore',
+  stdio: ['ignore', 'pipe', 'pipe'],
 });
+for (const stream of [child.stdout, child.stderr]) {
+  stream.on('data', (chunk) => {
+    processOutput = (processOutput + chunk.toString()).slice(-6_000);
+  });
+}
 let spawnError;
 child.once('error', (error) => {
   spawnError = error;
@@ -368,7 +374,7 @@ try {
 } catch (error) {
   const log = await readLog();
   const message = error instanceof Error ? error.message : String(error);
-  throw new Error(`${message}\n--- main.log ---\n${log.slice(-6_000)}`);
+  throw new Error(`${message}\n--- process output ---\n${processOutput}\n--- main.log ---\n${log.slice(-6_000)}`);
 } finally {
   if (child.exitCode === null) child.kill('SIGTERM');
   if (!(await waitForExit(child, 5_000)) && child.exitCode === null) child.kill('SIGKILL');

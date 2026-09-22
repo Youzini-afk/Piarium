@@ -6,7 +6,7 @@
   "description": "Varin desktop runtime",
   "author": "Youzini-afk and Varin contributors",
   "type": "module",
-  "main": "./dist-bundle/main.mjs",
+  "main": "./bootstrap.mjs",
   "dependencies": {
     "@varin/application-client": "workspace:*",
     "@varin/web": "workspace:*",
@@ -64,6 +64,7 @@
     "appId": "dev.varin.desktop",
     "productName": "Varin",
     "files": [
+      "bootstrap.mjs",
       "dist-bundle/main.mjs",
       "dist-bundle/preload.mjs",
       "!node_modules/@varin/*/{src,test,tests}/**/*",

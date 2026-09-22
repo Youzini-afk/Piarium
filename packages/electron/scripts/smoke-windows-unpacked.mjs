@@ -589,6 +589,7 @@ try {
   throw error;
 }
 const logPath = path.join(userDataDir, 'logs', 'main.log');
+let processOutput = '';
 const child = spawn(appPath, [
   `--user-data-dir=${userDataDir}`,
   '--remote-debugging-port=0',
@@ -602,9 +603,14 @@ const child = spawn(appPath, [
     VARIN_DATA_DIR: userDataDir,
     VARIN_WORKSPACE_ROOT: smokeWorkspaceRoot,
   },
-  stdio: 'ignore',
+  stdio: ['ignore', 'pipe', 'pipe'],
   windowsHide: true,
 });
+for (const stream of [child.stdout, child.stderr]) {
+  stream.on('data', (chunk) => {
+    processOutput = (processOutput + chunk.toString()).slice(-6_000);
+  });
+}
 let spawnError;
 child.once('error', (error) => {
   spawnError = error;
@@ -682,7 +688,7 @@ try {
   }, null, 2));
 } catch (error) {
   const log = await readLog();
-  const suffix = `\n--- main.log ---\n${log.slice(-6_000)}`;
+  const suffix = `\n--- process output ---\n${processOutput}\n--- main.log ---\n${log.slice(-6_000)}`;
   if (error instanceof Error) {
     throw new Error(`${error.message}${suffix}`, { cause: error });
   }
