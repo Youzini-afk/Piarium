@@ -23,7 +23,15 @@ import type { CapturedThreadDraftBaseline, PrepareIsolatedBranchInput } from "./
 import { createObservationCursorStore, type ObservationCursorStore } from "./observation-cursors.js";
 import { createZone2DeliveryService } from "./zone2-threads.js";
 import { clearManagedShellCompletionWatches } from "./harness-services.js";
+import { HarnessServiceError } from "./service-error.js";
+import { readHistoryPage } from "@varin/protocol";
+import {
+  COMPACTION_QUERY_CAPABILITIES,
+  COMPACTION_QUERY_METHODS,
+} from "@varin/protocol";
 import type {
+  CompactionHistoryParams,
+  CompactionHistoryResult,
   HarnessActorContext,
   HarnessActorIdentity,
   HarnessCapability,
@@ -377,6 +385,27 @@ export interface HarnessServiceHost {
   threadHistoryEntries: ((sessionId: string) => Promise<import("@varin/protocol").SessionEntriesResult>) | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
+  /**
+   * D-314: register a broker-spawned compaction worker as an auxiliary actor
+   * of `parent`'s session. Its harness queries carry the parent session
+   * identity plus the worker's own workerId; `leafEntryId` bounds history
+   * reads to the material frozen at task start. No-op unless the parent
+   * identity is still the registered session actor.
+   */
+  registerAuxiliaryActor(parent: HarnessActorIdentity, workerId: string, leafEntryId: string): void;
+  dropAuxiliaryActor(workerId: string): void;
+  /** Serve a compaction worker's frozen-range history read (auxiliary actors only). */
+  compactionHistory(actor: HarnessActorContext, params: import("@varin/protocol").CompactionHistoryParams): Promise<import("@varin/protocol").CompactionHistoryResult>;
+  /**
+   * D-314: run one frozen compaction task in a dedicated worker subprocess.
+   * Wired in the application host to the runtime broker; the parent session
+   * worker is the only valid caller (enforced by the service).
+   */
+  runCompactionTask: ((
+    actor: HarnessActorIdentity,
+    spec: import("@varin/protocol").CompactionTaskSpec,
+    signal: AbortSignal,
+  ) => Promise<import("@varin/protocol").CompactionRunResult>) | null;
   hasActor(identity: HarnessActorIdentity): boolean;
   resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
@@ -525,6 +554,8 @@ export interface HarnessServiceHostOptions {
   threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
   threadHistoryEntries?: NonNullable<HarnessServiceHost["threadHistoryEntries"]>;
+  /** D-314: dedicated compaction worker subprocess runner (broker wiring). */
+  runCompactionTask?: NonNullable<HarnessServiceHost["runCompactionTask"]>;
   verification?: VerificationCoordinator;
   storeRetrievalArtifact?: HarnessServiceHost["storeRetrievalArtifact"];
   readRetrievalArtifact?: HarnessServiceHost["readRetrievalArtifact"];
@@ -596,6 +627,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadSendToSession = options.threadSendToSession ?? null;
   const threadTranscriptReader = options.threadTranscriptReader ?? null;
   const threadHistoryEntries = options.threadHistoryEntries ?? null;
+  const runCompactionTask = options.runCompactionTask ?? null;
   const verification = options.verification ?? createVerificationCoordinator();
   const commitAgentInputContext = options.commitAgentInputContext ?? ((_sessionId, context) => ({
     // A Host without a snapshot authority may acknowledge disk/unavailable
@@ -724,7 +756,12 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const dropSession = (sessionId: string, actor?: HarnessActorIdentity): void => {
     const entry = sessions.get(sessionId);
-    if (actor && (!entry || !hasActor(actor))) return;
+    // Only the session's own worker can retire it: an auxiliary (compaction)
+    // worker exit shares the sessionId but must never drop the registration.
+    if (actor && (!entry
+      || entry.actor.authorityInstanceId !== actor.authorityInstanceId
+      || entry.actor.workerId !== actor.workerId
+      || entry.actor.workerGeneration !== actor.workerGeneration)) return;
     clearManagedShellCompletionWatches(host, sessionId);
     if (entry) {
       void options.releaseWebFetchReceipts?.(sessionId, entry.workspaceId).catch((error: unknown) => {
@@ -732,6 +769,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       });
       retireShell(sessionId, entry.shellSupervisor);
       sessions.delete(sessionId);
+    }
+    for (const [workerId, aux] of auxiliaryActors) {
+      if (aux.sessionId === sessionId) auxiliaryActors.delete(workerId);
     }
     outputStore.dropSession(sessionId);
     exploreQueryStore.dropSession(sessionId);
@@ -775,7 +815,47 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const getWebBinding = (sessionId: string): HarnessWebBinding | null => sessions.get(sessionId)?.webBinding ?? null;
 
+  // D-314 auxiliary actors: a session's dedicated compaction worker. Keyed
+  // by the worker's own id; queries resolve under the parent session with a
+  // read-only method allowlist, and history reads stop at the frozen leaf.
+  const auxiliaryActors = new Map<string, {
+    leafEntryId: string;
+    sessionId: string;
+    authorityInstanceId: string;
+    workerGeneration: number;
+  }>();
+
+  const registerAuxiliaryActor = (
+    parent: HarnessActorIdentity,
+    workerId: string,
+    leafEntryId: string,
+  ): void => {
+    const entry = sessions.get(parent.sessionId);
+    if (!entry || !hasActor(parent)) return;
+    auxiliaryActors.set(workerId, {
+      authorityInstanceId: parent.authorityInstanceId,
+      leafEntryId,
+      sessionId: parent.sessionId,
+      workerGeneration: parent.workerGeneration,
+    });
+  };
+
+  const dropAuxiliaryActor = (workerId: string): void => {
+    auxiliaryActors.delete(workerId);
+  };
+
+  const auxiliaryActor = (identity: HarnessActorIdentity) => {
+    const aux = auxiliaryActors.get(identity.workerId);
+    return aux
+      && aux.sessionId === identity.sessionId
+      && aux.authorityInstanceId === identity.authorityInstanceId
+      && aux.workerGeneration === identity.workerGeneration
+      ? aux
+      : undefined;
+  };
+
   const hasActor = (identity: HarnessActorIdentity): boolean => {
+    if (auxiliaryActor(identity)) return true;
     const entry = sessions.get(identity.sessionId);
     return Boolean(
       entry
@@ -787,12 +867,59 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const resolveActor = async (identity: HarnessActorIdentity): Promise<HarnessActorContext | null> => {
     const entry = sessions.get(identity.sessionId);
-    if (!entry || !hasActor(identity)) return null;
+    if (!entry) return null;
+    if (auxiliaryActor(identity)) {
+      return {
+        ...identity,
+        allowedMethods: [...COMPACTION_QUERY_METHODS],
+        workspaceId: entry.workspaceId,
+        ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
+        grantedCapabilities: [...COMPACTION_QUERY_CAPABILITIES],
+      };
+    }
+    if (!hasActor(identity)) return null;
     return {
       ...identity,
       workspaceId: entry.workspaceId,
       ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
       grantedCapabilities: await entry.grantedCapabilities,
+    };
+  };
+
+  const compactionHistory = async (
+    actor: HarnessActorContext,
+    params: CompactionHistoryParams,
+  ): Promise<CompactionHistoryResult> => {
+    const aux = auxiliaryActor(actor);
+    if (!aux) {
+      throw new HarnessServiceError("denied", "compaction.history is restricted to a session's compaction worker");
+    }
+    if (!threadHistoryEntries) {
+      throw new HarnessServiceError("unavailable", "Session history reads are unavailable");
+    }
+    const source = await threadHistoryEntries(actor.sessionId);
+    if (source.sessionId !== actor.sessionId) {
+      throw new HarnessServiceError("unavailable", "The history source identity did not match the session");
+    }
+    const leafIndex = source.entries.findIndex((entry) => entry.id === aux.leafEntryId);
+    // Entries appended after the task froze (N) are not part of the material;
+    // bound the read at the fixed leaf. A missing leaf means the branch moved;
+    // serve the current branch and disclose the bound honestly.
+    const entries = leafIndex >= 0 ? source.entries.slice(0, leafIndex + 1) : source.entries;
+    let page: ReturnType<typeof readHistoryPage>;
+    try {
+      page = readHistoryPage(entries, params);
+    } catch (error) {
+      throw new HarnessServiceError("invalid-params", error instanceof Error ? error.message : String(error));
+    }
+    return {
+      ...page,
+      details: {
+        ...page.details,
+        boundEntry: aux.leafEntryId,
+        boundFound: leafIndex >= 0,
+        scope: "frozen-branch",
+      },
     };
   };
 
@@ -859,6 +986,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadSendToSession,
     threadTranscriptReader,
     threadHistoryEntries,
+    registerAuxiliaryActor,
+    dropAuxiliaryActor,
+    compactionHistory,
+    runCompactionTask,
     verification,
     experimentService: options.experimentService ?? null,
     resourceService: options.resourceService ?? null,

@@ -3428,13 +3428,11 @@ export class SessionHost {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
                   inject: createRequestContextInjector(hostServicesBridge),
-                  completeSimple: (model, context, requestOptions) => {
-                    const modelRuntime = serviceRef.current?.modelRuntime;
-                    if (!modelRuntime) {
-                      return Promise.reject(new Error("Context preparation model runtime is not ready"));
-                    }
-                    return modelRuntime.completeSimple(model, context, requestOptions);
-                  },
+                  runCompactionTask: (spec, signal) =>
+                    hostServicesBridge.request<"compaction.run">("compaction.run", spec, {
+                      signal,
+                      timeoutMs: 0,
+                    }),
                   getCompactionSettings: () => settingsManager.getCompactionSettings(),
                   getExplicitKeepRecentTokens: () => settingsManager.getProjectSettings().compaction?.keepRecentTokens
                     ?? settingsManager.getGlobalSettings().compaction?.keepRecentTokens,

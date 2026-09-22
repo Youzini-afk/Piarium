@@ -74,8 +74,8 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
 
   // Router with respond callback that feeds back to bridge
   const router = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => {
-      bridge.respond(sessionId, requestId, outcome);
+    respond: async (identity, requestId, outcome) => {
+      bridge.respond(identity.sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     authorizeWorkspacePath: async (actor, inputPath) => ({

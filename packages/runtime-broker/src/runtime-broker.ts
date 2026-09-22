@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { lstat, realpath, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
+  CompactionRunResult,
+  CompactionTaskSpec,
   EventEnvelope,
   ExtensionUiResponse,
   HarnessActorIdentity,
@@ -339,6 +341,8 @@ export class PiRuntimeBroker {
   readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
+  /** Auxiliary workers (compaction) pinned to a session; killed with it. */
+  readonly #sessionAuxiliaries = new Map<string, Set<PiHostClient>>();
   readonly #sessionWorkspaceScopes = new Map<string, readonly string[]>();
   readonly #knownSummaries = new Map<string, SessionSummary>();
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
@@ -765,6 +769,88 @@ export class PiRuntimeBroker {
     await this.#removeWorker(worker);
     if (!summary.persisted) this.#knownSummaries.delete(sessionId);
     return result;
+  }
+
+  /**
+   * Address one specific worker process rather than the session's registered
+   * worker. Internal auxiliary workers (a session's compaction worker) are
+   * pinned to a session for event identity but never occupy #sessions.
+   */
+  requestForWorker<M extends HostMethod>(
+    workerId: string,
+    method: M,
+    params: HostMethodParams<M>,
+  ): Promise<HostMethodResult<M>> {
+    if ((method as HostMethod) === "package.bootstrap") {
+      throw new PiRuntimeBrokerError(
+        "unsupported_method",
+        "package.bootstrap is private to the broker provisioner",
+      );
+    }
+    for (const client of this.#clients) {
+      if (client.id === workerId) return client.request(method, params);
+    }
+    throw new PiRuntimeBrokerError("worker_not_found", `Pi worker is not active: ${workerId}`);
+  }
+
+  /**
+   * D-314: run one frozen internal compaction task in a dedicated worker
+   * subprocess. The worker is pinned to the owning session for event identity
+   * (its harness.request queries carry the session actor fields) but is never
+   * registered as a session worker — it cannot serve session methods and its
+   * queries do not queue behind the parent session's request pipeline.
+   * Cancellation kills the process; a late response cannot resurrect the task.
+   */
+  async runCompactionTask(
+    sessionId: string,
+    spec: CompactionTaskSpec,
+    options: {
+      signal?: AbortSignal;
+      registerWorker?: (workerId: string) => void | Promise<void>;
+      dropWorker?: (workerId: string) => void | Promise<void>;
+    } = {},
+  ): Promise<CompactionRunResult> {
+    if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+    const parent = this.#workerForSession(sessionId);
+    const cwd = this.#workerCwds.get(parent) ?? this.#options.cwd ?? parent.handshake.runtime.agentDir;
+    const worker = await this.#spawnAuxiliaryWorker("compaction", cwd);
+    worker.pinSession(sessionId);
+    let auxiliaries = this.#sessionAuxiliaries.get(sessionId);
+    if (!auxiliaries) {
+      auxiliaries = new Set();
+      this.#sessionAuxiliaries.set(sessionId, auxiliaries);
+    }
+    auxiliaries.add(worker);
+    let dropped = false;
+    const drop = async (): Promise<void> => {
+      if (dropped) return;
+      dropped = true;
+      const owned = this.#sessionAuxiliaries.get(sessionId);
+      owned?.delete(worker);
+      if (owned?.size === 0) this.#sessionAuxiliaries.delete(sessionId);
+      await options.dropWorker?.(worker.id);
+      await this.#removeWorker(worker);
+    };
+    const onAbort = (): void => {
+      void drop().catch((error) => {
+        this.#emit({
+          kind: "diagnostic",
+          level: "error",
+          message: `Failed to retire cancelled Pi compaction worker: ${error instanceof Error ? error.message : String(error)}`,
+          role: "compaction",
+          workerId: worker.id,
+        });
+      });
+    };
+    try {
+      await options.registerWorker?.(worker.id);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      options.signal?.throwIfAborted();
+      return await worker.request("compaction.run", spec);
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      await drop();
+    }
   }
 
   requestForSession<M extends HostMethod>(
@@ -1398,7 +1484,7 @@ export class PiRuntimeBroker {
   }
 
   async #spawnAuxiliaryWorker(
-    role: Extract<RuntimeWorkerRole, "package">,
+    role: Extract<RuntimeWorkerRole, "package" | "compaction">,
     cwd: string,
   ): Promise<PiHostClient> {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
@@ -2124,6 +2210,25 @@ export class PiRuntimeBroker {
       signal: exit.signal,
       workerId: client.id,
     });
+    // A session worker's death orphans its auxiliary workers (compaction);
+    // retire them so a late summary can never be delivered to a dead session.
+    if (role === "session" && sessionId !== undefined) {
+      const auxiliaries = this.#sessionAuxiliaries.get(sessionId);
+      if (auxiliaries) {
+        this.#sessionAuxiliaries.delete(sessionId);
+        for (const auxiliary of auxiliaries) {
+          void this.#removeWorker(auxiliary).catch((error) => {
+            this.#emit({
+              kind: "diagnostic",
+              level: "error",
+              message: `Failed to retire orphaned Pi auxiliary worker: ${error instanceof Error ? error.message : String(error)}`,
+              role: "compaction",
+              workerId: auxiliary.id,
+            });
+          });
+        }
+      }
+    }
   }
 
   #emit(event: PiRuntimeBrokerEventPayload): void {

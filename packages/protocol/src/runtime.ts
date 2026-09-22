@@ -282,7 +282,7 @@ export function isRuntimeMethod(value: unknown): value is RuntimeMethod {
   return typeof value === "string" && RUNTIME_METHOD_SET.has(value);
 }
 
-export const RUNTIME_WORKER_ROLES = ["catalog", "workspace", "package", "session"] as const;
+export const RUNTIME_WORKER_ROLES = ["catalog", "workspace", "package", "session", "compaction"] as const;
 
 export type RuntimeWorkerRole = (typeof RUNTIME_WORKER_ROLES)[number];
 

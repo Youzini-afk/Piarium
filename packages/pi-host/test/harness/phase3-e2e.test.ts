@@ -103,7 +103,7 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
   const router = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => { bridge.respond(sessionId, requestId, outcome); },
+    respond: async (identity, requestId, outcome) => { bridge.respond(identity.sessionId, requestId, outcome); },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     ...(options.transportTimeoutMs !== undefined ? { defaultTimeoutMs: options.transportTimeoutMs } : {}),
   });

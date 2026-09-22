@@ -317,8 +317,8 @@ describe("retrieval thread public slice", () => {
           grantedCapabilities: ["control.thread", "read.document", "read.search", "read.output", "context.session", "read.lsp"],
         };
       },
-      respond: async (sessionId, requestId, outcome) => {
-        hostFor(sessionId).respondHarness(sessionId, requestId, outcome);
+      respond: async (identity, requestId, outcome) => {
+        hostFor(identity.sessionId).respondHarness(identity.sessionId, requestId, outcome);
       },
       authorizeWorkspacePath: (actor, inputPath, options) => paths.resolve(actor, inputPath, options),
     });

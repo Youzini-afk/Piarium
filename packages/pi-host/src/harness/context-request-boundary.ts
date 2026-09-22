@@ -304,8 +304,6 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
   return {
     currentRequest,
     isCommitting: () => committing,
-    completeSummary: async (model: Model<Api>, context: Context, modelOptions: SimpleStreamOptions): Promise<AssistantMessage> =>
-      (await stream(model, context, modelRequestOptions(modelOptions))).result(),
     dispose: () => {
       disposed = true;
       budget.clear();

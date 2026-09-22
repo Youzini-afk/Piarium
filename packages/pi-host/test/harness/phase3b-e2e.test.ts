@@ -41,8 +41,8 @@ async function setupP3bE2E() {
 
   let bridge: HostServicesBridge;
   const router = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => {
-      bridge.respond(sessionId, requestId, outcome);
+    respond: async (identity, requestId, outcome) => {
+      bridge.respond(identity.sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });

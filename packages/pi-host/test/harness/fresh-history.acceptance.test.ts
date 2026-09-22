@@ -59,7 +59,7 @@ describe("fresh continuation and same-Thread history", () => {
       },
     });
     const router = createHarnessRouter({
-      respond: async (sessionId, requestId, outcome) => { hosts.get(sessionId)!.respondHarness(sessionId, requestId, outcome); },
+      respond: async (identity, requestId, outcome) => { hosts.get(identity.sessionId)!.respondHarness(identity.sessionId, requestId, outcome); },
       resolveActor: (identity) => serviceHost.resolveActor(identity),
     });
     registerHarnessServices(router, serviceHost);

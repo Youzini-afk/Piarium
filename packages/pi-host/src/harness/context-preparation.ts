@@ -14,11 +14,17 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Context, Message, Model, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
+import type { Api, Model, Usage } from "@earendil-works/pi-ai";
+import type { CompactionRunResult, CompactionTaskSpec, JsonValue } from "@varin/protocol";
 import { retainedContextState } from "./retained-context.js";
+import {
+  compactionWorkerContext,
+  serializeCompactionModel,
+} from "./compaction-agent.js";
 
 import {
   attachContextRequestBoundary, ContextCapacityError, contextRequestKey, estimateModelInputTokens,
+  modelRequestOptions,
   type ContextModelRequest,
   type ContextRequestBoundaryOptions,
 } from "./context-request-boundary.js";
@@ -26,9 +32,9 @@ import {
 /**
  * Context preparation extension — fixed-candidate background compaction.
  *
- * Design: agent-harness.md §8.4–8.6
- * Plan: agent-harness-plan.md §2.4A/B, §2.6A
- * Decisions: D-284, D-286
+ * Design: agent-harness.md §8.4–8.6, context-compaction-agent-design.md (D-314)
+ * Plan: agent-harness-plan.md §2.4A/B, §2.6A, stage C
+ * Decisions: D-284, D-286, D-314
  *
  * Budget is measured on the `context` hook, which Pi runs before every
  * provider request — including tool-loop continuations inside one turn.
@@ -36,11 +42,16 @@ import {
  * the background (P + S0 + A + B fixed at preparation time). The foreground
  * agent keeps running; normal appends do not invalidate the candidate.
  *
+ * The candidate runs in a dedicated internal compaction worker subprocess
+ * (broker-spawned pi-host, role "compaction") that receives the frozen
+ * S0/A/B material plus the shared continuation prompt and may issue
+ * read-only history/output/record queries under an auxiliary actor.
+ *
  * When Pi actually needs compaction (threshold or overflow), the
  * `session_before_compact` hook commits the matching candidate, waits for
- * an in-flight one, or generates a fresh summary from Pi's own preparation
- * using the same derived request shape. Failure defers to Pi's default
- * summarization; history is never truncated.
+ * an in-flight one, or runs a fresh worker task from Pi's own preparation.
+ * Failure keeps the original history; submission always goes through Pi's
+ * native compaction writer at the request boundary.
  */
 
 export interface ContextPreparationConfig {
@@ -63,9 +74,19 @@ interface FixedPreparation {
   /** Last entry id included in the summarized range. */
   lastSummarizedEntryId: string;
   firstKeptEntryId: string;
+  /** Branch leaf id when the range was fixed; bounds B and history reads. */
+  fixedLeafEntryId: string;
   isSplitTurn: boolean;
+  /**
+   * Entries that produced messagesToSummarize, in order, with each entry's
+   * message count. Lets the parent page the oldest part of A out of the
+   * worker's initial material with an authoritative elision boundary.
+   */
+  summarizedEntries: { id: string; messageCount: number }[];
   messagesToSummarize: AgentMessage[];
   turnPrefixMessages: AgentMessage[];
+  /** Retained recent original (B): entries firstKept..fixedLeaf, verbatim. */
+  keptMessages: AgentMessage[];
   previousSummary: string | undefined;
   tokensBefore: number;
 }
@@ -77,6 +98,8 @@ export interface PreparedCandidate extends FixedPreparation {
   modelKey: string;
   tokensAtFix: number;
   status: "in-flight" | "ready" | "failed";
+  /** The exact frozen task submitted to the worker. */
+  spec: CompactionTaskSpec;
   abort: AbortController;
   done: Promise<void>;
   summary?: string;
@@ -86,14 +109,14 @@ export interface PreparedCandidate extends FixedPreparation {
 
 export interface ContextPreparationOptions {
   /**
-   * Bound to services.modelRuntime.completeSimple — the same runtime the
-   * session's main requests use. No separate model slot or credentials.
+   * Run one frozen compaction task in the dedicated internal worker
+   * subprocess. Bound to the session's harness bridge in session-host;
+   * cancellation propagates to worker teardown.
    */
-  completeSimple: (
-    model: Model<Api>,
-    context: Context,
-    options: SimpleStreamOptions,
-  ) => Promise<AssistantMessage>;
+  runCompactionTask: (
+    spec: CompactionTaskSpec,
+    signal: AbortSignal,
+  ) => Promise<CompactionRunResult>;
   /** Live harness background-preparation setting. */
   getPreparationConfig: () => ContextPreparationConfig;
   /** Live Pi compaction settings (enabled, reserveTokens, keepRecentTokens). */
@@ -166,9 +189,16 @@ export function computeFixedPreparation(
   const firstKept = entries[cut.firstKeptEntryIndex];
   if (!firstKept?.id) return undefined;
   const historyEnd = cut.isSplitTurn ? cut.turnStartIndex : cut.firstKeptEntryIndex;
+  const summarizedEntries: { id: string; messageCount: number }[] = [];
   const messagesToSummarize: AgentMessage[] = [];
   for (let i = boundaryStart; i < historyEnd; i++) {
-    if (entries[i]!.type !== "compaction") messagesToSummarize.push(...sessionEntryToContextMessages(entries[i]!));
+    const entry = entries[i]!;
+    if (entry.type === "compaction") continue;
+    const messages = sessionEntryToContextMessages(entry);
+    if (entry.id && messages.length > 0) {
+      summarizedEntries.push({ id: entry.id, messageCount: messages.length });
+    }
+    messagesToSummarize.push(...messages);
   }
   const turnPrefixMessages: AgentMessage[] = [];
   if (cut.isSplitTurn) {
@@ -188,12 +218,22 @@ export function computeFixedPreparation(
       break;
     }
   }
+  const fixedLeaf = entries[entries.length - 1]!;
+  if (!fixedLeaf.id) return undefined;
+  // B: the recent original text retained verbatim — actual content, not a marker.
+  const keptMessages: AgentMessage[] = [];
+  for (let i = cut.firstKeptEntryIndex; i < entries.length; i++) {
+    if (entries[i]!.type !== "compaction") keptMessages.push(...sessionEntryToContextMessages(entries[i]!));
+  }
   return {
     boundaryCompactionId,
     firstSummarizedEntryId,
     firstKeptEntryId: firstKept.id,
+    fixedLeafEntryId: fixedLeaf.id,
     isSplitTurn: cut.isSplitTurn,
     lastSummarizedEntryId,
+    keptMessages,
+    summarizedEntries,
     messagesToSummarize,
     previousSummary,
     tokensBefore: tokensBefore ?? estimateModelInputTokens({ messages: convertToLlm(buildSessionContext(entries).messages) }),
@@ -202,120 +242,130 @@ export function computeFixedPreparation(
 }
 
 // ---------------------------------------------------------------------------
-// Summary request — derived from the active request shape: same system prompt,
-// same tool prefix (schema-only, no executor), message structure preserved via
-// convertToLlm, plus a fixed-scope instruction as the trailing user message.
+// Task spec — the program freezes identity and material; the compaction worker
+// receives the structured S0/A/B content and the shared prompt, and only
+// interprets it. Roles, order, and tool-call pairing survive end to end.
 // ---------------------------------------------------------------------------
 
-const SUMMARY_INSTRUCTION = `The messages above are the earlier portion of this working session, selected for compaction. The most recent messages are kept verbatim after this summary and are not included here.
-
-Write a continuation summary that lets the work proceed without re-reading the original text. Cover, in this order:
-- The user's goal and every requirement or correction that is still in force
-- Decisions made, their reasons, and rejected alternatives
-- Concrete identifiers: file paths, symbols, commands, error messages, numbers
-- Completed work versus open work; unresolved questions and pending actions
-- Where to recover detail (files, tools, earlier entries)
-
-Reply with the summary text only. Do not call tools — this request has no tool executor.`;
-
-const UPDATE_INSTRUCTION = `The messages above are new session material since the previous summary, which is shown first. Update it: preserve every still-valid item, refresh progress, and keep concrete identifiers (paths, symbols, errors, numbers).
-
-Reply with the updated summary text only. Do not call tools — this request has no tool executor.`;
-
-const SPLIT_TURN_NOTE = `\n\nThe tail of the material is the beginning of an in-progress turn; its remainder stays verbatim in context.`;
-
-function previousSummaryMessage(summary: string): AgentMessage {
-  return {
-    role: "compactionSummary",
-    summary,
-    timestamp: Date.now(),
-    tokensBefore: 0,
-  } as unknown as AgentMessage;
-}
-
-function buildSummaryContext(
-  ctx: ExtensionContext,
-  pi: ExtensionAPI,
+function buildCompactionTaskSpec(
+  model: Model<Api>,
+  sessionId: string,
   preparation: FixedPreparation,
+  summaryOut: number,
+  request: ContextModelRequest | undefined,
   customInstructions?: string,
-  request?: ContextModelRequest,
-): Context {
-  // Iterate active tool names so the serialized prefix order matches the
-  // request the agent loop sends.
-  const allTools = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
-  const tools = pi.getActiveTools()
-    .map((name) => allTools.get(name))
-    .filter((tool): tool is NonNullable<typeof tool> => tool !== undefined)
-    .map((tool) => ({
-      description: tool.description,
-      name: tool.name,
-      parameters: tool.parameters,
-    }));
-  const messages: AgentMessage[] = [
-    ...(preparation.previousSummary === undefined
-      ? []
-      : [previousSummaryMessage(preparation.previousSummary)]),
-    ...preparation.messagesToSummarize,
-    ...preparation.turnPrefixMessages,
-  ];
-  const instruction =
-    (preparation.previousSummary === undefined ? SUMMARY_INSTRUCTION : UPDATE_INSTRUCTION)
-    + (preparation.isSplitTurn ? SPLIT_TURN_NOTE : "")
-    + (customInstructions === undefined ? "" : `\n\nAdditional focus: ${customInstructions}`);
-  if (request) {
-    const entries = ctx.sessionManager.getBranch();
-    const first = entries.findIndex((entry) => entry.id === preparation.firstKeptEntryId);
-    const kept = entries.slice(first).flatMap((entry) => entry.type === "compaction" ? [] : sessionEntryToContextMessages(entry));
-    const anchor = convertToLlm(kept)[0];
-    if (first < 0 || !anchor) throw new ContextCapacityError("The fixed context boundary has no retained message");
-    const matches = request.context.messages.flatMap((message, index) => (
-      message.role === anchor.role && message.timestamp === anchor.timestamp ? [index] : []
-    ));
-    const exact = matches.filter((index) => JSON.stringify(request.context.messages[index]) === JSON.stringify(anchor));
-    const boundary = exact.length === 1 ? exact[0] : matches.length === 1 ? matches[0] : undefined;
-    if (boundary === undefined || boundary <= 0) {
-      throw new ContextCapacityError("A context transform obscured the fixed summary boundary; history was not changed");
-    }
-    return {
-      ...request.context,
-      ...(request.context.tools ? { tools: request.context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })) } : {}),
-      messages: [
-        ...request.context.messages.slice(0, boundary),
-        { role: "user", content: [{ type: "text", text: instruction }], timestamp: Date.now() },
-      ],
-    };
-  }
+): CompactionTaskSpec {
+  const requestOptions = modelRequestOptions(request?.options);
   return {
-    messages: [
-      ...convertToLlm(messages),
-      {
-        content: [{ text: instruction, type: "text" }],
-        role: "user",
-        timestamp: Date.now(),
-      } as Message,
-    ],
-    systemPrompt: ctx.getSystemPrompt(),
-    ...(tools.length === 0 ? {} : { tools }),
+    sessionId,
+    boundaryCompactionId: preparation.boundaryCompactionId,
+    firstSummarizedEntryId: preparation.firstSummarizedEntryId,
+    lastSummarizedEntryId: preparation.lastSummarizedEntryId,
+    firstKeptEntryId: preparation.firstKeptEntryId,
+    fixedLeafEntryId: preparation.fixedLeafEntryId,
+    isSplitTurn: preparation.isSplitTurn,
+    summarizedMessages: preparation.messagesToSummarize as unknown as JsonValue[],
+    turnPrefixMessages: preparation.turnPrefixMessages as unknown as JsonValue[],
+    keptMessages: preparation.keptMessages as unknown as JsonValue[],
+    ...(preparation.previousSummary === undefined
+      ? {}
+      : { previousSummary: preparation.previousSummary }),
+    model: serializeCompactionModel(model),
+    options: {
+      maxTokens: summaryOut,
+      ...(requestOptions.reasoning === undefined
+        ? {}
+        : { reasoning: String(requestOptions.reasoning) }),
+      ...(requestOptions.thinkingBudgets === undefined
+        ? {}
+        : { thinkingBudgets: requestOptions.thinkingBudgets as Record<string, JsonValue> }),
+      ...(requestOptions.temperature === undefined ? {} : { temperature: requestOptions.temperature }),
+      ...(requestOptions.samplingParams === undefined
+        ? {}
+        : { samplingParams: requestOptions.samplingParams as Record<string, JsonValue> }),
+      ...(requestOptions.transport === undefined
+        ? {}
+        : { transport: String(requestOptions.transport) }),
+      ...(requestOptions.cacheRetention === undefined
+        ? {}
+        : { cacheRetention: String(requestOptions.cacheRetention) }),
+      sessionId,
+    },
+    ...(customInstructions === undefined ? {} : { customInstructions }),
   };
 }
 
-function summaryText(response: AssistantMessage): string {
-  if (response.stopReason === "aborted" || response.stopReason === "length") {
-    throw new Error(`Summarization did not complete: ${response.stopReason}`);
+/** Estimated tokens of the exact request the worker agent will send. */
+function estimateWorkerRequest(spec: CompactionTaskSpec): number {
+  const request = compactionWorkerContext(spec);
+  return estimateModelInputTokens({
+    systemPrompt: request.systemPrompt,
+    ...(request.tools === undefined ? {} : { tools: request.tools }),
+    messages: convertToLlm(request.messages),
+  });
+}
+
+/**
+ * The worker's request must fit the same model window it runs on. When the
+ * frozen material overflows, page the oldest summarized entries out of the
+ * initial material with an authoritative boundary — the worker reads them
+ * back through compaction.history inside the frozen branch. Never silently
+ * drop material: the elision marker makes the unread range explicit.
+ */
+function fitSpecToWindow(
+  spec: CompactionTaskSpec,
+  preparation: FixedPreparation,
+  contextWindow: number,
+): CompactionTaskSpec | undefined {
+  let fitted = spec;
+  let droppedMessages = 0;
+  let elidedThrough: string | undefined;
+  const fits = () =>
+    estimateWorkerRequest(fitted) + fitted.options.maxTokens <= contextWindow;
+  for (const span of preparation.summarizedEntries) {
+    if (fits()) return fitted;
+    droppedMessages += span.messageCount;
+    elidedThrough = span.id;
+    fitted = {
+      ...fitted,
+      elidedSummarizedThroughEntryId: elidedThrough,
+      summarizedMessages: preparation.messagesToSummarize.slice(droppedMessages) as unknown as JsonValue[],
+    };
   }
-  if (response.stopReason === "error") {
-    throw new Error(`Summarization failed: ${response.errorMessage || "unknown error"}`);
+  return fits() ? fitted : undefined;
+}
+
+/**
+ * Entry-id/message-count spans for a summarize range derived from raw branch
+ * entries (the synchronous commit path, where Pi hands prepared messages).
+ * `dropTailMessages` excludes the split-turn prefix, which Pi reports
+ * separately and which is never elided.
+ */
+function summarizedEntrySpans(
+  entries: SessionEntry[],
+  endExclusive: number,
+  dropTailMessages = 0,
+): { spans: { id: string; messageCount: number }[]; aligned: boolean } {
+  const spans: { id: string; messageCount: number }[] = [];
+  let total = 0;
+  for (let i = 0; i < endExclusive; i++) {
+    const entry = entries[i]!;
+    if (entry.type === "compaction") continue;
+    const count = sessionEntryToContextMessages(entry).length;
+    total += count;
+    if (entry.id && count > 0) spans.push({ id: entry.id, messageCount: count });
   }
-  if (response.content.some((block) => block.type === "toolCall")) {
-    throw new Error("Summarization attempted to call a tool");
+  let remaining = Math.max(0, total - dropTailMessages);
+  const head: { id: string; messageCount: number }[] = [];
+  for (const span of spans) {
+    if (remaining <= 0) break;
+    // A span that straddles the summarized/prefix boundary cannot serve as an
+    // elision bound — the marker would claim material still present.
+    if (span.messageCount > remaining) return { spans: [], aligned: false };
+    head.push(span);
+    remaining -= span.messageCount;
   }
-  const text = response.content
-    .filter((block): block is { type: "text"; text: string } => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
-  if (!text) throw new Error("Summarization returned no text");
-  return text;
+  return { spans: head, aligned: total >= dropTailMessages };
 }
 
 // ---------------------------------------------------------------------------
@@ -339,8 +389,6 @@ export function createContextPreparationExtension(
   let boundSession: AgentSession | undefined;
   let api: ExtensionAPI | undefined;
   let latestContext: ExtensionContext | undefined;
-  const complete = (model: Model<Api>, context: Context, modelOptions: SimpleStreamOptions) =>
-    boundary ? boundary.completeSummary(model, context, modelOptions) : options.completeSimple(model, context, modelOptions);
   let epoch = 0;
   let candidateSeq = 0;
   // Waterline adaptation per model: measured growth while a preparation ran
@@ -415,6 +463,7 @@ export function createContextPreparationExtension(
   ): void => {
     const model = ctx.model;
     if (!model) return;
+    const sessionId = ctx.sessionManager.getSessionId();
     const entries = ctx.sessionManager.getBranch();
     const reserve = options.getCompactionSettings().reserveTokens;
     const summaryOut = Math.min(Math.floor(0.8 * reserve), model.maxTokens > 0 ? model.maxTokens : reserve);
@@ -422,35 +471,24 @@ export function createContextPreparationExtension(
     // keepRecent targets ~60% total after commit: prefix + summary out + kept raw.
     let keepRecent = options.getExplicitKeepRecentTokens?.()
       ?? Math.max(1, Math.floor(POST_COMPACTION_TARGET * usable) - prefix - summaryOut);
-    let preparation = computeFixedPreparation(entries, keepRecent, tokensNow);
-    if (!preparation) return;
-    // Move to an earlier legal cut when the summary's own request would overflow.
-    // Each iteration strictly advances toward the old boundary; no magic retry count.
-    while (preparation) {
-      let summaryContext: Context;
-      try { summaryContext = buildSummaryContext(ctx, pi, preparation, undefined, latestRequest); }
-      catch (error) {
-        options.onFailure?.("prepare", error instanceof Error ? error.message : String(error));
-        return;
-      }
-      const excess = estimateModelInputTokens(summaryContext) + summaryOut - model.contextWindow;
-      if (excess <= 0) break;
-      const cutIndex = entries.findIndex((entry) => entry.id === preparation!.firstKeptEntryId);
-      const keptTokens = entries.slice(cutIndex).flatMap(sessionEntryToContextMessages)
-        .reduce((total, message) => total + estimateTokens(message), 0);
-      keepRecent = Math.max(keepRecent + excess, keptTokens + 1);
-      const next = computeFixedPreparation(entries, keepRecent, tokensNow);
-      if (!next || entries.findIndex((entry) => entry.id === next.firstKeptEntryId) >= cutIndex) return;
-      preparation = next;
-    }
+    const preparation = computeFixedPreparation(entries, keepRecent, tokensNow);
     if (!preparation) return;
     const releasable = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
       .reduce((total, message) => total + estimateTokens(message), 0);
     // A prefix dominated by system/tools or one unsplittable latest result
     // cannot be improved by replacing a few words with a summary.
     if (releasable <= summaryOut) return;
+    // The worker's own request must fit the model window; page the oldest
+    // part of A out with an explicit boundary when it does not.
+    const spec = fitSpecToWindow(
+      buildCompactionTaskSpec(model, sessionId, preparation, summaryOut, latestRequest),
+      preparation,
+      model.contextWindow,
+    );
+    if (!spec) return;
     const cand: PreparedCandidate = {
       ...preparation,
+      spec,
       abort: new AbortController(),
       done: Promise.resolve(),
       epoch,
@@ -473,17 +511,16 @@ export function createContextPreparationExtension(
     options.onStatus?.();
     cand.done = (async () => {
       try {
-        const context = buildSummaryContext(ctx, pi, cand, undefined, latestRequest);
-        const response = await complete(model, context, {
-          ...latestRequest?.options,
-          maxTokens: summaryOut,
-          sessionId: ctx.sessionManager.getSessionId(),
-          signal: cand.abort.signal,
-        });
+        // The spec was frozen with the candidate; rebuilding it here would
+        // let a newer request shape drift into an already-fixed task.
+        const result = await options.runCompactionTask(cand.spec, cand.abort.signal);
         cand.abort.signal.throwIfAborted();
         if (candidate !== cand || !candidateValid(cand, ctx, ctx.sessionManager.getBranch())) return;
-        cand.summary = summaryText(response);
-        cand.usage = response.usage;
+        if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
+          throw new Error("Compaction returned no summary text");
+        }
+        cand.summary = result.summary;
+        if (result.usage !== undefined) cand.usage = result.usage as unknown as Usage;
         cand.status = "ready";
         prepStats.set(cand.modelKey, {
           durationMs: Math.max(1, now() - cand.fixedAt),
@@ -544,16 +581,45 @@ export function createContextPreparationExtension(
       return undefined;
     }
     // No usable candidate (not prepared, stale source, or manual focus):
-    // generate synchronously from Pi's own preparation using the same
-    // derived request shape. This is the blocking path the design allows.
+    // run the same worker task synchronously from Pi's own preparation.
+    // This is the blocking path the design allows; manual and automatic
+    // compaction share the single worker mechanism.
     const model = ctx.model;
     if (!model) return undefined;
+    const keptIndex = event.branchEntries.findIndex((entry) => entry.id === event.preparation.firstKeptEntryId);
+    const fixedLeaf = event.branchEntries[event.branchEntries.length - 1];
+    if (keptIndex < 0 || !fixedLeaf?.id) {
+      options.onFailure?.("commit", "The compaction boundary is not on the active branch");
+      return undefined;
+    }
+    const keptMessages: AgentMessage[] = [];
+    for (let i = keptIndex; i < event.branchEntries.length; i++) {
+      const entry = event.branchEntries[i]!;
+      if (entry.type !== "compaction") keptMessages.push(...sessionEntryToContextMessages(entry));
+    }
+    let firstSummarizedEntryId: string | null = null;
+    for (let i = 0; i < keptIndex; i++) {
+      if (entryMessage(event.branchEntries[i]!) !== undefined) {
+        firstSummarizedEntryId = event.branchEntries[i]!.id ?? null;
+        break;
+      }
+    }
+    // The split-turn prefix is part of the range but never elided; spans
+    // attribute only the summarized body so paging keeps an entry boundary.
+    const { spans, aligned } = summarizedEntrySpans(
+      event.branchEntries,
+      keptIndex,
+      event.preparation.turnPrefixMessages.length,
+    );
     const preparation: FixedPreparation = {
       boundaryCompactionId: boundaryId(event.branchEntries),
       firstKeptEntryId: event.preparation.firstKeptEntryId,
-      firstSummarizedEntryId: null,
+      firstSummarizedEntryId,
+      fixedLeafEntryId: fixedLeaf.id,
       isSplitTurn: event.preparation.isSplitTurn,
-      lastSummarizedEntryId: "",
+      lastSummarizedEntryId: event.branchEntries[keptIndex - 1]?.id ?? "",
+      keptMessages,
+      summarizedEntries: aligned ? spans : [],
       messagesToSummarize: event.preparation.messagesToSummarize,
       previousSummary: event.preparation.previousSummary,
       tokensBefore: event.preparation.tokensBefore,
@@ -561,31 +627,34 @@ export function createContextPreparationExtension(
     };
     try {
       const reserve = options.getCompactionSettings().reserveTokens;
-      const context = buildSummaryContext(ctx, pi, preparation, event.customInstructions, latestRequest);
-      const summaryOutput = Math.min(Math.floor(0.8 * reserve), model.maxTokens > 0 ? model.maxTokens : reserve);
-      if (estimateModelInputTokens(context) + summaryOutput > model.contextWindow) {
+      const summaryOut = Math.min(Math.floor(0.8 * reserve), model.maxTokens > 0 ? model.maxTokens : reserve);
+      const sessionId = ctx.sessionManager.getSessionId();
+      const fitted = fitSpecToWindow(
+        buildCompactionTaskSpec(model, sessionId, preparation, summaryOut, latestRequest, event.customInstructions),
+        preparation,
+        model.contextWindow,
+      );
+      if (!fitted) {
         throw new ContextCapacityError("The summary request itself exceeds the model capacity; original history was retained");
       }
+      const spec = fitted;
       const sourceEpoch = epoch;
-      const sourceIds = event.branchEntries.slice(0, event.branchEntries.findIndex((entry) => entry.id === preparation.firstKeptEntryId)).map((entry) => entry.id);
-      const response = await complete(model, context, {
-        ...latestRequest?.options,
-        maxTokens: Math.min(Math.floor(0.8 * reserve), model.maxTokens > 0 ? model.maxTokens : reserve),
-        sessionId: ctx.sessionManager.getSessionId(),
-        signal: event.signal,
-      });
+      const sourceIds = event.branchEntries.slice(0, keptIndex).map((entry) => entry.id);
+      const result = await options.runCompactionTask(spec, event.signal);
       event.signal.throwIfAborted();
+      if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
+        throw new Error("Compaction returned no summary text");
+      }
       const live = ctx.sessionManager.getBranch();
       if (sourceEpoch !== epoch || !sourceIds.every((id, index) => live[index]?.id === id)) {
         throw new ContextCapacityError("The summary source changed while preparation was running");
       }
-      const summary = summaryText(response);
       options.onSuccess?.("commit");
       return {
         firstKeptEntryId: event.preparation.firstKeptEntryId,
-        summary,
+        summary: result.summary,
         tokensBefore: event.preparation.tokensBefore,
-        usage: response.usage,
+        ...(result.usage === undefined ? {} : { usage: result.usage as unknown as Usage }),
       };
     } catch (error) {
       options.onFailure?.("commit", error instanceof Error ? error.message : String(error));

@@ -288,7 +288,7 @@ describe("thread runtime", () => {
       const lost = await registry.createThread({ ...input, brief: "Lose while reading" });
       const lostRun = await registry.startRun(WORKSPACE, lost.id);
       await retrievalRuntime.spawn({ ...input, brief: lost.brief, threadId: lost.id, runId: lostRun.id });
-      retrievalRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true });
+      retrievalRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true, role: "session" });
       await retrievalRuntime.drain();
       expect(await registry.getThread(WORKSPACE, PARENT, lost.id)).toMatchObject({
         integration: "none",
@@ -1269,7 +1269,7 @@ describe("thread runtime", () => {
   it("ends a crashed attempt as lost and automatically resumes the same Pi session in attempt two", async () => {
     const { thread } = await start();
     await registry.setAttention(WORKSPACE, thread.id, "user", { kind: "user", text: "Need input" });
-    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false });
+    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false, role: "session" });
     await runtime.drain();
     expect((await registry.listRuns(WORKSPACE, thread.id))[0]).toMatchObject({ outcome: "lost" });
 
@@ -1455,11 +1455,11 @@ describe("thread runtime", () => {
 
   it("stops automatic recovery after a second consecutive worker crash", async () => {
     const { thread } = await start();
-    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false });
+    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false, role: "session" });
     await runtime.drain();
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ attempt: 2, workerState: "running" });
 
-    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false });
+    runtime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: false, role: "session" });
     await runtime.drain();
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ attempt: 2, outcome: "lost" });
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ attention: "stalled" });
@@ -1871,7 +1871,7 @@ describe("thread runtime", () => {
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await partialRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-    partialRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true });
+    partialRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true, role: "session" });
     await partialRuntime.drain();
     expect(inspect).not.toHaveBeenCalled();
     expect(publishDirectoryResult).toHaveBeenCalled();

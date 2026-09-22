@@ -41,7 +41,9 @@ export function createSessionSettleTracker() {
     if (!sessionId) return;
     const waiter = waiters.get(sessionId);
     if (!waiter) return;
-    if (record.kind === 'worker.exit' || envelope.event === 'session.closed') {
+    // A session-scoped auxiliary worker exit (compaction) shares the
+    // sessionId; only the session worker's exit ends the run.
+    if ((record.kind === 'worker.exit' && record.role === 'session') || envelope.event === 'session.closed') {
       waiters.delete(sessionId);
       waiter.resolve({ settled: false, error: 'session ended before the run settled' });
       return;

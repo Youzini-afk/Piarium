@@ -95,8 +95,8 @@ async function setupP2E2E() {
 
   const bridgeState: { current?: HostServicesBridge } = {};
   const router = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => {
-      bridgeState.current?.respond(sessionId, requestId, outcome);
+    respond: async (identity, requestId, outcome) => {
+      bridgeState.current?.respond(identity.sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
   });

@@ -271,8 +271,8 @@ async function createSemanticHarness(options: {
     };
 
     const router = createHarnessRouter({
-      respond: async (requestSessionId, requestId, outcome) => {
-        host.respondHarness(requestSessionId, requestId, outcome);
+      respond: async (identity, requestId, outcome) => {
+        host.respondHarness(identity.sessionId, requestId, outcome);
       },
       resolveActor: (identity) => serviceHost.resolveActor(identity),
       authorizeWorkspacePath: (currentActor, inputPath, pathOptions) => paths.resolve(currentActor, inputPath, pathOptions),

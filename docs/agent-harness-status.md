@@ -18,13 +18,39 @@ Last updated: 2026-09-22
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），设计已接受，尚未实施。**
-设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)，计划为 C0–C4。
-当前仍是 `context-preparation.ts` 的一次摘要调用，没有独立压缩子进程或可执行查询工具；切点按预算与完整交互边界，
-不保证最后一条 user 原文保留。当前摘要请求不含作为参考的近期原文 B，后续提示也比首次简略。
-已交付的固定候选、后台准备、请求前容量/输出预留、复用在飞候选等待及 Pi 提交继续有效。
-新阶段将按语义提炼有效要求，以 B 理解续接位置，按需查询历史/输出/任务记录，再沿现有机制接上 B/N；
-本次仅文档变更，无新运行证据，不声称子进程、语义质量或缓存/速度收益已经实现。
+**D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**
+设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)。
+
+已接线：
+
+- 专用压缩 worker：broker 经 `#spawnAuxiliaryWorker("compaction", cwd)` 派生 pi-host 子进程（新 `RuntimeWorkerRole`
+  `"compaction"`），`pinSession` 到父会话承载事件身份；不注册为会话 worker、不进父会话请求队列，父退出即回收，
+  其 `worker.exit` 不被解释为会话退出（`role === "session"` 判定）。取消 = 进程终止；迟到结果由父侧身份/世代
+  复核丢弃，不重新提交。
+- 固定材料契约：父会话 `context-preparation.ts` 在准备时冻结 `CompactionTaskSpec`（S0 旧摘要、A 被替换区间、
+  B 保留原文、边界/分支叶/世代与序列化模型+执行选项），B 逐字随任务下发并经边界 marker 与 A 区分；材料过大时
+  显式分页——A 最旧前缀移出并以 `elidedSummarizedThroughEntryId` 披露未读范围，worker 须用 history 工具回读，
+  不静默裁剪。模型配置漂移、分支切换、fresh/再次压缩、手动重点变化均按真实来源复核使候选失效。
+- worker 内真实 `Agent` loop（`compaction-worker.ts`）：`ModelRuntime.create` 复用同一 agentDir 的
+  auth.json/models.json 凭据与 `ProviderConfigurationManager`（project trust 门禁一致），冻结模型与
+  reasoning/maxTokens/transport/thinkingBudgets；三件套只读查询工具（history/output/records）经
+  `harness.request` 走真实 broker→Host 通路。空摘要、error/aborted/length 终态均拒绝。
+- Host 侧辅助 actor：`registerAuxiliaryActor`/`dropAuxiliaryActor` 以 workerId 键控，
+  `resolveActor` 只授予 `COMPACTION_QUERY_METHODS` + `COMPACTION_QUERY_CAPABILITIES`；
+  `compaction.history` 经 `previewSessionEntries`（catalog worker 直读会话文件，不排队父 worker）并按冻结叶
+  截断、如实披露 boundFound。`harness.respond` 按 `identity.workerId` 路由回具体 worker。
+- 等待与提交：请求前容量核算不变；容量不足且在飞时等待同一候选不另起，`compaction.run` 以 `timeoutMs: 0`
+  免除桥/路由默认时限；提交仍走 Pi 原生 `appendCompaction`，原历史保留、半成品不提交。手动压缩与自动共用同一
+  worker 机制（`session_before_compact` manual 分支同步执行同一 spec），旧单次摘要调用与弱化更新提示已删除
+  （`completeSummary` seam 移除）。
+
+验证：protocol build/typecheck、pi-host、runtime-broker build 与 application-host 类型检查通过；pi-host
+套件 460/461（phase3-e2e 一项为负载下已知时序波动，单跑通过）；`session-e2e` 压缩链 3 结局（commit/cancel/
+invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证：B 材料在 marker 下方逐字到达、容量等待
+同一在飞任务、取消/错误结果不提交、write 工具调用不执行；broker 套件 85、web harness 聚焦 33 项通过。
+
+未实测：真实付费模型驱动下的完整往返与摘要质量、子进程派生在实际桌面包的纵切（测试为 in-process 等价路径）、
+跨平台。不声称语义质量或缓存/速度收益。
 
 **D-313 / 阶段 B：Varin 全面更名（2026-09-21），产品源码与仓库切换完成；首次新品牌发行待发布。**
 设计见 [varin-rebrand-design.md](varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。

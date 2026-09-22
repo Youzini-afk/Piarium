@@ -52,10 +52,12 @@ import {
   type FastDecisionMaterial,
   type FastDecisionQuestion,
   type HarnessFastDecisionParams,
+  type HarnessError,
   isWorkFocusId,
   isWorkFocusSource,
   type WorkFocusSelection,
 } from "@varin/protocol";
+import { CompactionWorkerRuntime } from "./compaction-worker.js";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
 import { expectRecord, readBoolean, readJson, readString } from "./params.js";
@@ -154,6 +156,12 @@ const PACKAGE_ROLE_METHODS = new Set<HostMethod>([
   "package.remove",
   "package.setEnabled",
   "package.update",
+]);
+/** Internal compaction workers run one task and may receive query responses. */
+const COMPACTION_ROLE_METHODS = new Set<HostMethod>([
+  ...COMMON_ROLE_METHODS,
+  "compaction.run",
+  "harness.respond",
 ]);
 const CONTEXT_FORBIDDEN_METHODS = new Set<HostMethod>([
   "package.bootstrap",
@@ -577,10 +585,12 @@ export class HostController {
   readonly #agentDir: string;
   readonly #packageRoot: string | undefined;
   readonly #packageAuthority: PackageAuthorityHost | undefined;
+  readonly #projectTrustOverride: boolean | undefined;
   readonly #runtimeSource: RuntimeSourceKind;
   readonly #sessionHost: SessionHost;
   readonly #transport: HostTransport;
   readonly #workerRole: RuntimeWorkerRole;
+  #compactionWorker: CompactionWorkerRuntime | undefined;
   #disposed = false;
   #requestQueue: Promise<void> = Promise.resolve();
   #sequence = 0;
@@ -589,6 +599,7 @@ export class HostController {
   constructor(options: HostControllerOptions) {
     this.#agentDir = resolve(options.agentDir ?? getAgentDir());
     this.#packageRoot = options.packageRoot ? resolve(options.packageRoot) : undefined;
+    this.#projectTrustOverride = options.projectTrustOverride;
     this.#runtimeSource = options.runtimeSource ?? (this.#packageRoot ? "custom" : "bundled");
     this.#transport = options.transport;
     this.#workerRole = options.workerRole ?? "session";
@@ -775,6 +786,7 @@ export class HostController {
   #methodAllowed(method: HostMethod): boolean {
     if (this.#workerRole === "catalog") return CATALOG_ROLE_METHODS.has(method);
     if (this.#workerRole === "package") return PACKAGE_ROLE_METHODS.has(method);
+    if (this.#workerRole === "compaction") return COMPACTION_ROLE_METHODS.has(method);
     if (method === "catalog.context.open") return this.#workerRole === "workspace";
     return !CONTEXT_FORBIDDEN_METHODS.has(method);
   }
@@ -1449,7 +1461,22 @@ export class HostController {
             readBoolean(params, "accepted"),
           ),
         };
-      case "harness.respond":
+      case "harness.respond": {
+        const harnessOutcome = params as {
+          ok: boolean; result?: unknown;
+          error?: { code: string; message: string; retryable?: boolean };
+        };
+        if (this.#workerRole === "compaction") {
+          return {
+            accepted: this.#compactionWorker?.respondHarness(
+              readString(params, "sessionId"),
+              readString(params, "requestId"),
+              harnessOutcome.ok
+                ? { ok: true, result: harnessOutcome.result }
+                : { ok: false, error: (harnessOutcome.error ?? { code: "failed", message: "unknown error" }) as HarnessError },
+            ) ?? false,
+          };
+        }
         return {
           accepted: this.#sessionHost.respondHarness(
             readString(params, "sessionId"),
@@ -1457,6 +1484,19 @@ export class HostController {
             params as { ok: boolean; result?: unknown; error?: { code: string; message: string; retryable?: boolean } },
           ),
         };
+      }
+      case "compaction.run":
+        if (this.#workerRole !== "compaction") {
+          throw new HostError("worker_role_violation", "compaction.run requires a compaction worker");
+        }
+        this.#compactionWorker ??= new CompactionWorkerRuntime({
+          agentDir: this.#agentDir,
+          emit: (event, data) => this.emit(event, data),
+          ...(this.#projectTrustOverride === undefined
+            ? {}
+            : { projectTrustOverride: this.#projectTrustOverride }),
+        });
+        return this.#compactionWorker.run(request.params);
       default:
         throw new HostError("method_not_found", `Unknown host method: ${methodName}`);
     }

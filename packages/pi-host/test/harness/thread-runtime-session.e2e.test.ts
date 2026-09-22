@@ -596,8 +596,8 @@ describe("thread runtime with native working-state integration", () => {
     });
 
     router = createHarnessRouter({
-      respond: async (sessionId, requestId, outcome) => {
-        hostFor(sessionId).respondHarness(sessionId, requestId, outcome);
+      respond: async (identity, requestId, outcome) => {
+        hostFor(identity.sessionId).respondHarness(identity.sessionId, requestId, outcome);
       },
       resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     });

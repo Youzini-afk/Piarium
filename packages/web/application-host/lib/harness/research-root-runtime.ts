@@ -13,6 +13,7 @@ interface BrokerEventLike {
   kind: string;
   sessionId?: string;
   expected?: boolean;
+  role?: string;
   envelope?: { kind?: string; event?: string; data?: unknown };
 }
 
@@ -329,16 +330,22 @@ export function createResearchRootRuntime(options: ResearchRootRuntimeOptions) {
       }
       const binding = active.get(sessionId);
       if (!binding) {
-        if (event.kind === "worker.exit" || agentEvent?.type === "agent_settled") blocked.delete(sessionId);
+        if ((event.kind === "worker.exit" && event.role === "session")
+          || agentEvent?.type === "agent_settled") {
+          blocked.delete(sessionId);
+        }
         return;
       }
-      if (event.kind === "worker.exit") {
+      // Auxiliary worker exits (e.g. a compaction worker) share the
+      // sessionId; only the session worker's exit loses the research Run.
+      if (event.kind === "worker.exit" && event.role === "session") {
         await finish(sessionId, {
           outcome: "lost",
           reason: event.expected ? "user session closed before the research Run settled" : "research session worker exited unexpectedly",
         });
         return;
       }
+      if (event.kind === "worker.exit") return;
       if (!agentEvent) return;
       if (agentEvent.type === "agent_end" && agentEvent.data.willRetry !== true) {
         binding.messages = Array.isArray(agentEvent.data.messages) ? agentEvent.data.messages as PiMessage[] : [];

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity } from "@varin/protocol";
+import type { HarnessActorIdentity, PiSessionEntry } from "@varin/protocol";
+import { COMPACTION_QUERY_CAPABILITIES, COMPACTION_QUERY_METHODS } from "@varin/protocol";
 import {
   createHarnessServiceHost,
   deriveHarnessCapabilities,
@@ -208,6 +209,76 @@ describe("harness service host authorization", () => {
         scope: "child", threadId: "thread-1", runId: "run-1",
         actor: { workerGeneration: 2, runId: "run-1" },
       });
+    } finally {
+      await host.dispose();
+    }
+  });
+
+  it("scopes a session's compaction worker to read-only queries bounded at the frozen leaf", async () => {
+    const entries: PiSessionEntry[] = (["e1", "e2", "e3", "e4"] as const).map((id, index) => ({
+      id,
+      parentId: index === 0 ? null : `e${index}`,
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "message",
+      message: { role: "user", content: `entry ${id} body`, timestamp: index },
+    })) as unknown as PiSessionEntry[];
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: {},
+      threadHistoryEntries: async (sessionId) => ({
+        sessionId, entries, leafId: "e4", scope: "branch",
+      }),
+    });
+    try {
+      host.registerSession({
+        actor: ACTOR,
+        grantedCapabilities: ["context.session", "read.output"],
+        workspaceId: "workspace-1",
+        workspaceRoot: "D:/workspace",
+      });
+      const auxIdentity: HarnessActorIdentity = { ...ACTOR, workerId: "worker-compaction" };
+      host.registerAuxiliaryActor(ACTOR, auxIdentity.workerId, "e3");
+
+      // The auxiliary identity resolves with the frozen allowlist only.
+      const aux = await host.resolveActor(auxIdentity);
+      expect(aux).not.toBeNull();
+      expect(aux?.allowedMethods).toEqual([...COMPACTION_QUERY_METHODS]);
+      expect(aux?.grantedCapabilities).toEqual([...COMPACTION_QUERY_CAPABILITIES]);
+      expect(aux?.workspaceId).toBe("workspace-1");
+      // Identity must match exactly: same session, wrong worker or generation is not the aux actor.
+      await expect(host.resolveActor({ ...auxIdentity, workerGeneration: 99 })).resolves.toBeNull();
+      await expect(host.resolveActor({ ...auxIdentity, sessionId: "other" })).resolves.toBeNull();
+
+      // Frozen-range history reads stop at the leaf recorded at task freeze.
+      const overview = await host.compactionHistory(aux!, {});
+      expect(overview.details.boundEntry).toBe("e3");
+      expect(overview.details.boundFound).toBe(true);
+      expect(overview.details.total).toBe(3);
+      const missed = await host.compactionHistory(aux!, { entry: "e4" });
+      expect(missed.details.found).toBe(false);
+      const hit = await host.compactionHistory(aux!, { query: "e2 body" });
+      expect(hit.details.matches).toBe(1);
+
+      // The parent session actor itself cannot use the bounded read.
+      const parent = await host.resolveActor({ ...ACTOR, runId: "run-9" });
+      await expect(host.compactionHistory(parent!, {})).rejects.toThrow(/restricted/);
+
+      // The auxiliary worker's exit must not retire the session registration.
+      host.dropSession(ACTOR.sessionId, auxIdentity);
+      await expect(host.resolveActor({ ...ACTOR, runId: "run-9" })).resolves.not.toBeNull();
+      await expect(host.resolveActor(auxIdentity)).resolves.not.toBeNull();
+
+      // Retiring just the auxiliary worker keeps the session alive.
+      host.dropAuxiliaryActor(auxIdentity.workerId);
+      await expect(host.resolveActor(auxIdentity)).resolves.toBeNull();
+      await expect(host.resolveActor(ACTOR)).resolves.not.toBeNull();
+
+      // The real session worker's exit retires both registrations.
+      host.registerAuxiliaryActor(ACTOR, "worker-compaction-2", "e3");
+      host.dropSession(ACTOR.sessionId, { ...ACTOR, runId: "run-9" });
+      await expect(host.resolveActor(ACTOR)).resolves.toBeNull();
+      await expect(host.resolveActor({ ...ACTOR, workerId: "worker-compaction-2" })).resolves.toBeNull();
     } finally {
       await host.dispose();
     }

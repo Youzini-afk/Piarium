@@ -227,6 +227,11 @@ export interface HostMethodMap {
     params: HarnessRespondParams;
     result: { accepted: boolean };
   };
+  /** Broker → dedicated compaction worker: run the frozen internal task (D-314). */
+  "compaction.run": {
+    params: import("./harness-compaction.js").CompactionTaskSpec;
+    result: import("./harness-compaction.js").CompactionRunResult;
+  };
   "project.trust.respond": {
     params: { remember: boolean; requestId: string; trusted: boolean };
     result: { accepted: boolean };

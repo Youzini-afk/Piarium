@@ -29,10 +29,11 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 通用能力与首个 Jev 适配、模型配置、`explore` 选材和动态下一步选择按 F0 → F1 → F2 → F3 → F4 推进。
 完整合同见 [fast-decision-model-design.md](fast-decision-model-design.md)；Computer Use 等未来用途只保留复用边界。
 
-**下一阶段 C：后台压缩 Agent 与语义续接（D-314，设计已接受，尚未实施）。**
-将现有固定候选的一次摘要调用升级为独立内部 worker，按需查询历史/产物/任务记录；按语义保留有效要求，
-以近期原文帮助理解工作位置，继续复用容量预留、候选等待与 Pi 安全提交。完整设计见
-[后台压缩 Agent](context-compaction-agent-design.md)。本次只更新设计和计划，不把阶段 C 标记为已交付。
+**阶段 C：后台压缩 Agent 与语义续接（D-314）已交付并接线。**
+原固定候选的一次摘要调用已替换为独立内部 worker：按需查询历史/产物/任务记录，按语义保留有效要求，
+以近期原文帮助理解工作位置，继续复用容量预留、候选等待与 Pi 安全提交。完整设计与实现说明见
+[后台压缩 Agent](context-compaction-agent-design.md)，交付状态见
+[agent-harness-status.md](agent-harness-status.md)。
 
 ## 0. 执行者须知
 
@@ -1962,9 +1963,10 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 
 ## 阶段 C：后台压缩 Agent 与语义续接（D-314）
 
-状态：**accepted design / not implemented**。承接已交付的阶段 F；D-284/D-286 的固定候选、较长原文、历史权威与
+状态：**已交付（wired）**。承接已交付的阶段 F；D-284/D-286 的固定候选、较长原文、历史权威与
 容量驱动仍是基础。设计 authority 为 [context-compaction-agent-design.md](context-compaction-agent-design.md)。
-顺序为 C0 → C1 → C2 → C3 → C4；最终以同一条生产路径替换旧单次摘要，不保留双引擎或新增 keeper。
+顺序为 C0 → C1 → C2 → C3 → C4；生产路径为 broker 派生的专用 `compaction` worker 沿同一机制替换旧单次摘要，
+无双引擎或新增 keeper；交付状态见 [agent-harness-status.md](agent-harness-status.md)。
 
 ### C0：固定材料、来源与共同提示词
 

@@ -1342,6 +1342,10 @@ export interface HarnessServiceMap {
   "schedule.loop.update": { params: import("./harness-scheduled-tasks.js").ScheduleLoopUpdateParams; result: import("./harness-scheduled-tasks.js").ScheduleLoopUpdateResult };
   "schedule.loop.remove": { params: import("./harness-scheduled-tasks.js").ScheduleLoopRemoveParams; result: import("./harness-scheduled-tasks.js").ScheduleLoopRemoveResult };
   "schedule.status": { params: import("./harness-scheduled-tasks.js").ScheduleStatusParams; result: import("./harness-scheduled-tasks.js").ScheduleStatusResult };
+  // D-314: internal compaction task — parent session submits the frozen spec;
+  // the compaction worker reads authorized history through compaction.history.
+  "compaction.run": { params: import("./harness-compaction.js").CompactionTaskSpec; result: import("./harness-compaction.js").CompactionRunResult };
+  "compaction.history": { params: import("./harness-compaction.js").CompactionHistoryParams; result: import("./harness-compaction.js").CompactionHistoryResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -1457,6 +1461,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "schedule.loop.update": "control.schedule",
   "schedule.loop.remove": "control.schedule",
   "schedule.status": "read.schedule",
+  "compaction.run": "context.session",
+  "compaction.history": "context.session",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1475,6 +1481,12 @@ export interface HarnessActorContext extends HarnessActorIdentity {
   workspaceId: string | null;
   workspaceScope?: readonly string[];
   grantedCapabilities: readonly HarnessCapability[];
+  /**
+   * Internal auxiliary actors (e.g. a session's compaction worker) may carry
+   * an explicit method allowlist; when present the router rejects every
+   * method outside it regardless of the granted capability category.
+   */
+  allowedMethods?: readonly HarnessMethod[];
 }
 
 const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
@@ -1563,6 +1575,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "schedule.loop.update",
   "schedule.loop.remove",
   "schedule.status",
+  "compaction.run",
+  "compaction.history",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {
@@ -1608,7 +1622,8 @@ export type HarnessRespondParams = {
 
 /**
  * Build the typed `harness.respond` params from a router outcome.
- * Callers pass this to `piRuntimeBroker.requestForSession(sessionId, 'harness.respond', params)`.
+ * Callers pass this to `piRuntimeBroker.requestForWorker(identity.workerId, 'harness.respond', params)` —
+ * auxiliary workers (e.g. a session's compaction worker) are addressed by worker, not session.
  */
 export function buildHarnessRespondParams(
   sessionId: string,

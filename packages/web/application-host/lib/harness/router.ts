@@ -47,7 +47,12 @@ export interface HarnessService<M extends HarnessMethod> {
 }
 
 export interface HarnessRouterOptions {
-  respond: (sessionId: string, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
+  /**
+   * Deliver the outcome to the requesting worker. Auxiliary workers (a
+   * session's compaction worker) are not the session's registered worker, so
+   * the response must route by worker identity, not by session lookup.
+   */
+  respond: (identity: HarnessActorIdentity, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
   resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
@@ -297,7 +302,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const identity = event.actor;
     if (!data || typeof data.requestId !== "string" || !identity) return;
     const respond = (outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => (
-      options.respond(identity.sessionId, data.requestId, outcome)
+      options.respond(identity, data.requestId, outcome)
     );
     if (!isHarnessMethod(data.method)) {
       await respond({
@@ -340,7 +345,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     // Only the actor-scoped scheduler waits may outlive their dependency or
     // reply deadline. Worker cancellation, generation replacement, and Host
     // disposal still abort them.
-    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait") && data.timeoutMs === 0
+    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run") && data.timeoutMs === 0
       ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const actor = await options.resolveActor(identity, controller.signal);
@@ -358,6 +363,13 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
         await respond({
           ok: false,
           error: harnessError("forbidden", "Harness input source does not match the actor workspace"),
+        });
+        return;
+      }
+      if (actor.allowedMethods !== undefined && !actor.allowedMethods.includes(method)) {
+        await respond({
+          ok: false,
+          error: harnessError("forbidden", `Harness method is outside this actor's allowlist: ${method}`),
         });
         return;
       }

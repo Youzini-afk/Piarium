@@ -1055,6 +1055,22 @@ export function registerHarnessServices(
   }
   // Every Host can acknowledge compaction and reset observer baselines.
   router.register("context.retained", createContextRetainedService(host));
+  // D-314: the owning session worker submits frozen compaction tasks; the
+  // dedicated worker reads frozen-range history under its auxiliary actor.
+  router.register("compaction.run", {
+    handle: async (params, ctx) => {
+      if (!host.runCompactionTask) {
+        throw new HarnessServiceError("unavailable", "The internal compaction worker is unavailable");
+      }
+      if (params.sessionId !== ctx.sessionId) {
+        throw new HarnessServiceError("denied", "A compaction task must belong to the calling session");
+      }
+      return host.runCompactionTask(ctx.actor, params, ctx.signal);
+    },
+  });
+  router.register("compaction.history", {
+    handle: (params, ctx) => host.compactionHistory(ctx.actor, params),
+  });
   if (host.todoDepsProvider) {
     router.register("todo.upsert", createTodoUpsertService(host));
   }

@@ -1,6 +1,6 @@
 # 后台压缩 Agent 与语义续接设计
 
-Status: accepted design / not implemented — D-314；实施顺序见 [阶段 C](agent-harness-plan.md#阶段-c后台压缩-agent-与语义续接d-314)
+Status: implemented — D-314；实施顺序见 [阶段 C](agent-harness-plan.md#阶段-c后台压缩-agent-与语义续接d-314)，交付事实以 [agent-harness-status.md](agent-harness-status.md) 为准
 
 Last updated: 2026-09-22
 
@@ -9,19 +9,20 @@ Last updated: 2026-09-22
 压缩的交付物是让主 Agent 能继续正确工作的上下文。它需要理解用户当前要做什么、哪些要求仍有效、工作推进到了哪里、
 哪些证据支持已有判断，以及接下来还缺什么。缩短文本是手段；不能把摘要写成流水账或只留下“已完成”的结论。
 
-当前 D-284 已交付固定范围后台准备、近期原文保留、请求前容量检查和按需提交：
+D-284 交付了固定范围后台准备、近期原文保留、请求前容量检查和按需提交；D-314 把原单次总结替换为
+有查询能力的独立后台子进程（实现入口 `packages/pi-host/src/compaction-worker.ts`、共用契约
+`harness/compaction-agent.ts`、查询工具 `harness/compaction-tools.ts`）。现有容量、固定候选和安全提交机制
+继续复用：
 
-- `packages/pi-host/src/harness/context-preparation.ts` 用当前会话模型发起一次无工具执行器的摘要请求。
-  首次提示要求保留目标、纠正、理由、具体标识与未完工作；后续仅用一段较短的更新提示。
+- `packages/pi-host/src/harness/context-preparation.ts` 冻结 `CompactionTaskSpec`（S0/A/B/边界/模型配置），
+  经 `compaction.run` 桥接请求交给 broker 派生的专用 `compaction` worker；首次与后续压缩共用同一完整提示。
 - 原文切点按 token 预算与 Pi 安全交互边界决定，不是固定最近几轮，也没有“最近 user 必须原文保留”的规则。
-- 实际摘要输入截在保留起点之前；近期原文 B 没有作为参考送给总结模型。这与主设计中“B 用于理解续接位置”的目标有差距。
+- 保留原文 B 逐字随任务下发并明确与 A 的分界；材料超窗时 A 的最旧前缀按完整 span 分页移出并披露
+  `elidedSummarizedThroughEntryId`，worker 经 `compaction.history` 回读未读范围。
 - `context-request-boundary.ts` 在每次真实请求前检查容量；不足时采用或等待同一候选，再从最新 Pi 历史构造请求。
   自动压缩开启时，代码以 `inputTokens + max(reserveTokens, request.maxTokens) > contextWindow` 判断需要空间。
   这里的输入是估算并结合实际 usage 校正，不是服务端精确 token 计数。
 - Pi SessionManager 仍保存原始历史；候选生成不改写会话，实际提交才改变下一请求使用的摘要与原文范围。
-
-本阶段把单次总结升级为有查询能力的独立后台子进程。现有容量、固定候选和安全提交机制继续复用；本文件不宣称新 Agent
-已接线，也不把旧实现的通过证据当作新 Agent 的验证。
 
 ## 2. 产品行为
 

@@ -23,7 +23,7 @@ import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import type { HostEvent, HostEventData } from "@varin/protocol";
+import type { HarnessError, HostEvent, HostEventData } from "@varin/protocol";
 
 import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
@@ -57,6 +57,8 @@ import { createTreeSitterStructureProvider } from "../../../web/application-host
 import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@varin/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
+import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
+import { deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
 import { serializedToolResult } from "./provider-context.js";
 
 const WORKSPACE_ID = "session-e2e-workspace";
@@ -92,12 +94,70 @@ async function setupSession(options: {
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
 
+  // In-process stand-in for the broker-spawned compaction subprocess: the real
+  // CompactionWorkerRuntime (Agent loop, query tools, harness bridge) runs here,
+  // registered as an auxiliary actor whose harness.request traffic goes through
+  // the same router the session uses. Only the OS process hop is absent.
+  const harnessResponders = new Map<string, (
+    requestId: string,
+    outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
+  ) => boolean>();
+  let compactionWorkerSeq = 0;
+
   const harnessServiceHost = createHarnessServiceHost({
     search: async () => ({ status: "empty" as const, generation: undefined }),
     resolveWorkspaceRoot: async () => root,
     discoveredShells: {
       hasBash: process.platform !== "win32",
       hasPowerShell: process.platform === "win32",
+    },
+    runCompactionTask: async (actor, spec, signal) => {
+      const workerId = `worker-compaction-${++compactionWorkerSeq}`;
+      harnessServiceHost.registerAuxiliaryActor(actor, workerId, spec.fixedLeafEntryId);
+      const runtime = new CompactionWorkerRuntime({
+        agentDir,
+        // The worker owns its ModelRuntime in a subprocess; in-process tests
+        // register the same faux provider the session's configureServices uses.
+        configureModelRuntime: async (modelRuntime) => {
+          const model = deserializeCompactionModel(spec.model);
+          modelRuntime.registerProvider(model.provider, {
+            api: model.api,
+            baseUrl: model.baseUrl,
+            models: [{
+              api: model.api,
+              baseUrl: model.baseUrl,
+              contextWindow: model.contextWindow,
+              cost: model.cost,
+              id: model.id,
+              input: model.input,
+              maxTokens: model.maxTokens,
+              name: model.name,
+              reasoning: model.reasoning,
+            }],
+          });
+          await modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+        },
+        emit: (event, data) => {
+          if (event !== "harness.request") return;
+          void router.processEvent({
+            actor: { ...actor, workerId },
+            kind: "host",
+            envelope: { kind: "event", event: "harness.request", data },
+          });
+        },
+      });
+      harnessResponders.set(workerId, (requestId, outcome) =>
+        runtime.respondHarness(spec.sessionId, requestId, outcome));
+      try {
+        // The production broker kills the worker process on abort; in-process
+        // the same signal rejects the task without committing anything.
+        return await Promise.race([runtime.run(spec), new Promise<never>((_, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("Compaction task aborted")), { once: true });
+        })]);
+      } finally {
+        harnessResponders.delete(workerId);
+        harnessServiceHost.dropAuxiliaryActor(workerId);
+      }
     },
     ...options.serviceHostOptions,
     // Root sessions have no virtual working branch. Production still registers
@@ -110,8 +170,13 @@ async function setupSession(options: {
   const uiRequests: UiRequest[] = [];
 
   const router = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => {
-      host.respondHarness(sessionId, requestId, outcome);
+    respond: async (identity, requestId, outcome) => {
+      const responder = harnessResponders.get(identity.workerId);
+      if (responder) {
+        responder(requestId, outcome);
+        return;
+      }
+      host.respondHarness(identity.sessionId, requestId, outcome);
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
@@ -896,6 +961,8 @@ describe("session e2e — context preparation chain", () => {
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;
       const compactionStarted = new Promise<void>((resolve) => { markCompactionStarted = resolve; });
+      let markSummaryRequested!: () => void;
+      const summaryRequested = new Promise<void>((resolve) => { markSummaryRequested = resolve; });
       const summaries: { context: Context; reasoning?: string }[] = [];
       const foreground: Context[] = [];
       const compacted: string[] = [];
@@ -904,17 +971,22 @@ describe("session e2e — context preparation chain", () => {
       let requestHistory = false;
       const respond = (context: Context, options: { cacheRetention?: string; reasoning?: string } | undefined) => {
         if (options) options.cacheRetention = "none"; // avoid faux's overlapping synthetic cache accounting
-        if (/summary text only/i.test(JSON.stringify(context.messages.at(-1)))) {
+        if (context.systemPrompt?.includes("background compaction agent")) {
+          markSummaryRequested();
           summaries.push({ context, ...(options?.reasoning ? { reasoning: options.reasoning } : {}) });
           return summaries.length === 1
             ? gate.then(() => outcome === "invalid-summary"
-              ? fauxAssistantMessage([fauxToolCall("write", { path: "unexpected-summary-write.txt", content: "must not execute" })])
+              // The worker agent owns a read-only surface: an attempted write
+              // is never executed, and an errored/empty result is rejected.
+              ? fauxAssistantMessage([fauxToolCall("write", { path: "unexpected-summary-write.txt", content: "must not execute" })],
+                { stopReason: "error", errorMessage: "invalid summary" })
               : fauxAssistantMessage("FIRST FIXED SUMMARY: the initial task remains binding; older entries remain in native history."))
             : fauxAssistantMessage("NEXT CANDIDATE: continue the same task.");
         }
         foreground.push(context);
         if (foreground.length === 2) {
-          assert.equal(summaries.length, 1, "preparation is already running when the actual foreground request reaches the provider");
+          // The dedicated worker's own model call lands asynchronously; the
+          // blocked summary gate below proves the task is already in flight.
           return fauxAssistantMessage([fauxToolCall("read", { path: "new-material.txt" })]);
         }
         if (requestHistory) {
@@ -946,16 +1018,30 @@ describe("session e2e — context preparation chain", () => {
         await session.host.prompt(created.sessionId, "KEPT-RAW-MARKER " + "beta ".repeat(8_000));
         await session.host.session.waitForIdle();
         assert.equal(foreground.length, 3, "both the foreground tool call and its continuation finish while the summary remains blocked");
+        // The worker's own model call reaches the provider asynchronously;
+        // it is still gated when the foreground turn is already complete.
+        await summaryRequested;
         assert.equal(summaries.length, 1);
         assert.equal(compacted.length, 0, "preparing a candidate cannot reset observers or publish a boundary");
         const kept = session.host.session.sessionManager.getBranch().find((entry) => entry.type === "message"
           && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("KEPT-RAW-MARKER"));
         assert.ok(kept);
-        assert.ok(summaries[0]!.context.systemPrompt === foreground[1]!.systemPrompt);
-        assert.deepEqual(summaries[0]!.context.tools, foreground[1]!.tools);
-        assert.equal(summaries[0]!.reasoning, "high");
-        assert.ok(!summaries[0]!.context.tools?.some((tool) => "execute" in tool));
-        assert.ok(!JSON.stringify(summaries[0]!.context).includes("KEPT-RAW-MARKER"), "the fixed kept suffix is not part of the summarized prefix");
+        // The dedicated compaction worker runs its own agent context: the
+        // shared compaction system prompt plus the read-only query schemas —
+        // never the session's executable tool surface.
+        const workerContext = summaries[0]!.context;
+        assert.match(workerContext.systemPrompt ?? "", /background compaction agent/);
+        assert.deepEqual(workerContext.tools?.map((tool) => tool.name), ["history", "output", "records"],
+          "the worker exposes only the read-only query tools");
+        assert.equal(summaries[0]!.reasoning, "high", "the worker keeps the session's resolved reasoning level");
+        const boundaryIndex = workerContext.messages.findIndex((message) =>
+          JSON.stringify(message).includes("Retained material begins"));
+        assert.ok(boundaryIndex > 0, "the worker material carries the retained-material marker");
+        const summarizedRange = JSON.stringify(workerContext.messages.slice(0, boundaryIndex));
+        const retainedRange = JSON.stringify(workerContext.messages.slice(boundaryIndex));
+        assert.ok(summarizedRange.includes("ORIGINAL-TASK-MARKER"), "the replaced range reaches the worker");
+        assert.ok(retainedRange.includes("KEPT-RAW-MARKER"), "retained material B is provided verbatim below the marker");
+        assert.ok(!summarizedRange.includes("KEPT-RAW-MARKER"), "the fixed kept suffix is not part of the summarized prefix");
 
         const pending = (async () => {
           await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(10_000));
@@ -2356,8 +2442,7 @@ describe("D-284 request admission", () => {
         // Faux's synthetic cache-write count overlaps its uncached input.
         // Disable that test-only estimator so the capacity test uses one input count.
         if (options) options.cacheRetention = "none";
-        const tail = JSON.stringify(context.messages.at(-1));
-        if (/summary text only/i.test(tail)) {
+        if (context.systemPrompt?.includes("background compaction agent")) {
           summaryCalls += 1;
           return fauxAssistantMessage("The task reads material.txt in chunks. Continue reading; original entries remain in history.");
         }

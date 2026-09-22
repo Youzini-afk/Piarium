@@ -252,6 +252,8 @@ interface BrokerEventLike {
   kind: string;
   sessionId?: string;
   expected?: boolean;
+  /** Broker worker role; worker.exit is only session loss for "session". */
+  role?: string;
   envelope?: {
     kind?: string;
     event?: string;
@@ -2972,6 +2974,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const binding = bindingsBySession.get(sessionId);
     if (!binding) return;
     if (event.kind === "worker.exit") {
+      // Only the bound session worker's exit loses the Run; an auxiliary
+      // worker (e.g. the session's compaction worker) shares the sessionId.
+      if (event.role !== "session") return;
       if (terminatingSessions.has(sessionId)) return;
       enqueue(binding.threadId, async () => {
         let shouldResume = false;

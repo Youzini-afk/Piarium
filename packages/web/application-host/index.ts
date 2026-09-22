@@ -2926,6 +2926,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadSendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
     threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
     threadHistoryEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, "branch"),
+    runCompactionTask: (actor, spec, signal) => piRuntimeBroker.runCompactionTask(actor.sessionId, spec, {
+      signal,
+      registerWorker: (workerId) => harnessServiceHost.registerAuxiliaryActor(actor, workerId, spec.fixedLeafEntryId),
+      dropWorker: (workerId) => harnessServiceHost.dropAuxiliaryActor(workerId),
+    }),
     threadContinueRun: (input) => threadRuntime!.continueRun(input),
     threadResumeLost: (workspaceId, parent) => threadRuntime!.resumeLostForParent(workspaceId, parent),
   });
@@ -3032,8 +3037,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // subscription as recovery turn coordinator) and dispatches to the
   // registered harness services.
   const harnessRouter = createHarnessRouter({
-    respond: async (sessionId, requestId, outcome) => {
-      await piRuntimeBroker.requestForSession(sessionId, 'harness.respond', buildHarnessRespondParams(sessionId, requestId, outcome));
+    // Route by the requesting worker, not by session: a session's internal
+    // compaction worker is pinned for identity but is not the session worker.
+    respond: async (identity, requestId, outcome) => {
+      await piRuntimeBroker.requestForWorker(
+        identity.workerId,
+        'harness.respond',
+        buildHarnessRespondParams(identity.sessionId, requestId, outcome),
+      );
     },
     resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
@@ -3103,6 +3114,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[ResearchRoot] Event routing failed:', errorMessage(error));
     });
     if (event?.kind === 'worker.exit') {
+      // An auxiliary worker (a session's compaction worker) shares the
+      // session identity but is not the session worker; its exit must not
+      // tear down session registrations.
+      if (event.role === 'compaction') return;
       if (event.sessionId) {
         const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
         harnessSessionRegistration.dropSession(event.sessionId, event.actor);

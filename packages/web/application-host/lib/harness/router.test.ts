@@ -33,8 +33,8 @@ describe("harness router", () => {
   it("dispatches with a Host-resolved actor and responds to its trusted session", async () => {
     const responses: Array<{ sessionId: string; requestId: string; ok: boolean; result?: unknown }> = [];
     const router = createHarnessRouter({
-      respond: async (sessionId, requestId, outcome) => {
-        responses.push({ sessionId, requestId, ok: outcome.ok, ...(outcome.ok ? { result: outcome.result } : {}) });
+      respond: async (identity, requestId, outcome) => {
+        responses.push({ sessionId: identity.sessionId, requestId, ok: outcome.ok, ...(outcome.ok ? { result: outcome.result } : {}) });
       },
       resolveActor: async () => resolvedActor(["read.output"]),
     });
@@ -82,6 +82,26 @@ describe("harness router", () => {
     router.register("shell.exec", { handle: async () => ({ kind: "completed", exitCode: 0, durationMs: 0, cwd: ".", stdout: "", stderr: "", handle: null, shown: null }) });
     await router.processEvent(harnessEvent("shell.exec", { command: "echo" }));
     expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
+    router.dispose();
+  });
+
+  it("enforces an auxiliary actor's method allowlist and responds to its own worker", async () => {
+    const auxActor: HarnessActorIdentity = { ...ACTOR, workerId: "worker-compaction" };
+    const responses: Array<{ workerId: string; ok: boolean; code?: string }> = [];
+    const router = createHarnessRouter({
+      respond: async (identity, _requestId, outcome) => {
+        responses.push({ workerId: identity.workerId, ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async (identity) => identity.workerId === "worker-compaction"
+        ? { ...resolvedActor(["context.session", "read.output", "control.thread"]), allowedMethods: ["compaction.history"] }
+        : null,
+    });
+    // A granted capability is not enough: the method must be in the allowlist.
+    await router.processEvent({
+      ...harnessEvent("output.read", { handle: "out_1" }),
+      actor: auxActor,
+    });
+    expect(responses).toEqual([{ workerId: "worker-compaction", ok: false, code: "forbidden" }]);
     router.dispose();
   });
 

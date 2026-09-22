@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) wired; Stage C (D-314) planned
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired
 
 Last updated: 2026-09-22
 
@@ -31,7 +31,7 @@ authoritative record of delivery, and each phase names the design document that 
 | W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
 | B | Varin product-wide rebrand | Source, product assets, build/distribution configuration and GitHub repository switched (D-313); first new-brand publication pending; no old-name compatibility |
 | F | Fast Decision Models and progressive retrieval | Implemented/wired (D-312): shared capability/binding, first Jev adapter and iterative `explore`; evidence and untested quality/latency in harness status |
-| C | Background compaction Agent and semantic continuation | Accepted design (D-314), not implemented: internal worker, scoped history/output queries, semantic retention, capacity waiting and fixed-boundary commit |
+| C | Background compaction Agent and semantic continuation | Implemented/wired (D-314): dedicated `compaction` worker process, scoped read-only history/output/record queries, S0/A/B frozen material with pagination, capacity waiting on the in-flight task and session-owned native commit |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -132,12 +132,11 @@ F0–F4 are delivered and wired for the `explore` consumer; real paid-provider c
 and retrieval-quality evidence are recorded as untested in harness status.
 
 Stage C follows F and is specified in [context-compaction-agent-design.md](context-compaction-agent-design.md).
-C0–C4 cover frozen source/reference material and shared semantic instructions, an internal compaction worker
-with scoped queries, candidate generation, capacity/wait/commit integration, and consumer/document closure.
-D-314 is accepted design only: current production still uses D-284's single summary call. The new worker
-will interpret valid user intent rather than pin the last user message, use retained recent text as reference,
-and preserve all later appends through the existing session-owned commit boundary. Paid-model quality and
-full platform observations are separate from proving the production path is connected.
+C0–C4 are delivered and wired: the broker spawns a dedicated `compaction` pi-host worker pinned to the parent
+session; frozen S0/A/B material ships verbatim retained text with an explicit elision notice when paginated;
+the worker runs a real Agent loop with scoped read-only queries over history, outputs and records; capacity-bound
+requests wait on the same in-flight task; commit stays session-owned through the native Pi compaction writer.
+Paid-model quality and full platform observations are recorded as untested in harness status.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

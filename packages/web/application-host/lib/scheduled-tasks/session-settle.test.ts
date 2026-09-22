@@ -65,7 +65,7 @@ describe('session settle tracker', () => {
   it('fails the waiter when the worker exits before settling', async () => {
     const tracker = createSessionSettleTracker();
     const pending = tracker.waitForSettled('s-1');
-    tracker.processEvent({ kind: 'worker.exit', sessionId: 's-1' });
+    tracker.processEvent({ kind: 'worker.exit', sessionId: 's-1', role: 'session' });
     const outcome = await pending;
     expect(outcome.settled).toBe(false);
   });
