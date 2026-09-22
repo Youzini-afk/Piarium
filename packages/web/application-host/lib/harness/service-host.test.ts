@@ -260,6 +260,10 @@ describe("harness service host authorization", () => {
       const hit = await host.compactionHistory(aux!, { query: "e2 body" });
       expect(hit.details.matches).toBe(1);
 
+      host.registerAuxiliaryActor(ACTOR, "worker-compaction-missing-leaf", "gone");
+      const missingLeaf = await host.resolveActor({ ...auxIdentity, workerId: "worker-compaction-missing-leaf" });
+      await expect(host.compactionHistory(missingLeaf!, {})).rejects.toThrow(/frozen history leaf is no longer available/);
+
       // The parent session actor itself cannot use the bounded read.
       const parent = await host.resolveActor({ ...ACTOR, runId: "run-9" });
       await expect(host.compactionHistory(parent!, {})).rejects.toThrow(/restricted/);

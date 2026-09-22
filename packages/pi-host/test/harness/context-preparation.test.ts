@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  computeFixedPreparation,
   createContextPreparationExtension,
 } from "../../src/harness/context-preparation.js";
-import { convertToLlm, type SessionEntry, type SessionMessageEntry } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, convertToLlm, type SessionEntry, type SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { RequestBudgetObservation } from "../../src/harness/context-request-boundary.js";
 import type { Usage } from "@earendil-works/pi-ai";
@@ -50,6 +51,11 @@ const toolResultMessage = (text: string): AgentMessage => ({
   content: [{ type: "text", text }],
   timestamp: Date.now(),
 } as unknown as AgentMessage);
+
+const toolCallMessage = (text: string): AgentMessage => ({
+  ...assistantMessage(text, 100),
+  content: [{ type: "text", text }, { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "pwd" } }],
+} as AgentMessage);
 
 const entry = (id: string, parentId: string | null, message: AgentMessage): SessionMessageEntry => ({
   type: "message",
@@ -127,6 +133,7 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     extension: undefined as never,
   };
   harness.extension = createContextPreparationExtension({
+    getProjectTrusted: () => true,
     runCompactionTask: (spec, signal) => new Promise<CompactionRunResult>((resolve, reject) => {
       calls.push({ spec, signal, resolve, reject });
     }),
@@ -167,7 +174,7 @@ const fireContext = (harness: Harness, tokens: number, messages?: AgentMessage[]
 
 const compactEvent = (
   harness: Harness,
-  overrides?: { customInstructions?: string; signal?: AbortSignal },
+  overrides?: { customInstructions?: string; signal?: AbortSignal; reason?: string },
 ): { type: string; preparation: unknown; branchEntries: SessionEntry[]; reason: string; willRetry: boolean; signal: AbortSignal; customInstructions?: string } => ({
   type: "session_before_compact",
   preparation: {
@@ -178,7 +185,7 @@ const compactEvent = (
     tokensBefore: 900,
   },
   branchEntries: harness.entries,
-  reason: "threshold",
+  reason: overrides?.reason ?? "threshold",
   willRetry: false,
   signal: overrides?.signal ?? new AbortController().signal,
   ...(overrides?.customInstructions === undefined ? {} : { customInstructions: overrides.customInstructions }),
@@ -303,6 +310,153 @@ describe("context preparation extension", () => {
     harness.calls[1]!.resolve(okResult("Schema-focused summary."));
     const result = await commitPromise as { compaction?: { summary: string } };
     assert.equal(result.compaction?.summary, "Schema-focused summary.");
+  });
+
+  it("routes a bound manual compaction through the same worker and preserves custom focus", async () => {
+    const harness = createHarness(branchEntries(1_300), 12_000);
+    const agent = {
+      streamFunction: async () => { throw new Error("manual summary must not use the foreground stream"); },
+      state: { systemPrompt: "You are a coding agent.", tools: [], messages: [] },
+    };
+    harness.extension.attach({ agent, model: harness.ctx.model,
+      extensionRunner: { createContext: () => harness.ctx },
+      sessionManager: harness.ctx.sessionManager,
+    } as never, () => undefined);
+    const work = harness.handlers.get("session_before_compact")!(compactEvent(harness, {
+      reason: "manual", customInstructions: "Focus on database migration",
+    }) as never, harness.ctx as never);
+    await waitFor(() => harness.calls.length === 1);
+    assert.equal(harness.calls[0]!.spec.customInstructions, "Focus on database migration");
+    harness.calls[0]!.resolve(okResult("Manual worker summary."));
+    const result = await work as { compaction?: { summary: string } };
+    assert.equal(result.compaction?.summary, "Manual worker summary.");
+    const automatic = await harness.handlers.get("session_before_compact")!(compactEvent(harness) as never, harness.ctx as never);
+    assert.deepEqual(automatic, { cancel: true });
+  });
+
+  it("does not reuse a B candidate after that fixed leaf leaves the active branch", async () => {
+    const harness = createHarness(branchEntries(1_300), 12_000);
+    fireContext(harness, 12_000);
+    harness.calls[0]!.resolve(okResult("Old branch summary."));
+    await waitFor(() => harness.extension.status().candidate === "ready");
+    harness.entries = [...harness.entries.slice(0, -1),
+      entry("e6-other", "e5", assistantMessage("Different tool continuation", 100))];
+    const work = harness.handlers.get("session_before_compact")!(compactEvent(harness) as never, harness.ctx as never);
+    await waitFor(() => harness.calls.length === 2);
+    assert.equal(harness.calls[1]!.spec.fixedLeafEntryId, "e6-other");
+    harness.calls[1]!.resolve(okResult("Current branch summary."));
+    const result = await work as { compaction?: { summary: string } };
+    assert.equal(result.compaction?.summary, "Current branch summary.");
+  });
+
+  it("second compaction starts A at the last first-kept entry, with S0 as separate material", async () => {
+    const base = branchEntries(1_300);
+    const prior = { type: "compaction", id: "c1", parentId: "e4", timestamp: new Date().toISOString(),
+      summary: "S0 covers e1 through e3", firstKeptEntryId: "e4", tokensBefore: 4_000 } as SessionEntry;
+    const entries = [...base.slice(0, 4), prior,
+      entry("e5", "c1", userMessage(pad("New request after S0", 1_000))),
+      entry("e6", "e5", assistantMessage(pad("Progress after S0", 1_000), 1_300))];
+    const harness = createHarness(entries, 12_000);
+    const event = {
+      ...compactEvent(harness),
+      preparation: {
+        firstKeptEntryId: "e6", messagesToSummarize: [base[3]!.type === "message" ? base[3]!.message : null,
+          entries[5]!.type === "message" ? entries[5]!.message : null].filter(Boolean),
+        turnPrefixMessages: [], isSplitTurn: false, tokensBefore: 12_000,
+        previousSummary: "S0 covers e1 through e3",
+      },
+    };
+    const work = harness.handlers.get("session_before_compact")!(event as never, harness.ctx as never);
+    await waitFor(() => harness.calls.length === 1);
+    const spec = harness.calls[0]!.spec;
+    assert.equal(spec.boundaryCompactionId, "c1");
+    assert.equal(spec.previousSummary, "S0 covers e1 through e3");
+    assert.equal(spec.firstSummarizedEntryId, "e4");
+    assert.equal(spec.lastSummarizedEntryId, "e5");
+    assert.deepEqual([...spec.summarizedMessages, ...spec.turnPrefixMessages], event.preparation.messagesToSummarize);
+    harness.calls[0]!.resolve(okResult("Second summary."));
+    assert.equal((await work as { compaction?: { summary: string } }).compaction?.summary, "Second summary.");
+  });
+
+  it("keeps A complete and uses sourced B excerpts without orphaning a tool result", () => {
+    const entries: SessionEntry[] = [
+      entry("a1", null, userMessage(pad("Initial task", 1_400))),
+      entry("a2", "a1", assistantMessage(pad("Planning", 1_400), 100)),
+      entry("a3", "a2", userMessage(pad("Constraint", 1_400))),
+      entry("a4", "a3", toolCallMessage(pad("Run inspection", 10_000))),
+      entry("a5", "a4", toolResultMessage(pad("Massive output", 10_000))),
+      entry("a6", "a5", assistantMessage(pad("Continue", 1_000), 100)),
+    ];
+    const harness = createHarness(entries, 4_000);
+    harness.ctx.model = { ...MODEL, contextWindow: 4_500 };
+    fireContext(harness, 4_000);
+    assert.equal(harness.calls.length, 1);
+    const spec = harness.calls[0]!.spec;
+    assert.equal(spec.firstKeptEntryId, "a4", "the large A tail moves into retained B at a legal cut");
+    assert.deepEqual([...spec.summarizedMessages, ...spec.turnPrefixMessages],
+      entries.slice(0, 3).map((item) => item.type === "message" ? item.message : null));
+    assert.equal(spec.keptMessages.length, 0);
+    assert.deepEqual(spec.keptExcerptEntries?.map(({ entryId, role }) => [entryId, role]), [
+      ["a4", "assistant"], ["a5", "toolResult"], ["a6", "assistant"],
+    ]);
+    assert.ok(spec.keptExcerptEntries?.some((item) => item.truncated));
+    assert.equal("elidedSummarizedThroughEntryId" in spec, false);
+  });
+
+  it("preserves original history when no nonempty complete A can fit", async () => {
+    const entries = [
+      entry("huge", null, userMessage(pad("One unsplittable old entry", 30_000))),
+      entry("tail", "huge", assistantMessage("Latest progress", 100)),
+    ];
+    const harness = createHarness(entries, 4_000);
+    harness.ctx.model = { ...MODEL, contextWindow: 4_500 };
+    fireContext(harness, 4_000);
+    assert.equal(harness.calls.length, 0);
+    const result = await harness.handlers.get("session_before_compact")!(compactEvent(harness) as never, harness.ctx as never);
+    assert.deepEqual(result, { cancel: true });
+    assert.equal(harness.calls.length, 0);
+    assert.match(harness.failures.at(-1)?.[1] ?? "", /no complete replaceable range|No complete source prefix/);
+  });
+
+  it("can summarize retained raw history again when a compaction entry is the leaf", () => {
+    const base = branchEntries(1_300);
+    const c1 = { type: "compaction", id: "c1", parentId: "e6", timestamp: new Date().toISOString(),
+      summary: "First summary", firstKeptEntryId: "e3", tokensBefore: 10_000 } as SessionEntry;
+    const second = computeFixedPreparation([...base, c1], 1);
+    assert.equal(second?.boundaryCompactionId, "c1");
+    assert.equal(second?.previousSummary, "First summary");
+    assert.equal(second?.firstSummarizedEntryId, "e3");
+    assert.equal(second?.firstKeptEntryId, "e6");
+    assert.equal(second?.fixedLeafEntryId, "c1");
+    assert.deepEqual([...second!.messagesToSummarize, ...second!.turnPrefixMessages],
+      base.slice(2, 5).map((item) => item.type === "message" ? item.message : null));
+
+    const c2 = { type: "compaction", id: "c2", parentId: "c1", timestamp: new Date().toISOString(),
+      summary: "Second summary", firstKeptEntryId: "e5", tokensBefore: 8_000 } as SessionEntry;
+    const third = computeFixedPreparation([...base, c1, c2], 1);
+    assert.equal(third?.boundaryCompactionId, "c2");
+    assert.equal(third?.firstSummarizedEntryId, "e5");
+    assert.equal(third?.firstKeptEntryId, "e6");
+    assert.deepEqual([...third!.messagesToSummarize, ...third!.turnPrefixMessages],
+      [base[4]!.type === "message" ? base[4]!.message : null]);
+  });
+
+  it("the context hook projects repeated native compaction entries to only the latest S1", () => {
+    const base = branchEntries(1_300);
+    const c1 = { type: "compaction", id: "c1", parentId: "e6", timestamp: new Date().toISOString(),
+      summary: "Old S0", firstKeptEntryId: "e3", tokensBefore: 10_000 } as SessionEntry;
+    const c2 = { type: "compaction", id: "c2", parentId: "c1", timestamp: new Date().toISOString(),
+      summary: "Current S1", firstKeptEntryId: "e5", tokensBefore: 8_000 } as SessionEntry;
+    const harness = createHarness([...base, c1, c2], 12_000);
+    const native = buildSessionContext(harness.entries).messages;
+    assert.deepEqual(native.flatMap((message) => message.role === "compactionSummary" ? [message.summary] : []),
+      ["Current S1", "Old S0"]);
+    const projected = harness.handlers.get("context")!({ type: "context", messages: native } as never,
+      harness.ctx as never) as { messages: AgentMessage[] };
+    assert.deepEqual(projected.messages.flatMap((message) => message.role === "compactionSummary" ? [message.summary] : []),
+      ["Current S1"]);
+    assert.deepEqual(projected.messages.filter((message) => message.role !== "compactionSummary"),
+      native.filter((message) => message.role !== "compactionSummary"));
   });
 
   it("reports a prepare failure, clears the candidate, and retries on the next request", async () => {

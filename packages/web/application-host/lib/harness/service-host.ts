@@ -820,6 +820,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   // read-only method allowlist, and history reads stop at the frozen leaf.
   const auxiliaryActors = new Map<string, {
     leafEntryId: string;
+    parentWorkerId: string;
     sessionId: string;
     authorityInstanceId: string;
     workerGeneration: number;
@@ -831,10 +832,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     leafEntryId: string,
   ): void => {
     const entry = sessions.get(parent.sessionId);
-    if (!entry || !hasActor(parent)) return;
+    if (!entry || entry.actor.workerId !== parent.workerId || !hasActor(parent)) {
+      throw new HarnessServiceError("unavailable", "The compaction parent session is no longer registered");
+    }
     auxiliaryActors.set(workerId, {
       authorityInstanceId: parent.authorityInstanceId,
       leafEntryId,
+      parentWorkerId: parent.workerId,
       sessionId: parent.sessionId,
       workerGeneration: parent.workerGeneration,
     });
@@ -846,7 +850,11 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const auxiliaryActor = (identity: HarnessActorIdentity) => {
     const aux = auxiliaryActors.get(identity.workerId);
+    const parent = sessions.get(identity.sessionId)?.actor;
     return aux
+      && parent?.workerId === aux.parentWorkerId
+      && parent.authorityInstanceId === aux.authorityInstanceId
+      && parent.workerGeneration === aux.workerGeneration
       && aux.sessionId === identity.sessionId
       && aux.authorityInstanceId === identity.authorityInstanceId
       && aux.workerGeneration === identity.workerGeneration
@@ -902,10 +910,16 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       throw new HarnessServiceError("unavailable", "The history source identity did not match the session");
     }
     const leafIndex = source.entries.findIndex((entry) => entry.id === aux.leafEntryId);
-    // Entries appended after the task froze (N) are not part of the material;
-    // bound the read at the fixed leaf. A missing leaf means the branch moved;
-    // serve the current branch and disclose the bound honestly.
-    const entries = leafIndex >= 0 ? source.entries.slice(0, leafIndex + 1) : source.entries;
+    // Entries appended after the task froze (N) are not part of the material.
+    // A missing leaf means the active branch no longer proves the frozen source;
+    // serving it would leak a later branch or N into the compaction worker.
+    if (leafIndex < 0) {
+      throw new HarnessServiceError(
+        "unavailable",
+        `The frozen history leaf is no longer available on the active branch: ${aux.leafEntryId}`,
+      );
+    }
+    const entries = source.entries.slice(0, leafIndex + 1);
     let page: ReturnType<typeof readHistoryPage>;
     try {
       page = readHistoryPage(entries, params);
@@ -917,7 +931,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       details: {
         ...page.details,
         boundEntry: aux.leafEntryId,
-        boundFound: leafIndex >= 0,
+        boundFound: true,
         scope: "frozen-branch",
       },
     };

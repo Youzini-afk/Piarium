@@ -19,13 +19,16 @@ export type CompactionModelSpec = JsonValue;
  *
  * - `summarizedMessages` + `turnPrefixMessages` are the replaced range (A),
  *   in original role/order with tool-call/result pairing preserved.
- * - `keptMessages` is the retained recent original (B) ending at
- *   `fixedLeafEntryId`; read-only context, never re-delivered by the worker.
+ * - `keptMessages` is the retained recent original (B) when it fits. Otherwise
+ *   `keptExcerptEntries` is a sourced, explicitly partial view of B; the full
+ *   B remains in the parent history and can be read by entry id.
  * - `previousSummary` is the prior summary (S0) when present.
  */
 export interface CompactionTaskSpec {
   /** Owning session id; must equal the requesting actor's session. */
   sessionId: string;
+  /** Resolved parent trust, including a one-session grant not saved on disk. */
+  projectTrusted: boolean;
   /** Entry id of the compaction bounding the summarized range, or null. */
   boundaryCompactionId: string | null;
   /** First entry covered by the summary, or null. */
@@ -38,19 +41,16 @@ export interface CompactionTaskSpec {
   fixedLeafEntryId: string;
   /** The cut lands inside an in-progress turn. */
   isSplitTurn: boolean;
-  /**
-   * When the frozen material did not fit the worker's own window, the oldest
-   * summarized entries up to and including this entry id were omitted from
-   * `summarizedMessages`. They remain readable through `compaction.history`
-   * inside the frozen branch; the worker must read them before summarizing.
-   */
-  elidedSummarizedThroughEntryId?: string;
   /** Serialized Pi AgentMessage list being replaced (A body). */
   summarizedMessages: JsonValue[];
   /** Split-turn prefix messages; part of the replaced range, kept verbatim tail. */
   turnPrefixMessages: JsonValue[];
   /** Serialized Pi AgentMessage list retained verbatim (B). */
   keptMessages: JsonValue[];
+  /** Partial B references, each attributed to its original entry and role. */
+  keptExcerptEntries?: { entryId: string; role: string; excerpt: string; truncated: boolean }[];
+  /** Last B entry wholly absent from the excerpts; from firstKeptEntryId. */
+  omittedKeptThroughEntryId?: string;
   /** Prior summary text (S0). */
   previousSummary?: string;
   /** Session's resolved model at freeze time. */
@@ -140,9 +140,21 @@ const readMessageList = (record: Record<string, unknown>, key: string): JsonValu
   return value as JsonValue[];
 };
 
+const readExcerptEntries = (value: unknown): NonNullable<CompactionTaskSpec["keptExcerptEntries"]> => {
+  if (!Array.isArray(value)) throw new Error("compaction task keptExcerptEntries must be an array");
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.excerpt !== "string" || typeof item.truncated !== "boolean") {
+      throw new Error("compaction task keptExcerptEntries requires an excerpt and truncation state");
+    }
+    return { entryId: readString(item, "entryId"), role: readString(item, "role"),
+      excerpt: item.excerpt, truncated: item.truncated };
+  });
+};
+
 /** Runtime validation for the worker-facing task spec (defense at the seam). */
 export function readCompactionTaskSpec(value: unknown): CompactionTaskSpec {
   if (!isRecord(value)) throw new Error("compaction task params must be an object");
+  if (typeof value.projectTrusted !== "boolean") throw new Error("compaction task requires projectTrusted");
   const options = value.options;
   if (!isRecord(options)) throw new Error("compaction task requires options");
   const maxTokens = options.maxTokens;
@@ -152,18 +164,22 @@ export function readCompactionTaskSpec(value: unknown): CompactionTaskSpec {
   if (!isRecord(value.model)) throw new Error("compaction task requires a model spec");
   return {
     sessionId: readString(value, "sessionId"),
+    projectTrusted: value.projectTrusted,
     boundaryCompactionId: readNullableString(value, "boundaryCompactionId"),
     firstSummarizedEntryId: readNullableString(value, "firstSummarizedEntryId"),
     lastSummarizedEntryId: readString(value, "lastSummarizedEntryId"),
     firstKeptEntryId: readString(value, "firstKeptEntryId"),
     fixedLeafEntryId: readString(value, "fixedLeafEntryId"),
     isSplitTurn: value.isSplitTurn === true,
-    ...(value.elidedSummarizedThroughEntryId === undefined
-      ? {}
-      : { elidedSummarizedThroughEntryId: readString(value, "elidedSummarizedThroughEntryId") }),
     summarizedMessages: readMessageList(value, "summarizedMessages"),
     turnPrefixMessages: readMessageList(value, "turnPrefixMessages"),
     keptMessages: readMessageList(value, "keptMessages"),
+    ...(value.keptExcerptEntries === undefined
+      ? {}
+      : { keptExcerptEntries: readExcerptEntries(value.keptExcerptEntries) }),
+    ...(value.omittedKeptThroughEntryId === undefined
+      ? {}
+      : { omittedKeptThroughEntryId: readString(value, "omittedKeptThroughEntryId") }),
     ...(value.previousSummary === undefined
       ? {}
       : { previousSummary: readString(value, "previousSummary") }),

@@ -25,20 +25,24 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 
 - 专用压缩 worker：broker 经 `#spawnAuxiliaryWorker("compaction", cwd)` 派生 pi-host 子进程（新 `RuntimeWorkerRole`
   `"compaction"`），`pinSession` 到父会话承载事件身份；不注册为会话 worker、不进父会话请求队列，父退出即回收，
-  其 `worker.exit` 不被解释为会话退出（`role === "session"` 判定）。取消 = 进程终止；迟到结果由父侧身份/世代
-  复核丢弃，不重新提交。
+  其 `worker.exit` 不被解释为会话退出（`role === "session"` 判定）。启动/注册之后复核父进程仍存活；取消经队列外
+  shutdown 中止 Agent/查询并等待清理；Host 在 actor 撤销或进程退出时中止在途查询。迟到结果由父侧身份/世代复核丢弃。
 - 固定材料契约：父会话 `context-preparation.ts` 在准备时冻结 `CompactionTaskSpec`（S0 旧摘要、A 被替换区间、
-  B 保留原文、边界/分支叶/世代与序列化模型+执行选项），B 逐字随任务下发并经边界 marker 与 A 区分；材料过大时
-  显式分页——A 最旧前缀移出并以 `elidedSummarizedThroughEntryId` 披露未读范围，worker 须用 history 工具回读，
-  不静默裁剪。模型配置漂移、分支切换、fresh/再次压缩、手动重点变化均按真实来源复核使候选失效。
+  B 保留原文、边界/分支叶/世代与序列化模型+执行选项）。S0/A 完整下发；B 空间不足时使用带 entryId/原角色的
+  参考摘录与明确未读范围。A 过大则向前移动合法切点，其余原文保留，不使用移出 A 再超窗回读的路径。
+  模型配置漂移、分支切换、fresh/再次压缩、手动重点变化均按真实来源复核使候选失效。
 - worker 内真实 `Agent` loop（`compaction-worker.ts`）：`ModelRuntime.create` 复用同一 agentDir 的
-  auth.json/models.json 凭据与 `ProviderConfigurationManager`（project trust 门禁一致），冻结模型与
+  auth.json/models.json 凭据，经 `createAgentSessionServices` 注册 Pi 静态扩展 provider 后应用
+  `ProviderConfigurationManager`；project trust 取父会话已解析的快照，包含未持久化的单次授权。冻结模型与
   reasoning/maxTokens/transport/thinkingBudgets；三件套只读查询工具（history/output/records）经
-  `harness.request` 走真实 broker→Host 通路。空摘要、error/aborted/length 终态均拒绝。
+  `harness.request` 走真实 broker→Host 通路。Pi 消息转换确保 S0/custom 消息实际送达；每次请求检查新增查询后的容量，
+  成功任务累计所有模型轮次用量。`streamSimple` 保留 provider 的推理选项转换；模型执行配置漂移在请求前拒绝。
+  空摘要、error/aborted/length 及未完成工具调用均拒绝。
 - Host 侧辅助 actor：`registerAuxiliaryActor`/`dropAuxiliaryActor` 以 workerId 键控，
   `resolveActor` 只授予 `COMPACTION_QUERY_METHODS` + `COMPACTION_QUERY_CAPABILITIES`；
   `compaction.history` 经 `previewSessionEntries`（catalog worker 直读会话文件，不排队父 worker）并按冻结叶
-  截断、如实披露 boundFound。`harness.respond` 按 `identity.workerId` 路由回具体 worker。
+  截断；找不到冻结叶时返回 unavailable。线程列表不推进父观察游标，records 支持报告/转录与运行修订，实时结果带
+  observedAt。`harness.respond` 按 `identity.workerId` 路由回具体 worker。
 - 等待与提交：请求前容量核算不变；容量不足且在飞时等待同一候选不另起，`compaction.run` 以 `timeoutMs: 0`
   免除桥/路由默认时限；提交仍走 Pi 原生 `appendCompaction`，原历史保留、半成品不提交。手动压缩与自动共用同一
   worker 机制（`session_before_compact` manual 分支同步执行同一 spec），旧单次摘要调用与弱化更新提示已删除
@@ -49,8 +53,17 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 invalid-summary）与 D-284 admission 经真实 in-process worker Agent 验证：B 材料在 marker 下方逐字到达、容量等待
 同一在飞任务、取消/错误结果不提交、write 工具调用不执行；broker 套件 85、web harness 聚焦 33 项通过。
 
-未实测：真实付费模型驱动下的完整往返与摘要质量、子进程派生在实际桌面包的纵切（测试为 in-process 等价路径）、
-跨平台。不声称语义质量或缓存/速度收益。
+独立验收修复：上述旧摘要过滤、手动旁路、A 分页与 worker 容量、查询游标副作用、来源/进程竞态均已修正。
+新增本机真实 broker→pi-host 子进程→可控 HTTP 模型→Host 查询响应的往返验证
+（`packages/runtime-broker/test/compaction-process.test.ts`），覆盖实际进程取消与父 owner 消失后的回收；
+相关材料、worker、查询与 router 行为检查见同模块测试。
+
+配置边界：内置 provider、models 配置与 Pi 扩展初始化时注册的 provider 已接通；父业务会话生命周期事件之后
+才建立的私有状态、动态 provider/hook 闭包不会跨进程迁移。依赖这类状态的扩展仍需可独立加载的 provider 注册；
+不可用时明确失败并保留主历史，不能将该边界描述成只是尚未实测。
+
+未实测：真实付费模型驱动下的摘要质量/延迟、实际桌面发行包纵切与跨平台；本机源码子进程已验证，
+不再以进程内替代测试代表该证据。不声称语义质量或缓存/速度收益。
 
 **D-313 / 阶段 B：Varin 全面更名（2026-09-21），产品源码与仓库切换完成；首次新品牌发行待发布。**
 设计见 [varin-rebrand-design.md](varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。

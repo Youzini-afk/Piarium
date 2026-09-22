@@ -3427,6 +3427,7 @@ export class SessionHost {
             {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
+                  getProjectTrusted: () => settingsManager.isProjectTrusted(),
                   inject: createRequestContextInjector(hostServicesBridge),
                   runCompactionTask: (spec, signal) =>
                     hostServicesBridge.request<"compaction.run">("compaction.run", spec, {

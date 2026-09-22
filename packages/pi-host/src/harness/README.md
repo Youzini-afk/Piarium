@@ -102,6 +102,13 @@ const customTools = selectHarnessTools(settings, {
   Compaction refreshes observations against retained raw-history receipts. History
   grows without replacing old facts; native tool/message pairing and continuation
   remain Pi's responsibility. The retired continuous keeper/takeover path is absent.
+  Both manual and automatic preparation use an internal broker-owned compaction
+  process. It sees the complete replaced history and either the retained originals
+  or explicitly attributed reference excerpts. Its Pi Agent loop can query frozen
+  history, output handles and related records without consuming the parent cursor.
+  Every worker request includes query results in its capacity check. Active input
+  keeps only the newest compaction summary; superseded summaries remain in the
+  native journal. Cancellation retires both the worker and its Host queries.
 
 ## HostServicesBridge
 

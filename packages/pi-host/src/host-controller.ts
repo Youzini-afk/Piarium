@@ -585,7 +585,6 @@ export class HostController {
   readonly #agentDir: string;
   readonly #packageRoot: string | undefined;
   readonly #packageAuthority: PackageAuthorityHost | undefined;
-  readonly #projectTrustOverride: boolean | undefined;
   readonly #runtimeSource: RuntimeSourceKind;
   readonly #sessionHost: SessionHost;
   readonly #transport: HostTransport;
@@ -599,7 +598,6 @@ export class HostController {
   constructor(options: HostControllerOptions) {
     this.#agentDir = resolve(options.agentDir ?? getAgentDir());
     this.#packageRoot = options.packageRoot ? resolve(options.packageRoot) : undefined;
-    this.#projectTrustOverride = options.projectTrustOverride;
     this.#runtimeSource = options.runtimeSource ?? (this.#packageRoot ? "custom" : "bundled");
     this.#transport = options.transport;
     this.#workerRole = options.workerRole ?? "session";
@@ -690,7 +688,8 @@ export class HostController {
             // The queued dispatcher remains authoritative for readiness and params.
           }
         }
-        if (envelope.kind === "request" && OUT_OF_BAND_METHODS.has(envelope.method)) {
+        if (envelope.kind === "request" && (OUT_OF_BAND_METHODS.has(envelope.method)
+          || (this.#workerRole === "compaction" && envelope.method === "host.shutdown"))) {
           void this.#handleEnvelope(envelope).catch((error) => this.#handleFatalError(error));
           return;
         }
@@ -1492,9 +1491,6 @@ export class HostController {
         this.#compactionWorker ??= new CompactionWorkerRuntime({
           agentDir: this.#agentDir,
           emit: (event, data) => this.emit(event, data),
-          ...(this.#projectTrustOverride === undefined
-            ? {}
-            : { projectTrustOverride: this.#projectTrustOverride }),
         });
         return this.#compactionWorker.run(request.params);
       default:
@@ -1504,6 +1500,7 @@ export class HostController {
 
   async #dispose(closeTransport: boolean): Promise<void> {
     if (this.#disposed) return;
+    this.#compactionWorker?.abort();
     this.#disposed = true;
     await this.#sessionHost.dispose();
     if (closeTransport) this.#transport.close();

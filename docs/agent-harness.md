@@ -1323,13 +1323,15 @@ session→auxiliary 映射回收。worker 内跑真实 `Agent` loop，`ModelRunt
 首次与更新共用同一份完整职责提示（设计 §6）；最近 user 可能是材料或补充，不机械钉住全文；
 有效要求、纠正与必要短引用由压缩 Agent 结合上下文判断；不增加强制调查轮次、摘要审查模型或另一套记忆库。
 
-任务材料为结构化 S0/A/B（不把对话重包装成一条巨大 user 字符串），B 逐字下发并以边界 marker 与 A 区分；
-材料超窗时 A 的最旧前缀按完整 summarized-entry span 移出并以 `elidedSummarizedThroughEntryId` 披露未读范围，
-由 worker 用查询工具回读，不静默裁剪。
+任务材料为结构化 S0/A/B（不把对话重包装成一条巨大 user 字符串），Pi 消息转换保留旧摘要与 custom 消息。
+待替换的 S0/A 始终完整；B 能放下时逐字下发，否则使用带 entryId/原角色的参考摘录，并明确未读范围。
+A 过大则向前移动合法切点，把尚未总结的部分留在父会话；不先删除 A 再要求模型超窗读回。
+初始材料按该模型摘要输出预算给查询留出余量，每次 worker 请求重新计入查询结果和最终输出预留。
 
 worker 持有三件只读查询工具（`history`/`output`/`records`），请求经 `harness.request` 走真实
 broker→router→service host 通路；辅助 actor 只授予压缩查询方法与能力。`compaction.history` 经 catalog
-worker 直读会话文件并按冻结叶截断，不排队父 worker、不消费父会话游标或 7G 收据。历史中 shell/write/spawn
+worker 直读会话文件并按冻结叶截断；冻结叶不可用时明确失败。线程列表使用完整只读视图，报告可按 Run/结果修订读取，
+实时记录附观察时间；不排队父 worker、不消费父会话游标或 7G 收据。历史中 shell/write/spawn
 调用是材料不重执行；worker 内不递归启动压缩、业务派发或 follow-up。
 
 历史中的工具调用/结果配对、角色与顺序在材料中保留；模型若返回 tool call 由真实 loop 按工具存在性处理，

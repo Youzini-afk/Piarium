@@ -811,6 +811,7 @@ export class PiRuntimeBroker {
     } = {},
   ): Promise<CompactionRunResult> {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+    options.signal?.throwIfAborted();
     const parent = this.#workerForSession(sessionId);
     const cwd = this.#workerCwds.get(parent) ?? this.#options.cwd ?? parent.handshake.runtime.agentDir;
     const worker = await this.#spawnAuxiliaryWorker("compaction", cwd);
@@ -821,15 +822,24 @@ export class PiRuntimeBroker {
       this.#sessionAuxiliaries.set(sessionId, auxiliaries);
     }
     auxiliaries.add(worker);
-    let dropped = false;
-    const drop = async (): Promise<void> => {
-      if (dropped) return;
-      dropped = true;
+    let dropping: Promise<void> | undefined;
+    const drop = (): Promise<void> => dropping ??= (async () => {
       const owned = this.#sessionAuxiliaries.get(sessionId);
       owned?.delete(worker);
       if (owned?.size === 0) this.#sessionAuxiliaries.delete(sessionId);
-      await options.dropWorker?.(worker.id);
-      await this.#removeWorker(worker);
+      try {
+        await options.dropWorker?.(worker.id);
+      } finally {
+        await this.#removeWorker(worker);
+      }
+    })();
+    const assertOwner = (): void => {
+      options.signal?.throwIfAborted();
+      if (this.#disposed || parent.disposing || !this.#clients.has(parent)
+        || !this.#clients.has(worker)
+        || (this.#sessions.get(sessionId) ?? this.#workspaceSessions.get(sessionId)) !== parent) {
+        throw new PiRuntimeBrokerError("session_context_unavailable", "The compaction owner exited or changed during worker startup");
+      }
     };
     const onAbort = (): void => {
       void drop().catch((error) => {
@@ -843,9 +853,10 @@ export class PiRuntimeBroker {
       });
     };
     try {
+      assertOwner();
       await options.registerWorker?.(worker.id);
       options.signal?.addEventListener("abort", onAbort, { once: true });
-      options.signal?.throwIfAborted();
+      assertOwner();
       return await worker.request("compaction.run", spec);
     } finally {
       options.signal?.removeEventListener("abort", onAbort);

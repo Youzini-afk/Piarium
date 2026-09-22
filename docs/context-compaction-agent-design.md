@@ -17,12 +17,13 @@ D-284 交付了固定范围后台准备、近期原文保留、请求前容量�
 - `packages/pi-host/src/harness/context-preparation.ts` 冻结 `CompactionTaskSpec`（S0/A/B/边界/模型配置），
   经 `compaction.run` 桥接请求交给 broker 派生的专用 `compaction` worker；首次与后续压缩共用同一完整提示。
 - 原文切点按 token 预算与 Pi 安全交互边界决定，不是固定最近几轮，也没有“最近 user 必须原文保留”的规则。
-- 保留原文 B 逐字随任务下发并明确与 A 的分界；材料超窗时 A 的最旧前缀按完整 span 分页移出并披露
-  `elidedSummarizedThroughEntryId`，worker 经 `compaction.history` 回读未读范围。
+- S0 与待替换的 A 完整进入 worker；B 能放下时逐字下发，否则提供带 entryId/原角色的参考摘录与未读范围。
+  A 本身过大时只选择更早的合法切点，其余历史继续保留在父会话；不能移走 A 后假设查询能扩充窗口。
 - `context-request-boundary.ts` 在每次真实请求前检查容量；不足时采用或等待同一候选，再从最新 Pi 历史构造请求。
   自动压缩开启时，代码以 `inputTokens + max(reserveTokens, request.maxTokens) > contextWindow` 判断需要空间。
   这里的输入是估算并结合实际 usage 校正，不是服务端精确 token 计数。
 - Pi SessionManager 仍保存原始历史；候选生成不改写会话，实际提交才改变下一请求使用的摘要与原文范围。
+- worker 使用 Pi 的消息转换保留旧摘要与 custom 消息，每次模型请求重新核算查询结果与输出预留；成功任务累计各轮用量。
 
 ## 2. 产品行为
 
@@ -80,6 +81,9 @@ Host/worker 重启后从 Pi 原历史重新准备，已提交摘要继续由原�
 
 默认沿所属会话当前模型与已解析的运行配置，不自动换廉价模型或快速决策模型；生成式理解与摘要仍是本任务的核心能力。
 凭据通过既有可信 runtime 获取，不放进 prompt 或产物。thinking/effort 与 provider 参数沿实际能力继承，不默认降为 minimal。
+当前 worker 通过 Pi 原生 services 加载静态扩展 provider，使用父会话冻结的 project trust（包含单次授权）与
+`streamSimple` 推理转换；不创建业务 AgentSession。父业务生命周期事件建立的私有状态/动态 hook 闭包不迁移，
+依赖它们的扩展须提供可独立加载的 provider 注册；具体边界在 status 中单列。
 
 业务线程的并发名额不能成为父会话等摘要时的循环依赖：即使普通工作线程名额已满，压缩任务也要有可推进的既有后台推理路径。
 这不意味着无限旁路资源管理；复用现有 provider/机器准入并明确内部用途。可控制的调度中前台请求优先，单槽后端上的准备可以排队，

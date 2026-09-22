@@ -308,8 +308,8 @@ recovery journal already uses, and mounts in-process extension hooks for tail-ap
 post-tool feedback, and fixed-candidate context preparation (D-284/D-287). On every model request —
 including tool-loop continuations — the context hook compares the projected request size against a
 configurable waterline of the usable window (context window minus Pi's reserve). Once crossed, the
-extension fixes a branch- and model-bound preparation range and runs one derived summary request in
-the background over the same ModelRuntime with the actual stable request prefix and no tool executor.
+extension fixes a branch- and model-bound preparation range and starts an internal compaction worker
+with the same resolved model and Pi provider/auth configuration. Its Agent loop has scoped read-only queries.
 The foreground turn keeps running. When a later request needs space, Pi commits the validated candidate at
 a safe paired boundary (or waits for the same candidate), persists the compaction entry, and reports which
 original observations remain in the retained context. A `history` tool reads
@@ -332,14 +332,15 @@ active context; Zone 2 then emits changed material instead of rebuilding a dashb
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
-D-314 accepts a subsequent [compaction Agent design](context-compaction-agent-design.md), not yet implemented.
-An internal child worker will reuse the Pi loop, provider/auth and process lifecycle to read scoped historical
-messages, tool output and task records when needed. The owning session will keep the fixed source boundary
-and sole commit authority. Retained recent messages become reference material for semantic understanding;
-user intent is extracted rather than mechanically pinning the last user message. Parent request admission
-and waiting continue to use D-284; the auxiliary worker also needs capacity for queries and final output,
-without recursively compacting itself or depending on a business-thread slot held by its waiting parent.
-Current production still performs one summary call with no tool executor.
+D-314 implements the [compaction Agent design](context-compaction-agent-design.md). The broker owns its
+internal child process; query responses route to that worker ID without blocking behind the parent session.
+The parent owns the fixed source and native compaction commit. Replaced material is complete; retained
+recent messages are supplied verbatim or as explicitly sourced excerpts when space is limited. Both manual
+and automatic compaction use this path. Pi message conversion preserves the prior summary and custom
+history, and the active-context projection excludes superseded summaries while preserving the native journal.
+Parent request admission still uses D-284; the auxiliary loop checks query results and final-output capacity
+on every request. It never recursively compacts or waits for a business-thread slot held by its parent.
+Frozen-history queries reject missing boundaries; record reads do not advance the parent's observation cursor.
 
 D-301's 7G request preparation is implemented at D-305. It runs before every actual Agent model request:
 new environment facts become replayable
@@ -473,7 +474,7 @@ as defaults after focused correctness checks. Replay sets and external tester re
 and optimization; they are not mandatory activation gates. Existing explicit user choices remain valid.
 D-284 implements that policy for context: a prepared candidate is committed only while its epoch,
 branch, model, compaction boundary, and first-kept entry still match the live session; anything stale
-is discarded and that compaction falls back to Pi's synchronous preparation or fails honestly without
+is discarded and compaction starts the same worker mechanism from a new fixed preparation or fails honestly without
 truncating history. Host restart never promotes an empty in-memory candidate into durable evidence.
 The capability matrix records the remaining implementation boundaries.
 

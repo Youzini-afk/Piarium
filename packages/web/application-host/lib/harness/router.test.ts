@@ -30,6 +30,34 @@ const harnessEvent = (method: string, params: unknown, data: Record<string, unkn
 });
 
 describe("harness router", () => {
+  it("cancels a retired worker's in-flight query after actor registration is gone", async () => {
+    let registered = true;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    let querySignal: AbortSignal | undefined;
+    const router = createHarnessRouter({
+      respond: async () => undefined,
+      resolveActor: async () => registered ? resolvedActor(["read.output"]) : null,
+    });
+    router.register("output.read", { handle: async (_params, ctx) => {
+      querySignal = ctx.signal;
+      entered();
+      await new Promise<void>((_resolve, reject) => {
+        ctx.signal.addEventListener("abort", () => reject(new DOMException("retired", "AbortError")), { once: true });
+      });
+      throw new Error("query must be cancelled");
+    } });
+    const pending = router.processEvent(harnessEvent("output.read", { handle: "out_1" }));
+    await started;
+    registered = false;
+    await router.processEvent({ kind: "worker.exit", workerId: "other-worker" });
+    expect(querySignal?.aborted).toBe(false);
+    await router.processEvent({ kind: "worker.exit", workerId: ACTOR.workerId });
+    await pending;
+    expect(querySignal?.aborted).toBe(true);
+    router.dispose();
+  });
+
   it("dispatches with a Host-resolved actor and responds to its trusted session", async () => {
     const responses: Array<{ sessionId: string; requestId: string; ok: boolean; result?: unknown }> = [];
     const router = createHarnessRouter({

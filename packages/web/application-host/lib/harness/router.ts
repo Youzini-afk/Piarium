@@ -65,6 +65,7 @@ export interface HarnessRouterOptions {
 
 interface RouterHostEvent {
   actor?: HarnessActorIdentity;
+  workerId?: string;
   envelope?: {
     data?: unknown;
     event?: string;
@@ -251,6 +252,14 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     return true;
   };
 
+  // Worker retirement is authoritative even after its actor registration has
+  // been removed. Query cancellation must not depend on resolving that actor.
+  const cancelWorker = (workerId: string): void => {
+    for (const pending of inflight.values()) {
+      if (pending.identity.workerId === workerId) pending.controller.abort();
+    }
+  };
+
   const requestKey = (identity: HarnessActorIdentity, requestId: string): string => [
     identity.authorityInstanceId,
     identity.sessionId,
@@ -292,6 +301,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
 
   const processEvent = async (event: RouterHostEvent): Promise<void> => {
     if (disposed) return;
+    if (event.kind === "worker.exit" && event.workerId) {
+      cancelWorker(event.workerId);
+      return;
+    }
     if (event.kind !== "host" || event.envelope?.kind !== "event") return;
     if (event.envelope.event === "harness.cancel") {
       await processCancel(event);
@@ -466,5 +479,5 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     services.clear();
   };
 
-  return { register, processEvent, dispose };
+  return { register, processEvent, cancelWorker, dispose };
 };

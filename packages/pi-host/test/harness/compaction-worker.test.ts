@@ -1,0 +1,256 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { Context } from "@earendil-works/pi-ai";
+import type { CompactionTaskSpec, JsonValue } from "@varin/protocol";
+import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
+
+const makeSpec = (
+  model: ReturnType<ReturnType<typeof registerFauxProvider>["getModel"]>,
+  overrides: Partial<CompactionTaskSpec> = {},
+): CompactionTaskSpec => ({
+  sessionId: "worker-session",
+  projectTrusted: false,
+  boundaryCompactionId: null,
+  firstSummarizedEntryId: "entry-1",
+  lastSummarizedEntryId: "entry-2",
+  firstKeptEntryId: "entry-3",
+  fixedLeafEntryId: "entry-4",
+  isSplitTurn: false,
+  summarizedMessages: [{ role: "user", content: "older task", timestamp: Date.now() }],
+  turnPrefixMessages: [],
+  keptMessages: [{ role: "user", content: "retained task", timestamp: Date.now() }],
+  model: JSON.parse(JSON.stringify(model)) as JsonValue,
+  options: { maxTokens: 256, cacheRetention: "none" },
+  ...overrides,
+});
+
+const createWorker = async (
+  faux: ReturnType<typeof registerFauxProvider>,
+  onRequest?: (requestId: string, worker: CompactionWorkerRuntime) => void,
+  options: { configureModelRuntime?: boolean } = {},
+): Promise<{ worker: CompactionWorkerRuntime; root: string }> => {
+  const root = await mkdtemp(join(tmpdir(), "varin-compaction-worker-"));
+  const model = faux.getModel();
+  const holder: { worker?: CompactionWorkerRuntime } = {};
+  const worker = new CompactionWorkerRuntime({
+    agentDir: root,
+    emit: (event, data) => {
+      if (event === "harness.request" && holder.worker) {
+        onRequest?.((data as { requestId: string }).requestId, holder.worker);
+      }
+    },
+    ...(options.configureModelRuntime === false ? {} : {
+      configureModelRuntime: async (runtime: ModelRuntime) => {
+        runtime.registerProvider(model.provider, {
+          api: model.api,
+          baseUrl: model.baseUrl,
+          models: [{
+            api: model.api,
+            baseUrl: model.baseUrl,
+            contextWindow: model.contextWindow,
+            cost: model.cost,
+            id: model.id,
+            input: model.input,
+            maxTokens: model.maxTokens,
+            name: model.name,
+            reasoning: model.reasoning,
+          }],
+        });
+        await runtime.setRuntimeApiKey(model.provider, "faux-key");
+      },
+    }),
+  });
+  holder.worker = worker;
+  return { worker, root };
+};
+
+describe("compaction worker", () => {
+  it("converts S0 and custom history messages before the provider request", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    const requests: Context[] = [];
+    faux.setResponses([(context) => {
+      requests.push({
+        ...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
+        messages: structuredClone(context.messages),
+        ...(context.tools === undefined ? {} : {
+          tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+        }),
+      });
+      return fauxAssistantMessage("summary");
+    }]);
+    const { worker, root } = await createWorker(faux);
+    try {
+      const result = await worker.run(makeSpec(faux.getModel(), {
+        previousSummary: "S0-KEEP-ME",
+        summarizedMessages: [{
+          role: "custom",
+          customType: "note",
+          content: "CUSTOM-HISTORY-KEEP-ME",
+          display: false,
+          timestamp: Date.now(),
+        } as unknown as JsonValue],
+      }));
+      assert.equal(result.summary, "summary");
+      assert.equal(requests.length, 1);
+      const text = JSON.stringify(requests[0]!.messages);
+      assert.match(text, /S0-KEEP-ME/);
+      assert.match(text, /CUSTOM-HISTORY-KEEP-ME/);
+      assert.match(text, /conversation history before this point was compacted/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("refuses a provider request after a query makes the full context exceed capacity", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 4_000, maxTokens: 512 }] });
+    const requests: Context[] = [];
+    faux.setResponses([
+      (context) => {
+        requests.push({
+          ...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
+          messages: structuredClone(context.messages),
+          ...(context.tools === undefined ? {} : {
+            tools: context.tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+          }),
+        });
+        return fauxAssistantMessage([fauxToolCall("history", { query: "missing" })]);
+      },
+      () => fauxAssistantMessage("must not be sent"),
+    ]);
+    const { worker, root } = await createWorker(faux, (requestId, current) => {
+      current.respondHarness("worker-session", requestId, {
+        ok: true,
+        result: {
+          content: [{ type: "text", text: "QUERY-RESULT " + "large ".repeat(2_000) }],
+          details: {},
+        },
+      });
+    });
+    try {
+      await assert.rejects(
+        worker.run(makeSpec(faux.getModel())),
+        /context window|history was retained/i,
+      );
+      assert.equal(requests.length, 1, "the over-capacity continuation must not reach the provider");
+      assert.equal(faux.state.callCount, 1, "capacity admission happens before the second provider call");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("returns usage accumulated across every assistant provider request", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    faux.setResponses([
+      () => fauxAssistantMessage([fauxToolCall("history", { query: "known" })]),
+      () => fauxAssistantMessage("final summary with enough output to measure"),
+    ]);
+    const { worker, root } = await createWorker(faux, (requestId, current) => {
+      current.respondHarness("worker-session", requestId, {
+        ok: true,
+        result: { content: [{ type: "text", text: "small result" }], details: {} },
+      });
+    });
+    try {
+      const result = await worker.run(makeSpec(faux.getModel()));
+      assert.ok(result.usage && typeof result.usage === "object");
+      const usage = result.usage as { output?: number };
+      // The final response alone is shorter than the first tool-call response
+      // plus the final response. This catches returning only lastAssistant.usage.
+      assert.ok((usage.output ?? 0) > Math.ceil("final summary with enough output to measure".length / 4));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("rejects a non-final stop reason even when text is present", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    faux.setResponses([() => fauxAssistantMessage("partial summary", { stopReason: "toolUse" })]);
+    const { worker, root } = await createWorker(faux);
+    try {
+      await assert.rejects(worker.run(makeSpec(faux.getModel())), /did not complete: toolUse/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("loads a static Pi extension provider before running the worker", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    faux.setResponses([() => fauxAssistantMessage("extension summary")]);
+    const model = faux.getModel();
+    const { worker, root } = await createWorker(faux, undefined, { configureModelRuntime: false });
+    try {
+      await mkdir(join(root, "extensions"), { recursive: true });
+      await writeFile(join(root, "extensions", "worker-provider.ts"), `export default function (pi: any) {
+        pi.registerProvider("worker-extension", {
+          api: "faux",
+          apiKey: "faux-key",
+          baseUrl: ${JSON.stringify(model.baseUrl)},
+          models: [${JSON.stringify({
+            api: model.api,
+            baseUrl: model.baseUrl,
+            contextWindow: model.contextWindow,
+            cost: model.cost,
+            id: model.id,
+            input: model.input,
+            maxTokens: model.maxTokens,
+            name: model.name,
+            reasoning: model.reasoning,
+          })}],
+        });
+      }
+      `, "utf8");
+      const extensionModel = { ...model, provider: "worker-extension" };
+      const result = await worker.run(makeSpec(extensionModel));
+      assert.equal(result.summary, "extension summary");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("does not block a usable model on an unrelated extension load error", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    faux.setResponses([() => fauxAssistantMessage("usable despite diagnostic")]);
+    const { worker, root } = await createWorker(faux);
+    try {
+      await mkdir(join(root, "extensions"), { recursive: true });
+      await writeFile(join(root, "extensions", "broken-unrelated.ts"), "export default ???", "utf8");
+      const result = await worker.run(makeSpec(faux.getModel()));
+      assert.equal(result.summary, "usable despite diagnostic");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+
+  it("aborts the agent and in-flight bridge work", async () => {
+    const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 8_000, maxTokens: 512 }] });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    faux.setResponses([async () => {
+      await held;
+      return fauxAssistantMessage("never committed");
+    }]);
+    const { worker, root } = await createWorker(faux);
+    try {
+      const running = worker.run(makeSpec(faux.getModel()));
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      worker.abort();
+      release();
+      await assert.rejects(running, /aborted/i);
+    } finally {
+      release();
+      await rm(root, { recursive: true, force: true });
+      faux.unregister();
+    }
+  });
+});

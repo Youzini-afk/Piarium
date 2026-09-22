@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { activeCompactionMessages } from "./compaction-context.js";
 
 /** A logical model request after Pi's context hooks and convertToLlm. */
 export interface ContextModelRequest {
@@ -150,7 +151,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     const model = session.model;
     if (!model) throw new ContextCapacityError("The session has no model for context preparation");
     const { reasoning: _reasoning, ...inheritedOptions } = latestOptions;
-    const raw = session.sessionManager.buildSessionContext().messages;
+    const raw = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
     const messages = agent.transformContext ? await agent.transformContext(raw, signal) : raw;
     return request(model, {
       systemPrompt: agent.state.systemPrompt,
@@ -204,7 +205,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
           firstKeptEntryId: result.firstKeptEntryId, tokensBefore: before,
         }]);
         const previewTokens = estimateModelInputTokens({ ...next.context,
-          messages: await agent.convertToLlm(preview.messages) });
+          messages: await agent.convertToLlm(activeCompactionMessages(preview.messages)) });
         signal.throwIfAborted();
         if (previewTokens + next.reserveTokens > model.contextWindow
           && previewTokens >= estimateModelInputTokens(next.context)) {
@@ -214,7 +215,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
           before, result.details, true, result.usage);
         const entry = session.sessionManager.getEntry(id);
         if (!entry || entry.type !== "compaction") throw new Error("Pi did not publish the compaction entry");
-        agent.state.messages = session.sessionManager.buildSessionContext().messages;
+        agent.state.messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
         generation += 1;
         budget.clear();
         options.onEvent?.({ type: "entry_appended", entry });
@@ -257,7 +258,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
                 );
                 const entry = session.sessionManager.getEntry(id);
                 if (!entry) throw new Error("Pi did not retain the delivered environment observations");
-                agent.state.messages = session.sessionManager.buildSessionContext().messages;
+                agent.state.messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
                 generation += 1;
                 options.onEvent?.({ type: "entry_appended", entry });
               }
@@ -294,7 +295,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     const update = await prepareNextTurn?.(context, signal);
     if (generation === refreshedGeneration) return update;
     refreshedGeneration = generation;
-    const messages = session.sessionManager.buildSessionContext().messages;
+    const messages = activeCompactionMessages(session.sessionManager.buildSessionContext().messages);
     agent.state.messages = messages;
     return { ...update, context: { ...context.context, ...update?.context, messages } };
   };

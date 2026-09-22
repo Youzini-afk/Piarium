@@ -2929,7 +2929,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     runCompactionTask: (actor, spec, signal) => piRuntimeBroker.runCompactionTask(actor.sessionId, spec, {
       signal,
       registerWorker: (workerId) => harnessServiceHost.registerAuxiliaryActor(actor, workerId, spec.fixedLeafEntryId),
-      dropWorker: (workerId) => harnessServiceHost.dropAuxiliaryActor(workerId),
+      dropWorker: (workerId) => {
+        harnessRouter.cancelWorker(workerId);
+        harnessServiceHost.dropAuxiliaryActor(workerId);
+      },
     }),
     threadContinueRun: (input) => threadRuntime!.continueRun(input),
     threadResumeLost: (workspaceId, parent) => threadRuntime!.resumeLostForParent(workspaceId, parent),

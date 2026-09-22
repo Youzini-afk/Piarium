@@ -50,8 +50,24 @@ const RecordsParams = Type.Object({
     description: "experiments only: read an attempt's collected logs or a named artifact instead of the summary view.",
   })),
   artifactId: Type.Optional(Type.String({ description: "Artifact id for part=artifact." })),
+  what: Type.Optional(Type.Union([
+    Type.Literal("blocks"),
+    Type.Literal("report"),
+    Type.Literal("steps"),
+    Type.Literal("transcript"),
+  ], { description: "threads only: select the status, report, steps, or transcript view." })),
+  runId: Type.Optional(Type.String({ description: "threads only: select a retained execution Run." })),
+  resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "threads only: select a published result revision." })),
   stream: Type.Optional(Type.Union([Type.Literal("stdout"), Type.Literal("stderr")])),
   offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  length: Type.Optional(Type.Integer({ minimum: 1 })),
+  since: Type.Optional(Type.Integer({ minimum: 0 })),
+  entry: Type.Optional(Type.String({ description: "threads/transcript: entry id to read with neighbours." })),
+  before: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+  after: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  query: Type.Optional(Type.String({ description: "threads/transcript: case-insensitive history search." })),
+  path: Type.Optional(Type.String({ description: "threads/transcript: restrict history matches to a path fragment." })),
   maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
@@ -153,14 +169,28 @@ export function createCompactionQueryTools(
       executionMode: "parallel",
       execute: async (_id, params, signal) => {
         try {
-          const { kind, id, part, artifactId, stream, offset, maxBytes } =
+          const { kind, id, part, artifactId, what, runId, resultRevision, stream, offset, length, since, entry, before, after, limit, query, path, maxBytes } =
             params as Record<string, unknown> & { kind: string; id?: string; part?: string; artifactId?: string; stream?: "stdout" | "stderr"; offset?: number; maxBytes?: number };
           let result: unknown;
           switch (kind) {
             case "threads":
               result = id === undefined
-                ? await call("thread.list", {}, signal)
-                : await call("thread.read", { threadId: id, ...(offset === undefined ? {} : { offset }), ...(maxBytes === undefined ? {} : { length: maxBytes }) }, signal);
+                ? await call("thread.list", { full: true }, signal)
+                : await call("thread.read", {
+                    threadId: id,
+                    ...(what === undefined ? {} : { what }),
+                    ...(runId === undefined ? {} : { runId }),
+                    ...(resultRevision === undefined ? {} : { resultRevision }),
+                    ...(since === undefined ? {} : { since }),
+                    ...(offset === undefined ? {} : { offset }),
+                    ...(length === undefined && maxBytes === undefined ? {} : { length: length ?? maxBytes }),
+                    ...(entry === undefined ? {} : { entry }),
+                    ...(before === undefined ? {} : { before }),
+                    ...(after === undefined ? {} : { after }),
+                    ...(limit === undefined ? {} : { limit }),
+                    ...(query === undefined ? {} : { query }),
+                    ...(path === undefined ? {} : { path }),
+                  }, signal);
               break;
             case "experiments":
               if (id === undefined) {
@@ -187,7 +217,11 @@ export function createCompactionQueryTools(
                 : await call("schedule.get", { taskId: id }, signal);
               break;
           }
-          return text(JSON.stringify(result, null, 2));
+          return text(JSON.stringify({
+            observedAt: new Date().toISOString(),
+            source: "live",
+            record: result,
+          }, null, 2));
         } catch (error) {
           return failure(error);
         }
