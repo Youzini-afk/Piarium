@@ -32,7 +32,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置、阶段 W 会话等待与续接。 | 40 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、阶段 C 压缩 Agent、建议/审阅、模型槽位与召回。 | 30 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
-| [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank、阶段 F 快速决策与检索量具。 | 62 |
+| [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank、阶段 F 快速决策、阶段 L Web/科研搜索与检索量具。 | 63 |
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
@@ -353,3 +353,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-312 | 2026-09-21 | 快速决策模型：供应商无关能力、Jev 首个适配、材料价值与探索价值分离、动态渐进检索 | implemented / wired（explore 消费者） | 扩展 D-174–D-193；生成式规划保留，Computer Use 等用途以后接入，不预设性能效果 | fast-decision-model-design；plan F0–F4；harness 6.1/8.5；status；architecture；roadmap | [retrieval](decisions/retrieval.md) |
 | D-313 | 2026-09-21 | Varin 全面更名：自有产品/工程/配置/发行身份一次切换，不留旧名称兼容层 | accepted design / not implemented | 明确当前无用户迁移需求；真实 Pi 依赖、已有成果和历史归属保留；B 优先于 F | varin-rebrand-design；plan B0–B4；harness；status；architecture；roadmap；development | [foundation-governance](decisions/foundation-governance.md) |
 | D-314 | 2026-09-22 | 后台压缩 Agent：独立子进程、语义保留、按需查证与容量等待接续 | implemented / wired | 替代 D-284 单次无执行器路径；固定候选、原文和提交权保持 | context-compaction-agent-design；plan C0–C4；harness 8.4；status；architecture；roadmap；development | [context-knowledge](decisions/context-knowledge.md) |
+| D-315 | 2026-09-22 | Web 与科研检索：复用已有子线程、自然语言报告、连续搜索/原文、学术关系/结构阅读、共享材料与快速决策 | accepted design / planned / not implemented | 计划部分替代 D-227/D-230/D-234 的唯一结构化交付要求，保留来源/Run 权威；扩展 D-289/D-312 | web-research-search-design；plan L0–L6；harness 5.8/6/9.2.2；research-cluster-design；fast-decision-model-design；status；architecture；roadmap；development | [retrieval](decisions/retrieval.md) |

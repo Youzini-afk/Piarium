@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired; Stage L (D-315) planned
 
 Last updated: 2026-09-22
 
@@ -32,6 +32,7 @@ authoritative record of delivery, and each phase names the design document that 
 | B | Varin product-wide rebrand | Source, product assets, build/distribution configuration and GitHub repository switched (D-313); first new-brand publication pending; no old-name compatibility |
 | F | Fast Decision Models and progressive retrieval | Implemented/wired (D-312): shared capability/binding, first Jev adapter and iterative `explore`; evidence and untested quality/latency in harness status |
 | C | Background compaction Agent and semantic continuation | Implemented/wired (D-314): dedicated `compaction` worker process, scoped read-only history/output/record queries, S0/A/B frozen material with pagination, capacity waiting on the in-flight task and session-owned native commit |
+| L | Web and scholarly search, reading and material reuse | Planned (D-315): existing retrieval/investigation threads, natural-language reports, continuous Web search, scholarly relations/reading and fast-decision consumers; no new implementation yet |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -120,7 +121,7 @@ and focused closure. The new brand is Varin; there are no existing-user compatib
 old aliases, fallback paths, dual writes and migration helpers are excluded. Actual Pi dependencies,
 developer assets and historical attribution remain intact. The repository is now `Youzini-afk/Varin`;
 new npm packages and release assets have not been published. Source/build/startup evidence and these
-distribution boundaries are recorded in harness status. Stage F is delivered; Stage C is the next implementation stage.
+distribution boundaries are recorded in harness status. Stages F and C are delivered; Stage L is the next implementation stage.
 
 Stage F follows B and is specified in [fast-decision-model-design.md](fast-decision-model-design.md).
 F0–F4 cover capability/configuration, provider inference, source selection, dynamic exploration actions and
@@ -137,6 +138,16 @@ session; frozen S0/A/B material ships verbatim retained text with an explicit el
 the worker runs a real Agent loop with scoped read-only queries over history, outputs and records; capacity-bound
 requests wait on the same in-flight task; commit stays session-owned through the native Pi compaction writer.
 Paid-model quality and full platform observations are recorded as untested in harness status.
+
+Stage L follows C and is specified in [web-research-search-design.md](web-research-search-design.md).
+L0–L1 improve the existing generic retrieval report, capability discovery, Web search and fixed source reading;
+L2–L3 add scholarly identities/relations, scoped passage retrieval and structured reading; L4–L6 connect
+shared materials, existing Thread communication, Web/scholarly fast-decision consumers and product surfaces.
+The generic `retrieval` preset already supports local and Web fact finding; research `investigation` and
+ordinary dispatch also exist. Stage L extends these rather than adding another Agent runtime. Its proposed
+natural-language report path makes `submit_facts` optional while preserving Host source checks and Run-bound
+receipt authority. Search is available independently of workbench selection. All L slices remain planned;
+model training and global literature indexing are outside this stage.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

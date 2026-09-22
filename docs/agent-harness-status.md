@@ -18,6 +18,14 @@ Last updated: 2026-09-22
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**D-315 / 阶段 L：Web 与科研检索（2026-09-22），已设计，待实施。**
+设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
+本轮只交付文档，不修改搜索、线程或模型执行行为。当前通用 `retrieval` 已支持本地与 Web 检索，
+专用模型未配置时不提供；科研 `investigation` 与普通派发也已存在。
+目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
+允许自然语言检索报告并将 `submit_facts` 改为可选也是待实施项；当前代码仍要求结构化事实交付。
+来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
+
 **D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**
 设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)。
 
