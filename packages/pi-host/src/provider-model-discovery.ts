@@ -167,8 +167,15 @@ function redactedProviderMessage(
   return message;
 }
 
-async function requestJson(url: URL, initialHeaders: Record<string, string>): Promise<unknown> {
+async function requestJson(
+  url: URL,
+  initialHeaders: Record<string, string>,
+  externalSignal?: AbortSignal,
+): Promise<unknown> {
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromCaller();
+  else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const timeout = REQUEST_TIMEOUT_MS === undefined
     ? undefined
     : setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -193,6 +200,11 @@ async function requestJson(url: URL, initialHeaders: Record<string, string>): Pr
           signal: controller.signal,
         });
       } catch (error) {
+        if (externalSignal?.aborted) {
+          throw new HostError("auth_cancelled", "Provider model discovery was cancelled", {
+            cause: error,
+          });
+        }
         if (controller.signal.aborted) {
           throw new HostError("provider_discovery_timeout", "Provider model discovery timed out", {
             cause: error,
@@ -227,7 +239,17 @@ async function requestJson(url: URL, initialHeaders: Record<string, string>): Pr
         currentUrl = nextUrl;
         continue;
       }
-      const bytes = await readBoundedBody(response);
+      let bytes: Uint8Array;
+      try {
+        bytes = await readBoundedBody(response);
+      } catch (error) {
+        if (externalSignal?.aborted) {
+          throw new HostError("auth_cancelled", "Provider model discovery was cancelled", {
+            cause: error,
+          });
+        }
+        throw error;
+      }
       let payload: unknown;
       try {
         payload = JSON.parse(new TextDecoder().decode(bytes));
@@ -246,6 +268,7 @@ async function requestJson(url: URL, initialHeaders: Record<string, string>): Pr
     }
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -346,7 +369,9 @@ export async function discoverProviderModels(options: {
   projectTrusted: boolean;
   providerId: string;
   runtime: ModelRuntime;
+  signal?: AbortSignal;
 }): Promise<ProviderModelDiscoveryResult> {
+  options.signal?.throwIfAborted();
   const config = options.config
     ?? await options.configuration.effectiveConfig(
       options.cwd,
@@ -374,10 +399,14 @@ export async function discoverProviderModels(options: {
   }
   const api = configuredApi as DiscoverableProviderApi;
   const discoveryUrl = appendModelsPath(configuredBaseUrl);
-  const auth = await options.runtime.getAuth(options.providerId);
+  const auth = await options.runtime.getAuth(options.providerId, {
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  options.signal?.throwIfAborted();
   const payload = await requestJson(
     discoveryUrl,
     requestHeaders(api, options.apiKey ?? auth?.auth.apiKey, auth?.auth.headers),
+    options.signal,
   );
   return {
     api,

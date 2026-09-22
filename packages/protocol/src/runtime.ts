@@ -75,6 +75,7 @@ type SessionScopedRuntimeMethod =
   | "provider.config.get"
   | "provider.config.upsert"
   | "provider.models.discover"
+  | "provider.auth.cancel"
   | "provider.login"
   | "provider.logout"
   | "resource.copy"
@@ -182,7 +183,7 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       params: { sessionId: string };
       result: HostMethodMap["session.list"]["result"][number];
     };
-    "provider.auth.respond": {
+  "provider.auth.respond": {
       params: { response: ProviderAuthResponse; sessionId: string };
       result: HostMethodMap["provider.auth.respond"]["result"];
     };
@@ -229,6 +230,7 @@ export const RUNTIME_METHODS = [
   "provider.config.upsert",
   "provider.models.discover",
   "provider.auth.respond",
+  "provider.auth.cancel",
   "provider.login",
   "provider.logout",
   "resource.copy",

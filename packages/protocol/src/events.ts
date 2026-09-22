@@ -59,12 +59,14 @@ export interface HostEventMap {
   };
   "project.trust.request": ProjectTrustRequest;
   "provider.auth.dismiss": {
+    interactionId: string;
     providerId: string;
     requestId: string;
     sessionId: string;
   };
   "provider.auth.event": {
     event: ProviderAuthEvent;
+    interactionId: string;
     providerId: string;
     sessionId: string;
   };

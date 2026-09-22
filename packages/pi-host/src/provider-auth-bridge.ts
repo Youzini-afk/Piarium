@@ -12,11 +12,13 @@ import { projectProviderAuthPrompt } from "./protocol-projector.js";
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
 interface PendingPrompt {
-  abortHandler?: () => void;
+  abortHandler: () => void;
   deferred: Deferred<string>;
+  interactionId: string;
   providerId: string;
   sessionId: string;
-  signal?: AbortSignal;
+  promptSignal?: AbortSignal;
+  operationSignal?: AbortSignal;
 }
 
 const cancelledError = () => new HostError("auth_cancelled", "Authentication was cancelled");
@@ -30,28 +32,39 @@ export class ProviderAuthBridge {
   }
 
   async prompt(
+    interactionId: string,
     providerId: string,
     sessionId: string,
     prompt: AuthPrompt,
+    operationSignal?: AbortSignal,
   ): Promise<string> {
-    if (prompt.signal?.aborted) throw cancelledError();
+    if (prompt.signal?.aborted || operationSignal?.aborted) throw cancelledError();
     const requestId = randomUUID();
     const pending: PendingPrompt = {
       deferred: createDeferred<string>(),
+      interactionId,
       providerId,
       sessionId,
-      ...(prompt.signal === undefined ? {} : { signal: prompt.signal }),
+      ...(prompt.signal === undefined ? {} : { promptSignal: prompt.signal }),
+      ...(operationSignal === undefined ? {} : { operationSignal }),
+      abortHandler: () => {
+        this.#clear(requestId, pending);
+        this.#emit("provider.auth.dismiss", {
+          interactionId,
+          providerId,
+          requestId,
+          sessionId,
+        });
+        pending.deferred.reject(cancelledError());
+      },
     };
-    pending.abortHandler = () => {
-      this.#clear(requestId, pending);
-      this.#emit("provider.auth.dismiss", { providerId, requestId, sessionId });
-      pending.deferred.reject(cancelledError());
-    };
-    if (pending.signal) {
-      pending.signal.addEventListener("abort", pending.abortHandler, { once: true });
+    pending.promptSignal?.addEventListener("abort", pending.abortHandler, { once: true });
+    if (pending.operationSignal && pending.operationSignal !== pending.promptSignal) {
+      pending.operationSignal.addEventListener("abort", pending.abortHandler, { once: true });
     }
     this.#pending.set(requestId, pending);
     this.#emit("provider.auth.prompt", {
+      interactionId,
       prompt: projectProviderAuthPrompt(requestId, prompt),
       providerId,
       sessionId,
@@ -75,10 +88,21 @@ export class ProviderAuthBridge {
     return true;
   }
 
+  cancelInteraction(interactionId: string): boolean {
+    let cancelled = false;
+    for (const pending of this.#pending.values()) {
+      if (pending.interactionId !== interactionId) continue;
+      cancelled = true;
+      pending.abortHandler();
+    }
+    return cancelled;
+  }
+
   cancelAll(): void {
     for (const [requestId, pending] of [...this.#pending]) {
       this.#clear(requestId, pending);
       this.#emit("provider.auth.dismiss", {
+        interactionId: pending.interactionId,
         providerId: pending.providerId,
         requestId,
         sessionId: pending.sessionId,
@@ -88,8 +112,9 @@ export class ProviderAuthBridge {
   }
 
   #clear(requestId: string, pending: PendingPrompt): void {
-    if (pending.abortHandler && pending.signal) {
-      pending.signal.removeEventListener("abort", pending.abortHandler);
+    pending.promptSignal?.removeEventListener("abort", pending.abortHandler);
+    if (pending.operationSignal && pending.operationSignal !== pending.promptSignal) {
+      pending.operationSignal.removeEventListener("abort", pending.abortHandler);
     }
     this.#pending.delete(requestId);
   }

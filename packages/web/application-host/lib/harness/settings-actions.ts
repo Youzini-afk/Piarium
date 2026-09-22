@@ -10,6 +10,7 @@
 
 import type { SettingsCatalogEntry } from '@varin/application-client';
 import type { SettingsActionResult } from '@varin/protocol';
+import { randomUUID } from 'node:crypto';
 import { HarnessServiceError } from './service-error.js';
 import type { AppPersistOutcome, SettingsServiceCaller } from './settings-service.js';
 
@@ -409,7 +410,11 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
         case 'login': {
           const providerId = needString(args, 'providerId');
           const type = str(args, 'type') === 'api_key' ? 'api_key' : 'oauth';
-          await deps.requestWorkspace(root, 'provider.login', { providerId, type });
+          await deps.requestWorkspace(root, 'provider.login', {
+            interactionId: randomUUID(),
+            providerId,
+            type,
+          });
           return {
             status: 'applied',
             detail: 'provider login request accepted by the owning session; recheck provider status/list for authentication state',
@@ -433,6 +438,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           return {
             status: 'applied',
             data: sanitizeProviderModelDiscovery(await deps.requestWorkspace(root, 'provider.models.discover', {
+              interactionId: randomUUID(),
               providerId: needString(args, 'providerId'),
               ...(isRecord(args.config) ? { config: args.config } : {}),
             })),

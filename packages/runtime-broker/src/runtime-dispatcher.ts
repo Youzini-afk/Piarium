@@ -691,6 +691,7 @@ async function dispatchRuntimeRequestUnchecked(
       const requestCredential = optionalBoolean(input, "requestCredential");
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.models.discover", {
         ...(config === undefined ? {} : { config }),
+        interactionId: requireString(input, "interactionId"),
         providerId: requireString(input, "providerId"),
         ...(requestCredential === undefined ? {} : { requestCredential }),
       });
@@ -703,8 +704,17 @@ async function dispatchRuntimeRequestUnchecked(
       );
       return { accepted };
     }
+    case "provider.auth.cancel": {
+      return {
+        cancelled: await broker.cancelProviderAuth(
+          requireRuntimeContext(input),
+          requireString(input, "interactionId"),
+        ),
+      };
+    }
     case "provider.login": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.login", {
+        interactionId: requireString(input, "interactionId"),
         providerId: requireString(input, "providerId"),
         type: requireEnum(input, "type", ["api_key", "oauth"] as const),
       });

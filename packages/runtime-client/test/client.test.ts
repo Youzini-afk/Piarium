@@ -141,6 +141,7 @@ describe("PiRuntimeClient", () => {
     await client.connect();
     const request = client.request("provider.login", {
       cwd: "C:/workspace",
+      interactionId: "interactive-login",
       providerId: "example",
       type: "oauth",
     });

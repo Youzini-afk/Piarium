@@ -1,8 +1,4 @@
 import React from 'react';
-import type {
-  ProviderAuthEvent,
-  ProviderAuthPrompt,
-} from '@varin/protocol';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
@@ -10,7 +6,6 @@ import {
   SettingsSection,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,13 +15,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -34,17 +22,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   deletePiProviderConfig,
-  loginPiProvider,
 } from '@/lib/pi-runtime/providers';
 import {
   usePiProviderStore,
-  type PiProviderView,
 } from '@/stores/usePiProviderStore';
 import { cn } from '@/lib/utils';
-import { copyTextToClipboard } from '@/lib/clipboard';
-import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { CustomProviderEditor } from './CustomProviderEditor';
+import { ProviderAuthPanel } from './ProviderAuthPanel';
 import { createEmptyCustomProviderState } from './customProviderForm';
 import type { CustomProviderEditableFormState } from './customProviderForm';
 import {
@@ -67,291 +52,6 @@ const formatTokens = (value?: number | null) => {
   if (value === 0) return '0';
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
-
-interface AuthLink {
-  label?: string;
-  url: string;
-}
-
-interface AuthDetails {
-  instructions?: string;
-  links: AuthLink[];
-  message?: string;
-  userCode?: string;
-}
-
-const detailsFromAuthEvent = (event: ProviderAuthEvent): Partial<AuthDetails> => {
-  switch (event.type) {
-    case 'auth_url':
-      return {
-        instructions: event.instructions,
-        links: [{ url: event.url }],
-      };
-    case 'device_code':
-      return {
-        links: [{ url: event.verificationUri }],
-        userCode: event.userCode,
-      };
-    case 'info':
-      return {
-        links: event.links ?? [],
-        message: event.message,
-      };
-    case 'progress':
-      return { message: event.message };
-  }
-};
-
-interface PendingAuthPrompt {
-  prompt: ProviderAuthPrompt;
-  resolve(value: string | undefined): void;
-  value: string;
-}
-
-const ProviderAuthPanel: React.FC<{
-  cwd: string;
-  onAuthenticated(providerId: string): Promise<void> | void;
-  provider: PiProviderView;
-}> = ({ cwd, onAuthenticated, provider }) => {
-  const { t } = useI18n();
-  const [apiKey, setApiKey] = React.useState('');
-  const [busy, setBusy] = React.useState<'api_key' | 'oauth' | null>(null);
-  const [details, setDetails] = React.useState<AuthDetails>({ links: [] });
-  const [pendingPrompt, setPendingPrompt] = React.useState<PendingAuthPrompt | null>(null);
-  const pendingPromptRef = React.useRef<PendingAuthPrompt | null>(null);
-  const cancelledRef = React.useRef(false);
-  const unmountedRef = React.useRef(false);
-
-  const setPrompt = React.useCallback((value: PendingAuthPrompt | null) => {
-    pendingPromptRef.current = value;
-    setPendingPrompt(value);
-  }, []);
-
-  React.useEffect(() => () => {
-    unmountedRef.current = true;
-    pendingPromptRef.current?.resolve(undefined);
-  }, []);
-
-  const refreshAfterLogin = async () => {
-    await usePiProviderStore.getState().load(cwd, { force: true });
-    await onAuthenticated(provider.id);
-  };
-
-  const handleApiKey = async () => {
-    const value = apiKey.trim();
-    if (!value) {
-      toast.error(t('settings.providers.page.toast.apiKeyRequired'));
-      return;
-    }
-    setBusy('api_key');
-    try {
-      await loginPiProvider({
-        cwd,
-        onPrompt: async () => value,
-        providerId: provider.id,
-        type: 'api_key',
-      });
-      setApiKey('');
-      toast.success(t('settings.providers.page.toast.apiKeySaved'));
-      await refreshAfterLogin();
-    } catch (error) {
-      console.error('Failed to save Pi provider credential:', error);
-      toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
-    } finally {
-      if (!unmountedRef.current) setBusy(null);
-    }
-  };
-
-  const handleOAuth = async () => {
-    cancelledRef.current = false;
-    setBusy('oauth');
-    setDetails({ links: [] });
-    try {
-      await loginPiProvider({
-        cwd,
-        onEvent: (event) => {
-          const update = detailsFromAuthEvent(event);
-          setDetails((current) => ({
-            ...current,
-            ...update,
-            links: update.links ?? current.links,
-          }));
-          if (event.type === 'auth_url') void openExternalUrl(event.url);
-          if (event.type === 'device_code') void openExternalUrl(event.verificationUri);
-        },
-        onPrompt: (prompt) => new Promise<string | undefined>((resolve) => {
-          const value = prompt.type === 'select' ? (prompt.options[0]?.id ?? '') : '';
-          setPrompt({ prompt, resolve, value });
-        }),
-        providerId: provider.id,
-        type: 'oauth',
-      });
-      setPrompt(null);
-      toast.success(t('settings.providers.page.toast.oauthCompleted'));
-      await refreshAfterLogin();
-    } catch (error) {
-      if (!unmountedRef.current && !cancelledRef.current) {
-        console.error('Failed to authenticate Pi provider:', error);
-        toast.error(t('settings.providers.page.toast.oauthCompleteFailed'));
-      }
-    } finally {
-      if (!unmountedRef.current) setBusy(null);
-    }
-  };
-
-  const completePrompt = (cancelled = false) => {
-    const current = pendingPromptRef.current;
-    if (!current) return;
-    if (cancelled) cancelledRef.current = true;
-    setPrompt(null);
-    current.resolve(cancelled ? undefined : current.value);
-  };
-
-  const copy = async (value: string, successKey: Parameters<typeof t>[0]) => {
-    const result = await copyTextToClipboard(value);
-    if (result.ok) toast.success(t(successKey));
-    else toast.error(t('settings.providers.page.toast.oauthLinkCopyFailed'));
-  };
-
-  const apiKeyMethod = provider.auth.methods.find((method) => method.type === 'api_key');
-  const oauthMethod = provider.auth.methods.find((method) => method.type === 'oauth');
-
-  if (!apiKeyMethod && !oauthMethod) {
-    return (
-      <p className="typography-meta text-muted-foreground py-1.5">
-        {t('settings.providers.page.auth.connected')}
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {apiKeyMethod && (
-        <div className="py-1.5">
-          <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-            {apiKeyMethod.label || t('settings.providers.page.auth.apiKeyLabel')}
-            <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-          </label>
-          <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-              className="flex-1 font-mono text-xs"
-            />
-            <Button
-              size="xs"
-              className="!font-normal shrink-0"
-              onClick={handleApiKey}
-              disabled={busy !== null}
-            >
-              {busy === 'api_key' ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {oauthMethod && (
-        <div className={cn('space-y-3', apiKeyMethod && 'border-t border-[var(--surface-subtle)] pt-3')}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="typography-ui-label text-foreground">{oauthMethod.label}</span>
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={handleOAuth}
-              disabled={busy !== null}
-            >
-              {busy === 'oauth' ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.connect')}
-            </Button>
-          </div>
-
-          {(details.instructions || details.message) && (
-            <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
-              {details.instructions || details.message}
-            </p>
-          )}
-
-          {details.userCode && (
-            <div className="flex items-center gap-2">
-              <Input value={details.userCode} readOnly className="font-mono text-center tracking-widest" />
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => void copy(details.userCode ?? '', 'settings.providers.page.toast.deviceCodeCopied')}
-              >
-                {t('settings.providers.page.actions.copyCode')}
-              </Button>
-            </div>
-          )}
-
-          {details.links.map((link) => (
-            <div key={link.url} className="flex items-center gap-2">
-              <Input value={link.url} readOnly className="text-xs text-muted-foreground" />
-              <div className="flex gap-1 shrink-0">
-                <Button variant="outline" size="xs" className="!font-normal" onClick={() => void openExternalUrl(link.url)}>
-                  {link.label || t('settings.providers.page.actions.open')}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="!font-normal"
-                  onClick={() => void copy(link.url, 'settings.providers.page.toast.oauthLinkCopied')}
-                >
-                  {t('settings.providers.page.actions.copy')}
-                </Button>
-              </div>
-            </div>
-          ))}
-
-          {pendingPrompt && (
-            <div className="space-y-2 rounded-lg border border-[var(--surface-subtle)] p-3">
-              <label className="typography-ui-label text-foreground">{pendingPrompt.prompt.message}</label>
-              {pendingPrompt.prompt.type === 'select' ? (
-                <Select
-                  value={pendingPrompt.value}
-                  onValueChange={(value) => setPrompt({ ...pendingPrompt, value })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {pendingPrompt.prompt.options.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        <div className="flex flex-col items-start">
-                          <span>{option.label}</span>
-                          {option.description && <span className="typography-micro text-muted-foreground">{option.description}</span>}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  type={pendingPrompt.prompt.type === 'secret' ? 'password' : 'text'}
-                  value={pendingPrompt.value}
-                  onChange={(event) => setPrompt({ ...pendingPrompt, value: event.target.value })}
-                  placeholder={pendingPrompt.prompt.placeholder}
-                  className="font-mono text-xs"
-                />
-              )}
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="xs" className="!font-normal" onClick={() => completePrompt(true)}>
-                  {t('settings.providers.page.actions.cancel')}
-                </Button>
-                <Button size="xs" className="!font-normal" onClick={() => completePrompt()}>
-                  {t('settings.providers.page.actions.complete')}
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 };
 
 export const ProvidersPage: React.FC = () => {
@@ -498,6 +198,9 @@ export const ProvidersPage: React.FC = () => {
 
         {addProviderMode === 'custom' ? (
           <SettingsSection title={t('settings.providers.page.connect.customProvider')} settingsItem="providers.custom">
+            <p className="typography-meta text-muted-foreground py-1.5">
+              {t('settings.providers.page.connect.description')}
+            </p>
             <CustomProviderEditor
               mode="create"
               onSaved={handleCustomProviderSaved}
@@ -507,6 +210,9 @@ export const ProvidersPage: React.FC = () => {
         ) : (
           <>
             <SettingsSection title={t('settings.providers.page.connect.selectProviderTitle')} settingsItem="providers.connect">
+              <p className="typography-meta text-muted-foreground py-1.5">
+                {t('settings.providers.page.connect.description')}
+              </p>
               <div className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="typography-ui-label text-foreground">{t('settings.providers.page.connect.providerField')}</span>
                 {isLoading ? (
@@ -568,7 +274,13 @@ export const ProvidersPage: React.FC = () => {
 
             {candidateProvider && (
               <SettingsSection title={t('settings.providers.page.auth.title')} settingsItem="providers.auth">
-                <ProviderAuthPanel key={candidateProvider.id} cwd={currentDirectory} provider={candidateProvider} onAuthenticated={handleAuthenticated} />
+                <ProviderAuthPanel
+                  key={candidateProvider.id}
+                  cwd={currentDirectory}
+                  methods={candidateProvider.auth.methods}
+                  onAuthenticated={handleAuthenticated}
+                  providerId={candidateProvider.id}
+                />
               </SettingsSection>
             )}
           </>
@@ -634,7 +346,13 @@ export const ProvidersPage: React.FC = () => {
         settingsItem="providers.auth"
       >
         {showAuthPanel ? (
-          <ProviderAuthPanel key={selectedProvider.id} cwd={currentDirectory} provider={selectedProvider} onAuthenticated={handleAuthenticated} />
+          <ProviderAuthPanel
+            key={selectedProvider.id}
+            cwd={currentDirectory}
+            methods={selectedProvider.auth.methods}
+            onAuthenticated={handleAuthenticated}
+            providerId={selectedProvider.id}
+          />
         ) : (
           <div className="flex items-center gap-1.5 py-1.5">
             <Icon name="check" className="h-4 w-4 shrink-0 text-[var(--status-success)]" />

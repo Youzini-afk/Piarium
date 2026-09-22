@@ -47,6 +47,7 @@ export type ProviderAuthPrompt =
     });
 
 export interface ProviderAuthPromptRequest {
+  interactionId: string;
   prompt: ProviderAuthPrompt;
   providerId: string;
   sessionId: string;

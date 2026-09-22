@@ -250,6 +250,7 @@ export interface HostMethodMap {
   "provider.models.discover": {
     params: {
       config?: ProviderConfigInput;
+      interactionId: string;
       providerId: string;
       requestCredential?: boolean;
     };
@@ -259,8 +260,12 @@ export interface HostMethodMap {
     params: ProviderAuthResponse;
     result: { accepted: boolean };
   };
+  "provider.auth.cancel": {
+    params: { interactionId: string };
+    result: { cancelled: boolean };
+  };
   "provider.login": {
-    params: { providerId: string; type: ProviderAuthType };
+    params: { interactionId: string; providerId: string; type: ProviderAuthType };
     result: { authenticated: boolean };
   };
   "provider.logout": {

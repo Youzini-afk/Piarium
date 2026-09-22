@@ -131,6 +131,7 @@ describe("HostController", () => {
 
       transport.receive(
         createRequest("provider-login", "provider.login", {
+          interactionId: "host-login-interaction",
           providerId: "varin-test-provider",
           type: "api_key",
         }),
@@ -155,6 +156,30 @@ describe("HostController", () => {
       assert.ok(authResponse.kind === "response" && authResponse.ok);
       const loggedIn = await transport.waitFor((entry) => isResponse(entry, "provider-login"));
       assert.ok(loggedIn.kind === "response" && loggedIn.ok);
+
+      transport.receive(createRequest("provider-login-cancelled", "provider.login", {
+        interactionId: "host-login-cancelled-interaction",
+        providerId: "varin-test-provider",
+        type: "api_key",
+      }));
+      const cancellablePrompt = await transport.waitFor(
+        (entry) => isEvent(entry, "provider.auth.prompt")
+          && entry.event === "provider.auth.prompt"
+          && entry.data.interactionId === "host-login-cancelled-interaction",
+      );
+      assert.ok(cancellablePrompt.kind === "event" && cancellablePrompt.event === "provider.auth.prompt");
+      transport.receive(createRequest("queued-provider-list", "model.list", {}));
+      transport.receive(createRequest("provider-login-cancel", "provider.auth.cancel", {
+        interactionId: "host-login-cancelled-interaction",
+      }));
+      const cancelResponse = await transport.waitFor((entry) => isResponse(entry, "provider-login-cancel"));
+      assert.ok(cancelResponse.kind === "response" && cancelResponse.ok);
+      assert.deepEqual(cancelResponse.result, { cancelled: true });
+      const cancelledLogin = await transport.waitFor((entry) => isResponse(entry, "provider-login-cancelled"));
+      assert.ok(cancelledLogin.kind === "response" && !cancelledLogin.ok);
+      assert.equal(cancelledLogin.error.code, "auth_cancelled");
+      const queuedProviderList = await transport.waitFor((entry) => isResponse(entry, "queued-provider-list"));
+      assert.ok(queuedProviderList.kind === "response" && queuedProviderList.ok);
 
       transport.receive(createRequest("models", "model.list", {}));
       const models = await transport.waitFor((entry) => isResponse(entry, "models"));
@@ -829,6 +854,7 @@ describe("HostController", () => {
       });
 
       transport.receive(createRequest("provider-login", "provider.login", {
+        interactionId: "embed-provider-login-interaction",
         providerId: "embed-provider",
         type: "api_key",
       }));

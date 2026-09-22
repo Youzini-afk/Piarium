@@ -278,11 +278,12 @@ test("broker owns catalog and per-session Pi workers", async () => {
     );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
-    const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {
+    const authPrompt = new Promise<{ interactionId: string; requestId: string; sessionId: string }>((resolvePrompt) => {
       stopAuthPromptListener = broker.subscribe((event) => {
         if (event.kind !== "host" || event.envelope.event !== "provider.auth.prompt") return;
         if (event.envelope.data.providerId !== "workspace-provider") return;
         resolvePrompt({
+          interactionId: event.envelope.data.interactionId,
           requestId: event.envelope.data.prompt.requestId,
           sessionId: event.envelope.data.sessionId,
         });
@@ -290,6 +291,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     const login = dispatchRuntimeRequest(broker, "provider.login", {
       cwd: workspace,
+      interactionId: "broker-login-interaction",
       providerId: "workspace-provider",
       type: "api_key",
     });
@@ -303,6 +305,13 @@ test("broker owns catalog and per-session Pi workers", async () => {
       { accepted: true },
     );
     assert.deepEqual(await login, { authenticated: true });
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "provider.auth.cancel", {
+        cwd: workspace,
+        interactionId: prompt.interactionId,
+      }),
+      { cancelled: false },
+    );
 
     const created = await dispatchRuntimeRequest(broker, "session.create", {
       cwd: workspace,

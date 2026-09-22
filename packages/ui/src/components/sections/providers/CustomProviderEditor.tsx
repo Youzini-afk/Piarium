@@ -9,7 +9,6 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
   discoverPiProviderModels,
-  loginPiProvider,
   upsertPiProviderConfig,
 } from '@/lib/pi-runtime/providers';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -43,6 +42,7 @@ import type {
   CustomProviderModelRowInput,
 } from './customProviderForm';
 import { CustomProviderReasoningLevels } from './CustomProviderReasoningLevels';
+import { ProviderAuthPromptView, usePiProviderAuth } from './ProviderAuthPanel';
 
 interface CustomProviderEditorProps {
   mode: 'create' | 'edit';
@@ -90,6 +90,24 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   const originalEditScopeRef = React.useRef<CustomProviderEditableFormState['scope'] | null>(
     mode === 'edit' && initialState ? initialState.scope : null,
   );
+  const mountedRef = React.useRef(false);
+  const providerId = state.id.trim();
+  const target = React.useMemo(() => ({ cwd: currentDirectory, providerId, scope: state.scope }), [currentDirectory, providerId, state.scope]);
+  const targetRef = React.useRef(target);
+  targetRef.current = target;
+  const providerAuth = usePiProviderAuth({
+    cwd: currentDirectory,
+    providerId: state.id.trim(),
+  });
+
+  React.useEffect(() => { setSaving(false); }, [target]);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (initialState) {
@@ -372,30 +390,45 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       return;
     }
 
+    const saveTarget = targetRef.current;
+    const isCurrentTarget = () => (
+      mountedRef.current && targetRef.current === saveTarget
+    );
     setSaving(true);
     try {
       const resolvedScope = mode === 'edit' ? (originalEditScopeRef.current ?? state.scope) : state.scope;
       const apiKey = readApiKey();
       const config = createPiProviderConfigFromForm(state);
       await upsertPiProviderConfig(currentDirectory, resolvedScope, config);
+      if (!isCurrentTarget()) return;
       if (apiKey) {
-        await loginPiProvider({
-          cwd: currentDirectory,
-          onPrompt: async () => apiKey,
-          providerId: config.id,
-          type: 'api_key',
-        });
+        const authResult = await providerAuth.start('api_key', { seedSecret: apiKey });
+        if (authResult.status === 'cancelled') {
+          if (!isCurrentTarget()) return;
+          await usePiProviderStore.getState().load(saveTarget.cwd, { force: true });
+          if (!isCurrentTarget()) return;
+          toast.info(t('settings.providers.page.toast.customProviderSavedAuthCancelled'));
+          onSaved?.(config.id);
+          return;
+        }
+        if (authResult.status === 'failed') {
+          if (!isCurrentTarget()) return;
+          throw authResult.error instanceof Error ? authResult.error : new Error(t('settings.providers.page.toast.customProviderSaveFailed'));
+        }
       }
 
+      if (!isCurrentTarget()) return;
+      await usePiProviderStore.getState().load(saveTarget.cwd, { force: true });
+      if (!isCurrentTarget()) return;
       toast.success(t('settings.providers.page.toast.customProviderSaved'));
-      await usePiProviderStore.getState().load(currentDirectory, { force: true });
       onSaved?.(config.id);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
+      if (!isCurrentTarget()) return;
       const message = error instanceof Error ? error.message : t('settings.providers.page.toast.customProviderSaveFailed');
       toast.error(message);
     } finally {
-      setSaving(false);
+      if (isCurrentTarget()) setSaving(false);
     }
   };
 
@@ -689,6 +722,13 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
           </div>
         </div>
       </div>
+
+      {providerAuth.busy && (
+        <div className="space-y-2 rounded-lg border border-[var(--surface-subtle)] p-3">
+          <p className="typography-ui-label text-foreground">{t('settings.providers.page.auth.title')}</p>
+          <ProviderAuthPromptView auth={providerAuth} />
+        </div>
+      )}
 
       <div className="flex items-center justify-end gap-2">
         {onCancel && (

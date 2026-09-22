@@ -24,6 +24,15 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
 Runtime API types and auth/fetch/URL/switch primitives are imported directly from
 `@varin/application-client`; UI-owned forwarding modules are not part of the boundary.
 
+The provider picker reads the active Pi runtime catalog; it does not maintain a second built-in
+provider list. Login and model discovery use separate interaction identities even for the same
+provider. The shared authentication UI renders Pi's secret/text/select/manual-code questions and
+events for both API keys and OAuth. Prompt withdrawal clears the corresponding input, and closing
+or changing the target cancels the native operation. Custom model configuration stays in `models.json`;
+credentials stay in Pi auth storage and are never persisted in renderer settings. Configuration save
+and subsequent authentication are separate outcomes, so cancelled login must not be reported as
+successful credential setup.
+
 ## Theme and component system
 
 `varin-mark.ts` owns the approved fold logo as two centered polygons, including the extended tips and

@@ -132,6 +132,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "extension.ui.respond",
   "harness.respond",
   "harness.inference.cancel",
+  "provider.auth.cancel",
   "provider.auth.respond",
   "project.trust.respond",
   "workspace.mutation.respond",
@@ -630,6 +631,35 @@ export class HostController {
       (envelope) => {
         if (
           envelope.kind === "request"
+          && this.#methodAllowed(envelope.method)
+          && (envelope.method === "provider.login" || envelope.method === "provider.models.discover")
+          && envelope.params
+          && typeof envelope.params === "object"
+          && !Array.isArray(envelope.params)
+        ) {
+          const params = envelope.params as Record<string, unknown>;
+          if (
+            typeof params.interactionId === "string"
+            && params.interactionId.length > 0
+            && typeof params.providerId === "string"
+            && params.providerId.length > 0
+            && (envelope.method === "provider.models.discover"
+              || params.type === "api_key"
+              || params.type === "oauth")
+          ) {
+            try {
+              this.#sessionHost.reserveProviderInteraction(
+                params.interactionId,
+                params.providerId,
+              );
+            } catch (error) {
+              this.#transport.send(createErrorResponse(envelope.id, toProtocolError(error)));
+              return;
+            }
+          }
+        }
+        if (
+          envelope.kind === "request"
           && (
             envelope.method === "harness.embed"
             || envelope.method === "harness.rerank"
@@ -722,6 +752,22 @@ export class HostController {
       this.#transport.send(createErrorResponse(envelope.id, toProtocolError(error)));
     } finally {
       this.#sessionHost.releaseInferenceReservation(envelope.id);
+      if (
+        envelope.method === "provider.login"
+        || envelope.method === "provider.models.discover"
+      ) {
+        const params = envelope.params;
+        if (
+          typeof params === "object"
+          && params !== null
+          && !Array.isArray(params)
+          && typeof (params as Record<string, unknown>).interactionId === "string"
+        ) {
+          this.#sessionHost.releaseProviderInteraction(
+            (params as Record<string, unknown>).interactionId as string,
+          );
+        }
+      }
     }
     if (shutdownAfterResponse) await this.dispose();
   }
@@ -1140,6 +1186,7 @@ export class HostController {
         );
       case "provider.models.discover":
         return this.#sessionHost.discoverProviderModels(
+          readString(params, "interactionId"),
           readString(params, "providerId"),
           params.config === undefined ? undefined : readProviderConfig(params.config),
           readBoolean(params, "requestCredential", { optional: true }) ?? false,
@@ -1156,6 +1203,12 @@ export class HostController {
         };
         return { accepted: this.#sessionHost.auth.respond(response) };
       }
+      case "provider.auth.cancel":
+        return {
+          cancelled: this.#sessionHost.cancelProviderInteraction(
+            readString(params, "interactionId"),
+          ),
+        };
       case "provider.login": {
         const type = readString(params, "type");
         if (type !== "api_key" && type !== "oauth") {
@@ -1163,6 +1216,7 @@ export class HostController {
         }
         return {
           authenticated: await this.#sessionHost.loginProvider(
+            readString(params, "interactionId"),
             readString(params, "providerId"),
             type,
           ),

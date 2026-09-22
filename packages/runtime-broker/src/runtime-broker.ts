@@ -228,6 +228,7 @@ export const PI_CATALOG_METHODS = [
   "provider.config.get",
   "provider.config.upsert",
   "provider.models.discover",
+  "provider.auth.cancel",
   "provider.login",
   "provider.logout",
   "resource.copy",
@@ -1267,6 +1268,22 @@ export class PiRuntimeBroker {
       response,
     );
     return result.accepted;
+  }
+
+  async cancelProviderAuth(
+    target: RuntimeContextTarget,
+    interactionId: string,
+  ): Promise<boolean> {
+    const result = "sessionId" in target
+      ? await this.#workerForInteractiveContext(target.sessionId).request(
+          "provider.auth.cancel",
+          { interactionId },
+        )
+      : await (await this.#getWorkspaceContext(target.cwd)).client.request(
+          "provider.auth.cancel",
+          { interactionId },
+        );
+    return result.cancelled;
   }
 
   async respondToProjectTrust(
