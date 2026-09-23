@@ -4,10 +4,19 @@ import type { ScholarlySearchResult } from "@varin/protocol";
 import { HarnessRequestError, type HostServicesBridge } from "./host-services-bridge.js";
 
 const ResearchSearchParams = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("paper")]),
+  action: Type.Union([
+    Type.Literal("search"),
+    Type.Literal("paper"),
+    Type.Literal("relations"),
+  ]),
   provider: Type.Optional(Type.Union([Type.Literal("openalex"), Type.Literal("semantic-scholar")])),
   query: Type.Optional(Type.String()),
   paper_id: Type.Optional(Type.String()),
+  relation: Type.Optional(Type.Union([
+    Type.Literal("references"),
+    Type.Literal("citations"),
+    Type.Literal("related"),
+  ], { description: "Required with action=relations: outgoing references, incoming citations, or provider related works." })),
   cursor: Type.Optional(Type.String()),
   limit: Type.Optional(Type.Integer({ minimum: 1 })),
 });
@@ -19,9 +28,12 @@ type ResearchSearchDetails = {
   status: ScholarlySearchResult["status"];
   provider?: string;
   action?: string;
+  relation?: string;
   papers: unknown[] | number;
   capabilities?: string[];
+  relationKinds?: string[];
   nextCursor?: string;
+  sources?: Array<{ url: string; title: string; provider?: string; paperId?: string; relation?: string }>;
 };
 
 const details = (value: ResearchSearchDetails): ResearchSearchDetails => value;
@@ -32,6 +44,8 @@ const formatPaper = (paper: ScholarlySearchResult["papers"][number], index?: num
   if (paper.year !== undefined) lines.push(`   Year: ${paper.year}`);
   if (paper.authors.length) lines.push(`   Authors: ${paper.authors.slice(0, 8).map((author) => encode(author.name)).join(", ")}`);
   if (paper.doi) lines.push(`   DOI: ${encode(paper.doi)}`);
+  if (paper.externalIds?.arxiv) lines.push(`   arXiv: ${encode(paper.externalIds.arxiv)}`);
+  if (paper.version) lines.push(`   Version: ${paper.version}`);
   if (paper.landingUrl) lines.push(`   URL: ${paper.landingUrl}`);
   if (paper.openAccessUrl) lines.push(`   Open access: ${paper.openAccessUrl}`);
   lines.push(`   Content: ${paper.content}`);
@@ -39,16 +53,30 @@ const formatPaper = (paper: ScholarlySearchResult["papers"][number], index?: num
   return lines.join("\n");
 };
 
+const paperSource = (paper: ScholarlySearchResult["papers"][number], relation?: string) => {
+  const url = paper.landingUrl ?? paper.openAccessUrl;
+  return url
+    ? [{
+      url,
+      title: paper.title,
+      provider: paper.provider,
+      paperId: paper.id,
+      ...(relation ? { relation } : {}),
+    }]
+    : [];
+};
+
 export function createResearchSearchTool(bridge: HostServicesBridge): ToolDefinition {
   return defineTool({
     name: "research_search",
     label: "Research Search",
-    description: "Search scholarly metadata or look up one paper through OpenAlex or Semantic Scholar. Metadata discovery is separate from reading the linked source.",
-    promptSnippet: "research_search: find papers, metadata, and open-access locations",
+    description: "Search scholarly metadata, look up one paper, or expand its references/citations/related works through OpenAlex or Semantic Scholar. Metadata discovery is separate from reading the linked source.",
+    promptSnippet: "research_search: find papers, metadata, relations, and open-access locations",
     promptGuidelines: [
       "Use action=search with a focused query; use the returned provider id with action=paper to inspect one record.",
+      "Use action=relations with paper_id and relation=references|citations|related to walk the citation graph one page at a time; pass nextCursor back as cursor to continue.",
       "Metadata, an open-access URL, and read content are separate states. Fetch the linked source before relying on paper details.",
-      "Use cursor for the provider's next page when it is returned. Preserve provider ids and versions when handing papers to another thread.",
+      "Preserve provider ids, DOI, and version markers when handing papers to another thread — titles alone do not identify a work.",
     ],
     parameters: ResearchSearchParams,
     executionMode: "parallel",
@@ -59,17 +87,29 @@ export function createResearchSearchTool(bridge: HostServicesBridge): ToolDefini
           ...(params.provider ? { provider: params.provider } : {}),
           ...(params.query ? { query: params.query } : {}),
           ...(params.paper_id ? { paperId: params.paper_id } : {}),
+          ...(params.relation ? { relation: params.relation } : {}),
           ...(params.cursor ? { cursor: params.cursor } : {}),
           ...(params.limit ? { limit: params.limit } : {}),
         }, signal ? { signal } : undefined) as ScholarlySearchResult;
         if (result.status === "failed" || result.status === "unavailable") {
           return {
             content: [{ type: "text", text: `research_search ${result.status}: ${result.message ?? "no further detail"}` }],
-            details: details({ kind: "research-search", status: result.status, provider: result.provider, papers: 0, capabilities: result.capabilities }),
+            details: details({
+              kind: "research-search",
+              status: result.status,
+              provider: result.provider,
+              ...(params.relation ? { relation: params.relation } : {}),
+              papers: 0,
+              capabilities: result.capabilities,
+              ...(result.relationKinds ? { relationKinds: result.relationKinds } : {}),
+            }),
             isError: result.status === "failed",
           };
         }
-        const header = `${result.status === "empty" ? "No papers" : `${result.papers.length} papers`} (${result.provider}, ${result.action})`;
+        const relationLabel = result.relation
+          ? ` ${result.relation.kind} of ${result.relation.source.provider}:${result.relation.source.id}`
+          : "";
+        const header = `${result.status === "empty" ? "No papers" : `${result.papers.length} papers`} (${result.provider}, ${result.action}${relationLabel})`;
         const body = result.papers.map((paper, index) => formatPaper(paper, index)).join("\n");
         const next = result.nextCursor ? `\nNext cursor: ${result.nextCursor}` : "";
         return {
@@ -79,9 +119,22 @@ export function createResearchSearchTool(bridge: HostServicesBridge): ToolDefini
             status: result.status,
             provider: result.provider,
             action: result.action,
-            papers: result.papers.map((paper) => ({ id: paper.id, title: paper.title, provider: paper.provider, content: paper.content, ...(paper.openAccessUrl ? { openAccessUrl: paper.openAccessUrl } : {}) })),
+            ...(result.relation ? { relation: result.relation.kind } : {}),
+            papers: result.papers.map((paper) => ({
+              id: paper.id,
+              title: paper.title,
+              provider: paper.provider,
+              content: paper.content,
+              ...(paper.doi ? { doi: paper.doi } : {}),
+              ...(paper.version ? { version: paper.version } : {}),
+              ...(paper.externalIds ? { externalIds: paper.externalIds } : {}),
+              ...(paper.openAccessUrl ? { openAccessUrl: paper.openAccessUrl } : {}),
+              ...(paper.availableFields ? { availableFields: paper.availableFields } : {}),
+            })),
             capabilities: result.capabilities,
+            ...(result.relationKinds ? { relationKinds: result.relationKinds } : {}),
             ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+            sources: result.papers.flatMap((paper) => paperSource(paper, result.relation?.kind)),
           }),
         };
       } catch (error) {

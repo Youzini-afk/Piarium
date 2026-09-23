@@ -573,10 +573,15 @@ export const HarnessThreadsPanel: React.FC<{
             <div className="space-y-1">
               {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
                 <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
-                  <Icon name={source.tool === 'websearch' ? 'search' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                  <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
                   <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
                     <span className="block truncate text-[11px] text-foreground">{source.title}</span>
                     <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                    {source.paperId ? (
+                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.paperId}>
+                        {source.provider}:{source.paperId}{source.relation ? ` · ${source.relation}` : ''}
+                      </span>
+                    ) : null}
                     {source.snapshotId ? (
                       <span className="block truncate text-[9px] text-muted-foreground/70" title={source.contentHash ?? source.snapshotId}>
                         snapshot {source.snapshotId}

@@ -7,10 +7,15 @@ export interface WebSource {
   title: string;
   fetchedAt: number;
   toolCallId: string;
-  tool: 'webfetch' | 'websearch';
+  tool: 'webfetch' | 'websearch' | 'research_search';
   /** Fixed content snapshot id when the Host pinned the fetched body. */
   snapshotId?: string;
   contentHash?: string;
+  /** Scholarly record identity for research_search entries. */
+  provider?: string;
+  paperId?: string;
+  /** Relation edge kind when the paper arrived via a relations expansion. */
+  relation?: string;
   pinned: boolean;
 }
 

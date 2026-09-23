@@ -69,4 +69,126 @@ describe("scholarly search service", () => {
       message: expect.stringContaining("HTTP 503"),
     });
   });
+
+  it("expands OpenAlex references one resolved page at a time", async () => {
+    const requested: string[] = [];
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = new URL(String(input));
+      requested.push(`${url.pathname}${url.search ? `?${url.searchParams.get("filter") ?? ""}` : ""}`);
+      if (url.pathname === "/works/W9") {
+        return json({
+          id: "https://openalex.org/W9",
+          title: "Source work",
+          doi: "https://doi.org/10.1/source",
+          referenced_works: ["https://openalex.org/W1", "https://openalex.org/W2", "https://openalex.org/W3"],
+          related_works: ["https://openalex.org/W7"],
+        });
+      }
+      expect(url.searchParams.get("filter")).toContain("ids.openalex:");
+      return json({
+        results: [
+          { id: "https://openalex.org/W1", title: "Ref one", ids: { doi: "https://doi.org/10.1/a", arxiv: "https://arxiv.org/abs/2401.0001" }, primary_location: { version: "publishedVersion" } },
+          { id: "https://openalex.org/W2", title: "Ref two" },
+        ],
+      });
+    });
+    const service = createResearchSearchService({ fetch });
+    const page = await service.handle({ action: "relations", paperId: "W9", relation: "references", limit: 2 }, context);
+    expect(page.status).toBe("ok");
+    expect(page.relation).toMatchObject({ kind: "references", source: { provider: "openalex", id: "W9", doi: "10.1/source", title: "Source work" } });
+    expect(page.papers.map((paper) => paper.id)).toEqual(["https://openalex.org/W1", "https://openalex.org/W2"]);
+    // Identity fields stay distinct: DOI/arXiv aliases and the version marker.
+    expect(page.papers[0]).toMatchObject({
+      doi: "10.1/a",
+      externalIds: { doi: "10.1/a", arxiv: "2401.0001" },
+      version: "publishedVersion",
+      content: "metadata-only",
+    });
+    expect(page.papers[0]!.availableFields).toEqual(expect.arrayContaining(["externalIds", "version"]));
+    expect(page.nextCursor).toBe("oa-list:references:W9:2");
+
+    // The minted cursor continues the same work's remaining references.
+    const next = await service.handle({ action: "relations", paperId: "W9", relation: "references", cursor: page.nextCursor!, limit: 2 }, context);
+    expect(next.status).toBe("ok");
+    expect(next.papers.map((paper) => paper.id)).toEqual(["https://openalex.org/W1", "https://openalex.org/W2"]);
+    expect(next.nextCursor).toBeUndefined();
+  });
+
+  it("rejects a cursor minted for a different paper or relation", async () => {
+    const service = createResearchSearchService({ fetch: vi.fn() });
+    await expect(service.handle(
+      { action: "relations", paperId: "W9", relation: "references", cursor: "oa-list:related:W9:2" },
+      context,
+    )).rejects.toMatchObject({ harnessCode: "invalid-params" });
+    await expect(service.handle(
+      { action: "relations", paperId: "W1", relation: "references", cursor: "oa-list:references:W9:2" },
+      context,
+    )).rejects.toMatchObject({ harnessCode: "invalid-params" });
+  });
+
+  it("expands OpenAlex citations through the provider's own cursor", async () => {
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/works");
+      expect(url.searchParams.get("filter")).toBe("cites:W9");
+      return json({
+        meta: { next_cursor: "cit-page-2" },
+        results: [{ id: "https://openalex.org/W5", title: "Citing work", cited_by_count: 7 }],
+      });
+    });
+    const service = createResearchSearchService({ fetch });
+    const page = await service.handle({ action: "relations", paperId: "W9", relation: "citations" }, context);
+    expect(page).toMatchObject({
+      status: "ok",
+      relation: { kind: "citations", source: { id: "W9" } },
+      nextCursor: "cit-page-2",
+    });
+  });
+
+  it("expands Semantic Scholar references with per-edge direction", async () => {
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/graph/v1/paper/P9/references");
+      return json({
+        next: 10,
+        data: [
+          { citedPaper: { paperId: "P1", title: "Cited one", externalIds: { DOI: "10.2/a", ArXiv: "2401.9999" }, openAccessPdf: { url: "https://example.org/p1.pdf" } } },
+          { citedPaper: null },
+        ],
+      });
+    });
+    const service = createResearchSearchService({ fetch });
+    const page = await service.handle({ action: "relations", provider: "semantic-scholar", paperId: "P9", relation: "references" }, context);
+    expect(page.status).toBe("ok");
+    expect(page.nextCursor).toBe("10");
+    expect(page.papers).toHaveLength(1);
+    expect(page.papers[0]).toMatchObject({
+      provider: "semantic-scholar",
+      id: "P1",
+      doi: "10.2/a",
+      externalIds: { doi: "10.2/a", arxiv: "2401.9999" },
+      content: "open-location",
+    });
+    expect(page.relation).toMatchObject({ kind: "references", source: { provider: "semantic-scholar", id: "P9" } });
+  });
+
+  it("reports the Semantic Scholar related relation as unavailable, not failed", async () => {
+    const fetch = vi.fn();
+    const service = createResearchSearchService({ fetch });
+    const result = await service.handle({ action: "relations", provider: "semantic-scholar", paperId: "P9", relation: "related" }, context);
+    expect(result.status).toBe("unavailable");
+    expect(result.relationKinds).not.toContain("related");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps an empty relation page distinct from a failed provider", async () => {
+    const fetch = vi.fn(async () => json({
+      id: "https://openalex.org/W9",
+      title: "Source work",
+      referenced_works: [],
+    }));
+    const service = createResearchSearchService({ fetch });
+    const page = await service.handle({ action: "relations", paperId: "W9", relation: "references" }, context);
+    expect(page).toMatchObject({ status: "empty", papers: [], relation: { kind: "references" } });
+  });
 });

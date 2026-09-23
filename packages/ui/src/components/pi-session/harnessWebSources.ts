@@ -20,7 +20,7 @@ export const projectHarnessWebSources = (
   if (entry.type !== 'message' || entry.message.role !== 'toolResult') return [];
   const message = entry.message;
   const tool = message.toolName;
-  if (tool !== 'webfetch' && tool !== 'websearch') return [];
+  if (tool !== 'webfetch' && tool !== 'websearch' && tool !== 'research_search') return [];
   const details = message.details;
   if (!isRecord(details)) return [];
   const sources = details.sources;
@@ -43,6 +43,9 @@ export const projectHarnessWebSources = (
       tool,
       ...(typeof source.snapshotId === 'string' && source.snapshotId ? { snapshotId: source.snapshotId } : {}),
       ...(typeof source.contentHash === 'string' && source.contentHash ? { contentHash: source.contentHash } : {}),
+      ...(typeof source.provider === 'string' && source.provider ? { provider: source.provider } : {}),
+      ...(typeof source.paperId === 'string' && source.paperId ? { paperId: source.paperId } : {}),
+      ...(typeof source.relation === 'string' && source.relation ? { relation: source.relation } : {}),
     }];
   });
 });
