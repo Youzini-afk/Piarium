@@ -12,6 +12,11 @@ const WebFetchParams = Type.Object({
   find: Type.Optional(Type.String({ minLength: 1, description: "Find literal text in the extracted page (case-insensitive), returning matching lines and nearby context." })),
   start_line: Type.Optional(Type.Integer({ minimum: 1, description: "First line of extracted Markdown to read, one-based." })),
   end_line: Type.Optional(Type.Integer({ minimum: 1, description: "Last line of extracted Markdown to read, inclusive." })),
+  page: Type.Optional(Type.Integer({ minimum: 1, description: "Read one page of a paged document (e.g. PDF snapshot)." })),
+  section: Type.Optional(Type.String({ description: "Read one section by heading title (substring match)." })),
+  element: Type.Optional(Type.Union([Type.Literal("table"), Type.Literal("figure")], { description: "Read a detected table or figure block." })),
+  element_index: Type.Optional(Type.Integer({ minimum: 1, description: "One-based index of the table/figure to read (default 1)." })),
+  appendix: Type.Optional(Type.Boolean({ description: "Read the appendix/supplementary section." })),
 });
 
 function selectPageText(markdown: string, options: { find?: string; start_line?: number; end_line?: number }): string {
@@ -50,7 +55,10 @@ const formatOkFetchHeader = (result: Extract<FetchResult, { status: "ok" }>): st
   const snapshot = result.snapshot
     ? ` snapshot ${result.snapshot.snapshotId} hash ${result.snapshot.contentHash}`
     : "";
-  return `fetched ${result.finalUrl} (${result.bytes} bytes${result.rendered ? ", rendered" : ""}${result.fromCache ? ", cached" : ""}${receipt}${snapshot})`;
+  const range = result.range
+    ? ` lines ${result.range.startLine}–${result.range.endLine} of ${result.range.totalLines}`
+    : "";
+  return `fetched ${result.finalUrl} (${result.bytes} bytes${result.rendered ? ", rendered" : ""}${result.fromCache ? ", cached" : ""}${receipt}${snapshot}${range})`;
 };
 
 function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: string; isError: boolean } {
@@ -99,6 +107,18 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
         isError: true,
       };
     }
+    case "structure-unsupported": {
+      return {
+        text: `snapshot has no ${result.kind} structure: this representation cannot express it (check the snapshot's unparsed aspects).`,
+        isError: true,
+      };
+    }
+    case "position-not-found": {
+      return {
+        text: `position not found in snapshot: ${result.detail}`,
+        isError: true,
+      };
+    }
     case "failed": {
       return {
         text: `fetch failed: ${result.reason}`,
@@ -134,6 +154,7 @@ export function createWebFetchTool(
     promptGuidelines: [
       "Use webfetch to read web pages. The tool extracts main content as Markdown.",
       "For long pages, use find to locate relevant passages, then start_line/end_line to read more. Line numbers refer to extracted Markdown, not HTML source.",
+      "For structured documents use page/section/element/appendix selectors; structure comes from the snapshot's own parser, so unsupported aspects are reported instead of guessed.",
       "Cross-domain redirects return metadata — call webfetch again with the new URL if you trust it.",
       "Each successful fetch pins a snapshot; cite snapshot_id so later reads resolve the same content even after the page changes.",
       "JS-rendered SPAs need render: true (desktop only). Empty pages are reported, not treated as success.",
@@ -150,11 +171,21 @@ export function createWebFetchTool(
           throw new Error("webfetch requires url or snapshot_id");
         }
         const hasPrompt = typeof params.prompt === "string" && params.prompt.trim().length > 0;
+        const position = params.page !== undefined
+          ? { kind: "page" as const, page: params.page }
+          : params.section !== undefined
+            ? { kind: "section" as const, title: params.section }
+            : params.appendix === true
+              ? { kind: "appendix" as const }
+              : params.element !== undefined
+                ? { kind: "element" as const, element: params.element, index: params.element_index ?? 1 }
+                : undefined;
         const fetched = await bridge.request("web.fetch", {
           ...(params.url?.trim() ? { url: params.url.trim() } : {}),
           ...(params.snapshot_id?.trim() ? { snapshotId: params.snapshot_id.trim() } : {}),
           ...(params.refresh === true ? { refresh: true } : {}),
           ...(params.render !== undefined ? { render: params.render } : {}),
+          ...(position ? { position } : {}),
         }, signal ? { signal } : undefined);
         const result = fetched.status === "ok"
           ? { ...fetched, markdown: selectPageText(fetched.markdown, params) }

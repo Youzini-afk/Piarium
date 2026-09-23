@@ -522,3 +522,115 @@ describe("web-fetch service", () => {
     }
   });
 });
+
+describe("structured reading (D-315 L3)", () => {
+  const structuredMarkdown = [
+    "# Title",
+    "",
+    "## Intro",
+    "Intro body line one.",
+    "Intro body line two.",
+    "",
+    "## Methods",
+    "Methods body.",
+    "",
+    "| col | val |",
+    "| --- | --- |",
+    "| a | 1 |",
+    "",
+    "![Figure 1](fig1.png)",
+    "",
+    "## Appendix A",
+    "Appendix body.",
+  ].join("\n");
+
+  const openMaterialService = () => {
+    const snapshots = new Map<string, { ref: import("@varin/protocol").WebSnapshotRef; body: Buffer }>();
+    let sequence = 0;
+    const materials = {
+      put: async (_ws: string, draft: import("./web-materials.js").WebSnapshotDraft, body: Buffer) => {
+        sequence += 1;
+        const ref: import("@varin/protocol").WebSnapshotRef = {
+          snapshotId: `snap-${sequence}`,
+          sourceUrl: draft.sourceUrl,
+          finalUrl: draft.finalUrl,
+          fetchedAt: sequence,
+          contentHash: "sha256-x",
+          representation: draft.representation,
+          byteLength: body.byteLength,
+          ...(draft.structure ? { structure: draft.structure } : {}),
+        };
+        snapshots.set(ref.snapshotId, { ref, body });
+        return ref;
+      },
+      read: async (_ws: string, snapshotId: string) => snapshots.get(snapshotId) ?? null,
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => structuredMarkdown,
+    }) as never;
+    return createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+  };
+
+  it("detects headings/tables/figures and reads positions from a snapshot", async () => {
+    const service = openMaterialService();
+    const fetched = await service.fetch({ url: "https://example.com/doc" }, fetchContext);
+    expect(fetched.status).toBe("ok");
+    if (fetched.status !== "ok") return;
+    expect(fetched.structure?.headings?.map((h) => h.title)).toEqual(["Title", "Intro", "Methods", "Appendix A"]);
+    expect(fetched.structure?.tables).toEqual([{ startLine: 10, endLine: 12 }]);
+    expect(fetched.structure?.figures).toEqual([{ line: 14, title: "Figure 1" }]);
+    expect(fetched.snapshot?.structure?.headings?.length).toBe(4);
+
+    const section = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId, position: { kind: "section", title: "methods" } }, fetchContext);
+    expect(section.status).toBe("ok");
+    if (section.status === "ok") {
+      expect(section.markdown).toContain("Methods body.");
+      expect(section.markdown).toContain("col");
+      expect(section.markdown).not.toContain("Intro body");
+      expect(section.range?.startLine).toBe(7);
+    }
+
+    const appendix = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId, position: { kind: "appendix" } }, fetchContext);
+    expect(appendix.status).toBe("ok");
+    if (appendix.status === "ok") {
+      expect(appendix.markdown).toContain("Appendix body.");
+      expect(appendix.markdown).not.toContain("Methods body.");
+    }
+
+    const table = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId, position: { kind: "element", element: "table", index: 1 } }, fetchContext);
+    expect(table.status).toBe("ok");
+    if (table.status === "ok") {
+      expect(table.markdown).toContain("| a | 1 |");
+      expect(table.markdown).not.toContain("Methods body.");
+    }
+  });
+
+  it("distinguishes unsupported structure from missing positions", async () => {
+    const service = openMaterialService();
+    const fetched = await service.fetch({ url: "https://example.com/doc2" }, fetchContext);
+    if (fetched.status !== "ok") throw new Error("fetch failed");
+    const snapshotId = fetched.snapshot!.snapshotId;
+
+    const page = await service.fetch({ snapshotId, position: { kind: "page", page: 1 } }, fetchContext);
+    expect(page).toMatchObject({ status: "structure-unsupported", kind: "pages" });
+
+    const missing = await service.fetch({ snapshotId, position: { kind: "section", title: "nonexistent" } }, fetchContext);
+    expect(missing.status).toBe("position-not-found");
+
+    const badTable = await service.fetch({ snapshotId, position: { kind: "element", element: "table", index: 9 } }, fetchContext);
+    expect(badTable.status).toBe("position-not-found");
+  });
+
+  it("applies a position slice on a URL fetch result", async () => {
+    const service = openMaterialService();
+    const sliced = await service.fetch({ url: "https://example.com/doc3", position: { kind: "lines", startLine: 4, endLine: 5 } }, fetchContext);
+    expect(sliced.status).toBe("ok");
+    if (sliced.status === "ok") {
+      expect(sliced.markdown).toBe("Intro body line one.\nIntro body line two.");
+      expect(sliced.range).toEqual({ startLine: 4, endLine: 5, totalLines: 17 });
+    }
+  });
+});

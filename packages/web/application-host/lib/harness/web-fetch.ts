@@ -1,4 +1,4 @@
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 import type { WebMaterialStore } from "./web-materials.js";
@@ -155,7 +155,13 @@ export function createWebFetch(deps: WebFetchDeps) {
     });
   };
 
-  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<string | null> => {
+  interface PdfExtraction {
+    text: string;
+    /** One-based line range of each page inside the joined text body. */
+    pages: Array<{ page: number; startLine: number; endLine: number }>;
+  }
+
+  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<PdfExtraction | null> => {
     try {
       signal?.throwIfAborted();
       // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
@@ -175,12 +181,132 @@ export function createWebFetch(deps: WebFetchDeps) {
           .join(" ");
         pages.push(text);
       }
-      return pages.join("\n\n");
+      // Pages join with "\n\n", which contributes exactly one empty line
+      // between consecutive page bodies — page ranges map back deterministically.
+      let cursor = 1;
+      const ranges = pages.map((text, index) => {
+        const count = text.split("\n").length;
+        const range = { page: index + 1, startLine: cursor, endLine: cursor + count - 1 };
+        cursor += count + 1;
+        return range;
+      });
+      return { text: pages.join("\n\n"), pages: ranges };
     } catch {
       if (signal?.aborted) {
         throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
       }
       return null;
+    }
+  };
+
+  // Lightweight structural detection over the stored readable body. What a
+  // representation cannot express is reported in `unparsed` instead of being
+  // silently absent (e.g. pdf-text has no figure/table boundaries).
+  const detectStructure = (
+    markdown: string,
+    representation: string,
+    pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+  ): WebSnapshotStructure => {
+    const lines = markdown.split("\n");
+    const headings: WebSnapshotStructure["headings"] = [];
+    const tables: NonNullable<WebSnapshotStructure["tables"]> = [];
+    const figures: NonNullable<WebSnapshotStructure["figures"]> = [];
+    const isMarkup = representation !== "pdf-text";
+    if (isMarkup) {
+      let index = 0;
+      while (index < lines.length) {
+        const line = lines[index] ?? "";
+        const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+        if (heading?.[1] && heading[2]) {
+          headings.push({ title: heading[2], level: heading[1].length, line: index + 1 });
+          index += 1;
+          continue;
+        }
+        const image = /!\[([^\]]*)\]\([^)]*\)/.exec(line);
+        if (image) {
+          figures.push(image[1] ? { line: index + 1, title: image[1] } : { line: index + 1 });
+        }
+        // A markdown table block: a header line, a |---| separator, then rows.
+        if (line.trim().startsWith("|") && index + 1 < lines.length && /^\|?\s*:?-{2,}/.test((lines[index + 1] ?? "").trim())) {
+          let end = index + 1;
+          while (end + 1 < lines.length && (lines[end + 1] ?? "").trim().startsWith("|")) end += 1;
+          tables.push({ startLine: index + 1, endLine: end + 1 });
+          index = end + 1;
+          continue;
+        }
+        index += 1;
+      }
+    }
+    const unparsed: string[] = [];
+    if (!pdfPages) unparsed.push("pages");
+    if (!isMarkup) unparsed.push("tables", "figures", "headings");
+    return {
+      ...(pdfPages && pdfPages.length ? { pages: pdfPages } : {}),
+      ...(headings && headings.length ? { headings } : {}),
+      ...(tables.length ? { tables } : {}),
+      ...(figures.length ? { figures } : {}),
+      ...(unparsed.length ? { unparsed } : {}),
+    };
+  };
+
+  const SECTION_END_LEVEL = (level: number): number => level;
+
+  const resolvePosition = (
+    markdown: string,
+    structure: WebSnapshotStructure | undefined,
+    position: WebReadPosition,
+    snapshotId: string,
+  ): { body: string; range: { startLine: number; endLine: number; totalLines: number } } | FetchResult => {
+    const lines = markdown.split("\n");
+    const totalLines = lines.length;
+    const notFound = (detail: string): FetchResult => ({ status: "position-not-found", snapshotId, detail });
+    const unsupported = (kind: string): FetchResult => ({ status: "structure-unsupported", snapshotId, kind });
+    const slice = (startLine: number, endLine: number): { body: string; range: { startLine: number; endLine: number; totalLines: number } } => ({
+      body: lines.slice(startLine - 1, Math.min(endLine, totalLines)).join("\n"),
+      range: { startLine, endLine: Math.min(endLine, totalLines), totalLines },
+    });
+    switch (position.kind) {
+      case "lines": {
+        if (position.startLine < 1 || position.startLine > totalLines) {
+          return notFound(`lines ${position.startLine}.. outside 1..${totalLines}`);
+        }
+        return slice(position.startLine, position.endLine ?? totalLines);
+      }
+      case "page": {
+        if (!structure?.pages?.length) return unsupported("pages");
+        const page = structure.pages.find((entry) => entry.page === position.page);
+        if (!page) return notFound(`page ${position.page} outside 1..${structure.pages.length}`);
+        return slice(page.startLine, page.endLine);
+      }
+      case "section": {
+        if (!structure?.headings?.length) return unsupported("headings");
+        const needle = position.title.trim().toLowerCase();
+        const heading = structure.headings.find((entry) => entry.title.toLowerCase().includes(needle));
+        if (!heading) return notFound(`no section matching "${position.title}"`);
+        const next = structure.headings.find(
+          (entry) => entry.line > heading.line && entry.level <= SECTION_END_LEVEL(heading.level),
+        );
+        return slice(heading.line, (next?.line ?? totalLines + 1) - 1);
+      }
+      case "appendix": {
+        if (!structure?.headings?.length) return unsupported("headings");
+        const heading = structure.headings.find((entry) =>
+          /^(appendix|appendices|supplementary\b|supplement\b|annex\b|附录)/i.test(entry.title.trim()));
+        if (!heading) return notFound("no appendix/supplementary section");
+        const next = structure.headings.find(
+          (entry) => entry.line > heading.line && entry.level <= heading.level,
+        );
+        return slice(heading.line, (next?.line ?? totalLines + 1) - 1);
+      }
+      case "element": {
+        const list = position.element === "table" ? structure?.tables : structure?.figures;
+        if (!list?.length) return unsupported(position.element === "table" ? "tables" : "figures");
+        const entry = list[position.index - 1];
+        if (!entry) return notFound(`${position.element} ${position.index} outside 1..${list.length}`);
+        const startLine = "startLine" in entry ? entry.startLine : entry.line;
+        const endLine = "endLine" in entry ? entry.endLine : entry.line;
+        return slice(startLine, endLine);
+      }
     }
   };
 
@@ -205,8 +331,12 @@ export function createWebFetch(deps: WebFetchDeps) {
     content: Extract<FetchResult, { status: "ok" }>,
     ctx: FetchContext,
     pdf = false,
+    pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
-    if (!deps.materials) return content;
+    const representation = representationFor(content.contentType, content.rendered, pdf);
+    const structure = content.structure ?? detectStructure(content.markdown, representation, pdfPages);
+    const withStructure = { ...content, structure };
+    if (!deps.materials) return withStructure;
     try {
       const snapshot = await deps.materials.put(
         ctx.workspaceId,
@@ -215,18 +345,19 @@ export function createWebFetch(deps: WebFetchDeps) {
           finalUrl: content.finalUrl,
           ...(content.contentType ? { contentType: content.contentType } : {}),
           ...(content.title ? { title: content.title } : {}),
-          representation: representationFor(content.contentType, content.rendered, pdf),
+          representation,
           ...(content.rendered ? { rendered: true } : {}),
+          structure,
         },
         Buffer.from(content.markdown, "utf8"),
         ctx.authority,
         ...(ctx.forceNewSnapshot ? [{ forceNew: true }] : []),
       );
-      return { ...content, snapshot };
+      return { ...withStructure, snapshot };
     } catch {
       // Snapshot persistence must never fail a body that was fetched
       // successfully; the result is delivered without a snapshotId.
-      return content;
+      return withStructure;
     }
   };
 
@@ -267,8 +398,9 @@ export function createWebFetch(deps: WebFetchDeps) {
     const finishOk = async (
       content: Extract<FetchResult, { status: "ok" }>,
       pdf = false,
+      pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
     ): Promise<FetchResult> => {
-      const result = await attachSnapshot(content, ctx, pdf);
+      const result = await attachSnapshot(content, ctx, pdf, pdfPages);
       cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
       return result;
     };
@@ -399,9 +531,9 @@ export function createWebFetch(deps: WebFetchDeps) {
             reason: `PDF exceeds max size (${arrayBuffer.byteLength} > ${maxBytes})`,
           };
         }
-        const text = await extractPdfText(arrayBuffer, controller.signal);
+        const extracted = await extractPdfText(arrayBuffer, controller.signal);
         controller.signal.throwIfAborted();
-        if (text === null) {
+        if (extracted === null) {
           finishRequest();
           return { status: "failed", url, reason: "PDF text extraction failed" };
         }
@@ -410,13 +542,13 @@ export function createWebFetch(deps: WebFetchDeps) {
           url,
           finalUrl: currentUrl,
           contentType,
-          markdown: text,
-          bytes: text.length,
+          markdown: extracted.text,
+          bytes: extracted.text.length,
           fromCache: false,
           rendered: false,
         };
         finishRequest();
-        return finishOk(content, true);
+        return finishOk(content, true, extracted.pages);
       }
 
       // Read body with size limit
@@ -490,7 +622,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     return JSON.stringify({ allow: policy.allow ?? null, block: [...policy.block].sort() });
   };
 
-  const readSnapshot = async (snapshotId: string, ctx: FetchContext): Promise<FetchResult> => {
+  const readSnapshot = async (snapshotId: string, ctx: FetchContext, position?: WebReadPosition): Promise<FetchResult> => {
     const found = deps.materials
       ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority).catch(() => null)
       : null;
@@ -501,7 +633,14 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (policyCheck.blocked) {
       return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
     }
-    const markdown = found.body.toString("utf8");
+    let markdown = found.body.toString("utf8");
+    let range: { startLine: number; endLine: number; totalLines: number } | undefined;
+    if (position) {
+      const sliced = resolvePosition(markdown, found.ref.structure, position, snapshotId);
+      if (!("body" in sliced)) return sliced;
+      markdown = sliced.body;
+      range = sliced.range;
+    }
     return withReceipt({
       status: "ok",
       url: found.ref.sourceUrl,
@@ -513,13 +652,15 @@ export function createWebFetch(deps: WebFetchDeps) {
       fromCache: false,
       rendered: found.ref.rendered === true,
       snapshot: found.ref,
+      ...(found.ref.structure ? { structure: found.ref.structure } : {}),
+      ...(range ? { range } : {}),
     }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
   };
 
   const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
     const request: WebFetchRequest = typeof input === "string" ? { url: input } : input;
     const snapshotId = request.snapshotId?.trim();
-    if (snapshotId) return readSnapshot(snapshotId, ctx);
+    if (snapshotId) return readSnapshot(snapshotId, ctx, request.position);
     const url = request.url?.trim() ?? "";
     if (!url) return { status: "failed", url: "", reason: "url or snapshotId is required" };
 
@@ -540,6 +681,19 @@ export function createWebFetch(deps: WebFetchDeps) {
       return { status: "renderer-unavailable", url };
     }
 
+    const positionSlice = (result: FetchResult): FetchResult => {
+      if (!request.position || result.status !== "ok") return result;
+      const sliced = resolvePosition(
+        result.markdown,
+        result.structure ?? result.snapshot?.structure,
+        request.position,
+        result.snapshot?.snapshotId ?? "",
+      );
+      if (!("body" in sliced)) return sliced;
+      const { range: _replacedRange, ...rest } = result;
+      return { ...rest, markdown: sliced.body, bytes: sliced.body.length, range: sliced.range };
+    };
+
     // Cached bytes are reusable only after this workspace and request have
     // independently passed their current authorization policies.
     const cacheKey = `${url}:${ctx.render ?? false}`;
@@ -553,7 +707,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           }
           const { receipt: _oldReceipt, ...content } = cached.result;
           const rebound = await attachSnapshot({ ...content, fromCache: true }, { ...ctx, forceNewSnapshot: false });
-          return withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+          return positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true));
         }
         return cached.result;
       }
@@ -567,7 +721,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       const rebound = rebindSnapshot
         ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false })
         : result;
-      return withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+      return positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true));
     };
 
     // A refresh is intentionally a fresh request: it bypasses both the

@@ -12,6 +12,7 @@ import {
 import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createResearchSearchTool } from "./research-search-tool.js";
+import { createMaterialsTool } from "./materials-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
 import { createExploreTool } from "./explore-tool.js";
@@ -71,6 +72,8 @@ export interface SelectHarnessToolsDeps {
   webSearchAvailable?: boolean;
   /** Whether the Host registered public scholarly metadata search. */
   researchSearchAvailable?: boolean;
+  /** Whether the Host registered the material collection service (D-315 L3). */
+  materialsAvailable?: boolean;
   /** Whether the host provides a thread runtime (thread registry + spawn).
    * When false, thread tools are not registered. */
   threadRuntimeAvailable?: boolean;
@@ -127,6 +130,7 @@ export function selectHarnessTools(
     readPage,
     webSearchAvailable,
     researchSearchAvailable,
+    materialsAvailable,
     threadRuntimeAvailable,
     experimentAvailable,
     settingsAvailable,
@@ -191,6 +195,9 @@ export function selectHarnessTools(
   }
   if (researchSearchAvailable && tools.research_search !== false) {
     result.push(createResearchSearchTool(bridge));
+  }
+  if (materialsAvailable && tools.materials !== false) {
+    result.push(createMaterialsTool(bridge));
   }
   // Phase 2 tools
   if (tools.todo !== false) {

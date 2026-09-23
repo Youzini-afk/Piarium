@@ -34,7 +34,15 @@ import type {
   PermissionInspectParams,
   PermissionInspectResult,
 } from "./permission-gate.js";
-import type { WebFetchRequest, WebSearchRequest, WebSearchResult, WebSnapshotRef } from "./harness-web.js";
+import type {
+  MaterialsCollectionParams,
+  MaterialsCollectionResult,
+  WebFetchRequest,
+  WebSearchRequest,
+  WebSearchResult,
+  WebSnapshotRef,
+  WebSnapshotStructure,
+} from "./harness-web.js";
 import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
@@ -245,7 +253,14 @@ export type FetchResult =
     receipt?: RetrievalUrlReceipt;
     /** Content-pinned snapshot when the Host material store is wired. */
     snapshot?: WebSnapshotRef;
+    /** Detected structure of the readable body (pages/headings/…). */
+    structure?: WebSnapshotStructure;
+    /** When a position selector was applied, the one-based line range of the
+     * returned markdown inside the fixed body. */
+    range?: { startLine: number; endLine: number; totalLines: number };
   }
+  | { status: "structure-unsupported"; snapshotId: string; kind: string }
+  | { status: "position-not-found"; snapshotId: string; detail: string }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
   | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
   | { status: "empty-shell"; url: string; hint: string }
@@ -1246,6 +1261,7 @@ export interface HarnessServiceMap {
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: WebFetchRequest; result: FetchResult };
   "web.search": { params: WebSearchRequest; result: WebSearchResult };
+  "materials.collections": { params: MaterialsCollectionParams; result: MaterialsCollectionResult };
   "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };
@@ -1402,6 +1418,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "web.search": "read.web",
   "research.search": "read.web",
+  "materials.collections": "read.web",
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
   "zone2.delivered": "context.session",
@@ -1517,6 +1534,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.search",
   "research.search",
+  "materials.collections",
   "zone2.assemble",
   "zone2.status",
   "zone2.delivered",

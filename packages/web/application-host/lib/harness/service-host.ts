@@ -282,6 +282,7 @@ export interface HarnessServiceHost {
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   researchSearchService: import("./router.js").HarnessService<"research.search"> | null;
+  materialCollectionsService?: import("./router.js").HarnessService<"materials.collections"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
   documentWriteGuard: HarnessDocumentWriteGuard | null;
@@ -524,6 +525,8 @@ export interface HarnessServiceHostOptions {
   webSearchService?: HarnessServiceHost["webSearchService"];
   /** Scholarly metadata service. Uses public OpenAlex/Semantic Scholar APIs. */
   researchSearchService?: HarnessServiceHost["researchSearchService"];
+  /** Material collections service (D-315 L3). */
+  materialCollectionsService?: HarnessServiceHost["materialCollectionsService"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
   documentReadSource?: HarnessDocumentReadSource;
   /** Surface-aware native Pi find/ls path overlay (null when unavailable). */

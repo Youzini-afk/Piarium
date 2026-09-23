@@ -652,6 +652,7 @@ export class SessionHost {
   #workspaceMutationJournalEnabled = false;
   #harnessThreadRuntimeEnabled = false;
   #harnessExperimentsEnabled = false;
+  #harnessMaterialsEnabled = false;
   #harnessSettingsEnabled = false;
   #harnessFollowUpsEnabled = false;
   #harnessScheduledTasksEnabled = false;
@@ -729,6 +730,10 @@ export class SessionHost {
 
   setHarnessExperimentsEnabled(enabled: boolean): void {
     this.#harnessExperimentsEnabled = enabled;
+  }
+
+  setHarnessMaterialsEnabled(enabled: boolean): void {
+    this.#harnessMaterialsEnabled = enabled;
   }
 
   setHarnessSettingsEnabled(enabled: boolean): void {
@@ -3702,6 +3707,7 @@ export class SessionHost {
         ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,
         researchSearchAvailable: this.#harnessWebSearchEnabled,
+        materialsAvailable: this.#harnessMaterialsEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         experimentAvailable: this.#harnessExperimentsEnabled,
         settingsAvailable: this.#harnessSettingsEnabled,

@@ -99,6 +99,7 @@ export const performHarnessWebFetch = async (
       ...(url ? { url } : {}),
       ...(snapshotId ? { snapshotId } : {}),
       ...(params.refresh === true ? { refresh: true } : {}),
+      ...(params.position ? { position: params.position } : {}),
     },
     {
       workspaceId,
@@ -1069,6 +1070,9 @@ export function registerHarnessServices(
   }
   if (host.researchSearchService) {
     router.register("research.search", host.researchSearchService);
+  }
+  if (host.materialCollectionsService) {
+    router.register("materials.collections", host.materialCollectionsService);
   }
   // Phase 2 services — registered only when the corresponding provider is available
   const zone2Delivery = host.zone2Delivery;

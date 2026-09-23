@@ -551,6 +551,8 @@ export interface HostHandshakeParams {
     harnessFollowUps?: boolean;
     /** The application Host exposes the project scheduled-task authority to agents (D-307). */
     harnessScheduledTasks?: boolean;
+    /** The application Host registered the material collection service (D-315 L3). */
+    harnessMaterials?: boolean;
     workspaceMutationJournal?: boolean;
   };
   clientName: string;

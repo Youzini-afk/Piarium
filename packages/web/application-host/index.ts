@@ -94,6 +94,7 @@ import { KernelPathLockService } from './lib/kernel/file-resource-lock-service.j
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web-materials.js';
+import { createMaterialCollections as createMaterialCollectionsService } from './lib/harness/material-collections.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
@@ -1743,6 +1744,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const webMaterials = createWebMaterialStore(harnessWorkingStates);
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
+  const materialCollectionsService = createMaterialCollectionsService(harnessWorkingStates, {
+    materials: webMaterials,
+    // URL members go through the full web.fetch path: session binding,
+    // domain policy, renderer entitlement, and receipt authority.
+    fetchUrl: (params, ctx) => performHarnessWebFetch(harnessServiceHost, params, ctx),
+    resolveThreadId: async (sessionId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId);
+      return binding?.threadId;
+    },
+  });
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
@@ -2906,6 +2917,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     webFetchService,
     ...(webSearchService ? { webSearchService } : {}),
     researchSearchService,
+    materialCollectionsService,
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
     onShellStarted: (sessionId, event) => knowledgeContextRuntime.observeShellStarted(sessionId, event).then(() => undefined),

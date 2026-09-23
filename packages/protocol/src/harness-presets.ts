@@ -120,6 +120,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
       "webfetch",
       "websearch",
       "research_search",
+      "materials",
       "submit_facts",
     ],
     worktree: "none",

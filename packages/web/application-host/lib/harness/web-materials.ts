@@ -32,6 +32,8 @@ export interface WebSnapshotDraft {
   /** Parser that produced the readable view, e.g. "readability-markdown". */
   representation: string;
   rendered?: boolean;
+  /** Detected structure of this exact body (pages/headings/tables/figures). */
+  structure?: WebSnapshotRef["structure"];
 }
 
 export interface WebSnapshotContent {
@@ -120,6 +122,7 @@ export const createWebMaterialStore = (
         ...(draft.contentType ? { contentType: draft.contentType } : {}),
         ...(draft.rendered ? { rendered: true } : {}),
         ...(draft.title ? { title: draft.title } : {}),
+        ...(draft.structure ? { structure: draft.structure } : {}),
       };
       const ownerId = store.ownerIdForObject?.(object.hash);
       await context.records.put({

@@ -24,6 +24,33 @@ export type WebSearchItemStatus =
   | "denied"
   | "unsupported";
 
+/**
+ * Structural positions a parser actually detected inside the stored body.
+ * Entries bind to the snapshot's fixed content — a refresh mints a new
+ * snapshot with its own structure.
+ */
+export interface WebSnapshotStructure {
+  /** Page boundaries mapped onto extracted-text lines (one-based). Present
+   * only when the parser actually segmented pages (e.g. pdf-text). */
+  pages?: Array<{ page: number; startLine: number; endLine: number }>;
+  /** Detected section headings mapped onto extracted-text lines. */
+  headings?: Array<{ title: string; level: number; line: number }>;
+  /** Detected table blocks as line ranges in the fixed body. */
+  tables?: Array<{ startLine: number; endLine: number }>;
+  /** Detected figure/image references (markdown image lines). */
+  figures?: Array<{ line: number; title?: string }>;
+  /** Aspects this representation honestly cannot express. */
+  unparsed?: string[];
+}
+
+/** A structural or line-range selector into a fixed snapshot body. */
+export type WebReadPosition =
+  | { kind: "lines"; startLine: number; endLine?: number }
+  | { kind: "page"; page: number }
+  | { kind: "section"; title: string }
+  | { kind: "element"; element: "table" | "figure"; index: number }
+  | { kind: "appendix" };
+
 export interface WebSnapshotRef {
   snapshotId: string;
   /** The URL originally requested (pre-redirect). */
@@ -38,6 +65,83 @@ export interface WebSnapshotRef {
   contentType?: string;
   rendered?: boolean;
   title?: string;
+  structure?: WebSnapshotStructure;
+}
+
+// ---------------------------------------------------------------------------
+// Material collections (D-315 L3)
+//
+// A collection is an explicit set of material references owned by a session
+// or thread. Members point at snapshots (fixed bodies), plain URLs (fetched
+// and pinned on add), or scholarly paper identities. Members never copy
+// content: they reference the existing snapshot/object authority. Searching a
+// collection applies the collection scope before recall — only member bodies
+// the caller can actually read are scanned.
+
+export type MaterialCollectionMemberKind = "snapshot" | "url" | "paper";
+
+export interface MaterialCollectionMemberInput {
+  kind: MaterialCollectionMemberKind;
+  snapshotId?: string;
+  url?: string;
+  /** Scholarly identity entry — metadata only, no body. */
+  paper?: { provider: string; id: string; doi?: string; title?: string };
+  /** What the material is for this investigation. */
+  role?: "main" | "supplement" | "code" | "data" | "other";
+  note?: string;
+  title?: string;
+}
+
+export interface MaterialCollectionMember extends MaterialCollectionMemberInput {
+  memberId: string;
+  addedAt: number;
+}
+
+export interface MaterialCollection {
+  collectionId: string;
+  name?: string;
+  /** Persisted collections survive their owning thread's lifecycle. */
+  persisted: boolean;
+  createdAt: number;
+  updatedAt: number;
+  members: MaterialCollectionMember[];
+}
+
+export interface MaterialCollectionSummary {
+  collectionId: string;
+  name?: string;
+  persisted: boolean;
+  memberCount: number;
+  updatedAt: number;
+}
+
+export interface MaterialCollectionSearchHit {
+  memberId: string;
+  snapshotId: string;
+  /** One-based line in the fixed snapshot body. */
+  line: number;
+  excerpt: string;
+}
+
+export interface MaterialsCollectionParams {
+  action: "create" | "add" | "remove" | "list" | "search";
+  collectionId?: string;
+  name?: string;
+  persist?: boolean;
+  member?: MaterialCollectionMemberInput;
+  memberId?: string;
+  query?: string;
+}
+
+export interface MaterialsCollectionResult {
+  status: "ok" | "not-found" | "denied" | "unavailable" | "failed";
+  collection?: MaterialCollection;
+  collections?: MaterialCollectionSummary[];
+  member?: MaterialCollectionMember;
+  hits?: MaterialCollectionSearchHit[];
+  /** Members whose body could not be read under the caller's authority. */
+  unreadable?: string[];
+  message?: string;
 }
 
 export interface WebSearchItem {
@@ -88,6 +192,8 @@ export interface WebFetchRequest {
   /** Bypass the short-lived response cache and mint a fresh snapshot. */
   refresh?: boolean;
   render?: boolean;
+  /** Read a structural slice of the body instead of the whole text. */
+  position?: WebReadPosition;
 }
 
 // ---------------------------------------------------------------------------

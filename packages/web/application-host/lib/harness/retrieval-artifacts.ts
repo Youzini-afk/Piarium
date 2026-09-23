@@ -278,6 +278,15 @@ const fieldsMatch = (
 );
 
 const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
+const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
+
+const persistedCollection = (record: RecordLike): boolean => {
+  try {
+    return (JSON.parse(record.payloadJson) as { persisted?: unknown }).persisted === true;
+  } catch {
+    return false;
+  }
+};
 
 const temporaryArtifactsFor = async (
   context: ContextLike,
@@ -666,12 +675,15 @@ export const createRetrievalArtifactAccess = (
       const plain: RecordLike[] = [];
       for (const record of await context.records.list({})) {
         const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
+        const isCollection = record.recordType === MATERIAL_COLLECTION_RECORD_TYPE;
         if (!(
           isSnapshot
+          || isCollection
           || record.recordType.startsWith("retrieval.evidence.")
           || record.recordType === "retrieval.artifact"
           || record.recordType === "retrieval.receipt"
         )) continue;
+        if (isCollection && persistedCollection(record)) continue;
         if (record.threadId === threadId) {
           (isSnapshot ? snapshots : plain).push(record);
           continue;
@@ -702,12 +714,22 @@ export const createRetrievalArtifactAccess = (
     "web-fetch-receipt-release",
     async (_store, context) => {
       const receipts: RecordLike[] = [];
-      for (const record of await context.records.list({ recordType: "retrieval.receipt" })) {
-        if (fieldsMatch(record, authority)) receipts.push(record);
+      const collections: RecordLike[] = [];
+      for (const record of await context.records.list({})) {
+        if (record.recordType === "retrieval.receipt" && fieldsMatch(record, authority)) {
+          receipts.push(record);
+        } else if (record.recordType === MATERIAL_COLLECTION_RECORD_TYPE
+          && !persistedCollection(record)
+          && fieldsMatch(record, authority)) {
+          collections.push(record);
+        }
       }
       const snapshots = await temporarySnapshotsFor(context, authority);
       for (const record of receipts) {
         await releaseRecord(context, "receipt-authority-release", record);
+      }
+      for (const record of collections) {
+        await releaseRecord(context, "collection-authority-release", record);
       }
       // Session-scoped web snapshots die with the same authority, unless a
       // surviving record still cites their body.
@@ -744,6 +766,15 @@ export const createRetrievalArtifactAccess = (
           continue;
         }
         const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
+        if (record.recordType === MATERIAL_COLLECTION_RECORD_TYPE) {
+          // Persisted collections are saved workspace assets. Temporary ones
+          // bound to a dead thread are orphans; session-scoped ones (no
+          // threadId) are left for session-drop release.
+          if (!persistedCollection(record) && record.threadId && !knownThreads.has(record.threadId)) {
+            plainOrphans.push(record);
+          }
+          continue;
+        }
         if (record.recordType !== "retrieval.artifact" && record.recordType !== "retrieval.receipt" && !isSnapshot) continue;
         if (!record.threadId || !record.runId) {
           // Session-scoped records release on session drop; only a mixed

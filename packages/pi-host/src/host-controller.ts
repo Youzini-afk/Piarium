@@ -866,6 +866,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessDocumentPathOverlay", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessMaterialsEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessMaterials", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessWebCapabilities({
           read: clientCapabilities !== undefined
             && readBoolean(clientCapabilities, "harnessWebRead", { optional: true }) === true,
