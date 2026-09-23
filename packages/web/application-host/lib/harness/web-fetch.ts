@@ -1,4 +1,4 @@
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebDocumentRegion, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 import type { WebMaterialStore } from "./web-materials.js";
@@ -19,11 +19,18 @@ export interface WebFetchDeps {
   persistReceipt?: (workspaceId: string, receipt: WebFetchReceiptDraft, markdown: string) => Promise<RetrievalUrlReceipt>;
   /** Durable snapshot store; when absent fetches still deliver content but mint no snapshotId. */
   materials?: Pick<WebMaterialStore, "put" | "read">;
+  /** Optional PDF page renderer. Text extraction stays available without it. */
+  pdfPageRenderer?: (source: Buffer, page: number, region?: WebDocumentRegion, signal?: AbortSignal) => Promise<{
+    data: Buffer;
+    mimeType: "image/png";
+  }>;
 }
 
 interface CacheEntry {
   result: FetchResult;
   expiresAt: number;
+  /** Raw PDF bytes remain available for a later authority rebind. */
+  sourceBytes?: Buffer;
 }
 
 interface FetchContext {
@@ -159,6 +166,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     text: string;
     /** One-based line range of each page inside the joined text body. */
     pages: Array<{ page: number; startLine: number; endLine: number }>;
+    pageCount: number;
   }
 
   const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<PdfExtraction | null> => {
@@ -166,7 +174,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       signal?.throwIfAborted();
       // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      const loading = pdfjs.getDocument({ data });
+      const loading = pdfjs.getDocument({ data, disableWorker: true });
       const doc = signal ? await awaitAbortable(loading.promise, signal) : await loading.promise;
       const pages: string[] = [];
       for (let i = 1; i <= doc.numPages; i++) {
@@ -176,9 +184,30 @@ export function createWebFetch(deps: WebFetchDeps) {
         signal?.throwIfAborted();
         const contentPromise = page.getTextContent();
         const content = signal ? await awaitAbortable(contentPromise, signal) : await contentPromise;
-        const text = content.items
-          .map((item) => item.str ?? "")
-          .join(" ");
+        const items = content.items
+          .filter((item) => typeof item.str === "string" && item.str.length > 0)
+          .map((item) => ({
+            text: item.str ?? "",
+            x: Array.isArray(item.transform) ? Number(item.transform[4] ?? 0) : 0,
+            y: Array.isArray(item.transform) ? Number(item.transform[5] ?? 0) : 0,
+            hasEOL: item.hasEOL === true,
+          }));
+        // Keep a useful reading order for ordinary PDFs: group glyph runs by
+        // baseline, then order each line left-to-right. This is still a
+        // lightweight view; complex multi-column documents remain explicitly
+        // eligible for a later structure parser.
+        const rows: Array<{ y: number; items: typeof items }> = [];
+        for (const item of items) {
+          const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
+          if (row) row.items.push(item);
+          else rows.push({ y: item.y, items: [item] });
+        }
+        rows.sort((left, right) => right.y - left.y);
+        const text = rows.map((row) => row.items
+          .sort((left, right) => left.x - right.x)
+          .map((item) => item.text)
+          .join(" ")
+          .trim()).filter(Boolean).join("\n");
         pages.push(text);
       }
       // Pages join with "\n\n", which contributes exactly one empty line
@@ -190,7 +219,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         cursor += count + 1;
         return range;
       });
-      return { text: pages.join("\n\n"), pages: ranges };
+      return { text: pages.join("\n\n"), pages: ranges, pageCount: doc.numPages };
     } catch {
       if (signal?.aborted) {
         throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
@@ -327,11 +356,29 @@ export function createWebFetch(deps: WebFetchDeps) {
           : "raw-text"
   );
 
+  const snapshotDerivation = (content: Extract<FetchResult, { status: "ok" }>): {
+    pdf: boolean;
+    pages?: Array<{ page: number; startLine: number; endLine: number }>;
+    document?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>;
+  } => {
+    const document = content.snapshot?.document;
+    const pdf = document?.kind === "pdf"
+      || content.snapshot?.representation === "pdf-text"
+      || content.contentType.toLowerCase().includes("application/pdf");
+    return {
+      pdf,
+      ...(content.structure?.pages ? { pages: content.structure.pages } : {}),
+      ...(document ? { document } : {}),
+    };
+  };
+
   const attachSnapshot = async (
     content: Extract<FetchResult, { status: "ok" }>,
     ctx: FetchContext,
     pdf = false,
     pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+    pdfDocument?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>,
+    sourceBytes?: Buffer,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
     const representation = representationFor(content.contentType, content.rendered, pdf);
     const structure = content.structure ?? detectStructure(content.markdown, representation, pdfPages);
@@ -348,10 +395,16 @@ export function createWebFetch(deps: WebFetchDeps) {
           representation,
           ...(content.rendered ? { rendered: true } : {}),
           structure,
+          ...(pdfDocument ? { document: pdfDocument } : {}),
         },
         Buffer.from(content.markdown, "utf8"),
         ctx.authority,
-        ...(ctx.forceNewSnapshot ? [{ forceNew: true }] : []),
+        {
+          ...(ctx.forceNewSnapshot ? { forceNew: true } : {}),
+          ...(sourceBytes ? {
+            source: { bytes: sourceBytes, contentType: content.contentType },
+          } : {}),
+        },
       );
       return { ...withStructure, snapshot };
     } catch {
@@ -399,9 +452,11 @@ export function createWebFetch(deps: WebFetchDeps) {
       content: Extract<FetchResult, { status: "ok" }>,
       pdf = false,
       pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+      pdfDocument?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>,
+      sourceBytes?: Buffer,
     ): Promise<FetchResult> => {
-      const result = await attachSnapshot(content, ctx, pdf, pdfPages);
-      cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+      const result = await attachSnapshot(content, ctx, pdf, pdfPages, pdfDocument, sourceBytes);
+      cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs, ...(sourceBytes ? { sourceBytes } : {}) });
       return result;
     };
 
@@ -548,7 +603,13 @@ export function createWebFetch(deps: WebFetchDeps) {
           rendered: false,
         };
         finishRequest();
-        return finishOk(content, true, extracted.pages);
+        return finishOk(
+          content,
+          true,
+          extracted.pages,
+          { kind: "pdf", pageCount: extracted.pageCount, parser: "pdf-text-layout-v1" },
+          Buffer.from(arrayBuffer),
+        );
       }
 
       // Read body with size limit
@@ -622,7 +683,82 @@ export function createWebFetch(deps: WebFetchDeps) {
     return JSON.stringify({ allow: policy.allow ?? null, block: [...policy.block].sort() });
   };
 
-  const readSnapshot = async (snapshotId: string, ctx: FetchContext, position?: WebReadPosition): Promise<FetchResult> => {
+  const renderSnapshotPage = async (
+    snapshotId: string,
+    ctx: FetchContext,
+    page: number | undefined,
+    region?: WebDocumentRegion,
+  ): Promise<FetchResult> => {
+    const pageNumber = page;
+    if (pageNumber === undefined || !Number.isSafeInteger(pageNumber) || pageNumber < 1) {
+      return { status: "page-image-unavailable", snapshotId, ...(page !== undefined ? { page } : {}), reason: "a one-based page is required" };
+    }
+    const validPage = pageNumber;
+    if (!deps.pdfPageRenderer) {
+      return { status: "page-image-unavailable", snapshotId, page: validPage, reason: "no PDF page renderer is installed" };
+    }
+    if (region && (!Number.isFinite(region.x) || !Number.isFinite(region.y)
+      || !Number.isFinite(region.width) || !Number.isFinite(region.height)
+      || region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0)) {
+      return { status: "page-image-unavailable", snapshotId, page: validPage, reason: "region must contain finite non-negative x/y and positive width/height" };
+    }
+    const found = deps.materials
+      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority, { includeSource: true }).catch(() => null)
+      : null;
+    if (!found) return { status: "snapshot-missing", snapshotId };
+    if (found.ref.document?.kind !== "pdf") {
+      return { status: "page-image-unavailable", snapshotId, page: validPage, reason: "snapshot is not a PDF" };
+    }
+    if (validPage > found.ref.document.pageCount) {
+      return { status: "page-image-unavailable", snapshotId, page: validPage, reason: `page ${validPage} is outside 1..${found.ref.document.pageCount}` };
+    }
+    if (!found.source) {
+      return { status: "page-image-unavailable", snapshotId, page: validPage, reason: "original PDF bytes are unavailable" };
+    }
+    const policyCheck = checkDomainPolicy(found.ref.finalUrl, ctx.workspaceId, ctx.domainPolicy);
+    if (policyCheck.blocked) return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
+    try {
+      const image = await deps.pdfPageRenderer(found.source.bytes, validPage, region, ctx.signal);
+      return withReceipt({
+        status: "ok",
+        url: found.ref.sourceUrl,
+        finalUrl: found.ref.finalUrl,
+        contentType: found.ref.contentType ?? "application/pdf",
+        ...(found.ref.title ? { title: found.ref.title } : {}),
+        markdown: "",
+        bytes: image.data.byteLength,
+        fromCache: false,
+        rendered: false,
+        snapshot: found.ref,
+        ...(found.ref.structure ? { structure: found.ref.structure } : {}),
+        pageImage: {
+          page: validPage,
+          mimeType: image.mimeType,
+          data: image.data.toString("base64"),
+          byteLength: image.data.byteLength,
+          ...(region ? { region } : {}),
+        },
+      }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+    } catch (error) {
+      if (ctx.signal?.aborted) throw ctx.signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
+      return {
+        status: "page-image-unavailable",
+        snapshotId,
+        page: validPage,
+        reason: error instanceof Error ? error.message : "PDF page rendering failed",
+      };
+    }
+  };
+
+  const readSnapshot = async (
+    snapshotId: string,
+    ctx: FetchContext,
+    position?: WebReadPosition,
+    view?: WebFetchRequest["view"],
+    page?: number,
+    region?: WebDocumentRegion,
+  ): Promise<FetchResult> => {
+    if (view === "page-image") return renderSnapshotPage(snapshotId, ctx, page, region);
     const found = deps.materials
       ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority).catch(() => null)
       : null;
@@ -660,7 +796,7 @@ export function createWebFetch(deps: WebFetchDeps) {
   const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
     const request: WebFetchRequest = typeof input === "string" ? { url: input } : input;
     const snapshotId = request.snapshotId?.trim();
-    if (snapshotId) return readSnapshot(snapshotId, ctx, request.position);
+    if (snapshotId) return readSnapshot(snapshotId, ctx, request.position, request.view, request.page, request.region);
     const url = request.url?.trim() ?? "";
     if (!url) return { status: "failed", url: "", reason: "url or snapshotId is required" };
 
@@ -694,6 +830,16 @@ export function createWebFetch(deps: WebFetchDeps) {
       return { ...rest, markdown: sliced.body, bytes: sliced.body.length, range: sliced.range };
     };
 
+    const applyView = async (result: FetchResult): Promise<FetchResult> => {
+      if (request.view !== "page-image") return result;
+      if (result.status !== "ok") return result;
+      const resultSnapshotId = result.snapshot?.snapshotId;
+      if (!resultSnapshotId) {
+        return { status: "page-image-unavailable", snapshotId: "", ...(request.page !== undefined ? { page: request.page } : {}), reason: "the fetched document was not pinned as a snapshot" };
+      }
+      return renderSnapshotPage(resultSnapshotId, ctx, request.page, request.region);
+    };
+
     // Cached bytes are reusable only after this workspace and request have
     // independently passed their current authorization policies.
     const cacheKey = `${url}:${ctx.render ?? false}`;
@@ -706,8 +852,16 @@ export function createWebFetch(deps: WebFetchDeps) {
             return { status: "blocked", url: cached.result.finalUrl, reason: "domain-blocked" };
           }
           const { receipt: _oldReceipt, ...content } = cached.result;
-          const rebound = await attachSnapshot({ ...content, fromCache: true }, { ...ctx, forceNewSnapshot: false });
-          return positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true));
+          const derivation = snapshotDerivation(content);
+          const rebound = await attachSnapshot(
+            { ...content, fromCache: true },
+            { ...ctx, forceNewSnapshot: false },
+            derivation.pdf,
+            derivation.pages,
+            derivation.document,
+            cached.sourceBytes,
+          );
+          return applyView(positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)));
         }
         return cached.result;
       }
@@ -718,8 +872,9 @@ export function createWebFetch(deps: WebFetchDeps) {
       // The in-flight/cache result may have been produced under another
       // session or thread. Rebind the content snapshot to this caller's
       // authority while reusing the content-addressed body.
+      const derivation = snapshotDerivation(result);
       const rebound = rebindSnapshot
-        ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false })
+        ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false }, derivation.pdf, derivation.pages, derivation.document, cache.get(cacheKey)?.sourceBytes)
         : result;
       return positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true));
     };
@@ -727,7 +882,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }), false);
+      return applyView(await deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }), false));
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
@@ -743,7 +898,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       shared = entry;
       inflight.set(sharedKey, shared);
     }
-    return deliver(await joinShared(shared, ctx.signal));
+    return applyView(await deliver(await joinShared(shared, ctx.signal)));
   };
 
   return {

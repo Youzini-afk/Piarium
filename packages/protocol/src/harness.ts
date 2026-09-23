@@ -40,6 +40,7 @@ import type {
   ResearchDecideParams,
   ResearchDecideResult,
   WebFetchRequest,
+  WebDocumentRegion,
   WebSearchRequest,
   WebSearchResult,
   WebSnapshotRef,
@@ -260,6 +261,14 @@ export type FetchResult =
     /** When a position selector was applied, the one-based line range of the
      * returned markdown inside the fixed body. */
     range?: { startLine: number; endLine: number; totalLines: number };
+    /** A real rendered page image, returned only when a caller asks for it. */
+    pageImage?: {
+      page: number;
+      mimeType: "image/png";
+      data: string;
+      byteLength: number;
+      region?: WebDocumentRegion;
+    };
   }
   | { status: "structure-unsupported"; snapshotId: string; kind: string }
   | { status: "position-not-found"; snapshotId: string; detail: string }
@@ -267,6 +276,7 @@ export type FetchResult =
   | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
   | { status: "empty-shell"; url: string; hint: string }
   | { status: "renderer-unavailable"; url: string }
+  | { status: "page-image-unavailable"; snapshotId: string; page?: number; reason: string }
   | { status: "snapshot-missing"; snapshotId: string }
   | { status: "failed"; url: string; reason: string };
 

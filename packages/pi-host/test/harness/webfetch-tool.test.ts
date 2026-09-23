@@ -248,4 +248,36 @@ describe("webfetch tool", () => {
     assert.ok(text.includes("JS-rendered app"));
     bridge.dispose();
   });
+
+  it("returns a requested PDF page as model-visible image content", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const resultPromise = createWebFetchTool(bridge, "test").execute(
+      "image",
+      { snapshot_id: "snap-pdf", view: "page-image", page: 2 } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(emitted[0]!.params, { snapshotId: "snap-pdf", view: "page-image", page: 2, position: { kind: "page", page: 2 } });
+    bridge.respond("test", emitted[0]!.requestId, {
+      ok: true,
+      result: {
+        status: "ok",
+        url: "https://example.com/paper.pdf",
+        finalUrl: "https://example.com/paper.pdf",
+        contentType: "application/pdf",
+        markdown: "",
+        bytes: 3,
+        fromCache: false,
+        rendered: false,
+        pageImage: { page: 2, mimeType: "image/png", data: "cG5n", byteLength: 3 },
+      },
+    });
+    const result = await resultPromise as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> };
+    assert.equal(result.content[1]?.type, "image");
+    assert.equal(result.content[1]?.data, "cG5n");
+    assert.equal(result.content[1]?.mimeType, "image/png");
+    bridge.dispose();
+  });
 });

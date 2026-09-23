@@ -43,6 +43,28 @@ export interface WebSnapshotStructure {
   unparsed?: string[];
 }
 
+/** A parser-backed document attached to an immutable snapshot. */
+export interface WebSnapshotDocument {
+  kind: "pdf";
+  pageCount: number;
+  /** Parser and layout strategy that produced the current text view. */
+  parser: string;
+  /** The original bytes are retained separately from the readable text body. */
+  source?: {
+    contentHash: string;
+    byteLength: number;
+    contentType: string;
+  };
+}
+
+export interface WebDocumentRegion {
+  /** Render-space pixels at the renderer's declared DPI. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** A structural or line-range selector into a fixed snapshot body. */
 export type WebReadPosition =
   | { kind: "lines"; startLine: number; endLine?: number }
@@ -66,6 +88,7 @@ export interface WebSnapshotRef {
   rendered?: boolean;
   title?: string;
   structure?: WebSnapshotStructure;
+  document?: WebSnapshotDocument;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +314,12 @@ export interface WebFetchRequest {
   /** Bypass the short-lived response cache and mint a fresh snapshot. */
   refresh?: boolean;
   render?: boolean;
+  /** Progressive document view. `page-image` is resolved from a pinned PDF snapshot. */
+  view?: "text" | "page-image";
+  /** One-based page for `view: "page-image"`. */
+  page?: number;
+  /** Optional crop in rendered page pixels; omitted means the full page. */
+  region?: WebDocumentRegion;
   /** Read a structural slice of the body instead of the whole text. */
   position?: WebReadPosition;
 }

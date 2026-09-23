@@ -1653,7 +1653,23 @@ foreign receiptId 不授权。同 URL 在飞读取按
 5. 实施分为 L3-P0 原件/页面视觉、L3-P1 版面/OCR/结构适配器、L3-P2 表格/公式/图表增强与阅读器交接；首个解析器与真实论文样本质量
    在实施后记录，不对解析准确率作先验保证。
 
-状态：设计已接受；未实施，作为阶段 L3 的后续结构阅读切片。
+状态：设计已接受；L3-P0 已实施，L3-P1/P2 仍是后续结构阅读切片。
+
+### D-323 · 2026-09-23 · L3-P0 原件保存与页面视觉读取
+
+类型：实现收口（D-322 P0）
+
+决定：沿现有 `web.snapshot` authority 保存 PDF 原始字节与抽取文本。`WebSnapshotRef.document` 固定页数、解析器身份和
+source content hash；重新解析或刷新产生新的快照身份，旧快照位置不变。`webfetch` 增加 `view=page-image`、一基页码和
+可选渲染像素区域，Host 经 Poppler adapter 生成 PNG，Pi 工具把真实图片作为 image content 返回给模型。没有 renderer、原件、
+页码或区域不合法时返回明确的 `page-image-unavailable`，不伪造图片；Poppler 通过 `VARIN_PDFTOPPM_PATH` 或 Host PATH 提供，
+文本读取不依赖它。
+
+验证：PDF.js 4.10.38 实际读取生成的两页 PDF；Poppler 实际渲染整页与裁剪页；web material / web fetch 聚焦套件 33 项通过，
+Pi `webfetch` 工具验证 image content；application-host 与 pi-host 类型检查通过。复杂多栏/OCR/表格/公式/图表解析和阅读器 UI
+仍未交付，不据此宣称完整结构阅读。
+
+状态：已实施；未推送（待主代理验收）。
 
 ### D-318 · 2026-09-23 · L4 跨线程材料授权
 

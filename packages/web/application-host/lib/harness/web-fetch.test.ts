@@ -362,6 +362,55 @@ describe("web-fetch service", () => {
     }
   });
 
+  it("renders a requested PDF page from the pinned original bytes", async () => {
+    const source = Buffer.from("original-pdf");
+    const ref = {
+      snapshotId: "snap-pdf",
+      sourceUrl: "https://example.com/paper.pdf",
+      finalUrl: "https://example.com/paper.pdf",
+      fetchedAt: 1,
+      contentHash: "sha256-text",
+      representation: "pdf-text",
+      byteLength: 9,
+      contentType: "application/pdf",
+      document: {
+        kind: "pdf" as const,
+        pageCount: 2,
+        parser: "pdf-text-layout-v1",
+        source: { contentHash: "sha256-source", byteLength: source.byteLength, contentType: "application/pdf" },
+      },
+    };
+    const materials = {
+      put: async () => ref,
+      read: async (_workspaceId: string, snapshotId: string, _authority: unknown, options?: { includeSource?: boolean }) => (
+        snapshotId === ref.snapshotId
+          ? { ref, body: Buffer.from("page text"), ...(options?.includeSource ? { source: { bytes: source, contentType: "application/pdf" } } : {}) }
+          : null
+      ),
+    };
+    const renderer = vi.fn(async (bytes: Buffer, page: number) => {
+      expect(bytes).toEqual(source);
+      expect(page).toBe(2);
+      return { data: Buffer.from("png-page-2"), mimeType: "image/png" as const };
+    });
+    const service = createWebFetch({
+      ssrf: createMockSsrf(),
+      domainPolicy: noDomainPolicy,
+      materials,
+      pdfPageRenderer: renderer,
+    });
+    const result = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 2 }, fetchContext);
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.pageImage).toMatchObject({ page: 2, mimeType: "image/png", data: Buffer.from("png-page-2").toString("base64") });
+      expect(result.snapshot?.snapshotId).toBe(ref.snapshotId);
+    }
+    expect(renderer).toHaveBeenCalledTimes(1);
+
+    const outOfRange = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 3 }, fetchContext);
+    expect(outOfRange).toMatchObject({ status: "page-image-unavailable", page: 3 });
+  });
+
   it("reports snapshot-missing for released or foreign snapshots and re-checks domain policy", async () => {
     const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
     const missing = await service.fetch({ snapshotId: "snap-gone" }, fetchContext);

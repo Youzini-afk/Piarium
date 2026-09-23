@@ -135,6 +135,7 @@ import { createGrammarStore } from './lib/structure/grammar-store.js';
 import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
+import { createPopplerPdfPageRenderer } from './lib/harness/pdf-page-renderer.js';
 import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
@@ -1514,6 +1515,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read'] } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
+    pdfPageRenderer: createPopplerPdfPageRenderer(),
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
       if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
@@ -1524,8 +1526,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!webMaterialAccess.put) throw new Error('Durable web snapshot storage is unavailable');
         return webMaterialAccess.put(workspaceId, draft, body, authority, options);
       },
-      read: async (workspaceId, snapshotId, authority) => (
-        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId, authority) : null
+      read: async (workspaceId, snapshotId, authority, options) => (
+        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId, authority, options) : null
       ),
     },
   });

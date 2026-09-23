@@ -36,12 +36,15 @@ export interface WebSnapshotDraft {
   rendered?: boolean;
   /** Detected structure of this exact body (pages/headings/tables/figures). */
   structure?: WebSnapshotRef["structure"];
+  document?: WebSnapshotRef["document"];
 }
 
 export interface WebSnapshotContent {
   ref: WebSnapshotRef;
   /** Stored readable body (utf-8 extracted text). */
   body: Buffer;
+  /** Original source bytes, loaded only when explicitly requested. */
+  source?: { bytes: Buffer; contentType: string };
 }
 
 type WebSnapshotAuthority = Pick<RetrievalReceiptAuthority, "owningWorkspaceId" | "sessionId" | "threadId">;
@@ -73,7 +76,10 @@ export const createWebMaterialStore = (
     draft: WebSnapshotDraft,
     body: Buffer,
     authority?: RetrievalReceiptAuthority,
-    options: { forceNew?: boolean } = {},
+    options: {
+      forceNew?: boolean;
+      source?: { bytes: Buffer; contentType: string };
+    } = {},
   ): Promise<WebSnapshotRef> => serializer.runSerialized(workspaceId, () => kernelContext(
     workingStates,
     workspaceId,
@@ -83,7 +89,19 @@ export const createWebMaterialStore = (
         throw new Error("Web snapshot authority does not match its owning workspace");
       }
       const contentHash = hashBytes(body);
-      const object = await store.putObject(body);
+      const sourceDescriptor = options.source
+        ? {
+            contentHash: hashBytes(options.source.bytes),
+            byteLength: options.source.bytes.byteLength,
+            contentType: options.source.contentType,
+          }
+        : undefined;
+      const document = draft.document
+        ? {
+            ...draft.document,
+            ...(sourceDescriptor ? { source: sourceDescriptor } : {}),
+          }
+        : undefined;
       // Reuse an existing snapshot only inside the same material authority.
       // A snapshot record carries the owning session/thread, so returning a
       // foreign record would make another Run depend on the first Run's
@@ -106,13 +124,19 @@ export const createWebMaterialStore = (
             && payload.finalUrl === draft.finalUrl
             && payload.contentHash === contentHash
             && payload.representation === draft.representation
-            && Boolean(payload.rendered) === Boolean(draft.rendered)) {
+            && Boolean(payload.rendered) === Boolean(draft.rendered)
+            && payload.document?.kind === document?.kind
+            && payload.document?.pageCount === document?.pageCount
+            && payload.document?.parser === document?.parser
+            && payload.document?.source?.contentHash === document?.source?.contentHash) {
             return payload;
           }
         }
       }
+      const object = await store.putObject(body);
       const snapshotId = `snap-${randomUUID()}`;
       const recordId = recordIdFor(snapshotId);
+      const sourceObject = options.source ? await store.putObject(options.source.bytes) : undefined;
       const ref: WebSnapshotRef = {
         snapshotId,
         sourceUrl: draft.sourceUrl,
@@ -125,8 +149,10 @@ export const createWebMaterialStore = (
         ...(draft.rendered ? { rendered: true } : {}),
         ...(draft.title ? { title: draft.title } : {}),
         ...(draft.structure ? { structure: draft.structure } : {}),
+        ...(document ? { document } : {}),
       };
       const ownerId = store.ownerIdForObject?.(object.hash);
+      const sourceOwnerId = sourceObject ? store.ownerIdForObject?.(sourceObject.hash) : undefined;
       await context.records.put({
         operationId: `web-snapshot-put:${recordId}`,
         recordId,
@@ -136,8 +162,11 @@ export const createWebMaterialStore = (
         ...(authority?.threadId ? { threadId: authority.threadId } : {}),
         ...(authority?.runId ? { runId: authority.runId } : {}),
         payloadJson: JSON.stringify(ref),
-        ownerIds: ownerId ? [ownerId] : [],
-        references: [{ slot: "body", objectHash: object.hash }],
+        ownerIds: [ownerId, sourceOwnerId].filter((value): value is string => typeof value === "string"),
+        references: [
+          { slot: "body", objectHash: object.hash },
+          ...(sourceObject ? [{ slot: "source", objectHash: sourceObject.hash }] : []),
+        ],
       });
       return ref;
     },
@@ -147,6 +176,7 @@ export const createWebMaterialStore = (
     workspaceId: string,
     snapshotId: string,
     authority?: WebSnapshotAuthority,
+    options: { includeSource?: boolean } = {},
   ): Promise<WebSnapshotContent | null> => kernelContext(
     workingStates,
     workspaceId,
@@ -227,7 +257,19 @@ export const createWebMaterialStore = (
           .then((value) => Buffer.from(value.bytesBase64, "base64"))
         : await store.getObject(ref.contentHash);
       if (!body || body.byteLength !== ref.byteLength) return null;
-      return { ref, body };
+      let source: WebSnapshotContent["source"];
+      if (options.includeSource && ref.document?.source) {
+        const sourceReference = record.references.find((item) =>
+          item.slot === "source" && item.objectHash === ref.document?.source?.contentHash);
+        if (!sourceReference) return null;
+        const sourceBytes = context.client
+          ? await context.client.getBlob(ref.document.source.contentHash, { recordId: record.recordId, slot: "source" })
+            .then((value) => Buffer.from(value.bytesBase64, "base64"))
+          : await store.getObject(ref.document.source.contentHash);
+        if (!sourceBytes || sourceBytes.byteLength !== ref.document.source.byteLength) return null;
+        source = { bytes: sourceBytes, contentType: ref.document.source.contentType };
+      }
+      return { ref, body, ...(source ? { source } : {}) };
     },
   );
 

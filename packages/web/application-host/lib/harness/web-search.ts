@@ -608,6 +608,7 @@ const mapFetchStatus = (fetch: FetchResult): Pick<WebSearchItem, "status" | "det
     case "blocked": return { status: "denied", detail: `fetch blocked: ${fetch.reason}` };
     case "empty-shell": return { status: "unavailable", detail: fetch.hint };
     case "renderer-unavailable": return { status: "unavailable", detail: "renderer is unavailable for this page" };
+    case "page-image-unavailable": return { status: "unavailable", detail: fetch.reason };
     case "snapshot-missing": return { status: "unavailable", detail: `snapshot is missing: ${fetch.snapshotId}` };
     case "structure-unsupported": return { status: "unsupported", detail: `snapshot cannot express ${fetch.kind}` };
     case "position-not-found": return { status: "empty", detail: fetch.detail };

@@ -432,5 +432,6 @@ Host 查询 OpenAlex/Semantic Scholar 的元数据、摘要、身份和开放获
 已追加接线：`action=relations` 的 references/citations/related 分页展开（保留 provider 身份、canonical/版本身份、
 来源记录与缺失字段）；`materials.collections` 服务与 `materials` 工具实现临时/持久材料集合与集合内关键词检索
 （范围先于召回）；`webfetch` 结构化位置读取（page/section/table/figure/appendix/lines，PDF 页码映射，
-`structure-unsupported` 与 `position-not-found` 分态）。
-跨线程材料授权、快速决策消费者与工作台/设置收口仍未交付；真实 provider 质量/延迟未测，不作收益结论。
+`structure-unsupported` 与 `position-not-found` 分态）。L3-P0 进一步保存 PDF 原始字节，快照记录页数/解析器/source hash，
+并支持 `view=page-image` 按页或像素区域返回模型可见 PNG；文本、原件和视觉读取仍共用同一快照 authority。
+复杂多栏顺序、OCR、表格单元格、公式/图表结构和阅读器 UI 仍按 L3-P1/P2 实施；真实 provider 质量/延迟未测，不作收益结论。

@@ -125,6 +125,27 @@ describe("web material snapshots", () => {
     expect(await opened.materials.read("other-ws", ref.snapshotId)).toBeNull();
   });
 
+  it("keeps original PDF bytes beside the readable text and loads them on demand", async () => {
+    const opened = openStore();
+    const source = Buffer.from("%PDF-original-bytes");
+    const ref = await opened.materials.put("ws", {
+      ...draft("https://example.com/paper.pdf"),
+      contentType: "application/pdf",
+      document: { kind: "pdf", pageCount: 3, parser: "pdf-text-layout-v1" },
+    }, Buffer.from("page one text\n\npage two text"), authority("s1"), {
+      source: { bytes: source, contentType: "application/pdf" },
+    });
+
+    expect(ref.document?.kind).toBe("pdf");
+    expect(ref.document?.pageCount).toBe(3);
+    expect(ref.document?.source?.byteLength).toBe(source.byteLength);
+    const withoutSource = await opened.materials.read("ws", ref.snapshotId, authority("s1"));
+    expect(withoutSource?.source).toBeUndefined();
+    const withSource = await opened.materials.read("ws", ref.snapshotId, authority("s1"), { includeSource: true });
+    expect(withSource?.source?.contentType).toBe("application/pdf");
+    expect(withSource?.source?.bytes).toEqual(source);
+  });
+
   it("dedupes identical content within one authority and keeps snapshots separate across threads", async () => {
     const opened = openStore();
     const owner = authority("s1", "thread-a", "run-a");

@@ -44,6 +44,9 @@ L3 基础已接线（wired）：`materials.collections` Host 服务（`read.web`
 `page`/`section`/`element`(table|figure)/`appendix` 选择器与 `lines` 区间，快照 `structure` 记录 headings/tables/figures/pages
 （PDF 页码经 pdf-text 页边界映射），`structure-unsupported`/`position-not-found` 与 `failed`/`snapshot-missing` 分态表达；
 retrieval preset 允许表加入 `materials`。`harnessMaterials` 客户端能力贯通 broker→host-controller→session-host→select-tools。
+L3-P0 已接线：PDF 原始字节与抽取文本共同挂在同一 `web.snapshot`，快照的 `document` 记录页数、解析器身份与 source hash；
+`webfetch` 支持 `view=page-image` + 一次页面像素区域裁剪，Host 通过可选 Poppler adapter 生成真实 PNG，Pi 工具将其作为
+模型可见的 image content 返回。原始内容、解析视图和视觉读取仍沿快照 authority 与回收规则，缓存/跨 Thread 重新绑定不复制第二份正文库。
 L4 已接线（wired）：retrieval preset 允许表补入 `send`/`read_thread`/`wait`/`follow_up`，通信仍走 `thread.send`/`thread.read`
 的同根关系与冻结权限校验。`materials.collections` 新增 `share` 动作产生 `material.grant` 内核记录（发送方线程 → 目标线程，
 覆盖 collectionId 或 snapshotId 集合），要求发送方自身可读目标材料且两线程满足 thread.send 的同根关系（父子/兄弟）；
@@ -65,9 +68,9 @@ L6 已接线（wired）：设置页 Fast Decision 区块按 `explore`/`web`/`sch
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 未实测/未覆盖：真实付费 web provider 与 TypeSafe Jev 实机响应、完整桌面启动纵切、跨平台抓取、快照规模表现、
-复杂 PDF 版式/OCR 适配器、页面/区域视觉读取、表格单元格/公式/图表结构对象、固定阅读器 UI，以及“候选排序质量”类质量断言——
+复杂 PDF 多栏/OCR/表格单元格/公式/图表结构适配器、固定阅读器 UI，以及“候选排序质量”类质量断言——
 均无数据或未接线，不宣称收益。当前 `webfetch` 的 `page`/`section`/`element` 选择器只对已有 snapshot 结构生效，
-不能代表已经支持复杂 PDF 结构阅读。
+不能代表已经支持复杂 PDF 结构阅读。L3-P0 的页面/区域视觉读取已经接线，但需要 Poppler 可执行文件；P1/P2 负责更深的结构解析与阅读器。
 
 D-321 验收修正：新服务已补入 `HarnessServiceHost` 的生产装配；`research_decide` 不再错误依赖学术搜索开关，
 并与 `materials` 一起进入只读并行工具的元数据与资源计划。持久集合成员可在集合保留期间按工作区材料 authority 读取，

@@ -99,6 +99,9 @@ export const performHarnessWebFetch = async (
       ...(url ? { url } : {}),
       ...(snapshotId ? { snapshotId } : {}),
       ...(params.refresh === true ? { refresh: true } : {}),
+      ...(params.view ? { view: params.view } : {}),
+      ...(params.page !== undefined ? { page: params.page } : {}),
+      ...(params.region ? { region: params.region } : {}),
       ...(params.position ? { position: params.position } : {}),
     },
     {
