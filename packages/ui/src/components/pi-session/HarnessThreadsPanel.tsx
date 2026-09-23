@@ -592,7 +592,7 @@ export const HarnessThreadsPanel: React.FC<{
                   {source.snapshotId && source.document?.kind === 'pdf' ? (
                     <details className="max-w-[180px] shrink-0">
                       <summary className="cursor-pointer list-none rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100" aria-label="Open fixed material page" title="Open fixed material page">
-                        <Icon name="image" className="size-3" />
+                        <Icon name="file-image" className="size-3" />
                       </summary>
                       <div className="absolute z-10 mt-1 w-52 rounded-md border border-border bg-popover p-1.5 shadow-lg">
                         <label className="flex items-center gap-1 text-[10px] text-muted-foreground">

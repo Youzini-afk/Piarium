@@ -263,7 +263,7 @@ export function createWebFetch(deps: WebFetchDeps) {
               } else {
                 ocrUnavailable = true;
               }
-            } catch (error) {
+            } catch {
               if (signal?.aborted) throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
               ocrUnavailable = true;
             }
@@ -358,8 +358,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       for (const layout of pdfLayouts) {
         const pageRange = pdfPages.find((entry) => entry.page === layout.page);
         if (!pageRange) continue;
-        const candidateLines = layout.lines.filter((line) => (line.segments?.length ?? 0) >= 2);
-        let run: typeof candidateLines = [];
+        let run: Array<(typeof layout.lines)[number]> = [];
         const flushTable = (): void => {
           if (run.length < 3) {
             run = [];
