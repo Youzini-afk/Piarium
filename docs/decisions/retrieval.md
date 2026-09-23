@@ -1633,7 +1633,7 @@ foreign receiptId 不授权。同 URL 在飞读取按
 
 验证：聚焦 web/research/material 套件 50/50、工具选择与协议工具元数据 19/19、完整 `bun run type-check` 通过；新增持久集合跨线程读取、共享集合后续成员读取和 Web-only `research_decide` 覆盖。真实 provider、复杂 PDF/OCR、完整桌面和跨平台仍不作为本轮验证结论。
 
-状态：已实施，待主代理决定是否接受阶段边界。
+状态：已实施；主代理验收接受 L2–L5 与 L6 的设置/工具/来源投影接线，L6 完整固定阅读器、集合管理 UI 与复杂 PDF/OCR 保持后续边界。
 
 ### D-318 · 2026-09-23 · L4 跨线程材料授权
 
