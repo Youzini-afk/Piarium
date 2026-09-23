@@ -119,23 +119,21 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
       "hover",
       "webfetch",
       "websearch",
+      "research_search",
       "submit_facts",
     ],
     worktree: "none",
     systemPromptFragment:
-      "You are a retrieval agent. Gather source-checked facts for an open question. "
-      + "Deliver the report only through submit_facts. Do not recommend product changes, priorities, or architecture. "
-      + "Do not edit, write, or run shell commands. Cite local paths with compact line ranges or stored URL receipts. "
+      "You are a retrieval agent. Answer the open question in a natural-language report. "
+      + "Use submit_facts only when structured, source-checked facts add useful detail; it is optional. "
+      + "Do not recommend product changes, priorities, or architecture. Do not edit, write, or run shell commands. "
+      + "Cite local paths with compact line ranges or stored URL receipts. "
       + "The Host can mark a source source-checked or source-valid; it cannot prove a claim is true. "
-      + "Record material you tried and could not obtain as unknown.",
+      + "Record material you tried and could not obtain as unknown, in the report or structured facts.",
     teamDescription: "multi-step fact retrieval",
     resultSchema: {
-      question: "string",
-      scope: "string[]",
-      facts: "{ claim, status, sources }[]",
-      unknowns: "string[]",
-      attempted: "{ action, outcome, detail? }[]",
-      completion: "delivered | incomplete | cancelled | unavailable",
+      conclusion: "natural-language report",
+      evidence: "optional Host-validated structured facts and unknowns",
     },
   },
 };

@@ -15,45 +15,47 @@ describe("thread protocol behavior", () => {
     assert.equal(resolveResearchCapabilities({}).length, 0);
   });
 
-  it("seals retrieval evidence without inventing source-checked facts or completeness", () => {
-    const cancelled = sealRetrievalEvidence(undefined, {
+  it("seals only submitted retrieval evidence and preserves partial facts by Run outcome", () => {
+    const noStructuredEvidence = sealRetrievalEvidence(undefined, {
       brief: "Where is login?",
-      scope: ["src"],
-      outcome: "cancelled",
-      exitReason: "killed by parent",
-    });
-    assert.equal(cancelled.completion, "cancelled");
-    assert.equal(cancelled.question, "Where is login?");
-    assert.equal(cancelled.facts.length, 0);
-
-    const incomplete = sealRetrievalEvidence(undefined, {
-      brief: "Where is login?",
-      scope: ["src"],
       outcome: "success",
-      exitReason: null,
     });
-    assert.equal(incomplete.completion, "incomplete");
-    assert.ok(incomplete.unknowns.length > 0);
+    assert.equal(noStructuredEvidence, undefined);
 
-    const delivered = sealRetrievalEvidence({
+    const partial = {
       question: "child restatement",
       scope: ["src"],
       facts: [{
         claim: "login is nearby",
-        status: "source-checked",
-        sources: [{ kind: "local", path: "src/auth.ts", startLine: 1, endLine: 1, check: "source-valid" }],
+        status: "source-checked" as const,
+        sources: [{ kind: "local" as const, path: "src/auth.ts", startLine: 1, endLine: 1, check: "source-valid" as const }],
       }],
-      unknowns: [],
+      unknowns: ["who calls login"],
       attempted: [],
-      completion: "delivered",
-    }, {
+      completion: "delivered" as const,
+    };
+    const failed = sealRetrievalEvidence(partial, {
       brief: "Where is login?",
-      scope: ["src"],
-      outcome: "success",
-      exitReason: null,
+      outcome: "failure",
     });
-    assert.equal(delivered.completion, "delivered");
-    assert.equal(delivered.question, "Where is login?");
-    assert.equal(delivered.facts[0]?.status, "source-checked");
+    assert.equal(failed?.completion, "incomplete");
+    assert.equal(failed?.question, "Where is login?");
+    assert.equal(failed?.facts[0]?.status, "source-checked");
+    assert.deepEqual(failed?.unknowns, ["who calls login"]);
+
+    const cancelled = sealRetrievalEvidence(partial, {
+      brief: "Where is login?",
+      outcome: "cancelled",
+    });
+    assert.equal(cancelled?.completion, "cancelled");
+    assert.equal(cancelled?.facts[0]?.status, "source-checked");
+
+    const delivered = sealRetrievalEvidence(partial, {
+      brief: "Where is login?",
+      outcome: "success",
+    });
+    assert.equal(delivered?.completion, "delivered");
+    assert.equal(delivered?.question, "Where is login?");
+    assert.equal(delivered?.facts[0]?.status, "source-checked");
   });
 });

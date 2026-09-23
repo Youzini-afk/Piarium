@@ -45,7 +45,7 @@ export const RESEARCH_CAPABILITY_DEFINITIONS: Readonly<Record<ResearchCapability
   investigation: {
     capability: 'investigation',
     slot: 'researchInvestigation',
-    tools: ['read', 'grep', 'find', 'ls', 'explore', 'related', 'recall', 'webfetch', 'websearch', 'dispatch', 'threads', 'wait', 'send', 'read_thread', 'resources', 'research_source'],
+    tools: ['read', 'grep', 'find', 'ls', 'explore', 'related', 'recall', 'webfetch', 'websearch', 'research_search', 'dispatch', 'threads', 'wait', 'send', 'read_thread', 'resources', 'research_source'],
     worktree: 'none',
     systemPromptFragment: 'Investigate competing explanations using source material and focused follow-up routes. Preserve conflicts and unknowns for the principal researcher.',
     defaultResources: { network: true },

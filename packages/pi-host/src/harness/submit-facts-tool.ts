@@ -41,10 +41,11 @@ export function createSubmitFactsTool(bridge: HostServicesBridge): ToolDefinitio
   return defineTool({
     name: "submit_facts",
     label: "Submit Facts",
-    description: "Submit the Host-validated fact report for this retrieval thread. Do not include recommendations, priorities, or architecture advice. The Host checks local paths, ranges, and URL receipts, then marks sources source-checked. It cannot prove a claim is true.",
-    promptSnippet: "submit_facts: deliver source-checked facts, sources, and unknowns for this retrieval thread",
+    description: "Optionally attach structured facts to this retrieval thread's natural-language report. The Host checks local paths, ranges, and URL receipts, then marks valid sources source-checked. It cannot prove a claim is true.",
+    promptSnippet: "submit_facts: optionally attach Host-validated facts, sources, and unknowns to a retrieval report",
     promptGuidelines: [
-      "Call submit_facts with the thread question, claims, local path+line ranges or URL receiptIds, unknowns, and attempted material.",
+      "Use submit_facts only when structured facts or unknowns add useful detail; a natural-language report is a valid delivery on its own.",
+      "When used, include the thread question, claims, local path+line ranges or URL receiptIds, unknowns, and attempted material.",
       "Do not include recommendations, priorities, or what should change.",
       "The Host will not mark a missing or out-of-scope path as source-checked. A valid source does not make the claim true.",
     ],

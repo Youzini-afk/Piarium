@@ -133,6 +133,7 @@ import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
+import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { readPiAuthFile, resolvePiAgentDir } from './lib/pi-config/storage.js';
@@ -1534,6 +1535,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
     },
   );
+  const researchSearchService = createResearchSearchService();
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
     documents: documentsAuthority,
     resolveWorkspaceId: async (workspaceRoot) => {
@@ -2882,6 +2884,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // depend on reader model / search provider configuration, wired later.
     webFetchService,
     ...(webSearchService ? { webSearchService } : {}),
+    researchSearchService,
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
     onShellStarted: (sessionId, event) => knowledgeContextRuntime.observeShellStarted(sessionId, event).then(() => undefined),

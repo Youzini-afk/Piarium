@@ -457,15 +457,13 @@ Generative search planning remains separate. Pi inference retains credentials an
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
 future integrations, not delivered features. See harness status for verification and untested boundaries.
 
-D-315 / Stage L is a planned [Web and research search extension](web-research-search-design.md),
-not a shipped change to the contracts above. It reuses generic `retrieval`, research `investigation`,
-ordinary dispatch and native web tools. The Host will connect search goals, immutable readable snapshots,
-scholarly identities/relations and reusable materials through the existing object/source authorities;
-Pi keeps Agent and model execution, and the UI projects the same materials across workbenches.
-Natural-language retrieval reports with optional `submit_facts` are part of that planned change and
-must replace the corresponding prompt, settlement and report-consumer assumptions together. Content
-reuse never transfers another Run's receipt authority. Web/scholarly fast-decision consumers are planned;
-only `explore` is currently registered. No parallel search scheduler or Agent runtime is introduced.
+D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0
+retrieval report contract and initial L2 scholarly discovery are wired: generic `retrieval` can return
+natural-language reports with optional Host-validated `submit_facts`, while `research_search` queries
+OpenAlex/Semantic Scholar metadata and open-access locations. It reuses ordinary dispatch and native
+web tools; remaining Web reading reuse, scholarly relations/structure, and fast-decision consumers are
+still planned. Content reuse never transfers another Run's receipt authority. No parallel search
+scheduler or Agent runtime is introduced.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
 query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their

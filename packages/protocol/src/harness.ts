@@ -1239,7 +1239,8 @@ export interface HarnessServiceMap {
   "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
-  "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
+  "web.search": { params: { query?: string; objective?: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
+  "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };
   "zone2.delivered": { params: Zone2DeliveredParams; result: Zone2DeliveredResult };
@@ -1394,6 +1395,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "fs.lock": "write.document",
   "web.fetch": "read.web",
   "web.search": "read.web",
+  "research.search": "read.web",
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
   "zone2.delivered": "context.session",
@@ -1508,6 +1510,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "fs.lock",
   "web.fetch",
   "web.search",
+  "research.search",
   "zone2.assemble",
   "zone2.status",
   "zone2.delivered",

@@ -114,6 +114,12 @@ makes no network request. A valid empty response is distinct from transport/prot
 failover reports its actual provider and cause; cancellation stops the chain. Search snippets are
 discovery material, while the existing `web.fetch` service remains the original-page authority.
 
+`research.search` is the first D-315 scholarly slice. It is a Host-owned, read-only adapter over
+OpenAlex and Semantic Scholar with separate `search` and `paper` actions. Returned records retain
+provider identity, DOI/author metadata, optional abstract and open-access URL, and a `content` state
+(`metadata-only` or `open-location`). The adapter does not claim that metadata is paper content,
+does not build a global citation graph, and returns provider errors and empty results distinctly.
+
 Consumes `harness.request` events from the broker stream and dispatches
 to registered services. Responds via `harness.respond` on the broker. The
 broker-pinned Actor must match the Host session registry and carry the method's

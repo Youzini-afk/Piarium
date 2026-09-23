@@ -1,14 +1,14 @@
 # Web 与科研检索：连续探索、原文阅读与协作复用
 
-Status: accepted design / planned (D-315, Stage L); no implementation delivered by this document
+Status: accepted design / implementation in progress (D-315, Stage L); L0 and the first L2 scholarly discovery slice are wired, with remaining L1–L6 work tracked in status
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 本文记录 Web search 与科研搜索讨论的设计结论。实施顺序见
 [阶段 L](agent-harness-plan.md#阶段-lweb-与科研检索d-315)，实际交付只记入
 [能力状态](agent-harness-status.md)。复用 [Harness](agent-harness.md)、
 [科研集群](research-cluster-design.md) 和 [快速决策模型](fast-decision-model-design.md) 的现有生产通路。
-下文区分当前实现、目标契约和后续探索；接口示例是设计形状，不是已经注册的工具。
+下文区分当前实现、目标契约和后续探索；已接线的 `research_search` 与 retrieval 报告合同以代码和 status 为准，其他接口示例仍是设计形状。
 
 ## 1. 产品目标
 
@@ -36,7 +36,8 @@ Last updated: 2026-09-22
 | --- | --- | --- |
 | `websearch` | 默认 Exa MCP，失败后 Parallel；可配置 Brave/Exa/Tavily/Jina/SearXNG；返回 URL/标题/片段与 provider 状态 | 目标、批量查询、能力披露、可继续使用的来源身份与互补检索 |
 | `webfetch` | HTML 正文、PDF 文本、桌面可选渲染、find/行范围、可选 reader；进程内缓存 | 固定内容视图、原文位置、结构/图表读取与按目标选段 |
-| `retrieval` 预设 | 通用事实检索 Thread，本地+Web；专用 `models.retrievalAgent`，未配置不提供；只读、无 shell | 沿同一线程增强工具与交流，允许自然语言报告及按需结构化事实 |
+| `retrieval` 预设 | 通用事实检索 Thread，本地+Web；专用 `models.retrievalAgent`，未配置不提供；只读、无 shell；当前允许自然语言报告与可选 `submit_facts` | 沿同一线程增强工具与交流，继续按需结构化事实 |
+| `research_search` | Host 只读学术发现/详情；OpenAlex 或 Semantic Scholar；返回元数据、摘要、身份和开放获取入口 | 论文关系、固定阅读材料和结构解析在后续 L2/L3 扩展 |
 | `investigation` | 科研调查 capability，含 Web/本地检索、消息与派发；要求 research 工作侧重 | 复用增强后的搜索/阅读，继续承担竞争解释与调查分支 |
 | 普通 `dispatch(task)` | 继承发起者当前模型和获准工具，可承担搜索 | 仍可用，不因专用 retrieval 未配置而丧失委派能力 |
 | `research_source` | 登记 URI、路径或对象引用，不自动取得或解析材料 | 关联实际材料与论文元数据，保持登记与获取的区别 |
@@ -55,7 +56,7 @@ Last updated: 2026-09-22
   [来源核对](../packages/web/application-host/lib/harness/retrieval-evidence.ts)、
   [快速决策消费者定义](../packages/protocol/src/harness-fast-decision.ts)。
 
-当前检索报告要求 `submit_facts`，不仅预设提示如此，Thread 初始提示与 settle 投影也据此工作。
+当前 retrieval 报告可以直接使用自然语言；`submit_facts` 只为需要逐项、Host 核验的结构化事实提供补充。
 URL 来源回执仅由获准的 active retrieval Run 铸造并绑定 workspace/session/thread/run；普通获取正文不自动得到同等权威。
 `source-checked` 表示来源位置与身份已核对，不表示 Host 证明了句子为真。搜索工具历史已有来源展示，
 但这不等于共享全文库；现有抓取缓存也不等于持久材料索引。
@@ -231,7 +232,7 @@ arXiv、PubMed 等既可作为材料/标识符来源，也可后续按具体需�
 
 ### 7.2 自然语言结果与可选事实结构
 
-**D-315 的待实施合同调整：** retrieval 可以用自然语言报告完成正常交付，引用实际来源并说明有用发现与未知；
+**D-315 的合同调整（L0 已实施）：** retrieval 可以用自然语言报告完成正常交付，引用实际来源并说明有用发现与未知；
 `submit_facts` 留作任务确实需要逐项事实结果时的可选工具。不会因为没填 facts JSON 就把一份有效报告覆盖成空结果或 incomplete。
 这部分仅替代 D-227/D-230/D-234 的唯一交付入口要求，保留它们的来源核对、Run 身份和耐久引用边界。
 
@@ -336,4 +337,6 @@ UI 的最小消费者随对应服务切片交付，不能把前面阶段完成�
 现有 trace/材料引用可为后续研究提供线索，不自动导出用户材料或上传训练数据；真实数据与训练方案另行设计。
 不附带新研究流程 DSL、强制专家会议、常驻检索管理 Agent、机械语义事件触发高级模型或统一数值硬配额。
 
-完成本设计文档不改变产品运行行为。D-315 的所有新增能力和 retrieval 交付变更在实施与验收之前均为 planned。
+当前已接线的部分：retrieval 线程可以直接交付自然语言报告，`submit_facts` 作为可选的结构化来源核验；`research_search` 通过
+Host 查询 OpenAlex/Semantic Scholar 的元数据、摘要、身份和开放获取入口，并支持论文详情与分页。关系展开、固定学术材料集合、
+结构化 PDF 阅读、跨线程材料复用和快速决策消费者仍未交付；真实 provider 质量/延迟未测，不作收益结论。

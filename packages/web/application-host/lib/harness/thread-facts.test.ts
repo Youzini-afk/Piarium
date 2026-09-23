@@ -22,7 +22,7 @@ const parentCtx = {
 };
 
 describe("thread.facts.set", () => {
-  it("validates facts on the retrieval child and exposes them through read_thread and settle", async () => {
+  it("keeps the assistant report and partial validated facts after a failed Run", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const dispatch = createThreadDispatchService({
@@ -73,11 +73,11 @@ describe("thread.facts.set", () => {
       const parent = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
       expect(parent?.pendingEvidence?.facts[0]?.status).toBe("source-checked");
 
-      await registry.endRun("workspace-1", dispatched.threadId, run!.id, "success", null, {
-        conclusion: "please ship this and prioritize login",
+      await registry.endRun("workspace-1", dispatched.threadId, run!.id, "failure", "worker exited after partial report", {
+        conclusion: "login is exported from src/auth.ts; who calls it remains unknown.",
         changedFiles: ["src/auth.ts"],
         unresolved: [],
-        deviations: ["should rewrite auth"],
+        deviations: ["unexpected deviation"],
         confidence: 0.9,
         transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: null, toEntryId: null },
         blocksSnapshot: {},
@@ -87,14 +87,55 @@ describe("thread.facts.set", () => {
       expect(settled?.report?.deviations).toEqual([]);
       expect(settled?.report?.evidence?.facts[0]?.status).toBe("source-checked");
       expect(settled?.report?.evidence?.question).toBe("Where is login?");
-      expect(settled?.report?.conclusion).toContain("source-checked");
-      expect(settled?.report?.conclusion).toContain("delivered");
-      expect(JSON.stringify(settled?.report)).not.toMatch(/prioritize|should rewrite|please ship/i);
+      expect(settled?.report?.conclusion).toBe("login is exported from src/auth.ts; who calls it remains unknown.");
+      expect(settled?.report?.evidence?.completion).toBe("incomplete");
+      expect(settled?.report?.unresolved).toContain("worker exited after partial report");
+      expect(JSON.stringify(settled?.report)).not.toMatch(/unexpected deviation/i);
 
       const report = await read.handle({ threadId: dispatched.threadId, what: "report" }, parentCtx);
       expect(report.text).toContain("login is in auth.ts");
       expect(report.text).toContain("src/auth.ts:1-1");
       expect(report.report?.evidence?.unknowns).toContain("who calls login");
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves a natural-language report when no structured facts are submitted", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-optional-report-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const dispatch = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: viSpawn,
+    } as never);
+    const read = createThreadReadService({ threadRegistry: registry } as never);
+    const conclusion = "The login helper is exported from src/auth.ts; callers remain unknown.";
+    try {
+      const dispatched = await dispatch.handle({
+        preset: "retrieval",
+        task: "Where is login?",
+        model: { providerId: "anthropic", modelId: "haiku" },
+      }, parentCtx);
+      const run = await registry.getActiveRun("workspace-1", dispatched.threadId);
+      await registry.markRunRunning("workspace-1", dispatched.threadId, run!.id, "child-1");
+      await registry.endRun("workspace-1", dispatched.threadId, run!.id, "success", null, {
+        conclusion,
+        changedFiles: [],
+        unresolved: [],
+        deviations: [],
+        confidence: 0.5,
+        transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: null, toEntryId: null },
+        blocksSnapshot: {},
+      });
+
+      const settled = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
+      expect(settled?.report?.conclusion).toBe(conclusion);
+      expect(settled?.report?.evidence).toBeUndefined();
+      expect(settled?.report?.evidenceRunId).toBeUndefined();
+      expect(settled?.pendingEvidence).toBeUndefined();
+      const report = await read.handle({ threadId: dispatched.threadId, what: "report" }, parentCtx);
+      expect(report.text).toContain(conclusion);
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -18,12 +18,14 @@ Last updated: 2026-09-22
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-22），已设计，待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L2 完成首个学术发现纵切；L1/L2 其余及 L3–L6 待实施。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
-本轮只交付文档，不修改搜索、线程或模型执行行为。当前通用 `retrieval` 已支持本地与 Web 检索，
-专用模型未配置时不提供；科研 `investigation` 与普通派发也已存在。
+通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
+没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
+新增 `research_search` 工具和 Host `research.search` 服务，默认可查询 OpenAlex，也可选择 Semantic Scholar，支持论文元数据、
+摘要/作者/DOI/引用数、开放获取入口、详情查询与分页游标。返回明确区分 `metadata-only`、`open-location`、`empty`、`failed` 和
+`unavailable`；目前未把关系展开、全文结构解析或材料持久化集合宣称为已完成。
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
-允许自然语言检索报告并将 `submit_facts` 改为可选也是待实施项；当前代码仍要求结构化事实交付。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 
 **D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**

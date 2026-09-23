@@ -137,6 +137,7 @@ export interface RetrievalEvidence {
 }
 
 export interface ThreadReport {
+  /** Natural-language assistant report, independent of optional structured evidence. */
   conclusion: string;
   changedFiles: string[];
   unresolved: string[];
@@ -147,7 +148,7 @@ export interface ThreadReport {
   resultCommit?: string;
   /** Native immutable working-state revision read by inspect/merge/reopen. */
   resultRevision?: number;
-  /** Present for retrieval threads; Host-sealed fact material. */
+  /** Optional structured retrieval evidence sealed by the Host; prose is never source-checked. */
   evidence?: RetrievalEvidence;
   /** Run that sealed `evidence`; stable across later Run attempts. */
   evidenceRunId?: string;
@@ -223,44 +224,36 @@ export const sealRetrievalEvidence = (
   pending: RetrievalEvidence | undefined,
   input: {
     brief: string;
-    scope: readonly string[];
     outcome: ThreadRunOutcome;
-    exitReason: string | null;
   },
-): RetrievalEvidence => {
-  const base = pending
-    ? {
-        question: input.brief,
-        scope: [...pending.scope],
-        facts: pending.facts.map((fact) => ({
-          ...fact,
-          sources: fact.sources.map((source) => {
-            if (!source.outputRef) return source;
-            const { outputRef: _ephemeral, ...rest } = source;
-            return rest;
-          }),
-        })),
-        unknowns: [...pending.unknowns],
-        attempted: [...pending.attempted],
-        completion: pending.completion,
-      }
-    : emptyRetrievalEvidence(input.brief, input.scope, "incomplete");
+): RetrievalEvidence | undefined => {
+  if (!pending) return undefined;
+  const base = {
+    question: input.brief,
+    scope: [...pending.scope],
+    facts: pending.facts.map((fact) => ({
+      ...fact,
+      sources: fact.sources.map((source) => {
+        if (!source.outputRef) return source;
+        const { outputRef: _ephemeral, ...rest } = source;
+        return rest;
+      }),
+    })),
+    unknowns: [...pending.unknowns],
+    attempted: [...pending.attempted],
+    completion: pending.completion,
+  };
   if (input.outcome === "cancelled") {
     return { ...base, question: input.brief, completion: "cancelled" };
-  }
-  if (!pending) {
-    const lost = input.exitReason ?? "no validated facts were submitted";
-    return {
-      ...base,
-      question: input.brief,
-      completion: "incomplete",
-      unknowns: base.unknowns.includes(lost) ? base.unknowns : [...base.unknowns, lost],
-    };
   }
   const unavailableOnly = pending.facts.length > 0
     && pending.facts.every((fact) => fact.status === "unavailable");
   if (unavailableOnly) return { ...base, question: input.brief, completion: "unavailable" };
-  return { ...base, question: input.brief, completion: "delivered" };
+  return {
+    ...base,
+    question: input.brief,
+    completion: input.outcome === "success" ? "delivered" : "incomplete",
+  };
 };
 
 export interface TranscriptRef {

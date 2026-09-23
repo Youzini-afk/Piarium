@@ -1047,6 +1047,9 @@ export function registerHarnessServices(
   if (host.webSearchService) {
     router.register("web.search", host.webSearchService);
   }
+  if (host.researchSearchService) {
+    router.register("research.search", host.researchSearchService);
+  }
   // Phase 2 services — registered only when the corresponding provider is available
   const zone2Delivery = host.zone2Delivery;
   if (host.zone2Provider) {

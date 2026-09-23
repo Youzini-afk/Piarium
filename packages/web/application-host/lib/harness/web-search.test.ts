@@ -338,4 +338,14 @@ describe("configured web search providers", () => {
     });
     expect(search).not.toHaveBeenCalled();
   });
+
+  it("accepts a natural-language objective when no literal query is supplied", async () => {
+    const search = vi.fn(async (query: string) => ({ results: [{ title: "Objective", url: "https://example.com/objective", snippet: query }] }));
+    const service = createWebSearchService(async () => ({ id: "objective", search }));
+    await expect(service.handle({ objective: "find recent papers about agent memory" }, context)).resolves.toMatchObject({
+      providerId: "objective",
+      results: [{ snippet: "find recent papers about agent memory" }],
+    });
+    expect(search).toHaveBeenCalledWith("find recent papers about agent memory", expect.anything());
+  });
 });

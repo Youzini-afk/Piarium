@@ -268,7 +268,7 @@ describe("thread runtime", () => {
       retrievalRuntime.processEvent({
         kind: "host",
         sessionId: "child-1",
-        envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("facts submitted")], willRetry: false } } },
+        envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("The login helper is exported from src/auth.ts; callers remain unknown.")], willRetry: false } } },
       });
       retrievalRuntime.processEvent({
         kind: "host",
@@ -279,9 +279,14 @@ describe("thread runtime", () => {
       expect(await registry.getThread(WORKSPACE, PARENT, settled.id)).toMatchObject({
         lifecycle: "settled",
         integration: "none",
-        report: { changedFiles: [] },
+        report: {
+          changedFiles: [],
+          conclusion: "The login helper is exported from src/auth.ts; callers remain unknown.",
+        },
       });
       const settledRecord = await registry.getThread(WORKSPACE, PARENT, settled.id);
+      expect(settledRecord?.report?.evidence).toBeUndefined();
+      expect(settledRecord?.pendingEvidence).toBeUndefined();
       expect(settledRecord?.resultRevision).toBeUndefined();
       expect(settledRecord?.verification).toBeUndefined();
 

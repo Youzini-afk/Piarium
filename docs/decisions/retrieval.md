@@ -1566,4 +1566,10 @@ fast-decision-model-design、architecture、status、roadmap、development 与�
 D-289 默认搜索与用户显式选择继续有效，D-312 现有 explore 消费者不变。L 阶段才注册 Web/学术快速决策用途，
 不新建会话库、scheduler、正文 authority 或强制 Skill。专项训练、全球文献索引及全部学科数据库接入另行讨论。
 
-状态：已设计，待实施；本轮仅文档。无真实付费渠道质量/延迟对比，不预设效果优势，也不将此作为代码接线的门槛。
+实施进展（2026-09-23）：L0 已将 retrieval 的自然语言报告接为正常结果，`submit_facts` 变为可选的 Host 核验补充；无 pending
+facts 时不覆盖 prose 或伪造 source-checked。L2 首个纵切新增 Host `research.search` 与 Pi `research_search`，复用 OpenAlex /
+Semantic Scholar 的公开元数据和开放获取入口，支持搜索、详情和 provider 分页游标；关系展开、结构阅读、集合持久化与快速决策
+消费者仍未接线。适配器状态不等于已读正文，真实质量/延迟未测。
+
+状态：L0 与 L2 首个学术发现纵切已 wired；L1、L2 其余及 L3–L6 仍待实施。无真实付费渠道质量/延迟对比，不预设效果优势，
+也不将此作为代码接线的门槛。

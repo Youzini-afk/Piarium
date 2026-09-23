@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired; Stage L (D-315) planned
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired; Stage L (D-315) in progress
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -32,7 +32,7 @@ authoritative record of delivery, and each phase names the design document that 
 | B | Varin product-wide rebrand | Source, product assets, build/distribution configuration and GitHub repository switched (D-313); first new-brand publication pending; no old-name compatibility |
 | F | Fast Decision Models and progressive retrieval | Implemented/wired (D-312): shared capability/binding, first Jev adapter and iterative `explore`; evidence and untested quality/latency in harness status |
 | C | Background compaction Agent and semantic continuation | Implemented/wired (D-314): dedicated `compaction` worker process, scoped read-only history/output/record queries, S0/A/B frozen material with pagination, capacity waiting on the in-flight task and session-owned native commit |
-| L | Web and scholarly search, reading and material reuse | Planned (D-315): existing retrieval/investigation threads, natural-language reports, continuous Web search, scholarly relations/reading and fast-decision consumers; no new implementation yet |
+| L | Web and scholarly search, reading and material reuse | In progress (D-315): L0 retrieval report contract and OpenAlex/Semantic Scholar discovery/detail tool wired; Web reading reuse, scholarly relations/structure, collaboration and fast-decision consumers remain |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery

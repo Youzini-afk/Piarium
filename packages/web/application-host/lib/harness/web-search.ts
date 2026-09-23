@@ -567,6 +567,8 @@ export function createWebSearchService(
 ): HarnessService<"web.search"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
+      const query = params.query?.trim() || params.objective?.trim() || "";
+      if (!query) throw new HarnessServiceError("invalid-params", "web.search requires query or objective");
       const providerResult = await resolveProvider(ctx);
       if ("unavailable" in providerResult) {
         throw new HarnessServiceError("unavailable", providerResult.hint);
@@ -581,7 +583,7 @@ export function createWebSearchService(
       if (domainPolicy.allow?.length === 0) {
         return { providerId: providerResult.id, results: [] };
       }
-      const response = await providerResult.search(params.query, {
+      const response = await providerResult.search(query, {
         ...(domainPolicy.allow === undefined ? {} : { allowedDomains: domainPolicy.allow }),
         ...(domainPolicy.block.length === 0 ? {} : { blockedDomains: domainPolicy.block }),
         ...(params.recency ? { recency: params.recency } : {}),

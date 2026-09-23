@@ -22,6 +22,7 @@ export * from "./harness-threads.js";
 export * from "./utf8.js";
 export * from "./work-focus.js";
 export * from "./research-capabilities.js";
+export * from "./research-search.js";
 export * from "./harness-observation.js";
 export * from "./harness-local-semantic.js";
 export * from "./permission-gate.js";

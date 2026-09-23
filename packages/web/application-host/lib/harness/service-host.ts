@@ -80,7 +80,7 @@ export function deriveHarnessCapabilities(
   if (tools.has("grep") || tools.has("explore")) capabilities.add("read.search");
   if (availability.documentRead && tools.has("read")) capabilities.add("read.document");
   if (availability.documentPathOverlay && (tools.has("find") || tools.has("ls"))) capabilities.add("read.document");
-  if (tools.has("webfetch") || tools.has("websearch")) capabilities.add("read.web");
+  if (tools.has("webfetch") || tools.has("websearch") || tools.has("research_search")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
   if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
   if (
@@ -281,6 +281,7 @@ export interface HarnessServiceHost {
     }) => Promise<import("@varin/protocol").FetchResult>;
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
+  researchSearchService: import("./router.js").HarnessService<"research.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
   documentWriteGuard: HarnessDocumentWriteGuard | null;
@@ -521,6 +522,8 @@ export interface HarnessServiceHostOptions {
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
   webSearchService?: HarnessServiceHost["webSearchService"];
+  /** Scholarly metadata service. Uses public OpenAlex/Semantic Scholar APIs. */
+  researchSearchService?: HarnessServiceHost["researchSearchService"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
   documentReadSource?: HarnessDocumentReadSource;
   /** Surface-aware native Pi find/ls path overlay (null when unavailable). */
@@ -598,6 +601,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const permissionAudit = options.permissionAudit ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
+  const researchSearchService = options.researchSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
   const documentPathOverlay = options.documentPathOverlay ?? null;
   const documentWriteGuard = options.documentWriteGuard ?? null;
@@ -972,6 +976,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     permissionAudit,
     webFetchService,
     webSearchService,
+    researchSearchService,
     documentReadSource,
     documentPathOverlay,
     documentWriteGuard,

@@ -3701,6 +3701,7 @@ export class SessionHost {
         ...(readPage ? { readPage } : {}),
         ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,
+        researchSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         experimentAvailable: this.#harnessExperimentsEnabled,
         settingsAvailable: this.#harnessSettingsEnabled,

@@ -357,7 +357,6 @@ describe("retrieval thread public slice", () => {
       }
       if (
         blob.includes("You are working as the retrieval thread")
-        || blob.includes("Deliver facts only through submit_facts")
       ) {
         childPhase += 1;
         if (childPhase === 1) {
@@ -388,7 +387,7 @@ describe("retrieval thread public slice", () => {
             attempted: [{ action: "related src/auth.ts", outcome: "unavailable" }],
           })]);
         }
-        return fauxAssistantMessage("Fact report submitted.");
+        return fauxAssistantMessage("The login helper is exported from src/auth.ts; callers remain unknown.");
       }
       parentPhase += 1;
       if (parentPhase === 1) {
@@ -494,6 +493,7 @@ describe("retrieval thread public slice", () => {
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.status === "source-checked" && fact.claim.includes("parent-only")), true);
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim.includes("secret outside")), false);
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim === "invented range" && fact.status === "source-checked"), false);
+      assert.equal(retrieval.report?.conclusion, "The login helper is exported from src/auth.ts; callers remain unknown.");
       assert.equal(retrieval.report?.changedFiles.length, 0);
       assert.equal(retrieval.resultRevision, undefined);
       assert.equal(retrieval.integration, "none");
@@ -513,7 +513,10 @@ describe("retrieval thread public slice", () => {
       );
       assert.equal(zone2.status, "ready");
       if (zone2.status === "ready") {
-        assert.ok(zone2.items.some((item) => item.id === retrieval.id && (item.evidenceSummary ?? item.conclusion ?? "").includes("source-checked")));
+        const projected = zone2.items.find((item) => item.id === retrieval.id);
+        assert.ok(projected);
+        assert.ok((projected?.evidenceSummary ?? "").includes("source-checked"));
+        assert.equal(projected?.conclusion, retrieval.report?.conclusion);
       }
 
       const second = await parentHost.prompt(parent.sessionId, "Read the retrieval report");

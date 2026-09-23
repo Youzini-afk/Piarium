@@ -11,6 +11,7 @@ import {
 } from "./output-tools.js";
 import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
+import { createResearchSearchTool } from "./research-search-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
 import { createExploreTool } from "./explore-tool.js";
@@ -68,6 +69,8 @@ export interface SelectHarnessToolsDeps {
   completeExplore?: NonNullable<Parameters<typeof createExploreTool>[2]>["complete"];
   /** Whether the host registered a real web.search service. */
   webSearchAvailable?: boolean;
+  /** Whether the Host registered public scholarly metadata search. */
+  researchSearchAvailable?: boolean;
   /** Whether the host provides a thread runtime (thread registry + spawn).
    * When false, thread tools are not registered. */
   threadRuntimeAvailable?: boolean;
@@ -123,6 +126,7 @@ export function selectHarnessTools(
     autoResizeImages,
     readPage,
     webSearchAvailable,
+    researchSearchAvailable,
     threadRuntimeAvailable,
     experimentAvailable,
     settingsAvailable,
@@ -184,6 +188,9 @@ export function selectHarnessTools(
   }
   if (webSearchAvailable && tools.websearch !== false) {
     result.push(createWebSearchTool(bridge, sessionId));
+  }
+  if (researchSearchAvailable && tools.research_search !== false) {
+    result.push(createResearchSearchTool(bridge));
   }
   // Phase 2 tools
   if (tools.todo !== false) {

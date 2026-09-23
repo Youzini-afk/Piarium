@@ -19,6 +19,7 @@ const baseDeps = {
   workspaceMutationJournal: undefined,
   isOpenAIFamily: false,
   webSearchAvailable: true,
+  researchSearchAvailable: true,
 };
 
 const webSettings: HarnessSettings = {
@@ -75,6 +76,20 @@ describe("selectHarnessTools web tool gating", () => {
     const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, baseDeps);
     assert.equal(tools.some((tool) => tool.name === "websearch"), true);
     assert.equal(tools.some((tool) => tool.name === "webfetch"), true);
+  });
+
+  it("includes scholarly discovery independently of a configured search provider", () => {
+    const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      webSearchAvailable: false,
+      researchSearchAvailable: true,
+    });
+    assert.equal(tools.some((tool) => tool.name === "research_search"), true);
+    const disabled = selectHarnessTools({ ...DEFAULT_HARNESS_SETTINGS, tools: { research_search: false } }, {
+      ...baseDeps,
+      researchSearchAvailable: true,
+    });
+    assert.equal(disabled.some((tool) => tool.name === "research_search"), false);
   });
 });
 

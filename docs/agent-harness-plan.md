@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
@@ -35,10 +35,10 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 [后台压缩 Agent](context-compaction-agent-design.md)，交付状态见
 [agent-harness-status.md](agent-harness-status.md)。
 
-**阶段 L：Web 与科研检索（D-315）已设计，待实施。** 承接阶段 C，按 L0–L1 通用基础、L2–L3 科研材料、
-L4–L6 协作/快速决策与收口推进。复用已有通用 `retrieval`、科研 `investigation` 和普通派发，
-不另建搜索 Agent runtime；自然语言检索报告与可选 `submit_facts` 的调整也在本阶段实施。
-完整目标见 [Web 与科研检索](web-research-search-design.md)，本轮文档不代表任何新增能力已接线。
+**阶段 L：Web 与科研检索（D-315）正在实施。** L0 的自然语言 retrieval 报告/可选 `submit_facts` 已接线；L2 已接入
+OpenAlex/Semantic Scholar 的论文发现与详情查询，返回元数据与开放入口状态。L1 的连续 Web 阅读/复用、L2 的关系展开、
+L3–L6 仍按顺序推进。复用已有通用 `retrieval`、科研 `investigation` 和普通派发，不另建搜索 Agent runtime。
+完整目标见 [Web 与科研检索](web-research-search-design.md)，交付事实以 status 为准。
 
 ## 0. 执行者须知
 
@@ -2042,10 +2042,10 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 
 ## 阶段 L：Web 与科研检索（D-315）
 
-状态：**已设计，待实施（L0–L6 均未交付）**。设计 authority 为
+状态：**L0 已交付；L2 首个学术发现纵切已交付；其余 L1–L6 仍在实施**。设计 authority 为
 [Web 与科研检索](web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
 使用现有 Pi Agent、Thread/Run、Host 网络服务、Rust 对象/记录与快速决策服务；默认 Web 能力和用户已有选择继续有效。
-实现阶段按下列依赖交付，不先一次性重写全部搜索。每个切片接上公开工具和必要 UI 消费者，再记录其完成范围。
+实现阶段按下列依赖交付，不一次性重写全部搜索。每个切片接上公开工具和必要消费者，再记录其完成范围。
 
 ### L0：现有检索线程、结果合同与能力发现
 

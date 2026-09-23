@@ -1830,37 +1830,43 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (thread.preset === "retrieval" && outcome !== "lost") {
         const evidence = sealRetrievalEvidence(thread.pendingEvidence, {
           brief: thread.brief,
-          scope: thread.manifest.scope,
           outcome,
-          exitReason,
         });
         delete thread.pendingEvidence;
-        const sealed: ThreadReport = report
-          ? {
-              ...report,
-              conclusion: summarizeRetrievalEvidence(evidence),
-              changedFiles: [],
-              deviations: [],
-              unresolved: [...new Set([...report.unresolved, ...evidence.unknowns])],
-              evidence,
-              evidenceRunId: run.id,
-            }
-          : {
-              conclusion: summarizeRetrievalEvidence(evidence),
-              changedFiles: [],
-              unresolved: [...evidence.unknowns],
-              deviations: [],
-              confidence: 0,
-              transcriptRef: {
-                runtimeId: run.runtimeId,
-                sessionId: run.sessionId ?? "",
-                fromEntryId: null,
-                toEntryId: null,
-              },
-              blocksSnapshot: {},
-              evidence,
-              evidenceRunId: run.id,
-            };
+        const fallbackConclusion = evidence
+          ? summarizeRetrievalEvidence(evidence)
+          : "Retrieval ended (" + outcome + ")" + (exitReason ? ": " + exitReason : " without an assistant report.");
+        const runIssues = outcome !== "success" && exitReason ? [exitReason] : [];
+        let sealed: ThreadReport;
+        if (report) {
+          const assistantReport = { ...report };
+          delete assistantReport.evidence;
+          delete assistantReport.evidenceRunId;
+          sealed = {
+            ...assistantReport,
+            conclusion: report.conclusion.trim() ? report.conclusion : fallbackConclusion,
+            changedFiles: [],
+            deviations: [],
+            unresolved: [...new Set([...report.unresolved, ...(evidence?.unknowns ?? []), ...runIssues])],
+            ...(evidence ? { evidence, evidenceRunId: run.id } : {}),
+          };
+        } else {
+          sealed = {
+            conclusion: fallbackConclusion,
+            changedFiles: [],
+            unresolved: [...new Set([...(evidence?.unknowns ?? []), ...runIssues])],
+            deviations: [],
+            confidence: 0,
+            transcriptRef: {
+              runtimeId: run.runtimeId,
+              sessionId: run.sessionId ?? "",
+              fromEntryId: null,
+              toEntryId: null,
+            },
+            blocksSnapshot: {},
+            ...(evidence ? { evidence, evidenceRunId: run.id } : {}),
+          };
+        }
         thread.report = sealed;
         report = sealed;
       } else if (report) {
