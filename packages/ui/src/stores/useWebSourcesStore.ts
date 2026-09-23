@@ -8,6 +8,9 @@ export interface WebSource {
   fetchedAt: number;
   toolCallId: string;
   tool: 'webfetch' | 'websearch';
+  /** Fixed content snapshot id when the Host pinned the fetched body. */
+  snapshotId?: string;
+  contentHash?: string;
   pinned: boolean;
 }
 

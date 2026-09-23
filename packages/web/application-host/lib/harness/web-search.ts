@@ -1,19 +1,31 @@
 import {
   mergeHarnessWebDomainPolicy,
+  mintSearchCursor,
+  parseSearchCursor,
+  type FetchResult,
   type HarnessWebDomainPolicy,
   type HarnessWebSearchSettings,
   type SearchResultItem,
+  type WebSearchItem,
 } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
 
 export interface SearchProvider {
   id: string;
+  /**
+   * Pagination mechanism the provider adapter actually implements.
+   * "offset" means Brave-style page indices; "page" means SearXNG pageno.
+   * false means a cursor must never be minted for this provider.
+   */
+  capabilities: { pagination: "offset" | "page" | false };
   search(query: string, options: {
     allowedDomains?: string[];
     blockedDomains?: string[];
     recency?: "day" | "week" | "month" | "year";
     limit?: number;
+    /** Continuation page for providers whose capability allows it. */
+    page?: { kind: "offset" | "page"; value: number };
     signal?: AbortSignal;
   }): Promise<SearchProviderResponse>;
 }
@@ -22,6 +34,8 @@ export interface SearchProviderResponse {
   results: SearchResultItem[];
   /** A provider may report the actual source when it is a router/failover. */
   providerId?: string;
+  /** Set when the provider exposes a further page; the service mints a cursor. */
+  nextPage?: { kind: "offset" | "page"; value: number };
   notices?: string[];
 }
 
@@ -109,11 +123,13 @@ const normalizeResults = (values: unknown[]): SearchResultItem[] => (
       || text(value.publish_date)
       || text(value.published_at)
       || text(value.date);
+    const summary = text(value.summary) || text(value.abstract);
     return [{
       title: text(value.title) || url,
       url,
       snippet,
       ...(publishedAt ? { publishedAt } : {}),
+      ...(summary ? { summary } : {}),
     }];
   })
 );
@@ -275,6 +291,7 @@ const defaultRecencyNotice = (provider: string, recency: string | undefined): st
 
 const exaMcpProvider = (runtime: SearchProviderRuntime): SearchProvider => ({
   id: "default-exa",
+  capabilities: { pagination: false },
   search: async (query, options) => {
     const advanced = options.allowedDomains !== undefined
       || Boolean(options.blockedDomains?.length)
@@ -304,6 +321,7 @@ const exaMcpProvider = (runtime: SearchProviderRuntime): SearchProvider => ({
 
 const parallelMcpProvider = (runtime: SearchProviderRuntime): SearchProvider => ({
   id: "default-parallel",
+  capabilities: { pagination: false },
   search: async (query, options) => {
     const guidance = [
       ...(options.allowedDomains?.length ? [`prefer results from these domains: ${options.allowedDomains.join(", ")}`] : []),
@@ -348,6 +366,7 @@ const defaultSearchProvider = (runtime: SearchProviderRuntime): SearchProvider =
   const parallel = parallelMcpProvider(runtime);
   return {
     id: "default-exa",
+    capabilities: { pagination: false },
     search: async (query, options) => {
       try {
         return await exa.search(query, options);
@@ -373,22 +392,32 @@ const defaultSearchProvider = (runtime: SearchProviderRuntime): SearchProvider =
 
 const braveProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
   id: "configured-brave",
+  capabilities: { pagination: "offset" },
   search: async (query, options) => {
     const endpoint = new URL(endpointFor(settings));
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("count", String(Math.min(options.limit ?? 10, 20)));
+    // Brave paginates by a 0..9 offset page index, not a result offset.
+    const offset = options.page?.kind === "offset" ? options.page.value : 0;
+    if (offset > 0) endpoint.searchParams.set("offset", String(Math.min(offset, 9)));
     if (options.recency) endpoint.searchParams.set("freshness", ({ day: "pd", week: "pw", month: "pm", year: "py" })[options.recency]);
     const payload = await responseJson(await runtime.fetch(endpoint, {
       headers: { Accept: "application/json", "X-Subscription-Token": requireCredential(settings, runtime.apiKey) },
       ...(options.signal ? { signal: options.signal } : {}),
     }), "Brave");
     const web = isRecord(payload.web) ? payload.web : {};
-    return { results: normalizeResults(Array.isArray(web.results) ? web.results : []) };
+    const queryMeta = isRecord(payload.query) ? payload.query : {};
+    const moreAvailable = queryMeta.more_results_available === true && offset < 9;
+    return {
+      results: normalizeResults(Array.isArray(web.results) ? web.results : []),
+      ...(moreAvailable ? { nextPage: { kind: "offset" as const, value: offset + 1 } } : {}),
+    };
   },
 });
 
 const exaProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
   id: "configured-exa",
+  capabilities: { pagination: false },
   search: async (query, options) => {
     const payload = await responseJson(await runtime.fetch(endpointFor(settings), {
       method: "POST",
@@ -409,6 +438,7 @@ const exaProvider = (settings: HarnessWebSearchSettings, runtime: SearchProvider
 
 const tavilyProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
   id: "configured-tavily",
+  capabilities: { pagination: false },
   search: async (query, options) => {
     const payload = await responseJson(await runtime.fetch(endpointFor(settings), {
       method: "POST",
@@ -428,6 +458,7 @@ const tavilyProvider = (settings: HarnessWebSearchSettings, runtime: SearchProvi
 
 const jinaProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
   id: "configured-jina",
+  capabilities: { pagination: false },
   search: async (query, options) => {
     const endpoint = new URL(endpointFor(settings));
     endpoint.searchParams.set("q", query);
@@ -445,11 +476,14 @@ const jinaProvider = (settings: HarnessWebSearchSettings, runtime: SearchProvide
 
 const searxngProvider = (settings: HarnessWebSearchSettings, runtime: SearchProviderRuntime): SearchProvider => ({
   id: "configured-searxng",
+  capabilities: { pagination: "page" },
   search: async (query, options) => {
     const endpoint = new URL(endpointFor(settings));
     if (endpoint.pathname === "/" || endpoint.pathname === "") endpoint.pathname = "/search";
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
+    const page = options.page?.kind === "page" ? options.page.value : 1;
+    if (page > 1) endpoint.searchParams.set("pageno", String(page));
     if (options.recency === "week") {
       throw new Error("SearXNG does not support an exact week recency filter; use day, month, or year");
     }
@@ -461,7 +495,13 @@ const searxngProvider = (settings: HarnessWebSearchSettings, runtime: SearchProv
       },
       ...(options.signal ? { signal: options.signal } : {}),
     }), "SearXNG");
-    return { results: normalizeResults(Array.isArray(payload.results) ? payload.results : []).slice(0, options.limit ?? 10) };
+    const raw = Array.isArray(payload.results) ? payload.results : [];
+    const results = normalizeResults(raw).slice(0, options.limit ?? 10);
+    // SearXNG does not report a result count; a non-empty page may have a successor.
+    return {
+      results,
+      ...(raw.length > 0 ? { nextPage: { kind: "page" as const, value: page + 1 } } : {}),
+    };
   },
 });
 
@@ -561,47 +601,153 @@ export function filterByDomainPolicy<T extends { url: string }>(
   });
 }
 
+const mapFetchStatus = (fetch: FetchResult): Pick<WebSearchItem, "status" | "detail"> => {
+  switch (fetch.status) {
+    case "ok": return { status: "ok" };
+    case "redirect-cross-host": return { status: "partial", detail: `redirected to another host: ${fetch.location}` };
+    case "blocked": return { status: "denied", detail: `fetch blocked: ${fetch.reason}` };
+    case "empty-shell": return { status: "unavailable", detail: fetch.hint };
+    case "renderer-unavailable": return { status: "unavailable", detail: "renderer is unavailable for this page" };
+    case "snapshot-missing": return { status: "unavailable", detail: `snapshot is missing: ${fetch.snapshotId}` };
+    case "failed": return { status: "failed", detail: fetch.reason };
+  }
+};
+
 export function createWebSearchService(
   resolveProvider: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<ResolveSearchProviderResult>,
   resolveDomainPolicy: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<HarnessWebDomainPolicy> = async () => ({ block: [] }),
+  deps: {
+    /** Host-bound fetch used for `urls` items; absent means fetch is unwired. */
+    fetchUrl?: (url: string, ctx: HarnessServiceContext) => Promise<FetchResult>;
+  } = {},
 ): HarnessService<"web.search"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      const query = params.query?.trim() || params.objective?.trim() || "";
-      if (!query) throw new HarnessServiceError("invalid-params", "web.search requires query or objective");
-      const providerResult = await resolveProvider(ctx);
-      if ("unavailable" in providerResult) {
-        throw new HarnessServiceError("unavailable", providerResult.hint);
+      const queryItems: Array<{ kind: "query" | "objective"; query: string }> = [];
+      if (params.query?.trim()) queryItems.push({ kind: "query", query: params.query.trim() });
+      for (const entry of params.queries ?? []) {
+        const query = typeof entry === "string" ? entry.trim() : "";
+        if (query) queryItems.push({ kind: "query", query });
       }
-      const domainPolicy = mergeHarnessWebDomainPolicy(
-        await resolveDomainPolicy(ctx),
-        {
-          ...(params.allowedDomains === undefined ? {} : { allow: params.allowedDomains }),
-          ...(params.blockedDomains === undefined ? {} : { block: params.blockedDomains }),
-        },
-      );
-      if (domainPolicy.allow?.length === 0) {
-        return { providerId: providerResult.id, results: [] };
+      if (params.objective?.trim()) queryItems.push({ kind: "objective", query: params.objective.trim() });
+      const urlItems = (params.urls ?? []).map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean);
+      const cursorRaw = params.cursor?.trim() ?? "";
+      if (queryItems.length === 0 && urlItems.length === 0 && !cursorRaw) {
+        throw new HarnessServiceError("invalid-params", "web.search requires query, objective, queries, urls, or cursor");
       }
-      const response = await providerResult.search(query, {
-        ...(domainPolicy.allow === undefined ? {} : { allowedDomains: domainPolicy.allow }),
-        ...(domainPolicy.block.length === 0 ? {} : { blockedDomains: domainPolicy.block }),
-        ...(params.recency ? { recency: params.recency } : {}),
-        ...(params.limit ? { limit: params.limit } : {}),
-        signal: ctx.signal,
-      });
-      const filtered = filterByDomainPolicy(response.results, domainPolicy.allow, domainPolicy.block)
-        .slice(0, params.limit ?? 10);
-      const results: SearchResultItem[] = filtered.map((result) => ({
-        title: result.title,
-        url: result.url,
-        snippet: result.snippet,
-        ...(result.publishedAt ? { publishedAt: result.publishedAt } : {}),
-      }));
+
+      const notices: string[] = [];
+      const needsProvider = queryItems.length > 0 || Boolean(cursorRaw);
+      const providerResult = needsProvider ? await resolveProvider(ctx) : null;
+      const provider = providerResult && !("unavailable" in providerResult) ? providerResult : null;
+      const providerHint = providerResult && "unavailable" in providerResult ? providerResult.hint : "search provider is unavailable";
+      const paginationKind = provider?.capabilities?.pagination;
+      // A routing/failover provider reports which engine actually answered.
+      let effectiveProviderId = provider?.id;
+
+      const runSearch = async (
+        kind: "query" | "objective" | "page",
+        query: string,
+        constraints: { allow?: string[]; block?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number },
+        page?: { kind: "offset" | "page"; value: number },
+      ): Promise<WebSearchItem> => {
+        const echo = kind === "page" ? {} : { query };
+        if (!provider) return { kind, ...echo, status: "unavailable", detail: providerHint };
+        const domainPolicy = mergeHarnessWebDomainPolicy(await resolveDomainPolicy(ctx), {
+          ...(constraints.allow === undefined ? {} : { allow: constraints.allow }),
+          ...(constraints.block === undefined ? {} : { block: constraints.block }),
+        });
+        if (domainPolicy.allow?.length === 0) {
+          return { kind, ...echo, status: "denied", detail: "domain allowlist is empty" };
+        }
+        try {
+          const response = await provider.search(query, {
+            ...(domainPolicy.allow === undefined ? {} : { allowedDomains: domainPolicy.allow }),
+            ...(domainPolicy.block.length === 0 ? {} : { blockedDomains: domainPolicy.block }),
+            ...(constraints.recency ? { recency: constraints.recency } : {}),
+            ...(constraints.limit ? { limit: constraints.limit } : {}),
+            ...(page ? { page } : {}),
+            signal: ctx.signal,
+          });
+          if (response.providerId) effectiveProviderId = response.providerId;
+          notices.push(...(response.notices ?? []));
+          const results = filterByDomainPolicy(response.results, domainPolicy.allow, domainPolicy.block)
+            .slice(0, constraints.limit ?? 10);
+          const nextCursor = response.nextPage && paginationKind !== false && paginationKind !== undefined
+            ? mintSearchCursor({
+              v: 1,
+              p: provider.id,
+              q: query,
+              k: response.nextPage.kind,
+              n: response.nextPage.value,
+              ...(constraints.allow ? { allow: constraints.allow } : {}),
+              ...(constraints.block ? { block: constraints.block } : {}),
+              ...(constraints.recency ? { recency: constraints.recency } : {}),
+              ...(constraints.limit ? { limit: constraints.limit } : {}),
+            })
+            : undefined;
+          return {
+            kind,
+            ...echo,
+            status: results.length === 0 ? "empty" : "ok",
+            results,
+            ...(nextCursor ? { nextCursor } : {}),
+          };
+        } catch (error) {
+          if (isCancellation(error, ctx.signal)) return { kind, ...echo, status: "cancelled", detail: "cancelled" };
+          return { kind, ...echo, status: "failed", detail: conciseFailure(error, "request failed") };
+        }
+      };
+
+      const items: WebSearchItem[] = await Promise.all([
+        ...queryItems.map((item) => runSearch(item.kind, item.query, {
+          ...(params.allowedDomains !== undefined ? { allow: params.allowedDomains } : {}),
+          ...(params.blockedDomains !== undefined ? { block: params.blockedDomains } : {}),
+          ...(params.recency ? { recency: params.recency } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+        })),
+        ...urlItems.map(async (url): Promise<WebSearchItem> => {
+          if (!deps.fetchUrl) return { kind: "url", url, status: "unavailable", detail: "host fetch path is not configured" };
+          try {
+            const fetch = await deps.fetchUrl(url, ctx);
+            return { kind: "url", url, fetch, ...mapFetchStatus(fetch) };
+          } catch (error) {
+            if (isCancellation(error, ctx.signal)) return { kind: "url", url, status: "cancelled", detail: "cancelled" };
+            return { kind: "url", url, status: "failed", detail: conciseFailure(error, "fetch failed") };
+          }
+        }),
+        ...(cursorRaw ? [runCursor(cursorRaw)] : []),
+      ]);
+
+      async function runCursor(raw: string): Promise<WebSearchItem> {
+        const payload = parseSearchCursor(raw);
+        if (!payload) return { kind: "page", status: "failed", detail: "unknown or malformed cursor" };
+        if (!provider) return { kind: "page", status: "unavailable", detail: providerHint };
+        if (paginationKind !== "offset" && paginationKind !== "page") {
+          return { kind: "page", status: "unsupported", detail: `provider ${provider.id} does not support pagination` };
+        }
+        if (payload.p !== provider.id) {
+          return { kind: "page", status: "failed", detail: `cursor was minted by provider ${payload.p}, not ${provider.id}` };
+        }
+        if (payload.k !== paginationKind) {
+          return { kind: "page", status: "failed", detail: `cursor pagination kind ${payload.k} does not match provider` };
+        }
+        return runSearch("page", payload.q, {
+          ...(payload.allow ? { allow: payload.allow } : {}),
+          ...(payload.block ? { block: payload.block } : {}),
+          ...(payload.recency ? { recency: payload.recency } : {}),
+          ...(payload.limit ? { limit: payload.limit } : {}),
+        }, { kind: payload.k, value: payload.n });
+      }
+
       return {
-        providerId: response.providerId ?? providerResult.id,
-        results,
-        ...(response.notices?.length ? { notices: response.notices } : {}),
+        providerId: effectiveProviderId ?? "none",
+        capabilities: {
+          pagination: paginationKind === "offset" || paginationKind === "page",
+          fetch: Boolean(deps.fetchUrl),
+        },
+        items,
+        ...(notices.length ? { notices } : {}),
       };
     },
   };

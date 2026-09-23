@@ -1,0 +1,151 @@
+/**
+ * D-315 / Stage L1: fixed web content snapshots.
+ *
+ * A snapshot pins the readable representation extracted from one fetch: the
+ * source identity (requested + final URL), content hash, parser name, and the
+ * stored text body. Positions reported against a snapshot (extracted-text
+ * line ranges) stay valid for exactly this content — a refresh mints a new
+ * snapshotId rather than mutating an existing one, so older references keep
+ * resolving to the older content.
+ *
+ * Snapshots live in the same kernel record store as retrieval artifacts:
+ * `web.snapshot` records with a `body` object reference. The record itself is
+ * temporary and owned by the fetching session/thread/run; it is released by
+ * the ordinary retrieval lifecycle (run settle, thread deletion, session
+ * drop, workspace reconcile) unless another live record — promoted evidence,
+ * a project source, another run's receipt — still references its body hash.
+ * Sharing therefore never depends on possessing another run's receipt: a
+ * consumer reads the snapshot under its own session authority.
+ */
+import { createHash, randomUUID } from "node:crypto";
+import type { RetrievalReceiptAuthority, WebSnapshotRef } from "@varin/protocol";
+import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
+import { createWorkspaceOpSerializer, kernelContext } from "./retrieval-artifacts.js";
+
+export const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
+
+export interface WebSnapshotDraft {
+  sourceUrl: string;
+  finalUrl: string;
+  contentType?: string;
+  title?: string;
+  /** Parser that produced the readable view, e.g. "readability-markdown". */
+  representation: string;
+  rendered?: boolean;
+}
+
+export interface WebSnapshotContent {
+  ref: WebSnapshotRef;
+  /** Stored readable body (utf-8 extracted text). */
+  body: Buffer;
+}
+
+const hashBytes = (bytes: Buffer): string => `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+
+const recordIdFor = (snapshotId: string): string => `web.snapshot:${snapshotId}`;
+
+const parseSnapshotPayload = (payloadJson: string): WebSnapshotRef | null => {
+  try {
+    const value = JSON.parse(payloadJson) as WebSnapshotRef;
+    if (!value || typeof value.snapshotId !== "string" || typeof value.finalUrl !== "string"
+      || typeof value.contentHash !== "string" || typeof value.byteLength !== "number") return null;
+    return value;
+  } catch {
+    return null;
+  }
+};
+
+export const createWebMaterialStore = (
+  workingStates: WorkspaceWorkingStateRootAccess,
+  deps: { now?: () => number; serializer?: ReturnType<typeof createWorkspaceOpSerializer> } = {},
+) => {
+  const now = deps.now ?? Date.now;
+  const serializer = deps.serializer ?? createWorkspaceOpSerializer();
+
+  const put = async (
+    workspaceId: string,
+    draft: WebSnapshotDraft,
+    body: Buffer,
+    authority?: RetrievalReceiptAuthority,
+  ): Promise<WebSnapshotRef> => serializer.runSerialized(workspaceId, () => kernelContext(
+    workingStates,
+    workspaceId,
+    "web-snapshot-put",
+    async (store, context) => {
+      if (authority && authority.owningWorkspaceId !== workspaceId) {
+        throw new Error("Web snapshot authority does not match its owning workspace");
+      }
+      const contentHash = hashBytes(body);
+      // Identical content at the same URL is the same snapshot: refreshing a
+      // page that did not change must not invalidate existing references.
+      for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE })) {
+        if (record.workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
+        if (record.state === "released") continue;
+        const payload = parseSnapshotPayload(record.payloadJson);
+        if (payload && payload.finalUrl === draft.finalUrl && payload.contentHash === contentHash) {
+          return payload;
+        }
+      }
+      const object = await store.putObject(body);
+      const snapshotId = `snap-${randomUUID()}`;
+      const recordId = recordIdFor(snapshotId);
+      const ref: WebSnapshotRef = {
+        snapshotId,
+        sourceUrl: draft.sourceUrl,
+        finalUrl: draft.finalUrl,
+        fetchedAt: now(),
+        contentHash,
+        representation: draft.representation,
+        byteLength: object.byteLength,
+        ...(draft.contentType ? { contentType: draft.contentType } : {}),
+        ...(draft.rendered ? { rendered: true } : {}),
+        ...(draft.title ? { title: draft.title } : {}),
+      };
+      const ownerId = store.ownerIdForObject?.(object.hash);
+      await context.records.put({
+        operationId: `web-snapshot-put:${recordId}`,
+        recordId,
+        recordType: WEB_SNAPSHOT_RECORD_TYPE,
+        state: "temporary",
+        ...(authority?.sessionId ? { sessionId: authority.sessionId } : {}),
+        ...(authority?.threadId ? { threadId: authority.threadId } : {}),
+        ...(authority?.runId ? { runId: authority.runId } : {}),
+        payloadJson: JSON.stringify(ref),
+        ownerIds: ownerId ? [ownerId] : [],
+        references: [{ slot: "body", objectHash: object.hash }],
+      });
+      return ref;
+    },
+  ));
+
+  const read = async (
+    workspaceId: string,
+    snapshotId: string,
+  ): Promise<WebSnapshotContent | null> => kernelContext(
+    workingStates,
+    workspaceId,
+    "web-snapshot-get",
+    async (store, context) => {
+      const record = await context.records.get(recordIdFor(snapshotId));
+      if (!record
+        || record.recordType !== WEB_SNAPSHOT_RECORD_TYPE
+        || (record.workspaceId !== undefined && record.workspaceId !== workspaceId)) {
+        return null;
+      }
+      const ref = parseSnapshotPayload(record.payloadJson);
+      if (!ref || ref.snapshotId !== snapshotId) return null;
+      const reference = record.references.find((item) => item.slot === "body" && item.objectHash === ref.contentHash);
+      if (!reference) return null;
+      const body = context.client
+        ? await context.client.getBlob(ref.contentHash, { recordId: record.recordId, slot: "body" })
+          .then((value) => Buffer.from(value.bytesBase64, "base64"))
+        : await store.getObject(ref.contentHash);
+      if (!body || body.byteLength !== ref.byteLength) return null;
+      return { ref, body };
+    },
+  );
+
+  return { put, read };
+};
+
+export type WebMaterialStore = ReturnType<typeof createWebMaterialStore>;

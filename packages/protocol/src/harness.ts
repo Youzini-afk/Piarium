@@ -34,6 +34,7 @@ import type {
   PermissionInspectParams,
   PermissionInspectResult,
 } from "./permission-gate.js";
+import type { WebFetchRequest, WebSearchRequest, WebSearchResult, WebSnapshotRef } from "./harness-web.js";
 import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
@@ -242,11 +243,14 @@ export type FetchResult =
     fromCache: boolean;
     rendered: boolean;
     receipt?: RetrievalUrlReceipt;
+    /** Content-pinned snapshot when the Host material store is wired. */
+    snapshot?: WebSnapshotRef;
   }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
   | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
   | { status: "empty-shell"; url: string; hint: string }
   | { status: "renderer-unavailable"; url: string }
+  | { status: "snapshot-missing"; snapshotId: string }
   | { status: "failed"; url: string; reason: string };
 
 export interface SearchResultItem {
@@ -254,6 +258,8 @@ export interface SearchResultItem {
   url: string;
   snippet: string;
   publishedAt?: string;
+  /** Provider-returned summary or abstract text, when the adapter supplies one. */
+  summary?: string;
 }
 
 /**
@@ -1238,8 +1244,8 @@ export interface HarnessServiceMap {
   "lsp.references": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
-  "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
-  "web.search": { params: { query?: string; objective?: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
+  "web.fetch": { params: WebFetchRequest; result: FetchResult };
+  "web.search": { params: WebSearchRequest; result: WebSearchResult };
   "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };

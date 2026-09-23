@@ -58,7 +58,7 @@ import { createHarnessRouter, buildHarnessRespondParams } from './lib/harness/ro
 import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harness/service-host.js';
 import { discoverShells } from './lib/harness/shell-discovery.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
-import { registerHarnessServices } from './lib/harness/harness-services.js';
+import { performHarnessWebFetch, registerHarnessServices } from './lib/harness/harness-services.js';
 import { createUserThreadSendAdapter } from './lib/harness/thread-ui-adapter.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
@@ -93,6 +93,7 @@ import { KernelFileResourceBackend } from './lib/kernel/file-resource-backend.js
 import { KernelPathLockService } from './lib/kernel/file-resource-lock-service.js';
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
+import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web-materials.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
@@ -1506,12 +1507,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ) => Promise<import('@varin/protocol').RetrievalUrlReceipt>;
     syncThread?: (workspaceId: string, thread: import('@varin/protocol').Thread) => Promise<void>;
   } = {};
+  // Deferred until the kernel working-state access exists below; fetches
+  // still deliver content but mint no snapshotId if it is unavailable.
+  const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read'] } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
       if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
       return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
+    },
+    materials: {
+      put: async (workspaceId, draft, body, authority) => {
+        if (!webMaterialAccess.put) throw new Error('Durable web snapshot storage is unavailable');
+        return webMaterialAccess.put(workspaceId, draft, body, authority);
+      },
+      read: async (workspaceId, snapshotId) => (
+        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId) : null
+      ),
     },
   });
   const webSearchService = createWebSearchService(
@@ -1533,6 +1546,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         ...(domains?.allow === undefined ? {} : { allow: [...domains.allow] }),
         block: [...(domains?.block ?? [])],
       };
+    },
+    // URL items share the exact web.fetch authority path: session binding,
+    // domain policy, renderer entitlement, and receipt minting.
+    {
+      fetchUrl: (url, ctx) => performHarnessWebFetch(harnessServiceHost, { url }, ctx),
     },
   );
   const researchSearchService = createResearchSearchService();
@@ -1722,6 +1740,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
+  const webMaterials = createWebMaterialStore(harnessWorkingStates);
+  webMaterialAccess.put = webMaterials.put;
+  webMaterialAccess.read = webMaterials.read;
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {

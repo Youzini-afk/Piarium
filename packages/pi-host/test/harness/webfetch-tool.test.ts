@@ -188,6 +188,47 @@ describe("webfetch tool", () => {
     bridge.dispose();
   });
 
+  it("re-reads a pinned snapshot and reports a missing snapshot honestly", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const snapshotResult: FetchResult = {
+      status: "ok",
+      url: "https://example.com/page",
+      finalUrl: "https://example.com/page",
+      contentType: "text/plain",
+      markdown: "line one\nline two\nline three",
+      bytes: 33,
+      fromCache: false,
+      rendered: false,
+      snapshot: {
+        snapshotId: "snap-9",
+        sourceUrl: "https://example.com/page",
+        finalUrl: "https://example.com/page",
+        fetchedAt: 1,
+        contentHash: "sha256-pin",
+        representation: "raw-text",
+        byteLength: 33,
+      },
+    };
+    const tool = createWebFetchTool(bridge, "test");
+    const pending = tool.execute("snap", { snapshot_id: "snap-9", start_line: 2, end_line: 3 } as never, undefined as never, undefined as never, undefined as never);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(emitted[0]!.method, "web.fetch");
+    assert.deepEqual(emitted[0]!.params, { snapshotId: "snap-9" });
+    bridge.respond("test", emitted[0]!.requestId, { ok: true, result: snapshotResult });
+    const result = await pending;
+    const text = result.content.map((entry) => entry.type === "text" ? entry.text : "").join("");
+    assert.match(text, /snapshot snap-9 hash sha256-pin/);
+    assert.match(text, /2: line two\n3: line three/);
+
+    const missing = tool.execute("gone", { snapshot_id: "snap-gone" } as never, undefined as never, undefined as never, undefined as never);
+    await new Promise((r) => setImmediate(r));
+    bridge.respond("test", emitted[1]!.requestId, { ok: true, result: { status: "snapshot-missing", snapshotId: "snap-gone" } });
+    const gone = await missing;
+    assert.equal((gone as { isError?: boolean }).isError, true);
+    assert.match((gone.content[0] as { text: string }).text, /snapshot unavailable: snap-gone/);
+    bridge.dispose();
+  });
+
   it("formats empty-shell as error", async () => {
     const { bridge, emitted } = createTestBridge("test");
     const emptyResult: FetchResult = {

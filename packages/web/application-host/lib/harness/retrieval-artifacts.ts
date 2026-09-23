@@ -117,6 +117,32 @@ const withKernel = async <T>(
   });
 }, "exclusive");
 
+export const kernelContext = withKernel;
+export type { ContextLike as KernelRecordContext, StoreLike as KernelRecordStore };
+
+/**
+ * Serialize record writes per workspace. The kernel root store exposes one
+ * owner lookup per object hash, so concurrent puts of equal content must not
+ * interleave. Shared by the retrieval and web-snapshot stores.
+ */
+export const createWorkspaceOpSerializer = () => {
+  const workspaceTails = new Map<string, Promise<void>>();
+  const runSerialized = async <T>(workspaceId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = workspaceTails.get(workspaceId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    workspaceTails.set(workspaceId, current);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (workspaceTails.get(workspaceId) === current) workspaceTails.delete(workspaceId);
+    }
+  };
+  return { runSerialized };
+};
+
 export const collectRetrievalArtifactHashes = hashesForEvidence;
 
 const authorityMatchesRecord = (
@@ -251,6 +277,8 @@ const fieldsMatch = (
   && record.runId === authority.runId
 );
 
+const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
+
 const temporaryArtifactsFor = async (
   context: ContextLike,
   authority: RetrievalReceiptAuthority,
@@ -259,13 +287,62 @@ const temporaryArtifactsFor = async (
     .filter((record) => record.state === "temporary" && fieldsMatch(record, authority))
 );
 
+const temporarySnapshotsFor = async (
+  context: ContextLike,
+  authority: RetrievalReceiptAuthority,
+): Promise<RecordLike[]> => (
+  (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
+    .filter((record) => record.state === "temporary" && fieldsMatch(record, authority))
+);
+
+const bodyHashOf = (record: RecordLike): string | undefined => (
+  record.references.find((reference) => reference.slot === "body")?.objectHash
+);
+
+/**
+ * Object hashes still referenced by live records outside the candidate set.
+ * A web snapshot is addressed by its record (snapshotId), so the record must
+ * survive while promoted evidence, a project source, or another run's
+ * receipt still cites its body.
+ */
+const referencedHashesOutside = async (
+  context: ContextLike,
+  candidateIds: Set<string>,
+): Promise<Set<string>> => {
+  const referenced = new Set<string>();
+  for (const record of await context.records.list({})) {
+    if (candidateIds.has(record.recordId)) continue;
+    for (const reference of record.references) referenced.add(reference.objectHash);
+  }
+  return referenced;
+};
+
+const releaseSnapshots = async (
+  context: ContextLike,
+  candidates: RecordLike[],
+  alsoReleasing: RecordLike[],
+  operationPrefix: string,
+): Promise<void> => {
+  if (candidates.length === 0) return;
+  const excluded = new Set([...candidates, ...alsoReleasing].map((record) => record.recordId));
+  const referenced = await referencedHashesOutside(context, excluded);
+  for (const record of candidates) {
+    const hash = bodyHashOf(record);
+    if (hash && referenced.has(hash)) continue;
+    await releaseRecord(context, operationPrefix, record);
+  }
+};
+
 const releaseTemporaryArtifactsInContext = async (
   context: ContextLike,
   authority: RetrievalReceiptAuthority,
 ): Promise<void> => {
-  for (const record of await temporaryArtifactsFor(context, authority)) {
+  const artifacts = await temporaryArtifactsFor(context, authority);
+  const snapshots = await temporarySnapshotsFor(context, authority);
+  for (const record of artifacts) {
     await releaseRecord(context, "artifact-release", record);
   }
+  await releaseSnapshots(context, snapshots, artifacts, "snapshot-release");
 };
 
 const releaseReceiptInContext = async (
@@ -325,13 +402,19 @@ const releaseThreadTemporaryRecords = async (
 ): Promise<void> => {
   const activeRunId = thread.lifecycle === "active" ? thread.activeRunId : null;
   const records = await context.records.list({});
+  const plain: RecordLike[] = [];
+  const snapshots: RecordLike[] = [];
   for (const record of records) {
-    const retrievalRecord = record.recordType === "retrieval.artifact" || record.recordType === "retrieval.receipt";
-    if (!retrievalRecord || record.threadId !== thread.id) continue;
-    if (!activeRunId || record.runId !== activeRunId) {
-      await releaseRecord(context, "thread-run-release", record);
-    }
+    const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
+    const isRetrieval = record.recordType === "retrieval.artifact" || record.recordType === "retrieval.receipt";
+    if ((!isSnapshot && !isRetrieval) || record.threadId !== thread.id) continue;
+    if (activeRunId && record.runId === activeRunId) continue;
+    (isSnapshot ? snapshots : plain).push(record);
   }
+  for (const record of plain) {
+    await releaseRecord(context, "thread-run-release", record);
+  }
+  await releaseSnapshots(context, snapshots, plain, "thread-run-release");
 };
 
 const syncThreadEvidenceInContext = async (
@@ -358,29 +441,15 @@ const syncThreadEvidenceInContext = async (
   }
 };
 
-export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingStateRootAccess) => {
-  // The kernel root store exposes one owner lookup per hash. Serialize all
-  // operations that can put/consume objects so equal hashes cannot make one
-  // concurrent caller observe another caller's temporary owner.
-  const workspaceTails = new Map<string, Promise<void>>();
-  const runSerialized = async <T>(workspaceId: string, operation: () => Promise<T>): Promise<T> => {
-    const previous = workspaceTails.get(workspaceId) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    workspaceTails.set(workspaceId, current);
-    await previous.catch(() => undefined);
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (workspaceTails.get(workspaceId) === current) workspaceTails.delete(workspaceId);
-    }
-  };
+export const createRetrievalArtifactAccess = (
+  workingStates: WorkspaceWorkingStateRootAccess,
+  serializer: ReturnType<typeof createWorkspaceOpSerializer> = createWorkspaceOpSerializer(),
+) => {
   const inKernel = <T>(
     workspaceId: string,
     purpose: string,
     operation: (store: StoreLike, context: ContextLike) => Promise<T> | T,
-  ): Promise<T> => runSerialized(workspaceId, () => withKernel(workingStates, workspaceId, purpose, operation));
+  ): Promise<T> => serializer.runSerialized(workspaceId, () => withKernel(workingStates, workspaceId, purpose, operation));
 
   const storeArtifact = async (
     workspaceId: string,
@@ -591,14 +660,18 @@ export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingSta
     workspaceId,
     "retrieval-evidence-release",
     async (_store, context) => {
+      const snapshots: RecordLike[] = [];
+      const plain: RecordLike[] = [];
       for (const record of await context.records.list({})) {
+        const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
         if (!(
-          record.recordType.startsWith("retrieval.evidence.")
+          isSnapshot
+          || record.recordType.startsWith("retrieval.evidence.")
           || record.recordType === "retrieval.artifact"
           || record.recordType === "retrieval.receipt"
         )) continue;
         if (record.threadId === threadId) {
-          await releaseRecord(context, "thread-release", record);
+          (isSnapshot ? snapshots : plain).push(record);
           continue;
         }
         // Exact structured authority parsing handles rows written before the
@@ -606,12 +679,16 @@ export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingSta
         try {
           const payload = JSON.parse(record.payloadJson) as { authority?: { threadId?: unknown } };
           if (payload.authority?.threadId === threadId) {
-            await releaseRecord(context, "thread-release", record);
+            (isSnapshot ? snapshots : plain).push(record);
           }
         } catch {
           // A malformed row has no verifiable owner and is left for reconcile.
         }
       }
+      for (const record of plain) {
+        await releaseRecord(context, "thread-release", record);
+      }
+      await releaseSnapshots(context, snapshots, plain, "thread-release");
     },
   );
 
@@ -622,9 +699,17 @@ export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingSta
     workspaceId,
     "web-fetch-receipt-release",
     async (_store, context) => {
+      const receipts: RecordLike[] = [];
       for (const record of await context.records.list({ recordType: "retrieval.receipt" })) {
-        if (fieldsMatch(record, authority)) await releaseRecord(context, "receipt-authority-release", record);
+        if (fieldsMatch(record, authority)) receipts.push(record);
       }
+      const snapshots = await temporarySnapshotsFor(context, authority);
+      for (const record of receipts) {
+        await releaseRecord(context, "receipt-authority-release", record);
+      }
+      // Session-scoped web snapshots die with the same authority, unless a
+      // surviving record still cites their body.
+      await releaseSnapshots(context, snapshots, receipts, "snapshot-authority-release");
     },
   );
 
@@ -646,6 +731,8 @@ export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingSta
     async (_store, context) => {
       const knownThreads = new Map(threads.map((thread) => [thread.id, thread]));
       const records = await context.records.list({});
+      const plainOrphans: RecordLike[] = [];
+      const snapshotOrphans: RecordLike[] = [];
       for (const record of records) {
         if (record.recordType === "retrieval.evidence.pending" || record.recordType === "retrieval.evidence.sealed") {
           const thread = record.threadId ? knownThreads.get(record.threadId) : undefined;
@@ -654,17 +741,24 @@ export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingSta
           }
           continue;
         }
-        if (record.recordType !== "retrieval.artifact" && record.recordType !== "retrieval.receipt") continue;
+        const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
+        if (record.recordType !== "retrieval.artifact" && record.recordType !== "retrieval.receipt" && !isSnapshot) continue;
         if (!record.threadId || !record.runId) {
-          if (record.threadId || record.runId) await releaseRecord(context, "workspace-orphan-retrieval", record);
+          // Session-scoped records release on session drop; only a mixed
+          // owner shape (one of thread/run set) is an orphan.
+          if (record.threadId || record.runId) plainOrphans.push(record);
           continue;
         }
         const thread = knownThreads.get(record.threadId);
         const activeRunId = thread?.lifecycle === "active" ? thread.activeRunId : null;
         if (!thread || !activeRunId || record.runId !== activeRunId) {
-          await releaseRecord(context, "workspace-orphan-retrieval", record);
+          (isSnapshot ? snapshotOrphans : plainOrphans).push(record);
         }
       }
+      for (const record of plainOrphans) {
+        await releaseRecord(context, "workspace-orphan-retrieval", record);
+      }
+      await releaseSnapshots(context, snapshotOrphans, plainOrphans, "workspace-orphan-retrieval");
       for (const thread of threads) await syncThreadEvidenceInContext(workspaceId, context, thread);
     },
   );

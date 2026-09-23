@@ -1513,7 +1513,10 @@ describe("session e2e — default web search", () => {
         harnessWebSearch: true,
         serviceHostOptions: {
           webSearchService,
-          webFetchService: { fetch: async (url) => ({ status: "ok", url, finalUrl: url, contentType: "text/plain", markdown: "Architecture\nThe Host owns file authority.\nPi supplies the agent loop.", bytes: 72, fromCache: false, rendered: false }) },
+          webFetchService: { fetch: async (input) => {
+            const url = typeof input === "string" ? input : input.url ?? "";
+            return { status: "ok" as const, url, finalUrl: url, contentType: "text/plain", markdown: "Architecture\nThe Host owns file authority.\nPi supplies the agent loop.", bytes: 72, fromCache: false, rendered: false };
+          } },
         },
       });
       try {

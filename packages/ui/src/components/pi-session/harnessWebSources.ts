@@ -41,6 +41,8 @@ export const projectHarnessWebSources = (
       fetchedAt: message.timestamp,
       toolCallId: message.toolCallId,
       tool,
+      ...(typeof source.snapshotId === 'string' && source.snapshotId ? { snapshotId: source.snapshotId } : {}),
+      ...(typeof source.contentHash === 'string' && source.contentHash ? { contentHash: source.contentHash } : {}),
     }];
   });
 });

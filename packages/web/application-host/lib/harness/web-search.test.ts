@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { mintSearchCursor } from "@varin/protocol";
 import {
   createConfiguredSearchProvider,
   createWebSearchService,
@@ -127,7 +128,7 @@ describe("configured web search providers", () => {
     });
   });
 
-  it("filters returned domains and surfaces provider failure instead of reporting empty success", async () => {
+  it("filters returned domains and reports provider failure as an item status", async () => {
     expect(filterByDomainPolicy([
       { url: "https://docs.example/a" },
       { url: "https://blocked.example/b" },
@@ -136,13 +137,17 @@ describe("configured web search providers", () => {
 
     const service = createWebSearchService(async () => ({
       id: "broken",
+      capabilities: { pagination: false },
       search: async () => { throw new Error("provider unavailable"); },
     }));
-    await expect(service.handle({ query: "q" }, context)).rejects.toThrow("provider unavailable");
+    await expect(service.handle({ query: "q" }, context)).resolves.toMatchObject({
+      providerId: "broken",
+      items: [{ kind: "query", query: "q", status: "failed", detail: "provider unavailable" }],
+    });
     const unavailable = createWebSearchService(async () => ({ unavailable: true, hint: "configure search" }));
-    await expect(unavailable.handle({ query: "q" }, context)).rejects.toMatchObject({
-      harnessCode: "unavailable",
-      message: "configure search",
+    await expect(unavailable.handle({ query: "q" }, context)).resolves.toMatchObject({
+      providerId: "none",
+      items: [{ kind: "query", query: "q", status: "unavailable", detail: "configure search" }],
     });
   });
 
@@ -165,7 +170,8 @@ describe("configured web search providers", () => {
       allowedDomains: ["docs.example.com"],
       blockedDomains: ["tracker.docs.example.com", "ads.docs.example.com"],
     }));
-    expect(result.results).toEqual([
+    expect(result.items[0]?.status).toBe("ok");
+    expect(result.items[0]?.results).toEqual([
       { title: "Docs", url: "https://api.docs.example.com/a", snippet: "ok" },
     ]);
   });
@@ -292,7 +298,7 @@ describe("configured web search providers", () => {
     const service = createWebSearchService(async () => resolved);
     await expect(service.handle({ query: "query", allowedDomains: ["docs.example"], blockedDomains: ["ads.example"], recency: "week" }, context)).resolves.toMatchObject({
       providerId: "default-parallel",
-      results: [],
+      items: [{ status: "empty", results: [] }],
       notices: [expect.stringContaining("Exa MCP failed"), expect.stringContaining("Parallel MCP cannot guarantee")],
     });
   });
@@ -329,23 +335,142 @@ describe("configured web search providers", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("returns empty immediately for an empty domain allowlist", async () => {
+  it("denies an empty domain allowlist per item without calling the provider", async () => {
     const search = vi.fn(async () => ({ results: [{ title: "should not call", url: "https://example.com", snippet: "" }] }));
-    const service = createWebSearchService(async () => ({ id: "default", search }));
-    await expect(service.handle({ query: "query", allowedDomains: [] }, context)).resolves.toEqual({
+    const service = createWebSearchService(async () => ({ id: "default", capabilities: { pagination: false }, search }));
+    await expect(service.handle({ query: "query", allowedDomains: [] }, context)).resolves.toMatchObject({
       providerId: "default",
-      results: [],
+      items: [{ kind: "query", query: "query", status: "denied" }],
     });
     expect(search).not.toHaveBeenCalled();
   });
 
   it("accepts a natural-language objective when no literal query is supplied", async () => {
     const search = vi.fn(async (query: string) => ({ results: [{ title: "Objective", url: "https://example.com/objective", snippet: query }] }));
-    const service = createWebSearchService(async () => ({ id: "objective", search }));
+    const service = createWebSearchService(async () => ({ id: "objective", capabilities: { pagination: false }, search }));
     await expect(service.handle({ objective: "find recent papers about agent memory" }, context)).resolves.toMatchObject({
       providerId: "objective",
-      results: [{ snippet: "find recent papers about agent memory" }],
+      items: [{ kind: "objective", status: "ok", results: [{ snippet: "find recent papers about agent memory" }] }],
     });
     expect(search).toHaveBeenCalledWith("find recent papers about agent memory", expect.anything());
+  });
+
+  it("keeps per-item status independent across a mixed batch", async () => {
+    const search = vi.fn(async (query: string) => {
+      if (query === "bad") throw new Error("boom");
+      return { results: [{ title: "Hit", url: `https://example.com/${query}`, snippet: query }] };
+    });
+    const fetchUrl = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      finalUrl: url,
+      contentType: "text/plain",
+      markdown: "fetched body",
+      bytes: 12,
+      fromCache: false,
+      rendered: false,
+      snapshot: {
+        snapshotId: "snap-url-1",
+        sourceUrl: url,
+        finalUrl: url,
+        fetchedAt: 1,
+        contentHash: "sha256-body",
+        representation: "raw-text",
+        byteLength: 12,
+      },
+    }));
+    const service = createWebSearchService(
+      async () => ({ id: "batch", capabilities: { pagination: false }, search }),
+      undefined,
+      { fetchUrl },
+    );
+    const result = await service.handle({
+      queries: ["alpha", "bad"],
+      urls: ["https://example.com/known"],
+      objective: "goal",
+    }, context);
+
+    // Canonical item order: query, queries, objective, urls, cursor.
+    expect(result.items).toHaveLength(4);
+    expect(result.items.map((item) => item.status)).toEqual(["ok", "failed", "ok", "ok"]);
+    expect(result.items[0]?.results?.[0]?.url).toBe("https://example.com/alpha");
+    expect(result.items[1]?.detail).toBe("boom");
+    expect(result.items[2]?.kind).toBe("objective");
+    expect(result.items[3]?.kind).toBe("url");
+    expect(result.items[3]?.fetch?.status).toBe("ok");
+    expect(result.items[3]?.fetch?.status === "ok" ? result.items[3].fetch.snapshot?.snapshotId : null).toBe("snap-url-1");
+    expect(result.capabilities.fetch).toBe(true);
+  });
+
+  it("marks url items unavailable when no host fetch path is wired", async () => {
+    const service = createWebSearchService(async () => ({ id: "p", capabilities: { pagination: false }, search: vi.fn() }));
+    const result = await service.handle({ urls: ["https://example.com/x"] }, context);
+    expect(result.items[0]?.status).toBe("unavailable");
+    expect(result.capabilities).toEqual({ pagination: false, fetch: false });
+    // URL-only batches never touch the search provider.
+    expect(result.providerId).toBe("none");
+  });
+
+  it("mints and continues a Brave pagination cursor", async () => {
+    const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = new URL(String(input));
+      const offset = url.searchParams.get("offset");
+      return jsonResponse({
+        query: { more_results_available: offset !== "1" },
+        web: { results: [{ title: `Brave p${offset ?? "0"}`, url: `https://docs.example/${offset ?? "0"}`, description: "snippet" }] },
+      });
+    });
+    const provider = createConfiguredSearchProvider({ provider: "brave" }, { apiKey: "k", fetch });
+    const service = createWebSearchService(async () => provider);
+
+    const first = await service.handle({ query: "q" }, context);
+    expect(first.capabilities.pagination).toBe(true);
+    const cursor = first.items[0]?.nextCursor;
+    expect(cursor).toBeTruthy();
+
+    const second = await service.handle({ cursor: cursor! }, context);
+    expect(second.items[0]?.kind).toBe("page");
+    expect(second.items[0]?.status).toBe("ok");
+    expect(second.items[0]?.results?.[0]?.url).toBe("https://docs.example/1");
+    expect(new URL(String(fetch.mock.calls[1]?.[0])).searchParams.get("offset")).toBe("1");
+    expect(second.items[0]?.nextCursor).toBeUndefined();
+  });
+
+  it("rejects cursors on non-paginating providers and cursors minted by another provider", async () => {
+    const service = createWebSearchService(async () => ({
+      id: "default-exa",
+      capabilities: { pagination: false },
+      search: vi.fn(),
+    }));
+    const foreign = mintSearchCursor({ v: 1, p: "configured-brave", q: "q", k: "offset", n: 1 });
+    const unsupported = await service.handle({ cursor: foreign }, context);
+    expect(unsupported.items[0]?.status).toBe("unsupported");
+
+    const paginating = createWebSearchService(async () => ({
+      id: "configured-searxng",
+      capabilities: { pagination: "page" as const },
+      search: vi.fn(async () => ({ results: [] })),
+    }));
+    const wrongProvider = await paginating.handle({ cursor: foreign }, context);
+    expect(wrongProvider.items[0]?.status).toBe("failed");
+    expect(wrongProvider.items[0]?.detail).toContain("configured-brave");
+  });
+
+  it("marks aborted batch items cancelled without erasing completed siblings", async () => {
+    const controller = new AbortController();
+    const search = vi.fn(async (query: string) => {
+      if (query === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        controller.abort();
+        throw new DOMException("cancelled", "AbortError");
+      }
+      return { results: [{ title: "Fast", url: "https://example.com/fast", snippet: "" }] };
+    });
+    const service = createWebSearchService(async () => ({ id: "p", capabilities: { pagination: false }, search }));
+    const result = await service.handle({ queries: ["fast", "slow"] }, {
+      ...context,
+      signal: controller.signal,
+    });
+    expect(result.items.map((item) => item.status)).toEqual(["ok", "cancelled"]);
   });
 });

@@ -318,4 +318,159 @@ describe("web-fetch service", () => {
       expect(result.reason).toContain("404");
     }
   });
+
+  it("pins fetched content as a snapshot and reads it back by snapshotId", async () => {
+    const text = "snapshot body with enough content to be a real page. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt.";
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => text,
+    }) as never;
+    const objects = new Map<string, Buffer>();
+    const snapshots = new Map<string, { ref: import("@varin/protocol").WebSnapshotRef; body: Buffer }>();
+    const materials = {
+      put: async (_ws: string, draft: { sourceUrl: string; finalUrl: string }, body: Buffer) => {
+        const ref = {
+          snapshotId: "snap-1",
+          sourceUrl: draft.sourceUrl,
+          finalUrl: draft.finalUrl,
+          fetchedAt: 1,
+          contentHash: `sha256-stored`,
+          representation: "raw-text",
+          byteLength: body.byteLength,
+        };
+        objects.set(ref.contentHash, body);
+        snapshots.set(ref.snapshotId, { ref, body });
+        return ref;
+      },
+      read: async (_ws: string, snapshotId: string) => snapshots.get(snapshotId) ?? null,
+    };
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials, persistReceipt });
+    const result = await service.fetch({ url: "https://example.com/pinned" }, fetchContext);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.snapshot?.snapshotId).toBe("snap-1");
+
+    const reread = await service.fetch({ snapshotId: "snap-1" }, fetchContext);
+    expect(reread.status).toBe("ok");
+    if (reread.status === "ok") {
+      expect(reread.markdown).toBe(text);
+      expect(reread.snapshot?.contentHash).toBe("sha256-stored");
+      // A snapshot read mints this caller's own receipt — not a foreign one.
+      expect(reread.receipt?.authority.sessionId).toBe("session-1");
+    }
+  });
+
+  it("reports snapshot-missing for released or foreign snapshots and re-checks domain policy", async () => {
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const missing = await service.fetch({ snapshotId: "snap-gone" }, fetchContext);
+    expect(missing).toEqual({ status: "snapshot-missing", snapshotId: "snap-gone" });
+
+    const materials = {
+      put: async () => { throw new Error("unused"); },
+      read: async () => ({
+        ref: {
+          snapshotId: "snap-blocked",
+          sourceUrl: "https://evil.com/x",
+          finalUrl: "https://evil.com/x",
+          fetchedAt: 1,
+          contentHash: "sha256-x",
+          representation: "raw-text",
+          byteLength: 4,
+        },
+        body: Buffer.from("body"),
+      }),
+    };
+    const guarded = createWebFetch({
+      ssrf: createMockSsrf(),
+      domainPolicy: () => ({ allow: [], block: ["evil.com"] }),
+      materials,
+    });
+    const blocked = await guarded.fetch({ snapshotId: "snap-blocked" }, {
+      workspaceId: "ws",
+      authority: { owningWorkspaceId: "ws", sessionId: "s" },
+    });
+    expect(blocked).toMatchObject({ status: "blocked", reason: "domain-blocked" });
+  });
+
+  it("shares one in-flight fetch and lets a single waiter's cancel leave others running", async () => {
+    let resolveBody!: (value: string) => void;
+    const body = new Promise<string>((resolve) => { resolveBody = resolve; });
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: () => body,
+    });
+    globalThis.fetch = mockFetch as never;
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const ctx = (sessionId: string, signal?: AbortSignal) => ({
+      workspaceId: "ws",
+      authority: { owningWorkspaceId: "ws", sessionId },
+      ...(signal ? { signal } : {}),
+    });
+
+    const first = new AbortController();
+    const pendingA = service.fetch({ url: "https://example.com/shared" }, ctx("session-a", first.signal));
+    const pendingB = service.fetch({ url: "https://example.com/shared" }, ctx("session-b"));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    first.abort(new DOMException("cancelled", "AbortError"));
+    await expect(pendingA).rejects.toMatchObject({ name: "AbortError" });
+
+    resolveBody("shared page body long enough to matter. Lorem ipsum dolor sit amet.");
+    const resultB = await pendingB;
+    expect(resultB.status).toBe("ok");
+    if (resultB.status === "ok") expect(resultB.markdown).toContain("shared page body");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the shared request when the last waiter leaves", async () => {
+    let resolveBody!: (value: string) => void;
+    const body = new Promise<string>((resolve) => { resolveBody = resolve; });
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: () => body,
+    });
+    globalThis.fetch = mockFetch as never;
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy });
+    const controller = new AbortController();
+    const pending = service.fetch({ url: "https://example.com/last" }, {
+      workspaceId: "ws",
+      authority: { owningWorkspaceId: "ws", sessionId: "session-only" },
+      signal: controller.signal,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort(new DOMException("cancelled", "AbortError"));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(service.inflight.size).toBe(0);
+    resolveBody("late");
+  });
+
+  it("refresh bypasses the cache and the in-flight share", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "text/plain" }),
+        text: async () => `page version ${calls} with enough body content to pass checks.`,
+      };
+    }) as never;
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, cacheTtlMs: 60_000 });
+    const first = await service.fetch({ url: "https://example.com/refresh" }, fetchContext);
+    const cached = await service.fetch({ url: "https://example.com/refresh" }, fetchContext);
+    const refreshed = await service.fetch({ url: "https://example.com/refresh", refresh: true }, fetchContext);
+    expect(first.status).toBe("ok");
+    expect(cached.status === "ok" && cached.fromCache).toBe(true);
+    expect(refreshed.status === "ok" && refreshed.fromCache).toBe(false);
+    if (refreshed.status === "ok") expect(refreshed.markdown).toContain("version 2");
+    expect(calls).toBe(2);
+  });
 });

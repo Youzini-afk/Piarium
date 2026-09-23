@@ -271,7 +271,7 @@ export interface HarnessServiceHost {
   }) => Promise<import("@varin/protocol").HarnessFastDecisionResult>;
   permissionAudit: ((record: import("@varin/protocol").PermissionAuditRecord) => void) | null;
   webFetchService: {
-    fetch: (url: string, ctx: {
+    fetch: (input: import("@varin/protocol").WebFetchRequest | string, ctx: {
       workspaceId: string;
       authority: import("@varin/protocol").RetrievalReceiptAuthority;
       render?: boolean;

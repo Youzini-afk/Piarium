@@ -577,6 +577,11 @@ export const HarnessThreadsPanel: React.FC<{
                   <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
                     <span className="block truncate text-[11px] text-foreground">{source.title}</span>
                     <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                    {source.snapshotId ? (
+                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.contentHash ?? source.snapshotId}>
+                        snapshot {source.snapshotId}
+                      </span>
+                    ) : null}
                   </a>
                   <button
                     type="button"

@@ -1,6 +1,7 @@
-import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@varin/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
+import type { WebMaterialStore } from "./web-materials.js";
 
 export interface SsrfPolicy {
   check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" }>;
@@ -16,11 +17,29 @@ export interface WebFetchDeps {
   cacheTtlMs?: number;
   maxBytes?: number;
   persistReceipt?: (workspaceId: string, receipt: WebFetchReceiptDraft, markdown: string) => Promise<RetrievalUrlReceipt>;
+  /** Durable snapshot store; when absent fetches still deliver content but mint no snapshotId. */
+  materials?: Pick<WebMaterialStore, "put" | "read">;
 }
 
 interface CacheEntry {
   result: FetchResult;
   expiresAt: number;
+}
+
+interface FetchContext {
+  workspaceId: string;
+  authority: RetrievalReceiptAuthority;
+  render?: boolean;
+  domainPolicy?: DomainPolicy;
+  signal?: AbortSignal;
+  issueReceipt?: boolean;
+}
+
+interface SharedFetch {
+  controller: AbortController;
+  promise: Promise<FetchResult>;
+  waiters: number;
+  done: boolean;
 }
 
 const DEFAULT_CACHE_TTL_MS = 900_000; // 15 minutes
@@ -169,42 +188,86 @@ export function createWebFetch(deps: WebFetchDeps) {
     return html.includes("<script") && markdown.trim().length < EMPTY_SHELL_THRESHOLD;
   };
 
-  const fetchUrl = async (url: string, ctx: {
-    workspaceId: string;
-    authority: RetrievalReceiptAuthority;
-    render?: boolean;
-    domainPolicy?: DomainPolicy;
-    signal?: AbortSignal;
-    issueReceipt?: boolean;
-  }): Promise<FetchResult> => {
-    // Check domain policy
-    const domainCheck = checkDomainPolicy(url, ctx.workspaceId, ctx.domainPolicy);
-    if (domainCheck.blocked) {
-      return { status: "blocked", url, reason: "domain-blocked" };
-    }
+  const representationFor = (contentType: string, rendered: boolean, pdf: boolean): string => (
+    pdf
+      ? "pdf-text"
+      : rendered
+        ? "rendered-readability-markdown"
+        : contentType.startsWith("text/html") || contentType.includes("xml")
+          ? "readability-markdown"
+          : "raw-text"
+  );
 
-    // Check SSRF
-    const ssrfCheck = await deps.ssrf.check(url);
-    if (ssrfCheck.blocked) {
-      return { status: "blocked", url, reason: ssrfCheck.reason ?? "private-network" };
+  const attachSnapshot = async (
+    content: Extract<FetchResult, { status: "ok" }>,
+    ctx: FetchContext,
+    pdf = false,
+  ): Promise<Extract<FetchResult, { status: "ok" }>> => {
+    if (!deps.materials || content.snapshot) return content;
+    try {
+      const snapshot = await deps.materials.put(
+        ctx.workspaceId,
+        {
+          sourceUrl: content.url,
+          finalUrl: content.finalUrl,
+          ...(content.contentType ? { contentType: content.contentType } : {}),
+          ...(content.title ? { title: content.title } : {}),
+          representation: representationFor(content.contentType, content.rendered, pdf),
+          ...(content.rendered ? { rendered: true } : {}),
+        },
+        Buffer.from(content.markdown, "utf8"),
+        ctx.authority,
+      );
+      return { ...content, snapshot };
+    } catch {
+      // Snapshot persistence must never fail a body that was fetched
+      // successfully; the result is delivered without a snapshotId.
+      return content;
     }
+  };
 
-    // Cached bytes are reusable only after this workspace and request have
-    // independently passed their current authorization policies.
+  // One in-flight fetch per (url, render, policy) key. Each caller waits with
+  // its own cancellation; when the last waiter leaves before the task
+  // settles, the underlying request is aborted.
+  const inflight = new Map<string, SharedFetch>();
+
+  const joinShared = (shared: SharedFetch, signal: AbortSignal | undefined): Promise<FetchResult> => {
+    shared.waiters += 1;
+    let left = false;
+    const leave = (): void => {
+      if (left) return;
+      left = true;
+      shared.waiters -= 1;
+      if (shared.waiters <= 0 && !shared.done) shared.controller.abort();
+    };
+    if (!signal) return shared.promise.finally(leave);
+    if (signal.aborted) {
+      leave();
+      return Promise.reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
+    }
+    return new Promise<FetchResult>((resolve, reject) => {
+      const onAbort = (): void => {
+        leave();
+        reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      shared.promise.then(
+        (value) => { leave(); resolve(value); },
+        (error) => { leave(); reject(error); },
+      ).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  };
+
+  const performFetch = async (url: string, ctx: FetchContext): Promise<FetchResult> => {
     const cacheKey = `${url}:${ctx.render ?? false}`;
-    const cached = cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      if (cached.result.status === "ok") {
-        const { receipt: _oldReceipt, ...content } = cached.result;
-        return withReceipt({ ...content, fromCache: true }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
-      }
-      return cached.result;
-    }
-
-    // If render requested but no renderer available
-    if (ctx.render && !deps.renderer) {
-      return { status: "renderer-unavailable", url };
-    }
+    const finishOk = async (
+      content: Extract<FetchResult, { status: "ok" }>,
+      pdf = false,
+    ): Promise<FetchResult> => {
+      const result = await attachSnapshot(content, ctx, pdf);
+      cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+      return result;
+    };
 
     // Fetch with redirect handling
     let currentUrl = url;
@@ -306,9 +369,8 @@ export function createWebFetch(deps: WebFetchDeps) {
             rendered: true,
             ...(title ? { title } : {}),
           };
-          cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
           finishRequest();
-          return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+          return finishOk(content);
         } catch (error) {
           finishRequest();
           if (ctx.signal?.aborted) {
@@ -345,9 +407,8 @@ export function createWebFetch(deps: WebFetchDeps) {
           fromCache: false,
           rendered: false,
         };
-        cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
         finishRequest();
-        return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+        return finishOk(content, true);
       }
 
       // Read body with size limit
@@ -405,9 +466,8 @@ export function createWebFetch(deps: WebFetchDeps) {
         rendered: false,
         ...(title ? { title } : {}),
       };
-      cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
       finishRequest();
-      return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+      return finishOk(content);
       } finally {
         finishRequest();
       }
@@ -417,8 +477,104 @@ export function createWebFetch(deps: WebFetchDeps) {
     return { status: "failed", url, reason: "too many redirects" };
   };
 
+  const policyKeyFor = (workspaceId: string, override?: DomainPolicy): string => {
+    const policy = override ?? deps.domainPolicy?.(workspaceId) ?? { block: [] };
+    return JSON.stringify({ allow: policy.allow ?? null, block: [...policy.block].sort() });
+  };
+
+  const readSnapshot = async (snapshotId: string, ctx: FetchContext): Promise<FetchResult> => {
+    const found = deps.materials ? await deps.materials.read(ctx.workspaceId, snapshotId).catch(() => null) : null;
+    if (!found) return { status: "snapshot-missing", snapshotId };
+    // Re-reading stored material still passes the caller's current domain
+    // policy — a snapshot is content, not a stored authorization.
+    const policyCheck = checkDomainPolicy(found.ref.finalUrl, ctx.workspaceId, ctx.domainPolicy);
+    if (policyCheck.blocked) {
+      return { status: "blocked", url: found.ref.finalUrl, reason: "domain-blocked" };
+    }
+    const markdown = found.body.toString("utf8");
+    return withReceipt({
+      status: "ok",
+      url: found.ref.sourceUrl,
+      finalUrl: found.ref.finalUrl,
+      contentType: found.ref.contentType ?? "text/markdown",
+      ...(found.ref.title ? { title: found.ref.title } : {}),
+      markdown,
+      bytes: found.body.byteLength,
+      fromCache: false,
+      rendered: found.ref.rendered === true,
+      snapshot: found.ref,
+    }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+  };
+
+  const fetchUrl = async (input: WebFetchRequest | string, ctx: FetchContext): Promise<FetchResult> => {
+    const request: WebFetchRequest = typeof input === "string" ? { url: input } : input;
+    const snapshotId = request.snapshotId?.trim();
+    if (snapshotId) return readSnapshot(snapshotId, ctx);
+    const url = request.url?.trim() ?? "";
+    if (!url) return { status: "failed", url: "", reason: "url or snapshotId is required" };
+
+    // Check domain policy
+    const domainCheck = checkDomainPolicy(url, ctx.workspaceId, ctx.domainPolicy);
+    if (domainCheck.blocked) {
+      return { status: "blocked", url, reason: "domain-blocked" };
+    }
+
+    // Check SSRF
+    const ssrfCheck = await deps.ssrf.check(url);
+    if (ssrfCheck.blocked) {
+      return { status: "blocked", url, reason: ssrfCheck.reason ?? "private-network" };
+    }
+
+    // If render requested but no renderer available
+    if (ctx.render && !deps.renderer) {
+      return { status: "renderer-unavailable", url };
+    }
+
+    // Cached bytes are reusable only after this workspace and request have
+    // independently passed their current authorization policies.
+    const cacheKey = `${url}:${ctx.render ?? false}`;
+    if (!request.refresh) {
+      const cached = cache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        if (cached.result.status === "ok") {
+          const { receipt: _oldReceipt, ...content } = cached.result;
+          return withReceipt({ ...content, fromCache: true }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+        }
+        return cached.result;
+      }
+    }
+
+    const deliver = async (result: FetchResult): Promise<FetchResult> => (
+      result.status === "ok"
+        ? withReceipt(result, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)
+        : result
+    );
+
+    // A refresh is intentionally a fresh request: it bypasses both the
+    // response cache and in-flight sharing so it can mint a new snapshot.
+    if (request.refresh) {
+      return deliver(await performFetch(url, ctx));
+    }
+
+    const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
+    let shared = inflight.get(sharedKey);
+    if (!shared || shared.done || shared.controller.signal.aborted) {
+      const controller = new AbortController();
+      const entry: SharedFetch = { controller, waiters: 0, done: false, promise: Promise.resolve({ status: "failed", url, reason: "unset" }) };
+      entry.promise = performFetch(url, { ...ctx, signal: controller.signal })
+        .finally(() => {
+          entry.done = true;
+          if (inflight.get(sharedKey) === entry) inflight.delete(sharedKey);
+        });
+      shared = entry;
+      inflight.set(sharedKey, shared);
+    }
+    return deliver(await joinShared(shared, ctx.signal));
+  };
+
   return {
     fetch: fetchUrl,
     cache,
+    inflight,
   };
 }

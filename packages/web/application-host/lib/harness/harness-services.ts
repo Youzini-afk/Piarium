@@ -1,5 +1,5 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
-import type { HarnessServiceMap, ShellExecResultSpawnFailed } from "@varin/protocol";
+import type { FetchResult, HarnessServiceMap, ShellExecResultSpawnFailed, WebFetchRequest } from "@varin/protocol";
 import { encodeDocumentText } from "../documents/inspect.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
@@ -54,6 +54,67 @@ export { createExploreSearchService } from "./explore-service.js";
 const requiredWorkspaceId = (ctx: HarnessServiceContext): string => {
   if (!ctx.workspaceId) throw new HarnessServiceError("forbidden", "Managed execution requires an owning workspace");
   return ctx.workspaceId;
+};
+
+/**
+ * Host-bound `web.fetch` execution: session binding, retrieval receipt
+ * authority, and the session-frozen web binding (domain policy + renderer
+ * entitlement). Shared by the `web.fetch` service and `web.search` url items.
+ */
+export const performHarnessWebFetch = async (
+  host: Pick<HarnessServiceHost, "threadRegistry" | "getWebBinding" | "webFetchService">,
+  params: WebFetchRequest,
+  ctx: HarnessServiceContext,
+): Promise<FetchResult> => {
+  const url = params.url?.trim() ?? "";
+  const snapshotId = params.snapshotId?.trim() ?? "";
+  if (!ctx.workspaceId) {
+    return { status: "failed", url, reason: "no workspace" };
+  }
+  const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
+  const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+  const owner = binding
+    ? await host.threadRegistry?.getThreadById(binding.owningWorkspaceId, binding.threadId)
+    : null;
+  const issueReceipt = Boolean(
+    binding
+    && owner?.preset === "retrieval"
+    && owner.activeRunId === binding.runId
+    && owner.lifecycle === "active",
+  );
+  const webBinding = host.getWebBinding(ctx.sessionId);
+  const domainPolicy = webBinding?.settings?.domains
+    ? {
+        ...(webBinding.settings.domains.allow === undefined
+          ? {}
+          : { allow: [...webBinding.settings.domains.allow] }),
+        block: [...(webBinding.settings.domains.block ?? [])],
+      }
+    : { block: [] };
+  if (params.render === true && webBinding?.settings?.render !== true) {
+    return { status: "renderer-unavailable", url };
+  }
+  return host.webFetchService!.fetch(
+    {
+      ...(url ? { url } : {}),
+      ...(snapshotId ? { snapshotId } : {}),
+      ...(params.refresh === true ? { refresh: true } : {}),
+    },
+    {
+      workspaceId,
+      authority: {
+        owningWorkspaceId: workspaceId,
+        sessionId: ctx.sessionId,
+        ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
+      },
+      // Renderer access is user-owned and session-frozen. A tool request
+      // cannot turn it on when harness.web.render is false/unset.
+      render: params.render === true,
+      domainPolicy,
+      signal: ctx.signal,
+      ...(issueReceipt ? { issueReceipt: true } : {}),
+    },
+  );
 };
 
 interface ManagedShellWatch {
@@ -1000,48 +1061,7 @@ export function registerHarnessServices(
   // Web services — registered only when available
   if (host.webFetchService) {
     router.register("web.fetch", {
-      handle: async (params, ctx) => {
-        if (!ctx.workspaceId) {
-          return { status: "failed", url: params.url, reason: "no workspace" };
-        }
-        const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
-        const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
-        const owner = binding
-          ? await host.threadRegistry?.getThreadById(binding.owningWorkspaceId, binding.threadId)
-          : null;
-        const issueReceipt = Boolean(
-          binding
-          && owner?.preset === "retrieval"
-          && owner.activeRunId === binding.runId
-          && owner.lifecycle === "active",
-        );
-        const webBinding = host.getWebBinding(ctx.sessionId);
-        const domainPolicy = webBinding?.settings?.domains
-          ? {
-              ...(webBinding.settings.domains.allow === undefined
-                ? {}
-                : { allow: [...webBinding.settings.domains.allow] }),
-              block: [...(webBinding.settings.domains.block ?? [])],
-            }
-          : { block: [] };
-        if (params.render === true && webBinding?.settings?.render !== true) {
-          return { status: "renderer-unavailable", url: params.url };
-        }
-        return host.webFetchService!.fetch(params.url, {
-          workspaceId,
-          authority: {
-            owningWorkspaceId: workspaceId,
-            sessionId: ctx.sessionId,
-            ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
-          },
-          // Renderer access is user-owned and session-frozen. A tool request
-          // cannot turn it on when harness.web.render is false/unset.
-          render: params.render === true,
-          domainPolicy,
-          signal: ctx.signal,
-          ...(issueReceipt ? { issueReceipt: true } : {}),
-        });
-      },
+      handle: (params, ctx) => performHarnessWebFetch(host, params, ctx),
     });
   }
   if (host.webSearchService) {
