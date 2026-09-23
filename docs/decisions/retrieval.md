@@ -1577,10 +1577,27 @@ Semantic Scholar 的公开元数据和开放获取入口，支持搜索、详情
 实施进展（2026-09-23，L1）：`web.search` 扩展为批量契约（query/objective/queries/urls/cursor），每项独立状态
 （ok/empty/unavailable/failed/cancelled/partial/denied/unsupported），分页 cursor 由声明能力的 provider 铸造并绑定
 provider 身份与筛选；`web.fetch` 新增 `snapshotId` 回读与 `refresh`，成功正文固定为 `web.snapshot` 内核记录
-（内容 hash 去重、parser 表示、获取时间），行/find 位置绑定快照内容。快照回收沿 receipt 生命周期且被存活记录引用时保留；
-跨线程复用重检接收方 scope 并为调用者另铸 receipt，foreign receiptId 不授权。同 URL 在飞读取按
+（内容 hash 去重、parser 表示、获取时间），行/find 位置绑定快照内容。快照回收沿 owner 生命周期处理：Thread 所属快照跨 Run 结算和 workspace reconcile 保留，Thread 删除时回收；无 Thread 的会话快照随 session drop 回收，
+被存活记录引用时继续保留。快照读取按当前 session/thread scope 校验，同一 Thread 的后续 Run 可重读，跨 Thread 的显式材料授权留到 L4；
+foreign receiptId 不授权。同 URL 在飞读取按
 （url/render/策略）共享，逐等待者取消。URL 条目经 Host 真实 web-fetch 路径执行。UI 来源卡展示 snapshotId/hash。
 不设固定缓存天数/数量硬配额，不新建正文 authority。
 
 状态：L0、L1 与 L2 首个学术发现纵切已 wired；L2 其余及 L3–L6 仍待实施。无真实付费渠道质量/延迟对比，不预设效果优势，
 也不将此作为代码接线的门槛。
+
+### D-316 · 2026-09-23 · L1 验收纠正：快照 owner、刷新身份与读取 scope
+
+背景：L1 首轮实现把同一 URL/内容的快照去重做成 workspace 范围，导致另一个 Thread 可能拿到前一 Thread 的临时记录；`refresh` 在正文未变化时也会复用旧 snapshot；线程 Run 结算和 workspace reconcile 会过早释放仍被 Thread 报告引用的快照；缓存命中没有再次按最终 URL 检查当前域策略。
+
+决定：
+
+1. Thread 所属快照跨 Run 结算和 workspace reconcile 保留，Thread 删除时才回收；无 Thread 的会话快照沿 session drop 回收；存活 evidence/receipt/来源记录仍优先保护其正文对象。
+2. 同一 Thread 的后续 Run 可以用自身当前 session/thread scope 重读；跨 Thread 的材料授权留到 L4，不把 snapshotId 当 workspace-wide bearer token。foreign receiptId 仍不能授权。
+3. 同一 Thread 和相同内容可以复用 snapshot；显式 `refresh` 即使正文 hash 不变也铸造新的 snapshot identity，旧引用保持不变。共享正文对象继续按内容 hash 复用。
+4. cache 命中重新检查最终 URL 的当前 domain policy；缓存或共享结果交付给其他 Run 时重新绑定其材料 owner，不携带前一 Run 的 receipt。
+5. PDF 文本解析失败返回明确失败，不把占位错误文本保存成可读正文。
+
+验证：L1 web materials/fetch/retrieval-artifacts/session registration/web search 聚焦套件 63/63；application-host、pi-host、protocol 类型检查和改动文件 lint 通过；文档检查 9/9、378 页/858 链接通过。真实 provider、跨平台和完整桌面重启仍未实测。
+
+状态：已实施并推送。

@@ -473,4 +473,52 @@ describe("web-fetch service", () => {
     if (refreshed.status === "ok") expect(refreshed.markdown).toContain("version 2");
     expect(calls).toBe(2);
   });
+
+  it("refresh mints a new snapshot even when the fetched bytes are unchanged", async () => {
+    const snapshots = new Map<string, { ref: import("@varin/protocol").WebSnapshotRef; body: Buffer }>();
+    let sequence = 0;
+    const materials = {
+      put: async (
+        _workspaceId: string,
+        draft: { sourceUrl: string; finalUrl: string; representation: string },
+        body: Buffer,
+        _authority: unknown,
+        options?: { forceNew?: boolean },
+      ) => {
+        if (!options?.forceNew) {
+          const existing = [...snapshots.values()].find((entry) => entry.ref.contentHash === "sha256-same");
+          if (existing) return existing.ref;
+        }
+        sequence += 1;
+        const ref = {
+          snapshotId: `snap-refresh-${sequence}`,
+          sourceUrl: draft.sourceUrl,
+          finalUrl: draft.finalUrl,
+          fetchedAt: sequence,
+          contentHash: "sha256-same",
+          representation: draft.representation,
+          byteLength: body.byteLength,
+        };
+        snapshots.set(ref.snapshotId, { ref, body });
+        return ref;
+      },
+      read: async (_workspaceId: string, snapshotId: string) => snapshots.get(snapshotId) ?? null,
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "text/plain" }),
+      text: async () => "unchanged body with enough content to be retained",
+    }) as never;
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials });
+
+    const first = await service.fetch({ url: "https://example.com/unchanged" }, fetchContext);
+    const refreshed = await service.fetch({ url: "https://example.com/unchanged", refresh: true }, fetchContext);
+    expect(first.status).toBe("ok");
+    expect(refreshed.status).toBe("ok");
+    if (first.status === "ok" && refreshed.status === "ok") {
+      expect(refreshed.snapshot?.snapshotId).not.toBe(first.snapshot?.snapshotId);
+      expect(refreshed.snapshot?.contentHash).toBe(first.snapshot?.contentHash);
+    }
+  });
 });

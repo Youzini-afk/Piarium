@@ -1518,12 +1518,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
     },
     materials: {
-      put: async (workspaceId, draft, body, authority) => {
+      put: async (workspaceId, draft, body, authority, options) => {
         if (!webMaterialAccess.put) throw new Error('Durable web snapshot storage is unavailable');
-        return webMaterialAccess.put(workspaceId, draft, body, authority);
+        return webMaterialAccess.put(workspaceId, draft, body, authority, options);
       },
-      read: async (workspaceId, snapshotId) => (
-        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId) : null
+      read: async (workspaceId, snapshotId, authority) => (
+        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId, authority) : null
       ),
     },
   });

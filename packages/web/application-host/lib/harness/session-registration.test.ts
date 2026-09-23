@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessActorIdentity, PiSettingsSnapshot } from "@varin/protocol";
+import type { HarnessActorIdentity, PiSettingsSnapshot, WebFetchRequest } from "@varin/protocol";
 import { createHarnessServiceHost, type HarnessSessionContext } from "./service-host.js";
 import { createHarnessSessionRegistration } from "./session-registration.js";
 import { createHarnessRouter } from "./router.js";
@@ -189,7 +189,10 @@ describe("asynchronous Harness registration", () => {
   });
 
   it("enforces the frozen renderer switch and domain policy before web.fetch execution", async () => {
-    const fetch = vi.fn(async (url: string) => ({ status: "failed" as const, url, reason: "stub" }));
+    const fetch = vi.fn(async (input: string | WebFetchRequest) => {
+      const url = typeof input === "string" ? input : input.url ?? "";
+      return { status: "failed" as const, url, reason: "stub" };
+    });
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => "D:/workspace",
@@ -243,7 +246,7 @@ describe("asynchronous Harness registration", () => {
         data: { requestId: "render-on", method: "web.fetch", params: { url: "https://example.com", render: true } },
       },
     });
-    expect(fetch).toHaveBeenCalledWith("https://example.com", expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ url: "https://example.com" }), expect.objectContaining({
       render: true,
       domainPolicy: { allow: ["example.com"], block: ["ads.example.com"] },
     }));

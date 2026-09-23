@@ -40,6 +40,8 @@ export interface WebSnapshotContent {
   body: Buffer;
 }
 
+type WebSnapshotAuthority = Pick<RetrievalReceiptAuthority, "owningWorkspaceId" | "sessionId" | "threadId">;
+
 const hashBytes = (bytes: Buffer): string => `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
 
 const recordIdFor = (snapshotId: string): string => `web.snapshot:${snapshotId}`;
@@ -67,6 +69,7 @@ export const createWebMaterialStore = (
     draft: WebSnapshotDraft,
     body: Buffer,
     authority?: RetrievalReceiptAuthority,
+    options: { forceNew?: boolean } = {},
   ): Promise<WebSnapshotRef> => serializer.runSerialized(workspaceId, () => kernelContext(
     workingStates,
     workspaceId,
@@ -76,17 +79,34 @@ export const createWebMaterialStore = (
         throw new Error("Web snapshot authority does not match its owning workspace");
       }
       const contentHash = hashBytes(body);
-      // Identical content at the same URL is the same snapshot: refreshing a
-      // page that did not change must not invalidate existing references.
-      for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE })) {
-        if (record.workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
-        if (record.state === "released") continue;
-        const payload = parseSnapshotPayload(record.payloadJson);
-        if (payload && payload.finalUrl === draft.finalUrl && payload.contentHash === contentHash) {
-          return payload;
+      const object = await store.putObject(body);
+      // Reuse an existing snapshot only inside the same material authority.
+      // A snapshot record carries the owning session/thread, so returning a
+      // foreign record would make another Run depend on the first Run's
+      // cleanup lifecycle. The body object is still content-addressed and is
+      // reused by the new record.
+      if (!options.forceNew) {
+        for (const record of await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE })) {
+          if (record.workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
+          if (record.state === "released") continue;
+          if (authority) {
+            if (record.threadId !== undefined) {
+              if (!authority.threadId || record.threadId !== authority.threadId) continue;
+            } else if (record.sessionId !== authority.sessionId || authority.threadId !== undefined) {
+              continue;
+            }
+          }
+          const payload = parseSnapshotPayload(record.payloadJson);
+          if (payload
+            && payload.sourceUrl === draft.sourceUrl
+            && payload.finalUrl === draft.finalUrl
+            && payload.contentHash === contentHash
+            && payload.representation === draft.representation
+            && Boolean(payload.rendered) === Boolean(draft.rendered)) {
+            return payload;
+          }
         }
       }
-      const object = await store.putObject(body);
       const snapshotId = `snap-${randomUUID()}`;
       const recordId = recordIdFor(snapshotId);
       const ref: WebSnapshotRef = {
@@ -121,6 +141,7 @@ export const createWebMaterialStore = (
   const read = async (
     workspaceId: string,
     snapshotId: string,
+    authority?: WebSnapshotAuthority,
   ): Promise<WebSnapshotContent | null> => kernelContext(
     workingStates,
     workspaceId,
@@ -130,6 +151,16 @@ export const createWebMaterialStore = (
       if (!record
         || record.recordType !== WEB_SNAPSHOT_RECORD_TYPE
         || (record.workspaceId !== undefined && record.workspaceId !== workspaceId)) {
+        return null;
+      }
+      if (authority
+        && (record.threadId !== undefined
+          ? !authority.threadId || record.threadId !== authority.threadId
+          : record.sessionId !== authority.sessionId || authority.threadId !== undefined)) {
+        // The snapshot id is intentionally not a workspace-wide bearer token.
+        // A caller may reread it from the same Thread across sessions/Runs;
+        // another thread must receive a material through an explicit owner
+        // path instead.
         return null;
       }
       const ref = parseSnapshotPayload(record.payloadJson);

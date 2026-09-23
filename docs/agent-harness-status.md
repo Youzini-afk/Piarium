@@ -26,9 +26,9 @@ L1 已接线（wired）：`web.search` 接受 `query`/`objective`/`queries[]`/`u
 `ok`/`empty`/`unavailable`/`failed`/`cancelled`/`partial`/`denied`/`unsupported`；分页 cursor 由 provider 实际能力铸造
 （Brave offset、SearXNG pageno，其余 provider 不铸 cursor），游标绑定 provider 身份与原始筛选。`web.fetch` 支持
 `snapshotId` 回读与 `refresh`；成功正文固定为 `web.snapshot` 内核记录（内容 hash 去重、解析方式、获取时间、最终 URL），
-行区间/find 位置绑定该快照内容。快照沿 receipt 同一套生命周期回收（Run 结算/线程删除/会话 drop/工作区 reconcile），
-被其他存活记录引用（晋升 evidence、receipt、来源登记）时保留；跨线程复用经接收方自身 scope 重读并为调用者另铸 receipt，
-foreign receiptId 不授予读取权。同一 URL 的在飞读取按（url/render/策略）合并共享，单个等待者取消不影响其他等待者，
+行区间/find 位置绑定该快照内容。线程所属快照跨 Run 结算和工作区对账保留，在 Thread 删除时回收；无 Thread 的会话快照随会话 drop 回收，
+被其他存活记录引用（晋升 evidence、receipt、来源登记）时继续保留。快照读取按当前 session/thread scope 校验，同一 Thread 的后续 Run 可以重读，
+跨 Thread 的显式材料授权留给 L4；foreign receiptId 不授予读取权。同一 URL 的在飞读取按（url/render/策略）合并共享，单个等待者取消不影响其他等待者，
 最后退出者中止底层请求。UI 来源列表展示 snapshotId/内容 hash。
 新增 `research_search` 工具和 Host `research.search` 服务，默认可查询 OpenAlex，也可选择 Semantic Scholar，支持论文元数据、
 摘要/作者/DOI/引用数、开放获取入口、详情查询与分页游标。返回明确区分 `metadata-only`、`open-location`、`empty`、`failed` 和

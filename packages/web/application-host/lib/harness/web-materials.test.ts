@@ -125,13 +125,20 @@ describe("web material snapshots", () => {
     expect(await opened.materials.read("other-ws", ref.snapshotId)).toBeNull();
   });
 
-  it("dedupes identical content at the same URL and keeps the old snapshot after a changed refresh", async () => {
+  it("dedupes identical content within one authority and keeps snapshots separate across threads", async () => {
     const opened = openStore();
-    const first = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), authority("s1"));
-    const same = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), authority("s2"));
+    const owner = authority("s1", "thread-a", "run-a");
+    const first = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), owner);
+    const same = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), owner);
     expect(same.snapshotId).toBe(first.snapshotId);
 
-    const refreshed = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v2 changed"), authority("s2"));
+    const other = authority("s2", "thread-b", "run-b");
+    const separate = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v1"), other);
+    expect(separate.snapshotId).not.toBe(first.snapshotId);
+    expect(await opened.materials.read("ws", separate.snapshotId, owner)).toBeNull();
+    expect((await opened.materials.read("ws", separate.snapshotId, other))?.body.toString()).toBe("v1");
+
+    const refreshed = await opened.materials.put("ws", draft("https://example.com/a"), Buffer.from("v2 changed"), owner, { forceNew: true });
     expect(refreshed.snapshotId).not.toBe(first.snapshotId);
     expect((await opened.materials.read("ws", first.snapshotId))?.body.toString()).toBe("v1");
     expect((await opened.materials.read("ws", refreshed.snapshotId))?.body.toString()).toBe("v2 changed");
@@ -167,8 +174,8 @@ describe("web material snapshots", () => {
       recordType: "web.snapshot" as never,
       workspaceId: "ws",
       sessionId: owner.sessionId,
-      threadId: owner.threadId,
-      runId: owner.runId,
+      ...(owner.threadId ? { threadId: owner.threadId } : {}),
+      ...(owner.runId ? { runId: owner.runId } : {}),
     };
     await opened.retrieval.promotePendingEvidence({
       workspaceId: "ws",
@@ -194,5 +201,25 @@ describe("web material snapshots", () => {
     await opened.retrieval.reconcileWorkspaceEvidence("ws", [retrievalThread("thread-live", "active", "run-live")]);
     expect(await opened.materials.read("ws", runRef.snapshotId)).toBeNull();
     expect((await opened.materials.read("ws", liveRef.snapshotId))?.body.toString()).toBe("live body");
+  });
+
+  it("keeps a thread snapshot across Run reconciliation and releases it when the thread disappears", async () => {
+    const opened = openStore();
+    const ref = await opened.materials.put(
+      "ws",
+      draft("https://example.com/thread-retained"),
+      Buffer.from("retained body"),
+      authority("session-a", "thread-a", "run-a"),
+    );
+
+    await opened.retrieval.syncThreadEvidence("ws", retrievalThread("thread-a", "active", "run-b"));
+    expect((await opened.materials.read("ws", ref.snapshotId, authority("session-new", "thread-a", "run-b")))?.body.toString())
+      .toBe("retained body");
+
+    await opened.retrieval.reconcileWorkspaceEvidence("ws", [retrievalThread("thread-a", "active", "run-b")]);
+    expect(await opened.materials.read("ws", ref.snapshotId, authority("session-new", "thread-a", "run-b"))).not.toBeNull();
+
+    await opened.retrieval.reconcileWorkspaceEvidence("ws", []);
+    expect(await opened.materials.read("ws", ref.snapshotId)).toBeNull();
   });
 });

@@ -158,7 +158,7 @@ describe("configured web search providers", () => {
       { title: "Tracker", url: "https://tracker.docs.example.com/c", snippet: "blocked" },
     ] }));
     const service = createWebSearchService(
-      async () => ({ id: "configured-test", search }),
+      async () => ({ id: "configured-test", capabilities: { pagination: false }, search }),
       async () => ({ allow: ["example.com"], block: ["tracker.docs.example.com"] }),
     );
     const result = await service.handle({

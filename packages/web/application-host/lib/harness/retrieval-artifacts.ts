@@ -403,18 +403,20 @@ const releaseThreadTemporaryRecords = async (
   const activeRunId = thread.lifecycle === "active" ? thread.activeRunId : null;
   const records = await context.records.list({});
   const plain: RecordLike[] = [];
-  const snapshots: RecordLike[] = [];
   for (const record of records) {
     const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
     const isRetrieval = record.recordType === "retrieval.artifact" || record.recordType === "retrieval.receipt";
     if ((!isSnapshot && !isRetrieval) || record.threadId !== thread.id) continue;
+    // A web snapshot is the fixed source that a settled report may refer to
+    // on a later Run. Its owner is the Thread, not the individual Run. The
+    // thread-removal path releases it after the last report/reference is gone.
+    if (isSnapshot) continue;
     if (activeRunId && record.runId === activeRunId) continue;
-    (isSnapshot ? snapshots : plain).push(record);
+    plain.push(record);
   }
   for (const record of plain) {
     await releaseRecord(context, "thread-run-release", record);
   }
-  await releaseSnapshots(context, snapshots, plain, "thread-run-release");
 };
 
 const syncThreadEvidenceInContext = async (
@@ -751,8 +753,10 @@ export const createRetrievalArtifactAccess = (
         }
         const thread = knownThreads.get(record.threadId);
         const activeRunId = thread?.lifecycle === "active" ? thread.activeRunId : null;
-        if (!thread || !activeRunId || record.runId !== activeRunId) {
+        if (!thread) {
           (isSnapshot ? snapshotOrphans : plainOrphans).push(record);
+        } else if (!isSnapshot && (!activeRunId || record.runId !== activeRunId)) {
+          plainOrphans.push(record);
         }
       }
       for (const record of plainOrphans) {

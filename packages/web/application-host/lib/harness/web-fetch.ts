@@ -33,6 +33,9 @@ interface FetchContext {
   domainPolicy?: DomainPolicy;
   signal?: AbortSignal;
   issueReceipt?: boolean;
+  /** A caller-requested refresh must create a new snapshot record even when
+   * the fetched bytes are unchanged. */
+  forceNewSnapshot?: boolean;
 }
 
 interface SharedFetch {
@@ -152,7 +155,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     });
   };
 
-  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<string> => {
+  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<string | null> => {
     try {
       signal?.throwIfAborted();
       // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
@@ -177,7 +180,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       if (signal?.aborted) {
         throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
       }
-      return "[PDF text extraction failed]";
+      return null;
     }
   };
 
@@ -203,7 +206,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     ctx: FetchContext,
     pdf = false,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
-    if (!deps.materials || content.snapshot) return content;
+    if (!deps.materials) return content;
     try {
       const snapshot = await deps.materials.put(
         ctx.workspaceId,
@@ -217,6 +220,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         },
         Buffer.from(content.markdown, "utf8"),
         ctx.authority,
+        ...(ctx.forceNewSnapshot ? [{ forceNew: true }] : []),
       );
       return { ...content, snapshot };
     } catch {
@@ -397,6 +401,10 @@ export function createWebFetch(deps: WebFetchDeps) {
         }
         const text = await extractPdfText(arrayBuffer, controller.signal);
         controller.signal.throwIfAborted();
+        if (text === null) {
+          finishRequest();
+          return { status: "failed", url, reason: "PDF text extraction failed" };
+        }
         const content: Extract<FetchResult, { status: "ok" }> = {
           status: "ok",
           url,
@@ -483,7 +491,9 @@ export function createWebFetch(deps: WebFetchDeps) {
   };
 
   const readSnapshot = async (snapshotId: string, ctx: FetchContext): Promise<FetchResult> => {
-    const found = deps.materials ? await deps.materials.read(ctx.workspaceId, snapshotId).catch(() => null) : null;
+    const found = deps.materials
+      ? await deps.materials.read(ctx.workspaceId, snapshotId, ctx.authority).catch(() => null)
+      : null;
     if (!found) return { status: "snapshot-missing", snapshotId };
     // Re-reading stored material still passes the caller's current domain
     // policy — a snapshot is content, not a stored authorization.
@@ -537,23 +547,33 @@ export function createWebFetch(deps: WebFetchDeps) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         if (cached.result.status === "ok") {
+          const cachedPolicyCheck = checkDomainPolicy(cached.result.finalUrl, ctx.workspaceId, ctx.domainPolicy);
+          if (cachedPolicyCheck.blocked) {
+            return { status: "blocked", url: cached.result.finalUrl, reason: "domain-blocked" };
+          }
           const { receipt: _oldReceipt, ...content } = cached.result;
-          return withReceipt({ ...content, fromCache: true }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+          const rebound = await attachSnapshot({ ...content, fromCache: true }, { ...ctx, forceNewSnapshot: false });
+          return withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
         }
         return cached.result;
       }
     }
 
-    const deliver = async (result: FetchResult): Promise<FetchResult> => (
-      result.status === "ok"
-        ? withReceipt(result, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true)
-        : result
-    );
+    const deliver = async (result: FetchResult, rebindSnapshot = true): Promise<FetchResult> => {
+      if (result.status !== "ok") return result;
+      // The in-flight/cache result may have been produced under another
+      // session or thread. Rebind the content snapshot to this caller's
+      // authority while reusing the content-addressed body.
+      const rebound = rebindSnapshot
+        ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false })
+        : result;
+      return withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+    };
 
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return deliver(await performFetch(url, ctx));
+      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }), false);
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
