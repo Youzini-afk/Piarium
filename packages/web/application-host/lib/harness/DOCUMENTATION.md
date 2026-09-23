@@ -114,11 +114,34 @@ makes no network request. A valid empty response is distinct from transport/prot
 failover reports its actual provider and cause; cancellation stops the chain. Search snippets are
 discovery material, while the existing `web.fetch` service remains the original-page authority.
 
-`research.search` is the first D-315 scholarly slice. It is a Host-owned, read-only adapter over
-OpenAlex and Semantic Scholar with separate `search` and `paper` actions. Returned records retain
-provider identity, DOI/author metadata, optional abstract and open-access URL, and a `content` state
-(`metadata-only` or `open-location`). The adapter does not claim that metadata is paper content,
-does not build a global citation graph, and returns provider errors and empty results distinctly.
+`research.search` is the D-315 scholarly adapter. It is a Host-owned, read-only service over
+OpenAlex and Semantic Scholar with `search`, `paper`, and `relations` actions; relation expansion
+(references/citations/related) is server-paginated through provider-minted cursors and keeps the
+relation source identity on every edge. Returned records retain provider identity, DOI/author
+metadata, optional abstract and open-access URL, and a `content` state (`metadata-only` or
+`open-location`). The adapter does not claim that metadata is paper content, does not merge works
+on title similarity alone, does not build a global citation graph, and returns provider errors and
+empty results distinctly.
+
+`web.fetch` pins fetched bodies as `web.snapshot` kernel records (`web-materials.ts`): content-hash
+deduplicated bodies, explicit `refresh` minting a new snapshot id, snapshot-id rereads re-checking
+the current domain policy under the caller's authority, and per-waiter cancellation over shared
+in-flight requests. Structured reading exposes line ranges and, where the parser supports them,
+pages/headings/tables/figures; unsupported aspects report under `unparsed` rather than fabricating
+positions. `materials.collections` owns `material.collection` records (snapshot/URL/paper member
+references, collection-scoped keyword search, `persisted` workspace-readable sets) and the
+`material.grant` records behind `share` — an explicit cross-thread read grant that reuses the
+`thread.send` same-root relation rule and releases with the sender's thread. Grants let the
+receiver reread under its own session/thread authority; they never transfer the sender's receipts.
+
+`research.decide` (`research-decide.ts`) is the D-315 fast-decision consumer: callers submit real
+candidates (URLs, snapshots, paper identities, snapshot sections, or new query text) with a goal and
+a judgment kind (`relevance`/`reading-value`/`complementary`/`duplicate`/`continuation`/`next`).
+The service resolves the `web`/`scholarly` purpose binding through `fastDecisionStatus`, freezes
+`configurationId` for the call, validates snapshot candidates by actually reading them under the
+caller's authority, and maps answers to ranked results. Disabled, unconfigured, unavailable,
+failed, and cancelled states return honestly with the caller's order preserved (`fallback:"order"`);
+missing answers are reported, never zero.
 
 Consumes `harness.request` events from the broker stream and dispatches
 to registered services. Responds via `harness.respond` on the broker. The

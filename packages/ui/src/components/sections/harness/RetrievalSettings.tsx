@@ -241,8 +241,8 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
   const providers = usePiProviderStore((state) => state.providers);
   const settings = harness.fastDecision;
   const binding = settings?.default;
-  const exploreOverride = settings?.purposes?.explore;
-  const [remote, setRemote] = React.useState(Boolean(binding || (exploreOverride && exploreOverride !== 'off')));
+  const purposes = settings?.purposes;
+  const [remote, setRemote] = React.useState(Boolean(binding || (purposes && Object.values(purposes).some((value) => value !== 'off'))));
   const remoteRef = React.useRef(remote);
   const [fields, setFields] = React.useState({
     providerId: binding?.providerId ?? '',
@@ -263,7 +263,10 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
       ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),
     } } });
   };
-  const overrideValue = exploreOverride === 'off' ? 'off' : exploreOverride === undefined ? 'default' : 'custom';
+  const purposeOverrideValue = (purpose: 'explore' | 'web' | 'scholarly') => {
+    const override = purposes?.[purpose];
+    return override === 'off' ? 'off' : override === undefined ? 'default' : 'custom';
+  };
   return <SettingsSection title={t('settings.page.harness.section.fastDecision')} settingsItem="harness.fastDecision" contentClassName="space-y-5">
     <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={t('settings.page.harness.section.fastDecision.description')}>
       <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => {
@@ -300,19 +303,22 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
         <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/v1/systemone" aria-label={t('settings.page.harness.fastDecision.endpoint')}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.fastDecision.endpoint.description')} />
       </SettingsFieldRow>
-      <SettingsFieldRow label={t('settings.page.harness.fastDecision.explore')} description={t('settings.page.harness.fastDecision.explore.description')}>
-        <Select value={overrideValue} onValueChange={(value) => {
-          if (value === 'custom') return;
-          update({ fastDecision: { purposes: { explore: value === 'off' ? 'off' : undefined } } });
-        }}>
-          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.explore')}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="default">{t('settings.page.harness.fastDecision.explore.default')}</SelectItem>
-            <SelectItem value="off">{t('settings.harness.retrieval.off')}</SelectItem>
-            {overrideValue === 'custom' ? <SelectItem value="custom" disabled>{t('settings.page.harness.fastDecision.explore.custom')}</SelectItem> : null}
-          </SelectContent>
-        </Select>
-      </SettingsFieldRow>
+      {(['explore', 'web', 'scholarly'] as const).map((purpose) => {
+        const overrideValue = purposeOverrideValue(purpose);
+        return <SettingsFieldRow key={purpose} label={t(`settings.page.harness.fastDecision.${purpose}`)} description={t(`settings.page.harness.fastDecision.${purpose}.description`)}>
+          <Select value={overrideValue} onValueChange={(value) => {
+            if (value === 'custom') return;
+            update({ fastDecision: { purposes: { [purpose]: value === 'off' ? 'off' : undefined } } });
+          }}>
+            <SelectTrigger size="settings" className="w-64" aria-label={t(`settings.page.harness.fastDecision.${purpose}`)}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">{t('settings.page.harness.fastDecision.purpose.default')}</SelectItem>
+              <SelectItem value="off">{t('settings.harness.retrieval.off')}</SelectItem>
+              {overrideValue === 'custom' ? <SelectItem value="custom" disabled>{t('settings.page.harness.fastDecision.purpose.custom')}</SelectItem> : null}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>;
+      })}
       <p className="typography-meta text-muted-foreground">{t(!fields.providerId || !fields.modelId ? 'settings.harness.completeFields' : 'settings.page.harness.fastDecision.provider.description')}</p>
     </> : null}
   </SettingsSection>;

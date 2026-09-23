@@ -457,16 +457,17 @@ Generative search planning remains separate. Pi inference retains credentials an
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
 future integrations, not delivered features. See harness status for verification and untested boundaries.
 
-D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0
-retrieval report contract, L1 continuous Web search/material reuse, and initial L2 scholarly discovery
-are wired: generic `retrieval` can return natural-language reports with optional Host-validated
+D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0–L5
+slices are wired: generic `retrieval` can return natural-language reports with optional Host-validated
 `submit_facts`; `websearch` accepts batch query/objective/URL items with per-item status and
 provider-minted pagination cursors; `webfetch` pins fetched bodies to durable `web.snapshot` kernel
-records with stable line/find positions, refresh minting new snapshots while old references keep old
-content; `research_search` queries OpenAlex/Semantic Scholar metadata and open-access locations. It
-reuses ordinary dispatch and native web tools; scholarly relations/structure, material collections, and
-fast-decision consumers are still planned. Content reuse re-checks the reader's own scope and never
-transfers another Run's receipt authority. No parallel search scheduler, body store, or Agent runtime
+records with stable line/find/structural positions, refresh minting new snapshots while old references
+keep old content; `research_search` queries OpenAlex/Semantic Scholar metadata, open-access locations,
+and paged relation expansion; `materials` owns `material.collection` records and explicit
+`material.grant` cross-thread read authorization; `research_decide` runs batch fast-decision judgment
+over real Web/scholarly candidates through the `web`/`scholarly` purpose bindings. It reuses ordinary
+dispatch and native web tools. Content reuse re-checks the reader's own scope and never transfers
+another Run's receipt authority. No parallel search scheduler, body store, or Agent runtime
 is introduced.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,

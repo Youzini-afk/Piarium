@@ -18,7 +18,7 @@ Last updated: 2026-09-23
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线，L4 跨线程材料授权已接线，L5 Web/学术快速决策消费者已接线；L6 收口待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0–L6 均已接线。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
@@ -57,8 +57,15 @@ L5 已接线（wired）：`research.decide` Host 服务（`read.web` 能力）+ 
 低分只影响排序不裁剪方向。purpose 未配置/关闭/不可用、provider 失败或取消时 `ranked` 保持调用方顺序并给出
 `fallback:"order"`，直接检索与 Agent 判断继续工作；结果保留 providerId/modelId/servedModelId/configurationId/usage。
 retrieval preset 允许表加入 `research_decide`；`research_decide` 的 details 进入既有来源投影（含 decide 分数标记）。
+L6 已接线（wired）：设置页 Fast Decision 区块按 `explore`/`web`/`scholarly` 三用途逐行暴露 default/off/自定义覆盖；
+工具设置页新增 `websearch`/`webfetch`/`research_search`/`materials`/`research_decide` 五个开关（写 `harness.tools.*`，
+与 select-tools 装配一致）；来源卡为 `materials`/`research_decide` 分配独立图标；settings catalog 的
+`harness.fastDecision` 说明更新到三用途；10 个 locale 的 settings 文案同步补齐（i18nParity 通过）。
+模块文档（application-host DOCUMENTATION、pi-host harness README、architecture）同步到 L0–L5 现状。
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
+未实测/未覆盖：真实付费 web provider 与 TypeSafe Jev 实机响应、完整桌面启动纵切、跨平台抓取、快照规模表现、
+复杂 PDF 版式/OCR 适配器、以及“候选排序质量”类质量断言——均无数据，不宣称收益。
 
 **D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**
 设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)。

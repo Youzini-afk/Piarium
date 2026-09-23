@@ -24,8 +24,11 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
 | `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.query.*` (algorithm-only `explore.search` is the same engine) |
 | `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |
-| `websearch` | Default keyless Exa search with disclosed Parallel failover, or the user's explicit search provider | `web.search` |
-| `webfetch` | Read a source URL, find literal text, or expand extracted Markdown line ranges | `web.fetch` |
+| `websearch` | Default keyless Exa search with disclosed Parallel failover, or the user's explicit search provider; batched query/objective/URL/page items with per-item status | `web.search` |
+| `webfetch` | Read a source URL or a pinned `snapshot_id`, find literal text, expand extracted Markdown line ranges, or read structural positions (page/section/table/figure/appendix) where the parser supports them | `web.fetch` |
+| `research_search` | OpenAlex / Semantic Scholar paper search, details, and paged relation expansion (references/citations/related) | `research.search` |
+| `materials` | Named collections of snapshot/URL/paper references with collection-scoped keyword search and explicit cross-thread `share` grants | `materials.collections` |
+| `research_decide` | Batch fast-decision scoring/selection over real URL/snapshot/paper/section/query candidates | `research.decide` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 | `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |

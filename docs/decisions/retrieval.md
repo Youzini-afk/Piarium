@@ -1618,7 +1618,7 @@ foreign receiptId 不授权。同 URL 在飞读取按
 验证：material-collections/web-fetch/web-materials 聚焦套件 35/35；pi-host webfetch/websearch/research_search/select-tools 30/30；application-host 与 pi-host typecheck、protocol build 通过。真实 provider、付费渠道与完整桌面路径未实测。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](agent-harness-status.md)。
+[agent-harness-status.md](../agent-harness-status.md)。
 
 ### D-318 · 2026-09-23 · L4 跨线程材料授权
 
@@ -1635,7 +1635,7 @@ foreign receiptId 不授权。同 URL 在飞读取按
 验证：material-collections 套件 14/14（含 grant 授权、跨根拒绝、不可读快照拒绝、幂等、grant 随线程释放、整集共享后可列可搜不可写）；application-host 与 pi-host typecheck、protocol build 通过。真实线程间端到端（实际 dispatch→send→read 链）以既有 thread-runtime 套件为准，未新增桌面 E2E。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](agent-harness-status.md)。
+[agent-harness-status.md](../agent-harness-status.md)。
 
 ### D-319 · 2026-09-23 · L5 Web/学术快速决策消费者
 
@@ -1653,4 +1653,21 @@ foreign receiptId 不授权。同 URL 在飞读取按
 验证：research-decide 套件 7/7（排序、choose 选择、unconfigured/disabled/unavailable 回退、不可读快照拒绝、purpose 推断与覆盖、取消与失败不伪造成绩、畸形输入拒绝）；material-collections 与 explore-fast-decision 回归全绿；protocol build、application-host/pi-host typecheck、改动文件 lint 通过。真实 fastDecision provider 未实测，候选排序质量无数据不宣称收益。
 
 状态：已实施，未推送（待主代理验收）。
-[agent-harness-status.md](agent-harness-status.md)。
+[agent-harness-status.md](../agent-harness-status.md)。
+
+### D-320 · 2026-09-23 · L6 设置与工作台收口
+
+背景：阶段 L 的能力需要如实进入设置目录、设置 UI、工具开关与来源展示，不新增强制研究模式，不要求用户手改 JSON 才能使用新用途。
+
+决定：
+
+1. Fast Decision 设置区块按 `explore`/`web`/`scholarly` 三用途逐行暴露 default/off/自定义绑定覆盖；选项写入 `harness.fastDecision.purposes.<purpose>`，与 `resolveFastDecisionPurpose` 的解析顺序一致。
+2. 工具设置页新增 `websearch`/`webfetch`/`research_search`/`materials`/`research_decide` 开关，直接写 `harness.tools.<name>`，与 `selectHarnessTools` 的装配条件一致——关掉即不注册，不伪装成 provider 失败。
+3. 来源面板为 `materials`（archive-stack）与 `research_decide`（scales-3）分配独立图标；`research_decide` details 的候选 URL 进入既有来源投影并带 `decide:<score>` 标记。不新建研究模式或强制入口。
+4. 10 个 locale 的 settings 文案全部补齐（fastDecision 三用途 + 五个工具开关），`explore.default/custom` 键更名为 `purpose.default/custom`；i18nParity 通过。
+5. 质量边界不变：真实付费 provider、TypeSafe Jev 实机、完整桌面 E2E、跨平台抓取与排序质量均未实测，状态文档如实记录。
+
+验证：ui 侧 i18nParity 4/4、harness 设置与来源投影测试全绿、ui/pi-host/application-host typecheck 通过、改动文件 lint 干净、test:docs 9/9。
+
+状态：已实施，未推送（待主代理验收）。
+[agent-harness-status.md](../agent-harness-status.md)。

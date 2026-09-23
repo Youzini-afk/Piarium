@@ -6,6 +6,7 @@ import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
 const tools = ['bash', 'grep', 'get_output', 'write_to_process', 'kill_shell', 'diagnostics', 'apply_patch'] as const;
+const researchTools = ['websearch', 'webfetch', 'research_search', 'materials', 'research_decide'] as const;
 const shells = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 
 export function ToolsSettings({ harness, update }: HarnessSettingsPageProps) {
@@ -15,6 +16,10 @@ export function ToolsSettings({ harness, update }: HarnessSettingsPageProps) {
   return <>
     <SettingsSection title={t('settings.page.harness.section.tools')} settingsItem="harness.tools" contentClassName="space-y-3">
       {tools.map((tool) => <SettingsCheckboxRow key={tool} checked={harness.tools[tool] !== false}
+        onChange={(checked) => update({ tools: { [tool]: checked } })}
+        ariaLabel={t(`settings.page.harness.tool.${tool}`)} label={t(`settings.page.harness.tool.${tool}`)}
+        description={t(`settings.page.harness.tool.${tool}.description`)} />)}
+      {researchTools.map((tool) => <SettingsCheckboxRow key={tool} checked={harness.tools[tool] !== false}
         onChange={(checked) => update({ tools: { [tool]: checked } })}
         ariaLabel={t(`settings.page.harness.tool.${tool}`)} label={t(`settings.page.harness.tool.${tool}`)}
         description={t(`settings.page.harness.tool.${tool}.description`)} />)}
