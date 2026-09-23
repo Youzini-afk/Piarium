@@ -428,7 +428,7 @@ const initialPrompt = (
       "Work only on the assigned fact-finding task. Do not modify the workspace.",
       input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
       parentBlocksText(parentBlocks),
-      "Write a natural-language report as your main response. submit_facts is optional and only for useful structured facts.",
+      "Write a natural-language report as your main response; do not follow a fixed output schema. submit_facts is optional, only for precise source-addressable claim rows, and never a reason to delay the report.",
       "Do not recommend product changes, priorities, or architecture. The Host verifies submitted paths, line ranges, and stored URLs; prose is not source-checked.",
       "Record material you tried and could not obtain as unknown in your report or structured facts.",
       "",
