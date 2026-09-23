@@ -96,10 +96,11 @@ export function createResearchDecideService(deps: ResearchDecideDeps): HarnessSe
       const purpose: "web" | "scholarly" = params.purpose
         ?? (params.candidates.some((candidate) => candidate.kind === "paper") ? "scholarly" : "web");
 
+      const resolvedThreadId = await deps.resolveThreadId?.(ctx.sessionId);
       const authority = {
         owningWorkspaceId: workspaceId,
         sessionId: ctx.sessionId,
-        threadId: await deps.resolveThreadId?.(ctx.sessionId),
+        ...(resolvedThreadId ? { threadId: resolvedThreadId } : {}),
       };
 
       // Validate references under the caller's authority before judging. A
@@ -193,12 +194,15 @@ export function createResearchDecideService(deps: ResearchDecideDeps): HarnessSe
             })),
             allowNone: true,
           }]
-        : candidates.map((candidate) => ({
-            id: candidate.id,
-            kind: "score" as const,
-            instructions: `${KIND_INSTRUCTIONS[params.kind]}\nGoal: ${goal}`,
-            levels: SCORE_LEVELS,
-          }));
+        : candidates.map((candidate) => {
+            const kind = params.kind === "next" ? "relevance" : params.kind;
+            return {
+              id: candidate.id,
+              kind: "score" as const,
+              instructions: `${KIND_INSTRUCTIONS[kind]}\nGoal: ${goal}`,
+              levels: SCORE_LEVELS,
+            };
+          });
 
       let result;
       try {

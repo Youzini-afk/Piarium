@@ -16,7 +16,6 @@ import { randomUUID } from "node:crypto";
 import type {
   MaterialCollection,
   MaterialCollectionMember,
-  MaterialCollectionMemberInput,
   MaterialCollectionSearchHit,
   MaterialCollectionSummary,
   MaterialGrant,
@@ -63,6 +62,9 @@ export interface MaterialCollectionsDeps {
 }
 
 const recordIdFor = (collectionId: string): string => `material.collection:${collectionId}`;
+const sameIds = (left: readonly string[], right: readonly string[]): boolean => (
+  JSON.stringify([...left].sort()) === JSON.stringify([...right].sort())
+);
 
 const parsePayload = (payloadJson: string): CollectionPayload | null => {
   try {
@@ -319,6 +321,9 @@ export const createMaterialCollections = (
               if (!collectionId || !query) {
                 throw new HarnessServiceError("invalid-params", "collection search requires collectionId and query");
               }
+              if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || params.limit < 1)) {
+                throw new HarnessServiceError("invalid-params", "collection search limit must be a positive integer");
+              }
               const loaded = await loadCollection(context, collectionId);
               const grants = await grantsFor(context);
               if (!loaded || !collectionVisibleTo(loaded.payload, loaded.record, authority, grants.collectionIds)) {
@@ -345,9 +350,9 @@ export const createMaterialCollections = (
                     line: index + 1,
                     excerpt: lines[index]!.slice(0, 240),
                   });
-                  if (hits.length >= 100) break;
+                  if (params.limit !== undefined && hits.length >= params.limit) break;
                 }
-                if (hits.length >= 100) break;
+                if (params.limit !== undefined && hits.length >= params.limit) break;
               }
               return {
                 status: "ok",
@@ -411,8 +416,8 @@ export const createMaterialCollections = (
                 if (existing
                   && existing.fromThreadId === grant.fromThreadId
                   && existing.toThreadId === grant.toThreadId
-                  && existing.snapshotIds.join("") === grant.snapshotIds.join("")
-                  && existing.collectionIds.join("") === grant.collectionIds.join("")) {
+                  && sameIds(existing.snapshotIds, grant.snapshotIds)
+                  && sameIds(existing.collectionIds, grant.collectionIds)) {
                   return { status: "ok", grant: existing };
                 }
               }

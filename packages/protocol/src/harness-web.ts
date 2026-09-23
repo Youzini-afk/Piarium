@@ -131,6 +131,8 @@ export interface MaterialsCollectionParams {
   member?: MaterialCollectionMemberInput;
   memberId?: string;
   query?: string;
+  /** Optional caller-selected hit cap for collection search. */
+  limit?: number;
   /** `share`: the related thread that may read the shared material under its
    * own authority. The grant never transfers the sender's receipt or scope. */
   targetThreadId?: string;

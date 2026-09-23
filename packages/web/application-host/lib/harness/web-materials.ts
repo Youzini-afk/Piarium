@@ -24,6 +24,7 @@ import { createWorkspaceOpSerializer, kernelContext } from "./retrieval-artifact
 
 export const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
 const MATERIAL_GRANT_RECORD_TYPE = "material.grant";
+const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
 
 export interface WebSnapshotDraft {
   sourceUrl: string;
@@ -166,15 +167,49 @@ export const createWebMaterialStore = (
         // another thread needs an explicit `material.grant` record issued by
         // the owning thread (D-315 L4). A foreign receipt id never applies.
         const granted = authority.threadId !== undefined && await (async () => {
+          // Persisted collections are workspace-owned material assets. Their
+          // member snapshots remain readable while the collection names them.
+          for (const collectionRecord of await context.records.list({ recordType: MATERIAL_COLLECTION_RECORD_TYPE })) {
+            if (collectionRecord.state === "released") continue;
+            try {
+              const collection = JSON.parse(collectionRecord.payloadJson) as {
+                persisted?: unknown;
+                members?: Array<{ snapshotId?: unknown }>;
+              };
+              if (collection.persisted === true && Array.isArray(collection.members)
+                && collection.members.some((member) => member.snapshotId === snapshotId)) return true;
+            } catch {
+              // A malformed collection record grants nothing.
+            }
+          }
           for (const candidate of await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE })) {
             if (candidate.state === "released") continue;
             try {
               const grant = JSON.parse(candidate.payloadJson) as {
-                toThreadId?: unknown; fromThreadId?: unknown; snapshotIds?: unknown;
+                toThreadId?: unknown;
+                fromThreadId?: unknown;
+                snapshotIds?: unknown;
+                collectionIds?: unknown;
               };
               if (grant.toThreadId !== authority.threadId) continue;
               if (record.threadId !== undefined && grant.fromThreadId !== record.threadId) continue;
               if (Array.isArray(grant.snapshotIds) && grant.snapshotIds.includes(snapshotId)) return true;
+              if (!Array.isArray(grant.collectionIds)) continue;
+              for (const collectionId of grant.collectionIds) {
+                if (typeof collectionId !== "string") continue;
+                const collectionRecord = await context.records.get(`material.collection:${collectionId}`);
+                if (!collectionRecord || collectionRecord.state === "released") continue;
+                if (collectionRecord.threadId !== undefined && collectionRecord.threadId !== grant.fromThreadId) continue;
+                try {
+                  const collection = JSON.parse(collectionRecord.payloadJson) as {
+                    members?: Array<{ snapshotId?: unknown }>;
+                  };
+                  if (Array.isArray(collection.members)
+                    && collection.members.some((member) => member.snapshotId === snapshotId)) return true;
+                } catch {
+                  // A malformed collection record grants nothing.
+                }
+              }
             } catch {
               // A malformed grant grants nothing.
             }

@@ -67,6 +67,11 @@ L6 已接线（wired）：设置页 Fast Decision 区块按 `explore`/`web`/`sch
 未实测/未覆盖：真实付费 web provider 与 TypeSafe Jev 实机响应、完整桌面启动纵切、跨平台抓取、快照规模表现、
 复杂 PDF 版式/OCR 适配器、以及“候选排序质量”类质量断言——均无数据，不宣称收益。
 
+D-321 验收修正：新服务已补入 `HarnessServiceHost` 的生产装配；`research_decide` 不再错误依赖学术搜索开关，
+并与 `materials` 一起进入只读并行工具的元数据与资源计划。持久集合成员可在集合保留期间按工作区材料 authority 读取，
+共享集合 grant 按当前成员解析，集合检索仅接受调用方显式 `limit`，不再使用未声明的固定命中上限。L6 当前完成的是设置、工具开关和来源投影；
+固定 snapshot 阅读器、集合管理面板和复杂 PDF/OCR UI 仍属于后续 UI 切片，来源卡仍提供线上入口与 snapshot 身份，不把它们写成已完成。
+
 **D-314 / 阶段 C：后台压缩 Agent 与语义续接（2026-09-22），C0–C4 已交付并进入生产调用链（wired）。**
 设计见 [context-compaction-agent-design.md](context-compaction-agent-design.md)。
 

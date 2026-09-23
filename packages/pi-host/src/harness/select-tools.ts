@@ -199,7 +199,7 @@ export function selectHarnessTools(
   }
   // research_decide reports unconfigured/disabled fast-decision honestly, so
   // it registers with the web slot even before a purpose binding exists.
-  if (researchSearchAvailable && tools.research_decide !== false) {
+  if ((webSearchAvailable || researchSearchAvailable) && tools.research_decide !== false) {
     result.push(createResearchDecideTool(bridge));
   }
   if (materialsAvailable && tools.materials !== false) {

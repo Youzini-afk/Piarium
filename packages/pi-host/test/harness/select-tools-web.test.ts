@@ -78,6 +78,14 @@ describe("selectHarnessTools web tool gating", () => {
     assert.equal(tools.some((tool) => tool.name === "webfetch"), true);
   });
 
+  it("exposes research_decide for Web-only sessions", () => {
+    const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      researchSearchAvailable: false,
+    });
+    assert.equal(tools.some((tool) => tool.name === "research_decide"), true);
+  });
+
   it("includes scholarly discovery independently of a configured search provider", () => {
     const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
       ...baseDeps,

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { MaterialsCollectionParams, RetrievalReceiptAuthority, WebSnapshotRef } from "@varin/protocol";
+import type { MaterialsCollectionParams, RetrievalReceiptAuthority } from "@varin/protocol";
 import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createMaterialCollections, MATERIAL_COLLECTION_RECORD_TYPE } from "./material-collections.js";
@@ -192,6 +192,28 @@ describe("material collections", () => {
     expect(temp.collection).toBeDefined();
   });
 
+  it("lets another thread read persisted collection members while the collection retains them", async () => {
+    const opened = openStore();
+    const snap = await opened.materials.put("ws", {
+      sourceUrl: "https://persisted.test/", finalUrl: "https://persisted.test/", representation: "raw-text",
+    }, Buffer.from("persisted body"), { owningWorkspaceId: "ws", sessionId: "s1", threadId: "t1" });
+    const service = createMaterialCollections(opened.workingStates, {
+      materials: opened.materials,
+      resolveThreadId: async (sessionId) => sessionId === "s1" ? "t1" : "t2",
+    });
+    const created = await call(service, { action: "create", persist: true }, "s1");
+    await call(service, {
+      action: "add", collectionId: created.collection!.collectionId,
+      member: { kind: "snapshot", snapshotId: snap.snapshotId },
+    }, "s1");
+    const read = await opened.materials.read("ws", snap.snapshotId, {
+      owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
+    });
+    expect(read?.body.toString()).toBe("persisted body");
+    const searched = await call(service, { action: "search", collectionId: created.collection!.collectionId, query: "persisted" }, "s2");
+    expect(searched.hits).toHaveLength(1);
+  });
+
   it("keeps member snapshot bodies alive through collection references", async () => {
     const opened = openStore();
     const authority: RetrievalReceiptAuthority = { owningWorkspaceId: "ws", sessionId: "s1", threadId: "t1" };
@@ -299,5 +321,23 @@ describe("material grants (L4)", () => {
       action: "add", collectionId, member: { kind: "paper", paper: { provider: "openalex", id: "W1" } },
     }, "s2");
     expect(deniedWrite.status).toBe("denied");
+  });
+
+  it("keeps a live collection grant in sync with later member additions", async () => {
+    const opened = openStore();
+    const service = serviceFor(opened);
+    const first = await snapFor(opened);
+    const second = await opened.materials.put("ws", {
+      sourceUrl: "https://b.test/", finalUrl: "https://b.test/", representation: "raw-text",
+    }, Buffer.from("second member"), { owningWorkspaceId: "ws", sessionId: "s1", threadId: "t1" });
+    const created = await call(service, { action: "create", name: "live-set" }, "s1");
+    const collectionId = created.collection!.collectionId;
+    await call(service, { action: "add", collectionId, member: { kind: "snapshot", snapshotId: first.snapshotId } }, "s1");
+    await call(service, { action: "share", collectionId, targetThreadId: "t2" }, "s1");
+    await call(service, { action: "add", collectionId, member: { kind: "snapshot", snapshotId: second.snapshotId } }, "s1");
+    const read = await opened.materials.read("ws", second.snapshotId, {
+      owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
+    });
+    expect(read?.body.toString()).toBe("second member");
   });
 });

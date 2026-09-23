@@ -1620,6 +1620,21 @@ foreign receiptId 不授权。同 URL 在飞读取按
 状态：已实施，未推送（待主代理验收）。
 [agent-harness-status.md](../agent-harness-status.md)。
 
+### D-321 · 2026-09-23 · L2–L6 主代理验收修正
+
+背景：阶段 L 的聚焦测试覆盖了主要服务，但首次干净类型构建暴露了生产装配和工具注册遗漏；材料集合的持久化与共享语义也需要沿实际读取 authority 补齐。
+
+决定：
+
+1. `HarnessServiceHostOptions` 与生产返回对象必须同时携带 `researchDecideService` 和 `materialCollectionsService`，否则服务只存在于 index 装配而不会进入 router。
+2. `research_decide` 在有 Web 搜索能力时即可装配，不能错误依赖 `research_search`；`research_decide` 与 `materials` 加入统一工具元数据和执行资源计划，作为只读、可并行工具。
+3. `persisted` 集合的成员在集合仍保留时按工作区材料资产读取；共享集合的 grant 按当前 collection 成员解析，后续加入的成员可被授权线程读取，删除成员或集合立即收回读取权，写权限仍属于集合 owner。
+4. 集合检索不使用未声明的固定命中上限；调用方可选提供 `limit`，未提供时由实际输出容量决定披露。
+
+验证：聚焦 web/research/material 套件 50/50、工具选择与协议工具元数据 19/19、完整 `bun run type-check` 通过；新增持久集合跨线程读取、共享集合后续成员读取和 Web-only `research_decide` 覆盖。真实 provider、复杂 PDF/OCR、完整桌面和跨平台仍不作为本轮验证结论。
+
+状态：已实施，待主代理决定是否接受阶段边界。
+
 ### D-318 · 2026-09-23 · L4 跨线程材料授权
 
 背景：snapshotId 与 foreign receiptId 都不能是 bearer token；跨线程材料复用需要显式授权记录，同时不能把判断/摘要随材料自动继承。

@@ -47,6 +47,8 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   webfetch: { mutation: 'none', executionMode: 'parallel' },
   websearch: { mutation: 'none', executionMode: 'parallel' },
   research_search: { mutation: 'none', executionMode: 'parallel' },
+  research_decide: { mutation: 'none', executionMode: 'parallel' },
+  materials: { mutation: 'none', executionMode: 'parallel' },
   recall: { mutation: 'none', executionMode: 'parallel' },
   related: { mutation: 'none', executionMode: 'parallel' },
   history: { mutation: 'none', executionMode: 'parallel' },

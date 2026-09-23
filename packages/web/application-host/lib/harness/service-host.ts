@@ -526,6 +526,8 @@ export interface HarnessServiceHostOptions {
   webSearchService?: HarnessServiceHost["webSearchService"];
   /** Scholarly metadata service. Uses public OpenAlex/Semantic Scholar APIs. */
   researchSearchService?: HarnessServiceHost["researchSearchService"];
+  /** Fast-decision consumer for Web and scholarly candidates (D-315 L5). */
+  researchDecideService?: HarnessServiceHost["researchDecideService"];
   /** Material collections service (D-315 L3). */
   materialCollectionsService?: HarnessServiceHost["materialCollectionsService"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
@@ -606,6 +608,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const researchSearchService = options.researchSearchService ?? null;
+  const researchDecideService = options.researchDecideService ?? null;
+  const materialCollectionsService = options.materialCollectionsService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
   const documentPathOverlay = options.documentPathOverlay ?? null;
   const documentWriteGuard = options.documentWriteGuard ?? null;
@@ -981,6 +985,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     webFetchService,
     webSearchService,
     researchSearchService,
+    researchDecideService,
+    materialCollectionsService,
     documentReadSource,
     documentPathOverlay,
     documentWriteGuard,

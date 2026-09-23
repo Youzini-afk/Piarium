@@ -39,6 +39,7 @@ const MaterialsParams = Type.Object({
   })),
   member_id: Type.Optional(Type.String()),
   query: Type.Optional(Type.String({ description: "Keyword query scoped to this collection's member bodies." })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, description: "Optional caller-selected maximum number of search hits." })),
 });
 
 const encode = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -108,6 +109,7 @@ export function createMaterialsTool(bridge: HostServicesBridge): ToolDefinition 
           ...(member ? { member } : {}),
           ...(params.member_id ? { memberId: params.member_id } : {}),
           ...(params.query ? { query: params.query } : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
           ...(params.target_thread_id ? { targetThreadId: params.target_thread_id } : {}),
           ...(params.snapshot_id ? { snapshotId: params.snapshot_id } : {}),
         }, signal ? { signal } : undefined) as MaterialsCollectionResult;
