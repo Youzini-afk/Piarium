@@ -20,7 +20,8 @@ export const projectHarnessWebSources = (
   if (entry.type !== 'message' || entry.message.role !== 'toolResult') return [];
   const message = entry.message;
   const tool = message.toolName;
-  if (tool !== 'webfetch' && tool !== 'websearch' && tool !== 'research_search' && tool !== 'materials') return [];
+  if (tool !== 'webfetch' && tool !== 'websearch' && tool !== 'research_search'
+    && tool !== 'materials' && tool !== 'research_decide') return [];
   const details = message.details;
   if (!isRecord(details)) return [];
   const sources = details.sources;

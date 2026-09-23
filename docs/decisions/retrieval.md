@@ -1636,3 +1636,21 @@ foreign receiptId 不授权。同 URL 在飞读取按
 
 状态：已实施，未推送（待主代理验收）。
 [agent-harness-status.md](agent-harness-status.md)。
+
+### D-319 · 2026-09-23 · L5 Web/学术快速决策消费者
+
+背景：`harness.fastDecision`（D-312）此前只有 `explore` 消费者。阶段 L 需要 Web/学术候选的批量判断，且不得另建模型配置体系、不得借用 `models.explore` 冒充网络研究判断。
+
+决定：
+
+1. `FAST_DECISION_PURPOSES` 新增 `web` 与 `scholarly` 两个用途槽，沿用默认绑定 → purpose 覆盖 → off 的解析顺序与 configurationId 冻结语义；调用开始即冻结绑定，迟到结果不覆盖已结束操作。
+2. 新 Host 服务 `research.decide`（`read.web` 能力）+ Pi 工具 `research_decide`（retrieval preset 允许表已补）。候选必须是调用方已取得的材料：websearch URL、webfetch 快照、research_search 论文身份、快照内 section、或新查询文本。
+3. snapshot/section 候选在调用者权限下先回读真实正文片段（每候选 ≤2000 字符预算）再送模型；不可读快照、畸形 url/paper/query 候选列入 `rejected`，不送模型也不解释为低价值。
+4. `relevance`/`reading-value`/`complementary`/`duplicate`/`continuation` 映射为逐候选 score 问题；`next` 映射为允许显式无合适项的 choose。missing 单列、永不计零；无阈值即完成、无固定轮次/候选数。
+5. purpose 未配置/关闭/不可用/失败/取消时返回对应状态 + `fallback:"order"`，`ranked` 保持调用方顺序——直接搜索、来源排序与 Agent 判断继续工作，不借另一模型填空。
+6. 结果保留 providerId/modelId/servedModelId/configurationId/usage；settings catalog 说明更新到三用途。
+
+验证：research-decide 套件 7/7（排序、choose 选择、unconfigured/disabled/unavailable 回退、不可读快照拒绝、purpose 推断与覆盖、取消与失败不伪造成绩、畸形输入拒绝）；material-collections 与 explore-fast-decision 回归全绿；protocol build、application-host/pi-host typecheck、改动文件 lint 通过。真实 fastDecision provider 未实测，候选排序质量无数据不宣称收益。
+
+状态：已实施，未推送（待主代理验收）。
+[agent-harness-status.md](agent-harness-status.md)。

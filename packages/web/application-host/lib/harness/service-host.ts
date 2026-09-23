@@ -282,6 +282,7 @@ export interface HarnessServiceHost {
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   researchSearchService: import("./router.js").HarnessService<"research.search"> | null;
+  researchDecideService?: import("./router.js").HarnessService<"research.decide"> | null;
   materialCollectionsService?: import("./router.js").HarnessService<"materials.collections"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;

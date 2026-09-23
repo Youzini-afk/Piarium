@@ -1071,6 +1071,9 @@ export function registerHarnessServices(
   if (host.researchSearchService) {
     router.register("research.search", host.researchSearchService);
   }
+  if (host.researchDecideService) {
+    router.register("research.decide", host.researchDecideService);
+  }
   if (host.materialCollectionsService) {
     router.register("materials.collections", host.materialCollectionsService);
   }

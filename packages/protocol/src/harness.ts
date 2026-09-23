@@ -37,6 +37,8 @@ import type {
 import type {
   MaterialsCollectionParams,
   MaterialsCollectionResult,
+  ResearchDecideParams,
+  ResearchDecideResult,
   WebFetchRequest,
   WebSearchRequest,
   WebSearchResult,
@@ -1263,6 +1265,7 @@ export interface HarnessServiceMap {
   "web.search": { params: WebSearchRequest; result: WebSearchResult };
   "materials.collections": { params: MaterialsCollectionParams; result: MaterialsCollectionResult };
   "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
+  "research.decide": { params: ResearchDecideParams; result: ResearchDecideResult };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };
   "zone2.delivered": { params: Zone2DeliveredParams; result: Zone2DeliveredResult };
@@ -1418,6 +1421,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "web.search": "read.web",
   "research.search": "read.web",
+  "research.decide": "read.web",
   "materials.collections": "read.web",
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
@@ -1534,6 +1538,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.search",
   "research.search",
+  "research.decide",
   "materials.collections",
   "zone2.assemble",
   "zone2.status",

@@ -8,8 +8,13 @@
 
 import { HarnessInferenceSettingsValidationError } from "./harness-inference.js";
 
-/** Consumers registered for fast-decision judgments. New purposes are added here. */
-export const FAST_DECISION_PURPOSES = ["explore"] as const;
+/**
+ * Consumers registered for fast-decision judgments. New purposes are added
+ * here. `web`/`scholarly` are the D-315 L5 consumers that batch-judge real
+ * Web and scholarly candidates; they reuse the same binding/override/cancel
+ * machinery as `explore`.
+ */
+export const FAST_DECISION_PURPOSES = ["explore", "web", "scholarly"] as const;
 export type HarnessFastDecisionPurpose = (typeof FAST_DECISION_PURPOSES)[number];
 
 export type HarnessFastDecisionProtocol = "typesafe-systemone";

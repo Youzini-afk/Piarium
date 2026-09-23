@@ -287,7 +287,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.fastDecision', category: 'retrieval', owner: 'pi-settings',
     field: { path: 'harness.fastDecision', kind: 'json', scope: 'user',
-      note: 'Fast Decision Model {default?: {protocol:"typesafe-systemone",providerId,modelId,endpoint?}, purposes?: {explore?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
+      note: 'Fast Decision Model {default?: {protocol:"typesafe-systemone",providerId,modelId,endpoint?}, purposes?: {explore|web|scholarly?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
     apply: 'next-run',
     ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.fastDecision',
       keywords: ['fast decision', 'jev', 'typesafe', 'selection'] },

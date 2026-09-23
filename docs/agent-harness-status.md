@@ -18,7 +18,7 @@ Last updated: 2026-09-23
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线，L4 跨线程材料授权已接线；L5–L6 待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线，L4 跨线程材料授权已接线，L5 Web/学术快速决策消费者已接线；L6 收口待实施。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
@@ -49,6 +49,14 @@ L4 已接线（wired）：retrieval preset 允许表补入 `send`/`read_thread`/
 覆盖 collectionId 或 snapshotId 集合），要求发送方自身可读目标材料且两线程满足 thread.send 的同根关系（父子/兄弟）；
 接收方经 `web-materials.read` 的 grant 回退以自身 scope 回读，foreign receiptId 与无授权 snapshotId 仍不授权；
 share 幂等（同内容活 grant 复用），grant 随发送方线程删除/对账回收；持久化集合继续对工作区可读但不放开写权限。
+L5 已接线（wired）：`research.decide` Host 服务（`read.web` 能力）+ Pi `research_decide` 工具经 `harness.fastDecision`
+对真实候选做批量判断；新增 `web`/`scholarly` 两个 purpose 绑定槽（默认 binding → purpose 覆盖 → off，configurationId
+随调用冻结）。候选限定为已取得的 URL/snapshot/论文身份/快照区间/新查询文本；snapshot 与 section 候选先在调用者
+权限下回读并截取真实正文片段，不可读/畸形候选列入 `rejected` 而不送模型。`relevance`/`reading-value`/`complementary`/
+`duplicate`/`continuation` 映射为逐候选 score 问题，`next` 映射为允许“无合适项”的 choose；missing 单列不计零分，
+低分只影响排序不裁剪方向。purpose 未配置/关闭/不可用、provider 失败或取消时 `ranked` 保持调用方顺序并给出
+`fallback:"order"`，直接检索与 Agent 判断继续工作；结果保留 providerId/modelId/servedModelId/configurationId/usage。
+retrieval preset 允许表加入 `research_decide`；`research_decide` 的 details 进入既有来源投影（含 decide 分数标记）。
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 

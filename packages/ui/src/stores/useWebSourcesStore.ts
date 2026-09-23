@@ -7,7 +7,7 @@ export interface WebSource {
   title: string;
   fetchedAt: number;
   toolCallId: string;
-  tool: 'webfetch' | 'websearch' | 'research_search';
+  tool: 'webfetch' | 'websearch' | 'research_search' | 'materials' | 'research_decide';
   /** Fixed content snapshot id when the Host pinned the fetched body. */
   snapshotId?: string;
   contentHash?: string;

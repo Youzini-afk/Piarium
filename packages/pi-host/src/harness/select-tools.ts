@@ -13,6 +13,7 @@ import { createWebFetchTool } from "./webfetch-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createResearchSearchTool } from "./research-search-tool.js";
 import { createMaterialsTool } from "./materials-tool.js";
+import { createResearchDecideTool } from "./research-decide-tool.js";
 import { createTodoTool } from "./todo-tool.js";
 import { createRecallTool } from "./recall-tool.js";
 import { createExploreTool } from "./explore-tool.js";
@@ -195,6 +196,11 @@ export function selectHarnessTools(
   }
   if (researchSearchAvailable && tools.research_search !== false) {
     result.push(createResearchSearchTool(bridge));
+  }
+  // research_decide reports unconfigured/disabled fast-decision honestly, so
+  // it registers with the web slot even before a purpose binding exists.
+  if (researchSearchAvailable && tools.research_decide !== false) {
+    result.push(createResearchDecideTool(bridge));
   }
   if (materialsAvailable && tools.materials !== false) {
     result.push(createMaterialsTool(bridge));

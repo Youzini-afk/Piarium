@@ -95,6 +95,7 @@ import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDi
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web-materials.js';
 import { createMaterialCollections as createMaterialCollectionsService } from './lib/harness/material-collections.js';
+import { createResearchDecideService, type ResearchDecideDeps } from './lib/harness/research-decide.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
@@ -1764,6 +1765,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         || (to.parent.kind === from.parent.kind && to.parent.id === from.parent.id);
     },
   });
+  // Fast-decision deps are bound after the semantic runtime exists; the
+  // service reads them at call time so an unconfigured purpose reports
+  // honestly instead of being absent.
+  const researchDecideDeps: ResearchDecideDeps = {
+    materials: webMaterials,
+    resolveThreadId: async (sessionId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId);
+      return binding?.threadId;
+    },
+  };
+  const researchDecideService = createResearchDecideService(researchDecideDeps);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
@@ -2608,6 +2620,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
   });
   semanticRuntimeHolder.current = semanticRuntime;
+  researchDecideDeps.fastDecisionStatus = semanticRuntime.fastDecisionStatus;
+  researchDecideDeps.fastDecision = semanticRuntime.fastDecision;
   registerLocalSemanticComponentRoutes(app, {
     manager: localSemanticComponent,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
@@ -2927,6 +2941,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     webFetchService,
     ...(webSearchService ? { webSearchService } : {}),
     researchSearchService,
+    researchDecideService,
     materialCollectionsService,
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
