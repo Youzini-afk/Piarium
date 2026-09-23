@@ -35,9 +35,8 @@ Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性
 [后台压缩 Agent](context-compaction-agent-design.md)，交付状态见
 [agent-harness-status.md](agent-harness-status.md)。
 
-**阶段 L：Web 与科研检索（D-315）正在实施。** L0 的自然语言 retrieval 报告/可选 `submit_facts` 已接线；L2 已接入
-OpenAlex/Semantic Scholar 的论文发现与详情查询，返回元数据与开放入口状态。L1 的连续 Web 阅读/复用、L2 的关系展开、
-L3–L6 仍按顺序推进。复用已有通用 `retrieval`、科研 `investigation` 和普通派发，不另建搜索 Agent runtime。
+**阶段 L：Web 与科研检索（D-315）正在实施。** L0 的自然语言 retrieval 报告/可选 `submit_facts` 已接线；L1 连续 Web 阅读/复用、
+L2 论文发现与关系展开、L3 材料集合与结构阅读均已接线。L4–L6 仍按顺序推进。复用已有通用 `retrieval`、科研 `investigation` 和普通派发，不另建搜索 Agent runtime。
 完整目标见 [Web 与科研检索](web-research-search-design.md)，交付事实以 status 为准。
 
 ## 0. 执行者须知
@@ -2043,7 +2042,7 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 
 ## 阶段 L：Web 与科研检索（D-315）
 
-状态：**L0 已交付；L1 连续 Web 搜索/固定快照/材料复用已交付并接线；L2 首个学术发现纵切已交付；L2 其余与 L3–L6 仍在实施**。设计 authority 为
+状态：**L0 已交付；L1 连续 Web 搜索/固定快照/材料复用已交付并接线；L2 论文发现与关系展开已交付；L3 材料集合与结构阅读已交付；L4–L6 仍在实施**。设计 authority 为
 [Web 与科研检索](web-research-search-design.md)。本阶段承接 C，不与已交付的 7H 工具并发/长命令阶段混淆。
 使用现有 Pi Agent、Thread/Run、Host 网络服务、Rust 对象/记录与快速决策服务；默认 Web 能力和用户已有选择继续有效。
 实现阶段按下列依赖交付，不一次性重写全部搜索。每个切片接上公开工具和必要消费者，再记录其完成范围。
@@ -2078,7 +2077,7 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 完成判据：同一会话/Thread 可从结果进入固定原文并继续展开；同一 Thread 的后续 Run 仍按自身 scope 重读，跨 Thread 的显式材料授权由 L4 处理；部分失败/取消不抹去已成功材料。
 重启后持久引用能回读，临时网络请求不冒称耐久执行。
 
-### L2：学术身份、发现与关系追踪
+### L2：学术身份、发现与关系追踪（已交付，wired）
 
 - 接入 OpenAlex / Semantic Scholar 的论文搜索、详情、引用/参考文献与开放材料位置，按真实 API 分别声明能力；
   可配置 Sciverse 提供段落语义/读取等增强，独立可用，不能以所有密钥齐全作为前提。
@@ -2091,7 +2090,7 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 完成判据：公开工具可从自然语言/论文标识找到真实论文记录，再取得相关论文及可读来源，元数据和实际内容级别不混淆。
 第一批学术 adapter 的生产接线可用受控 HTTP 响应验证，不依赖购买账户才闭合调用链。
 
-### L3：材料集合、结构阅读与实践交接
+### L3：材料集合、结构阅读与实践交接（已交付，wired）
 
 - 支持明确论文/材料集合内的关键词与可用语义检索，范围在召回前应用，命中能回到固定文档位置；
   不复制代码 `explore` 或要求先建立全球论文索引，无向量配置时仍可文本检索与读取。

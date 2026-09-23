@@ -1601,3 +1601,21 @@ foreign receiptId 不授权。同 URL 在飞读取按
 验证：L1 web materials/fetch/retrieval-artifacts/session registration/web search 聚焦套件 63/63；application-host、pi-host、protocol 类型检查和改动文件 lint 通过；文档检查 9/9、378 页/858 链接通过。真实 provider、跨平台和完整桌面重启仍未实测。
 
 状态：已实施并推送。
+
+### D-317 · 2026-09-23 · L2 关系展开与 L3 材料集合/结构阅读
+
+背景：L2 首个纵切只覆盖搜索与详情；L3 需要显式材料集合与结构化阅读，同时要守住"快照 id 不是跨线程 bearer token""元数据不等于正文"两条边界。
+
+决定：
+
+1. 关系结果保留 provider record id、canonical 身份、版本、来源记录、可见/缺失字段与续页游标；DOI/arXiv/provider id 分立存储，标题或语义相似不产生身份合并或引用边。
+2. 关系展开按需、分页、可取消（OpenAlex referenced_works/cited_by 过滤，Semantic Scholar /references|/citations）；不固定跳数，不建全库图；关系命中的开放入口经 `webfetch` 进入快照链，入口存在不表示正文已读。
+3. 材料集合是 `material.collection` 内核记录：成员为 snapshot/URL/论文身份的引用而非副本，URL 成员经完整 `web.fetch` 授权路径固定为快照；集合的 `references` 让成员正文对象沿 keep-if-referenced 规则存活。
+4. 集合内关键词检索先应用集合范围再扫描成员正文，每个成员按调用者自身权限回读，不可读成员单列 `unreadable`；foreign snapshot id 不构成授权。
+5. `persisted` 集合跨线程生命周期保留并对工作区可读；临时集合随线程删除、会话 drop 和工作区对账回收；持久化不放开写权限——写仍要求属主身份。
+6. 结构阅读用快照 `structure` 如实记录检测到的 headings/tables/figures/pages（PDF 页码由 pdf-text 页边界映射）；`structure-unsupported`（该表示无法表达）与 `position-not-found`（结构在但目标缺失）分态表达，不做占位猜测。重型版式/OCR 仍属可选 adapter，不进基础路径。
+
+验证：material-collections/web-fetch/web-materials 聚焦套件 35/35；pi-host webfetch/websearch/research_search/select-tools 30/30；application-host 与 pi-host typecheck、protocol build 通过。真实 provider、付费渠道与完整桌面路径未实测。
+
+状态：已实施，未推送（待主代理验收）。
+[agent-harness-status.md](agent-harness-status.md)。

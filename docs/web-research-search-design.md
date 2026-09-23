@@ -352,5 +352,9 @@ UI 的最小消费者随对应服务切片交付，不能把前面阶段完成�
 不附带新研究流程 DSL、强制专家会议、常驻检索管理 Agent、机械语义事件触发高级模型或统一数值硬配额。
 
 当前已接线的部分：retrieval 线程可以直接交付自然语言报告，`submit_facts` 作为可选的结构化来源核验；`research_search` 通过
-Host 查询 OpenAlex/Semantic Scholar 的元数据、摘要、身份和开放获取入口，并支持论文详情与分页。关系展开、固定学术材料集合、
-结构化 PDF 阅读、跨线程材料复用和快速决策消费者仍未交付；真实 provider 质量/延迟未测，不作收益结论。
+Host 查询 OpenAlex/Semantic Scholar 的元数据、摘要、身份和开放获取入口，并支持论文详情与分页。
+已追加接线：`action=relations` 的 references/citations/related 分页展开（保留 provider 身份、canonical/版本身份、
+来源记录与缺失字段）；`materials.collections` 服务与 `materials` 工具实现临时/持久材料集合与集合内关键词检索
+（范围先于召回）；`webfetch` 结构化位置读取（page/section/table/figure/appendix/lines，PDF 页码映射，
+`structure-unsupported` 与 `position-not-found` 分态）。
+跨线程材料授权、快速决策消费者与工作台/设置收口仍未交付；真实 provider 质量/延迟未测，不作收益结论。

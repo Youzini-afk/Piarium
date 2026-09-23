@@ -18,7 +18,7 @@ Last updated: 2026-09-23
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 完成首个学术发现纵切；L2 其余及 L3–L6 待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线；L4–L6 待实施。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
@@ -32,7 +32,18 @@ L1 已接线（wired）：`web.search` 接受 `query`/`objective`/`queries[]`/`u
 最后退出者中止底层请求。UI 来源列表展示 snapshotId/内容 hash。
 新增 `research_search` 工具和 Host `research.search` 服务，默认可查询 OpenAlex，也可选择 Semantic Scholar，支持论文元数据、
 摘要/作者/DOI/引用数、开放获取入口、详情查询与分页游标。返回明确区分 `metadata-only`、`open-location`、`empty`、`failed` 和
-`unavailable`；目前未把关系展开、全文结构解析或材料持久化集合宣称为已完成。
+`unavailable`。
+L2 关系展开已接线（wired）：`research_search action=relations` 支持 `references`/`citations`/`related` 按需分页展开
+（OpenAlex referenced_works/cited_by 过滤端点，Semantic Scholar /references|/citations 端点），每条结果保留 provider
+record id、canonical 身份、版本、来源记录、可见/缺失字段与续页游标；DOI/arXiv/provider id 分立，标题或语义相似不产生身份合并。
+关系命中的开放入口经 `webfetch` 进入 L1 快照链，入口存在不表示正文已读。
+L3 已接线（wired）：`materials.collections` Host 服务（`read.web` 能力）+ Pi `materials` 工具实现 create/add/remove/list/search；
+集合为 `material.collection` 内核记录，成员是快照/URL/论文身份的引用而非副本，URL 成员经完整 `web.fetch` 授权路径固定为快照；
+集合内关键词检索先应用集合范围再扫描成员正文（各自按调用者权限回读），不可读成员单列 `unreadable`；`persisted` 集合
+跨线程生命周期保留并对工作区可读，临时集合随线程删除/会话 drop/工作区对账回收。`webfetch` 新增结构化位置读取：
+`page`/`section`/`element`(table|figure)/`appendix` 选择器与 `lines` 区间，快照 `structure` 记录 headings/tables/figures/pages
+（PDF 页码经 pdf-text 页边界映射），`structure-unsupported`/`position-not-found` 与 `failed`/`snapshot-missing` 分态表达；
+retrieval preset 允许表加入 `materials`。`harnessMaterials` 客户端能力贯通 broker→host-controller→session-host→select-tools。
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 
