@@ -102,6 +102,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
+  const [sourcePages, setSourcePages] = React.useState<Record<string, number>>({});
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
@@ -589,16 +590,30 @@ export const HarnessThreadsPanel: React.FC<{
                     ) : null}
                   </a>
                   {source.snapshotId && source.document?.kind === 'pdf' ? (
-                    <a
-                      href={`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/materials/${encodeURIComponent(source.snapshotId)}/page?page=1`}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="Open fixed material page"
-                      title="Open fixed material page"
-                      className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100"
-                    >
-                      <Icon name="image" className="size-3" />
-                    </a>
+                    <details className="max-w-[180px] shrink-0">
+                      <summary className="cursor-pointer list-none rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100" aria-label="Open fixed material page" title="Open fixed material page">
+                        <Icon name="image" className="size-3" />
+                      </summary>
+                      <div className="absolute z-10 mt-1 w-52 rounded-md border border-border bg-popover p-1.5 shadow-lg">
+                        <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          Page
+                          <input
+                            type="number"
+                            min={1}
+                            max={source.document.pageCount}
+                            value={sourcePages[source.id] ?? 1}
+                            onChange={(event) => setSourcePages((current) => ({ ...current, [source.id]: Math.max(1, Math.min(source.document!.pageCount, Number(event.target.value) || 1)) }))}
+                            className="w-12 rounded border border-border bg-background px-1 py-0.5 text-[10px] text-foreground"
+                          />
+                          / {source.document.pageCount}
+                        </label>
+                        <img
+                          src={`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/materials/${encodeURIComponent(source.snapshotId)}/page?page=${sourcePages[source.id] ?? 1}`}
+                          alt={`${source.title} page ${sourcePages[source.id] ?? 1}`}
+                          className="mt-1 max-h-64 w-full rounded border border-border/60 object-contain"
+                        />
+                      </div>
+                    </details>
                   ) : null}
                   <button
                     type="button"
