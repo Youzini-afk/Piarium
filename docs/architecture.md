@@ -457,8 +457,8 @@ Generative search planning remains separate. Pi inference retains credentials an
 decision service does not own search, permissions or action execution. Computer Use and other consumers are
 future integrations, not delivered features. See harness status for verification and untested boundaries.
 
-D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0–L5
-slices are wired: generic `retrieval` can return natural-language reports with optional Host-validated
+D-315 / Stage L is the [Web and research search extension](web-research-search-design.md). Its L0–L6
+service slices are wired: generic `retrieval` can return natural-language reports with optional Host-validated
 `submit_facts`; `websearch` accepts batch query/objective/URL items with per-item status and
 provider-minted pagination cursors; `webfetch` pins fetched bodies to durable `web.snapshot` kernel
 records with stable line/find/structural positions, refresh minting new snapshots while old references
@@ -468,7 +468,10 @@ and paged relation expansion; `materials` owns `material.collection` records and
 over real Web/scholarly candidates through the `web`/`scholarly` purpose bindings. It reuses ordinary
 dispatch and native web tools. Content reuse re-checks the reader's own scope and never transfers
 another Run's receipt authority. No parallel search scheduler, body store, or Agent runtime
-is introduced.
+is introduced. The current L3 PDF path still provides lightweight text/page positions and simple snapshot
+structure. Complex layout recovery, OCR, table-cell/formula/figure objects, page-region visual reads, and the
+corresponding reader UI are the separate L3-P0–P2 follow-up described in the research search design; they are not
+implied by the existing `webfetch` structural selectors.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
 query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their

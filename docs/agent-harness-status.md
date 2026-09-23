@@ -37,7 +37,7 @@ L2 关系展开已接线（wired）：`research_search action=relations` 支持 
 （OpenAlex referenced_works/cited_by 过滤端点，Semantic Scholar /references|/citations 端点），每条结果保留 provider
 record id、canonical 身份、版本、来源记录、可见/缺失字段与续页游标；DOI/arXiv/provider id 分立，标题或语义相似不产生身份合并。
 关系命中的开放入口经 `webfetch` 进入 L1 快照链，入口存在不表示正文已读。
-L3 已接线（wired）：`materials.collections` Host 服务（`read.web` 能力）+ Pi `materials` 工具实现 create/add/remove/list/search；
+L3 基础已接线（wired）：`materials.collections` Host 服务（`read.web` 能力）+ Pi `materials` 工具实现 create/add/remove/list/search；
 集合为 `material.collection` 内核记录，成员是快照/URL/论文身份的引用而非副本，URL 成员经完整 `web.fetch` 授权路径固定为快照；
 集合内关键词检索先应用集合范围再扫描成员正文（各自按调用者权限回读），不可读成员单列 `unreadable`；`persisted` 集合
 跨线程生命周期保留并对工作区可读，临时集合随线程删除/会话 drop/工作区对账回收。`webfetch` 新增结构化位置读取：
@@ -65,7 +65,9 @@ L6 已接线（wired）：设置页 Fast Decision 区块按 `explore`/`web`/`sch
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 未实测/未覆盖：真实付费 web provider 与 TypeSafe Jev 实机响应、完整桌面启动纵切、跨平台抓取、快照规模表现、
-复杂 PDF 版式/OCR 适配器、以及“候选排序质量”类质量断言——均无数据，不宣称收益。
+复杂 PDF 版式/OCR 适配器、页面/区域视觉读取、表格单元格/公式/图表结构对象、固定阅读器 UI，以及“候选排序质量”类质量断言——
+均无数据或未接线，不宣称收益。当前 `webfetch` 的 `page`/`section`/`element` 选择器只对已有 snapshot 结构生效，
+不能代表已经支持复杂 PDF 结构阅读。
 
 D-321 验收修正：新服务已补入 `HarnessServiceHost` 的生产装配；`research_decide` 不再错误依赖学术搜索开关，
 并与 `materials` 一起进入只读并行工具的元数据与资源计划。持久集合成员可在集合保留期间按工作区材料 authority 读取，
