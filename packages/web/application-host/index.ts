@@ -136,9 +136,11 @@ import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
 import { createPopplerPdfPageRenderer } from './lib/harness/pdf-page-renderer.js';
+import { createTesseractPdfOcr } from './lib/harness/pdf-ocr.js';
 import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
+import { registerPdfMaterialRoutes } from './lib/harness/pdf-material-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { readPiAuthFile, resolvePiAgentDir } from './lib/pi-config/storage.js';
 import { seedProductSkills } from './lib/pi-runtime/product-skills.js';
@@ -1510,12 +1512,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ) => Promise<import('@varin/protocol').RetrievalUrlReceipt>;
     syncThread?: (workspaceId: string, thread: import('@varin/protocol').Thread) => Promise<void>;
   } = {};
+  const pdfPageRenderer = createPopplerPdfPageRenderer();
   // Deferred until the kernel working-state access exists below; fetches
   // still deliver content but mint no snapshotId if it is unavailable.
   const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read'] } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
-    pdfPageRenderer: createPopplerPdfPageRenderer(),
+    pdfPageRenderer,
+    pdfOcr: createTesseractPdfOcr(pdfPageRenderer),
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
       if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
@@ -2400,6 +2404,30 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerWebSearchCredentialRoutes(app, {
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerPdfMaterialRoutes(app, {
+    fetchPage: async ({ sessionId, snapshotId, page, region, signal }) => {
+      const binding = await harnessServiceHost.threadRegistry?.getSessionBinding(sessionId);
+      const workspaceId = binding?.owningWorkspaceId;
+      if (!workspaceId) return { status: 'failed', url: '', reason: 'no workspace' };
+      return performHarnessWebFetch(
+        harnessServiceHost,
+        {
+          snapshotId,
+          view: 'page-image',
+          page,
+          ...(region ? { region } : {}),
+        },
+        {
+          sessionId,
+          workspaceId,
+          actor: {} as never,
+          authorizedPaths: [],
+          signal,
+        },
+      );
+    },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {

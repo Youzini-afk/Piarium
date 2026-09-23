@@ -588,6 +588,18 @@ export const HarnessThreadsPanel: React.FC<{
                       </span>
                     ) : null}
                   </a>
+                  {source.snapshotId && source.document?.kind === 'pdf' ? (
+                    <a
+                      href={`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/materials/${encodeURIComponent(source.snapshotId)}/page?page=1`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open fixed material page"
+                      title="Open fixed material page"
+                      className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100"
+                    >
+                      <Icon name="image" className="size-3" />
+                    </a>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => source.pinned ? unpinSource(source.id) : pinSource(source.id)}

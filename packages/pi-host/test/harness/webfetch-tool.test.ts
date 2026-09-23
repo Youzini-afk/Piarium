@@ -280,4 +280,44 @@ describe("webfetch tool", () => {
     assert.equal(result.content[1]?.mimeType, "image/png");
     bridge.dispose();
   });
+
+  it("passes a page image to the configured reader model for visual questions", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    let readerInput: unknown;
+    const tool = createWebFetchTool(bridge, "test", {
+      readPage: async (input) => {
+        readerInput = input;
+        return "The chart rises.";
+      },
+    });
+    const pending = tool.execute("visual", {
+      snapshot_id: "snap-pdf", view: "page-image", page: 3, prompt: "What trend is visible?",
+    } as never, undefined as never, undefined as never, undefined as never);
+    await new Promise((resolve) => setImmediate(resolve));
+    bridge.respond("test", emitted[0]!.requestId, {
+      ok: true,
+      result: {
+        status: "ok",
+        url: "https://example.com/paper.pdf",
+        finalUrl: "https://example.com/paper.pdf",
+        contentType: "application/pdf",
+        markdown: "paper text",
+        bytes: 10,
+        fromCache: false,
+        rendered: false,
+        pageImage: { page: 3, mimeType: "image/png", data: "cG5n", byteLength: 3 },
+      },
+    });
+    const result = await pending as { content: Array<{ type: string; data?: string }> };
+    assert.equal(result.content[0]?.type, "text");
+    assert.equal(result.content[1]?.type, "image");
+    assert.deepEqual(readerInput, {
+      finalUrl: "https://example.com/paper.pdf",
+      markdown: "paper text",
+      prompt: "What trend is visible?",
+      images: [{ data: "cG5n", mimeType: "image/png" }],
+      signal: undefined,
+    });
+    bridge.dispose();
+  });
 });

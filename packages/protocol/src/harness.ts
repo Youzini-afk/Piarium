@@ -269,6 +269,12 @@ export type FetchResult =
       byteLength: number;
       region?: WebDocumentRegion;
     };
+    ocr?: {
+      status: "not-needed" | "used" | "unavailable";
+      engine?: string;
+      pages?: number[];
+      detail?: string;
+    };
   }
   | { status: "structure-unsupported"; snapshotId: string; kind: string }
   | { status: "position-not-found"; snapshotId: string; detail: string }

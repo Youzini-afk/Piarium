@@ -33,12 +33,41 @@ export interface WebSnapshotStructure {
   /** Page boundaries mapped onto extracted-text lines (one-based). Present
    * only when the parser actually segmented pages (e.g. pdf-text). */
   pages?: Array<{ page: number; startLine: number; endLine: number }>;
+  /** Coordinate text layout from a document parser, in page points. */
+  layouts?: Array<{
+    page: number;
+    width: number;
+    height: number;
+    columns?: number;
+    lines: Array<{
+      text: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      readingIndex: number;
+      segments?: Array<{ text: string; x: number; width: number }>;
+    }>;
+  }>;
   /** Detected section headings mapped onto extracted-text lines. */
   headings?: Array<{ title: string; level: number; line: number }>;
   /** Detected table blocks as line ranges in the fixed body. */
-  tables?: Array<{ startLine: number; endLine: number }>;
+  tables?: Array<{
+    startLine: number;
+    endLine: number;
+    confidence?: "candidate";
+    rows?: Array<{ cells: Array<{ text: string; x: number; width: number }> }>;
+  }>;
   /** Detected figure/image references (markdown image lines). */
-  figures?: Array<{ line: number; title?: string }>;
+  figures?: Array<{
+    line: number;
+    title?: string;
+    page?: number;
+    bbox?: { x: number; y: number; width: number; height: number };
+    confidence?: "candidate";
+  }>;
+  /** Formula candidates from text/layout heuristics; never treated as LaTeX truth. */
+  formulas?: Array<{ line: number; text: string; confidence: "candidate" }>;
   /** Aspects this representation honestly cannot express. */
   unparsed?: string[];
 }
@@ -49,6 +78,11 @@ export interface WebSnapshotDocument {
   pageCount: number;
   /** Parser and layout strategy that produced the current text view. */
   parser: string;
+  ocr?: {
+    status: "not-requested" | "not-needed" | "used" | "unavailable";
+    engine?: string;
+    pages?: number[];
+  };
   /** The original bytes are retained separately from the readable text body. */
   source?: {
     contentHash: string;
@@ -70,7 +104,7 @@ export type WebReadPosition =
   | { kind: "lines"; startLine: number; endLine?: number }
   | { kind: "page"; page: number }
   | { kind: "section"; title: string }
-  | { kind: "element"; element: "table" | "figure"; index: number }
+  | { kind: "element"; element: "table" | "figure" | "formula"; index: number }
   | { kind: "appendix" };
 
 export interface WebSnapshotRef {
@@ -320,6 +354,8 @@ export interface WebFetchRequest {
   page?: number;
   /** Optional crop in rendered page pixels; omitted means the full page. */
   region?: WebDocumentRegion;
+  /** Request OCR for PDF pages whose text layer is empty. */
+  ocr?: boolean;
   /** Read a structural slice of the body instead of the whole text. */
   position?: WebReadPosition;
 }

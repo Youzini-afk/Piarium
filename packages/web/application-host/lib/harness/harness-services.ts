@@ -102,6 +102,7 @@ export const performHarnessWebFetch = async (
       ...(params.view ? { view: params.view } : {}),
       ...(params.page !== undefined ? { page: params.page } : {}),
       ...(params.region ? { region: params.region } : {}),
+      ...(params.ocr === true ? { ocr: true } : {}),
       ...(params.position ? { position: params.position } : {}),
     },
     {

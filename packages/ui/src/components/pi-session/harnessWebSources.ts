@@ -44,6 +44,9 @@ export const projectHarnessWebSources = (
       tool,
       ...(typeof source.snapshotId === 'string' && source.snapshotId ? { snapshotId: source.snapshotId } : {}),
       ...(typeof source.contentHash === 'string' && source.contentHash ? { contentHash: source.contentHash } : {}),
+      ...(isRecord(source.document) && source.document.kind === 'pdf' && typeof source.document.pageCount === 'number'
+        ? { document: { kind: 'pdf' as const, pageCount: source.document.pageCount } }
+        : {}),
       ...(typeof source.provider === 'string' && source.provider ? { provider: source.provider } : {}),
       ...(typeof source.paperId === 'string' && source.paperId ? { paperId: source.paperId } : {}),
       ...(typeof source.relation === 'string' && source.relation ? { relation: source.relation } : {}),

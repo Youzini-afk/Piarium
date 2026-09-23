@@ -434,4 +434,5 @@ Host 查询 OpenAlex/Semantic Scholar 的元数据、摘要、身份和开放获
 （范围先于召回）；`webfetch` 结构化位置读取（page/section/table/figure/appendix/lines，PDF 页码映射，
 `structure-unsupported` 与 `position-not-found` 分态）。L3-P0 进一步保存 PDF 原始字节，快照记录页数/解析器/source hash，
 并支持 `view=page-image` 按页或像素区域返回模型可见 PNG；文本、原件和视觉读取仍共用同一快照 authority。
-复杂多栏顺序、OCR、表格单元格、公式/图表结构和阅读器 UI 仍按 L3-P1/P2 实施；真实 provider 质量/延迟未测，不作收益结论。
+L3-P1/P2 已补基础纵切：PDF.js 坐标布局与明显双栏顺序、表格/公式/图像候选、按页可取消的可选 Tesseract OCR、reader 模型图像提问、
+固定快照页面路由和来源卡入口。复杂版式、表格单元格准确率、OCR/图表解析质量及真实 provider 质量/延迟仍未测，不作收益结论。

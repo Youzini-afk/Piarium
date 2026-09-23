@@ -24,6 +24,10 @@ export interface WebFetchDeps {
     data: Buffer;
     mimeType: "image/png";
   }>;
+  pdfOcr?: (input: { source: Buffer; page: number; signal?: AbortSignal }) => Promise<{
+    text: string;
+    engine: string;
+  }>;
 }
 
 interface CacheEntry {
@@ -43,6 +47,7 @@ interface FetchContext {
   /** A caller-requested refresh must create a new snapshot record even when
    * the fetched bytes are unchanged. */
   forceNewSnapshot?: boolean;
+  ocr?: boolean;
 }
 
 interface SharedFetch {
@@ -167,9 +172,14 @@ export function createWebFetch(deps: WebFetchDeps) {
     /** One-based line range of each page inside the joined text body. */
     pages: Array<{ page: number; startLine: number; endLine: number }>;
     pageCount: number;
+    layouts: NonNullable<WebSnapshotStructure["layouts"]>;
+    ocrPages: number[];
+    ocrEngine?: string;
+    ocrUnavailable: boolean;
+    imagePages: number[];
   }
 
-  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<PdfExtraction | null> => {
+  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal, ocr?: FetchContext["ocr"]): Promise<PdfExtraction | null> => {
     try {
       signal?.throwIfAborted();
       // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
@@ -177,6 +187,11 @@ export function createWebFetch(deps: WebFetchDeps) {
       const loading = pdfjs.getDocument({ data, disableWorker: true });
       const doc = signal ? await awaitAbortable(loading.promise, signal) : await loading.promise;
       const pages: string[] = [];
+      const layouts: NonNullable<WebSnapshotStructure["layouts"]> = [];
+      const ocrPages: number[] = [];
+      let ocrEngine: string | undefined;
+      let ocrUnavailable = false;
+      const imagePages: number[] = [];
       for (let i = 1; i <= doc.numPages; i++) {
         signal?.throwIfAborted();
         const pagePromise = doc.getPage(i);
@@ -184,18 +199,34 @@ export function createWebFetch(deps: WebFetchDeps) {
         signal?.throwIfAborted();
         const contentPromise = page.getTextContent();
         const content = signal ? await awaitAbortable(contentPromise, signal) : await contentPromise;
+        try {
+          const operatorPromise = page.getOperatorList();
+          const operatorList = signal ? await awaitAbortable(operatorPromise, signal) : await operatorPromise;
+          const imageOps = [
+            pdfjs.OPS.paintImageMaskXObject,
+            pdfjs.OPS.paintImageMaskXObjectRepeat,
+            pdfjs.OPS.paintImageXObject,
+            pdfjs.OPS.paintInlineImageXObject,
+          ].filter((value): value is number => typeof value === "number");
+          if (imageOps.some((value) => operatorList.fnArray.includes(value))) imagePages.push(i);
+        } catch {
+          // Some PDFs omit an operator list or use an unsupported image op;
+          // text/layout extraction remains useful and the page can still be
+          // opened through the visual reader.
+        }
         const items = content.items
           .filter((item) => typeof item.str === "string" && item.str.length > 0)
           .map((item) => ({
             text: item.str ?? "",
             x: Array.isArray(item.transform) ? Number(item.transform[4] ?? 0) : 0,
             y: Array.isArray(item.transform) ? Number(item.transform[5] ?? 0) : 0,
+            width: Number(item.width ?? 0),
+            height: Number(item.height ?? 0),
             hasEOL: item.hasEOL === true,
           }));
         // Keep a useful reading order for ordinary PDFs: group glyph runs by
-        // baseline, then order each line left-to-right. This is still a
-        // lightweight view; complex multi-column documents remain explicitly
-        // eligible for a later structure parser.
+        // baseline, then order each line left-to-right. A later column pass
+        // groups obvious left/right starts while preserving the coordinates.
         const rows: Array<{ y: number; items: typeof items }> = [];
         for (const item of items) {
           const row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= 2);
@@ -203,11 +234,56 @@ export function createWebFetch(deps: WebFetchDeps) {
           else rows.push({ y: item.y, items: [item] });
         }
         rows.sort((left, right) => right.y - left.y);
-        const text = rows.map((row) => row.items
-          .sort((left, right) => left.x - right.x)
-          .map((item) => item.text)
-          .join(" ")
-          .trim()).filter(Boolean).join("\n");
+        const lineRecords = rows.map((row) => {
+          const sorted = row.items.sort((left, right) => left.x - right.x);
+          const text = sorted.map((item) => item.text).join(" ").trim();
+          const x = sorted.reduce((value, item) => Math.min(value, item.x), Number.POSITIVE_INFINITY);
+          const right = sorted.reduce((value, item) => Math.max(value, item.x + item.width), 0);
+          const height = sorted.reduce((value, item) => Math.max(value, item.height), 0);
+          return {
+            text,
+            x: Number.isFinite(x) ? x : 0,
+            y: row.y,
+            width: Math.max(0, right - (Number.isFinite(x) ? x : 0)),
+            height,
+            segments: sorted.map((item) => ({ text: item.text, x: item.x, width: item.width })),
+          };
+        }).filter((line) => line.text.length > 0);
+        let text = lineRecords.map((line) => line.text).join("\n");
+        if (!text.trim() && ocr === true) {
+          if (!deps.pdfOcr) {
+            ocrUnavailable = true;
+          } else {
+            try {
+              const result = await deps.pdfOcr({ source: Buffer.from(data), page: i, ...(signal ? { signal } : {}) });
+              if (result.text.trim()) {
+                text = result.text.trim();
+                ocrPages.push(i);
+                ocrEngine ??= result.engine;
+              } else {
+                ocrUnavailable = true;
+              }
+            } catch (error) {
+              if (signal?.aborted) throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
+              ocrUnavailable = true;
+            }
+          }
+        }
+        const viewport = page.getViewport({ scale: 1 });
+        const starts = [...new Set(lineRecords.map((line) => Math.round(line.x / 12) * 12))].sort((a, b) => a - b);
+        const columns = starts.length > 1 && starts.at(-1)! - starts[0]! > viewport.width * 0.18 ? Math.min(starts.length, 3) : undefined;
+        const orderedLines = columns && columns >= 2
+          ? [...lineRecords.filter((line) => line.x < (starts[0]! + starts.at(-1)!) / 2),
+            ...lineRecords.filter((line) => line.x >= (starts[0]! + starts.at(-1)!) / 2)]
+          : lineRecords;
+        if (columns && columns >= 2 && !ocrPages.includes(i)) text = orderedLines.map((line) => line.text).join("\n");
+        layouts.push({
+          page: i,
+          width: viewport.width,
+          height: viewport.height,
+          ...(columns ? { columns } : {}),
+          lines: orderedLines.map((line, readingIndex) => ({ ...line, readingIndex })),
+        });
         pages.push(text);
       }
       // Pages join with "\n\n", which contributes exactly one empty line
@@ -219,7 +295,16 @@ export function createWebFetch(deps: WebFetchDeps) {
         cursor += count + 1;
         return range;
       });
-      return { text: pages.join("\n\n"), pages: ranges, pageCount: doc.numPages };
+      return {
+        text: pages.join("\n\n"),
+        pages: ranges,
+        pageCount: doc.numPages,
+        layouts,
+        ocrPages,
+        ...(ocrEngine ? { ocrEngine } : {}),
+        ocrUnavailable,
+        imagePages,
+      };
     } catch {
       if (signal?.aborted) {
         throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
@@ -235,11 +320,14 @@ export function createWebFetch(deps: WebFetchDeps) {
     markdown: string,
     representation: string,
     pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+    pdfLayouts?: NonNullable<WebSnapshotStructure["layouts"]>,
+    pdfImagePages?: number[],
   ): WebSnapshotStructure => {
     const lines = markdown.split("\n");
     const headings: WebSnapshotStructure["headings"] = [];
     const tables: NonNullable<WebSnapshotStructure["tables"]> = [];
     const figures: NonNullable<WebSnapshotStructure["figures"]> = [];
+    const formulas: NonNullable<WebSnapshotStructure["formulas"]> = [];
     const isMarkup = representation !== "pdf-text";
     if (isMarkup) {
       let index = 0;
@@ -266,14 +354,72 @@ export function createWebFetch(deps: WebFetchDeps) {
         index += 1;
       }
     }
+    if (!isMarkup && pdfLayouts && pdfPages) {
+      for (const layout of pdfLayouts) {
+        const pageRange = pdfPages.find((entry) => entry.page === layout.page);
+        if (!pageRange) continue;
+        const candidateLines = layout.lines.filter((line) => (line.segments?.length ?? 0) >= 2);
+        let run: typeof candidateLines = [];
+        const flushTable = (): void => {
+          if (run.length < 3) {
+            run = [];
+            return;
+          }
+          tables.push({
+            startLine: pageRange.startLine + run[0]!.readingIndex,
+            endLine: pageRange.startLine + run.at(-1)!.readingIndex,
+            confidence: "candidate",
+            rows: run.map((line) => ({
+              cells: (line.segments ?? []).map((cell) => ({ text: cell.text, x: cell.x, width: cell.width })),
+            })),
+          });
+          run = [];
+        };
+        for (const line of layout.lines) {
+          if ((line.segments?.length ?? 0) >= 2) {
+            if (run.length > 0 && line.readingIndex !== run.at(-1)!.readingIndex + 1) flushTable();
+            run.push(line);
+          } else {
+            flushTable();
+          }
+          if (/[=∑∫√]|\\frac\b|\\sum\b|\\int\b/.test(line.text)) {
+            formulas.push({
+              line: pageRange.startLine + line.readingIndex,
+              text: line.text,
+              confidence: "candidate",
+            });
+          }
+        }
+        flushTable();
+      }
+    }
+    if (!isMarkup && pdfImagePages && pdfPages) {
+      for (const page of pdfImagePages) {
+        const pageRange = pdfPages.find((entry) => entry.page === page);
+        const layout = pdfLayouts?.find((entry) => entry.page === page);
+        if (!pageRange) continue;
+        figures.push({
+          line: pageRange.startLine,
+          page,
+          title: `PDF image candidate on page ${page}`,
+          confidence: "candidate",
+          ...(layout ? { bbox: { x: 0, y: 0, width: layout.width, height: layout.height } } : {}),
+        });
+      }
+    }
     const unparsed: string[] = [];
     if (!pdfPages) unparsed.push("pages");
-    if (!isMarkup) unparsed.push("tables", "figures", "headings");
+    if (!isMarkup) {
+      if (tables.length === 0) unparsed.push("tables");
+      unparsed.push("figures", "headings", "ocr");
+    }
     return {
       ...(pdfPages && pdfPages.length ? { pages: pdfPages } : {}),
+      ...(pdfLayouts && pdfLayouts.length ? { layouts: pdfLayouts } : {}),
       ...(headings && headings.length ? { headings } : {}),
       ...(tables.length ? { tables } : {}),
       ...(figures.length ? { figures } : {}),
+      ...(formulas.length ? { formulas } : {}),
       ...(unparsed.length ? { unparsed } : {}),
     };
   };
@@ -328,8 +474,10 @@ export function createWebFetch(deps: WebFetchDeps) {
         return slice(heading.line, (next?.line ?? totalLines + 1) - 1);
       }
       case "element": {
-        const list = position.element === "table" ? structure?.tables : structure?.figures;
-        if (!list?.length) return unsupported(position.element === "table" ? "tables" : "figures");
+        const list = position.element === "table"
+          ? structure?.tables
+          : position.element === "figure" ? structure?.figures : structure?.formulas;
+        if (!list?.length) return unsupported(`${position.element}s`);
         const entry = list[position.index - 1];
         if (!entry) return notFound(`${position.element} ${position.index} outside 1..${list.length}`);
         const startLine = "startLine" in entry ? entry.startLine : entry.line;
@@ -359,6 +507,7 @@ export function createWebFetch(deps: WebFetchDeps) {
   const snapshotDerivation = (content: Extract<FetchResult, { status: "ok" }>): {
     pdf: boolean;
     pages?: Array<{ page: number; startLine: number; endLine: number }>;
+    layouts?: NonNullable<WebSnapshotStructure["layouts"]>;
     document?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>;
   } => {
     const document = content.snapshot?.document;
@@ -368,6 +517,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     return {
       pdf,
       ...(content.structure?.pages ? { pages: content.structure.pages } : {}),
+      ...(content.structure?.layouts ? { layouts: content.structure.layouts } : {}),
       ...(document ? { document } : {}),
     };
   };
@@ -377,11 +527,13 @@ export function createWebFetch(deps: WebFetchDeps) {
     ctx: FetchContext,
     pdf = false,
     pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+    pdfLayouts?: NonNullable<WebSnapshotStructure["layouts"]>,
+    pdfImagePages?: number[],
     pdfDocument?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>,
     sourceBytes?: Buffer,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
     const representation = representationFor(content.contentType, content.rendered, pdf);
-    const structure = content.structure ?? detectStructure(content.markdown, representation, pdfPages);
+    const structure = content.structure ?? detectStructure(content.markdown, representation, pdfPages, pdfLayouts, pdfImagePages);
     const withStructure = { ...content, structure };
     if (!deps.materials) return withStructure;
     try {
@@ -447,15 +599,17 @@ export function createWebFetch(deps: WebFetchDeps) {
   };
 
   const performFetch = async (url: string, ctx: FetchContext): Promise<FetchResult> => {
-    const cacheKey = `${url}:${ctx.render ?? false}`;
+    const cacheKey = `${url}:${ctx.render ?? false}:ocr=${ctx.ocr === true}`;
     const finishOk = async (
       content: Extract<FetchResult, { status: "ok" }>,
       pdf = false,
       pdfPages?: Array<{ page: number; startLine: number; endLine: number }>,
+      pdfLayouts?: NonNullable<WebSnapshotStructure["layouts"]>,
+      pdfImagePages?: number[],
       pdfDocument?: NonNullable<NonNullable<Extract<FetchResult, { status: "ok" }>["snapshot"]>["document"]>,
       sourceBytes?: Buffer,
     ): Promise<FetchResult> => {
-      const result = await attachSnapshot(content, ctx, pdf, pdfPages, pdfDocument, sourceBytes);
+      const result = await attachSnapshot(content, ctx, pdf, pdfPages, pdfLayouts, pdfImagePages, pdfDocument, sourceBytes);
       cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs, ...(sourceBytes ? { sourceBytes } : {}) });
       return result;
     };
@@ -586,12 +740,19 @@ export function createWebFetch(deps: WebFetchDeps) {
             reason: `PDF exceeds max size (${arrayBuffer.byteLength} > ${maxBytes})`,
           };
         }
-        const extracted = await extractPdfText(arrayBuffer, controller.signal);
+        const extracted = await extractPdfText(arrayBuffer, controller.signal, ctx.ocr);
         controller.signal.throwIfAborted();
         if (extracted === null) {
           finishRequest();
           return { status: "failed", url, reason: "PDF text extraction failed" };
         }
+        const ocr = ctx.ocr === true
+          ? extracted.ocrPages.length > 0
+            ? { status: "used" as const, ...(extracted.ocrEngine ? { engine: extracted.ocrEngine } : {}), pages: extracted.ocrPages }
+            : extracted.ocrUnavailable
+              ? { status: "unavailable" as const, pages: [] as number[], detail: "OCR adapter unavailable or returned no text" }
+              : { status: "not-needed" as const, pages: [] as number[] }
+          : undefined;
         const content: Extract<FetchResult, { status: "ok" }> = {
           status: "ok",
           url,
@@ -601,13 +762,27 @@ export function createWebFetch(deps: WebFetchDeps) {
           bytes: extracted.text.length,
           fromCache: false,
           rendered: false,
+          ...(ocr ? { ocr } : {}),
         };
         finishRequest();
         return finishOk(
           content,
           true,
           extracted.pages,
-          { kind: "pdf", pageCount: extracted.pageCount, parser: "pdf-text-layout-v1" },
+          extracted.layouts,
+          extracted.imagePages,
+          {
+            kind: "pdf",
+            pageCount: extracted.pageCount,
+            parser: "pdf-text-layout-v1",
+            ocr: ctx.ocr === true
+              ? extracted.ocrPages.length > 0
+                ? { status: "used" as const, ...(extracted.ocrEngine ? { engine: extracted.ocrEngine } : {}), pages: extracted.ocrPages }
+                : extracted.ocrUnavailable
+                  ? { status: "unavailable" as const, pages: [] as number[] }
+                  : { status: "not-needed" as const, pages: [] as number[] }
+              : { status: "not-requested" as const },
+          },
           Buffer.from(arrayBuffer),
         );
       }
@@ -845,7 +1020,7 @@ export function createWebFetch(deps: WebFetchDeps) {
 
     // Cached bytes are reusable only after this workspace and request have
     // independently passed their current authorization policies.
-    const cacheKey = `${url}:${ctx.render ?? false}`;
+    const cacheKey = `${url}:${ctx.render ?? false}:ocr=${request.ocr === true}`;
     if (!request.refresh) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -861,6 +1036,8 @@ export function createWebFetch(deps: WebFetchDeps) {
             { ...ctx, forceNewSnapshot: false },
             derivation.pdf,
             derivation.pages,
+            derivation.layouts,
+            undefined,
             derivation.document,
             cached.sourceBytes,
           );
@@ -877,7 +1054,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       // authority while reusing the content-addressed body.
       const derivation = snapshotDerivation(result);
       const rebound = rebindSnapshot
-        ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false }, derivation.pdf, derivation.pages, derivation.document, cache.get(cacheKey)?.sourceBytes)
+        ? await attachSnapshot(result, { ...ctx, forceNewSnapshot: false }, derivation.pdf, derivation.pages, derivation.layouts, undefined, derivation.document, cache.get(cacheKey)?.sourceBytes)
         : result;
       return positionSlice(await withReceipt(rebound, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true));
     };
@@ -885,7 +1062,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return applyView(await deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }), false));
+      return applyView(await deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true, ocr: request.ocr === true }), false));
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
@@ -893,7 +1070,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (!shared || shared.done || shared.controller.signal.aborted) {
       const controller = new AbortController();
       const entry: SharedFetch = { controller, waiters: 0, done: false, promise: Promise.resolve({ status: "failed", url, reason: "unset" }) };
-      entry.promise = performFetch(url, { ...ctx, signal: controller.signal })
+      entry.promise = performFetch(url, { ...ctx, signal: controller.signal, ocr: request.ocr === true })
         .finally(() => {
           entry.done = true;
           if (inflight.get(sharedKey) === entry) inflight.delete(sharedKey);

@@ -19,12 +19,13 @@ const WebFetchParams = Type.Object({
     width: Type.Number({ exclusiveMinimum: 0 }),
     height: Type.Number({ exclusiveMinimum: 0 }),
   }, { description: "Optional page-image crop in rendered pixels." })),
+  ocr: Type.Optional(Type.Boolean({ description: "For PDFs, request OCR on pages without a text layer." })),
   find: Type.Optional(Type.String({ minLength: 1, description: "Find literal text in the extracted page (case-insensitive), returning matching lines and nearby context." })),
   start_line: Type.Optional(Type.Integer({ minimum: 1, description: "First line of extracted Markdown to read, one-based." })),
   end_line: Type.Optional(Type.Integer({ minimum: 1, description: "Last line of extracted Markdown to read, inclusive." })),
   page: Type.Optional(Type.Integer({ minimum: 1, description: "Read one page of a paged document (e.g. PDF snapshot)." })),
   section: Type.Optional(Type.String({ description: "Read one section by heading title (substring match)." })),
-  element: Type.Optional(Type.Union([Type.Literal("table"), Type.Literal("figure")], { description: "Read a detected table or figure block." })),
+  element: Type.Optional(Type.Union([Type.Literal("table"), Type.Literal("figure"), Type.Literal("formula")], { description: "Read a detected table, figure, or formula candidate." })),
   element_index: Type.Optional(Type.Integer({ minimum: 1, description: "One-based index of the table/figure to read (default 1)." })),
   appendix: Type.Optional(Type.Boolean({ description: "Read the appendix/supplementary section." })),
 });
@@ -69,7 +70,8 @@ const formatOkFetchHeader = (result: Extract<FetchResult, { status: "ok" }>): st
     ? ` lines ${result.range.startLine}–${result.range.endLine} of ${result.range.totalLines}`
     : "";
   const page = result.pageImage ? ` page-image=${result.pageImage.page}` : "";
-  return `fetched ${result.finalUrl} (${result.bytes} bytes${result.rendered ? ", rendered" : ""}${result.fromCache ? ", cached" : ""}${receipt}${snapshot}${range}${page})`;
+  const ocr = result.ocr ? ` ocr=${result.ocr.status}${result.ocr.pages?.length ? `:${result.ocr.pages.join(",")}` : ""}` : "";
+  return `fetched ${result.finalUrl} (${result.bytes} bytes${result.rendered ? ", rendered" : ""}${result.fromCache ? ", cached" : ""}${receipt}${snapshot}${range}${page}${ocr})`;
 };
 
 function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: string; isError: boolean } {
@@ -154,6 +156,7 @@ export interface WebFetchToolOptions {
     finalUrl: string;
     markdown: string;
     prompt: string;
+    images?: Array<{ data: string; mimeType: string }>;
     signal: AbortSignal | undefined;
   }) => Promise<string>;
 }
@@ -175,6 +178,7 @@ export function createWebFetchTool(
       "For long pages, use find to locate relevant passages, then start_line/end_line to read more. Line numbers refer to extracted Markdown, not HTML source.",
       "For structured documents use page/section/element/appendix selectors; structure comes from the snapshot's own parser, so unsupported aspects are reported instead of guessed.",
       "For PDFs, start with extracted text and document metadata. When a figure, table, formula, or layout matters, call view=page-image with snapshot_id and page; the result includes the actual image for model vision.",
+      "Set ocr=true when a PDF page has no text layer. OCR is page-scoped and its engine/status is reported in the result; unavailable OCR never hides the original page.",
       "Cross-domain redirects return metadata — call webfetch again with the new URL if you trust it.",
       "Each successful fetch pins a snapshot; cite snapshot_id so later reads resolve the same content even after the page changes.",
       "JS-rendered SPAs need render: true (desktop only). Empty pages are reported, not treated as success.",
@@ -208,21 +212,32 @@ export function createWebFetchTool(
           ...(params.view ? { view: params.view } : {}),
           ...(params.page !== undefined ? { page: params.page } : {}),
           ...(params.region ? { region: params.region } : {}),
+          ...(params.ocr === true ? { ocr: true } : {}),
           ...(position ? { position } : {}),
         }, signal ? { signal } : undefined);
         const result = fetched.status === "ok"
           ? { ...fetched, markdown: selectPageText(fetched.markdown, params) }
           : fetched;
-        if (hasPrompt && readPage && result.status === "ok" && !result.pageImage) {
+        if (hasPrompt && readPage && result.status === "ok") {
           try {
             const answer = await readPage({
               finalUrl: result.finalUrl,
               markdown: result.markdown,
               prompt: params.prompt!.trim(),
+              ...(result.pageImage ? {
+                images: [{ data: result.pageImage.data, mimeType: result.pageImage.mimeType }],
+              } : {}),
               signal,
             });
             return {
-              content: [{ type: "text", text: `${formatOkFetchHeader(result)}\nanswer (from ${result.finalUrl}):\n${answer}` }],
+              content: [
+                { type: "text", text: `${formatOkFetchHeader(result)}\nanswer (from ${result.finalUrl}):\n${answer}` },
+                ...(result.pageImage ? [{
+                  type: "image" as const,
+                  data: result.pageImage.data,
+                  mimeType: result.pageImage.mimeType,
+                }] : []),
+              ],
               details: {
                 kind: "webfetch",
                 status: "ok",
@@ -231,6 +246,7 @@ export function createWebFetchTool(
                   url: result.finalUrl,
                   title: result.title ?? result.finalUrl,
                   ...(result.snapshot ? { snapshotId: result.snapshot.snapshotId, contentHash: result.snapshot.contentHash } : {}),
+                  ...(result.snapshot?.document ? { document: result.snapshot.document } : {}),
                 }],
                 ...(result.receipt ? { receipt: result.receipt } : {}),
               },
@@ -260,6 +276,7 @@ export function createWebFetchTool(
                   url: result.finalUrl,
                   title: result.title ?? result.finalUrl,
                   ...(result.snapshot ? { snapshotId: result.snapshot.snapshotId, contentHash: result.snapshot.contentHash } : {}),
+                  ...(result.snapshot?.document ? { document: result.snapshot.document } : {}),
                 }],
                 ...(result.receipt ? { receipt: result.receipt } : {}),
               }

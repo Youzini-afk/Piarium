@@ -1653,7 +1653,25 @@ foreign receiptId 不授权。同 URL 在飞读取按
 5. 实施分为 L3-P0 原件/页面视觉、L3-P1 版面/OCR/结构适配器、L3-P2 表格/公式/图表增强与阅读器交接；首个解析器与真实论文样本质量
    在实施后记录，不对解析准确率作先验保证。
 
-状态：设计已接受；L3-P0 已实施，L3-P1/P2 仍是后续结构阅读切片。
+状态：设计已接受；L3-P0–P2 基础纵切已实施，复杂样本质量与更完整阅读器仍需观察和迭代。
+
+### D-324 · 2026-09-24 · L3-P1/P2 结构候选、OCR 与视觉交接
+
+类型：实现收口（D-322 P1/P2 基础纵切）
+
+决定：在同一 PDF 快照内保存页面尺寸、文本行/段坐标和明显双栏顺序；程序只把重复列位置形成的表格、数学符号形成的公式、
+PDF image operator 对应的图像页标为候选，并携带原页行号/坐标与 `candidate` 置信度。`element=formula` 与既有 table/figure 位置
+共用快照读取，不将启发式候选改写成论文事实。`webfetch ocr=true` 只对无文本层页面调用可替换 Tesseract adapter；OCR 结果写回该页
+再计算全文页范围，adapter 缺失/失败保留原件、状态和页面视觉入口。
+
+视觉交接沿同一 `webfetch`：`page-image` 可以带 prompt，把真实 PNG 同时交给配置的 reader model；结果正文和图片仍分开记录。新增
+`/api/harness/sessions/:sessionId/materials/:snapshotId/page` 受认证页面路由，来源卡可打开固定快照页图，路由再次经过当前 session 的
+材料 authority 和域策略。
+
+验证：PDF/material/web-fetch 聚焦套件 34 项、Pi webfetch 11 项、PDF 页面路由 2 项、protocol/application-host/pi-host/ui 类型检查通过；
+真实 Tesseract、复杂论文解析准确率、跨平台 Poppler 与完整桌面阅读器交互未实测，不作质量收益结论。
+
+状态：已实施；未推送（待主代理验收）。
 
 ### D-323 · 2026-09-23 · L3-P0 原件保存与页面视觉读取
 

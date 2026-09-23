@@ -11,6 +11,7 @@ export interface WebSource {
   /** Fixed content snapshot id when the Host pinned the fetched body. */
   snapshotId?: string;
   contentHash?: string;
+  document?: { kind: 'pdf'; pageCount: number };
   /** Scholarly record identity for research_search entries. */
   provider?: string;
   paperId?: string;
