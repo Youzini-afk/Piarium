@@ -1632,7 +1632,7 @@ foreign receiptId 不授权。同 URL 在飞读取按
 4. share 幂等——相同发送方/目标/内容集合的活 grant 复用；grant 随发送方线程删除与工作区对账回收。
 5. 持久化集合对工作区可读但写权限仍限属主；grant 只放开读，不放开写。
 
-验证：material-collections 套件 14/14（含 grant 授权、跨根拒绝、不可读快照拒绝、幂等、grant 随线程释放、整集共享后可列可搜不可写）；application-host 与 pi-host typecheck、protocol build 通过。真实线程间端到端（实际 dispatch→send→read 链）以既有 thread-runtime 套件为准，未新增桌面 E2E。
+验证：material-collections 套件 9/9（含 grant 授权、跨根拒绝、不可读快照拒绝、幂等、grant 随线程释放、整集共享后可列可搜不可写）；application-host 与 pi-host typecheck、protocol build 通过。真实线程间端到端（实际 dispatch→send→read 链）以既有 thread-runtime 套件为准，未新增桌面 E2E。
 
 状态：已实施，未推送（待主代理验收）。
 [agent-harness-status.md](../agent-harness-status.md)。
