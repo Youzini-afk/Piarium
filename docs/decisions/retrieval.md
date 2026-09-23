@@ -1574,5 +1574,13 @@ Semantic Scholar 的公开元数据和开放获取入口，支持搜索、详情
 补充边界（2026-09-23）：检索分支负责材料、原文位置、冲突与未知，不要求中等模型在每轮形成当前判断或“改变判断的条件”。
 主线或明确发起的高能力综合任务才把材料汇总为暂时判断；程序不把检索解释自动写入主线状态，也不因新材料到达自动改写已有判断。
 
-状态：L0 与 L2 首个学术发现纵切已 wired；L1、L2 其余及 L3–L6 仍待实施。无真实付费渠道质量/延迟对比，不预设效果优势，
+实施进展（2026-09-23，L1）：`web.search` 扩展为批量契约（query/objective/queries/urls/cursor），每项独立状态
+（ok/empty/unavailable/failed/cancelled/partial/denied/unsupported），分页 cursor 由声明能力的 provider 铸造并绑定
+provider 身份与筛选；`web.fetch` 新增 `snapshotId` 回读与 `refresh`，成功正文固定为 `web.snapshot` 内核记录
+（内容 hash 去重、parser 表示、获取时间），行/find 位置绑定快照内容。快照回收沿 receipt 生命周期且被存活记录引用时保留；
+跨线程复用重检接收方 scope 并为调用者另铸 receipt，foreign receiptId 不授权。同 URL 在飞读取按
+（url/render/策略）共享，逐等待者取消。URL 条目经 Host 真实 web-fetch 路径执行。UI 来源卡展示 snapshotId/hash。
+不设固定缓存天数/数量硬配额，不新建正文 authority。
+
+状态：L0、L1 与 L2 首个学术发现纵切已 wired；L2 其余及 L3–L6 仍待实施。无真实付费渠道质量/延迟对比，不预设效果优势，
 也不将此作为代码接线的门槛。

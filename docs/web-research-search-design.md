@@ -1,6 +1,6 @@
 # Web 与科研检索：连续探索、原文阅读与协作复用
 
-Status: accepted design / implementation in progress (D-315, Stage L); L0 and the first L2 scholarly discovery slice are wired, with remaining L1–L6 work tracked in status
+Status: accepted design / implementation in progress (D-315, Stage L); L0, L1 continuous Web search/material reuse, and the first L2 scholarly discovery slice are wired, with remaining L2–L6 work tracked in status
 
 Last updated: 2026-09-23
 

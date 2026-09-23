@@ -18,10 +18,18 @@ Last updated: 2026-09-23
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L2 完成首个学术发现纵切；L1/L2 其余及 L3–L6 待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 完成首个学术发现纵切；L2 其余及 L3–L6 待实施。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
+L1 已接线（wired）：`web.search` 接受 `query`/`objective`/`queries[]`/`urls[]`/`cursor` 批量条目，每项独立返回
+`ok`/`empty`/`unavailable`/`failed`/`cancelled`/`partial`/`denied`/`unsupported`；分页 cursor 由 provider 实际能力铸造
+（Brave offset、SearXNG pageno，其余 provider 不铸 cursor），游标绑定 provider 身份与原始筛选。`web.fetch` 支持
+`snapshotId` 回读与 `refresh`；成功正文固定为 `web.snapshot` 内核记录（内容 hash 去重、解析方式、获取时间、最终 URL），
+行区间/find 位置绑定该快照内容。快照沿 receipt 同一套生命周期回收（Run 结算/线程删除/会话 drop/工作区 reconcile），
+被其他存活记录引用（晋升 evidence、receipt、来源登记）时保留；跨线程复用经接收方自身 scope 重读并为调用者另铸 receipt，
+foreign receiptId 不授予读取权。同一 URL 的在飞读取按（url/render/策略）合并共享，单个等待者取消不影响其他等待者，
+最后退出者中止底层请求。UI 来源列表展示 snapshotId/内容 hash。
 新增 `research_search` 工具和 Host `research.search` 服务，默认可查询 OpenAlex，也可选择 Semantic Scholar，支持论文元数据、
 摘要/作者/DOI/引用数、开放获取入口、详情查询与分页游标。返回明确区分 `metadata-only`、`open-location`、`empty`、`failed` 和
 `unavailable`；目前未把关系展开、全文结构解析或材料持久化集合宣称为已完成。
