@@ -12,7 +12,7 @@ describe("research_search tool", () => {
       action: "paper",
       provider: "semantic-scholar",
       paper_id: "CorpusId:123",
-    } as never, undefined, undefined, undefined);
+    } as never, undefined, undefined, {} as never);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(emitted[0]?.method, "research.search");
     assert.deepEqual(emitted[0]?.params, { action: "paper", provider: "semantic-scholar", paperId: "CorpusId:123" });

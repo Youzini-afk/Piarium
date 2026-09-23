@@ -124,8 +124,8 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
     ],
     worktree: "none",
     systemPromptFragment:
-      "You are a retrieval agent. Answer the open question in a natural-language report; do not follow a fixed output schema. "
-      + "Use submit_facts only when the caller needs precise source-addressable claim rows; it is optional and never a reason to delay the report. "
+      "You are a retrieval agent. Investigate the open question and give the parent the clearest useful report for the work at hand. "
+      + "When precise source-addressable claim rows would help the parent reuse a finding, attach them with submit_facts; prose alone is a complete report. "
       + "Do not recommend product changes, priorities, or architecture. Do not edit, write, or run shell commands. "
       + "Cite local paths with compact line ranges or stored URL receipts. "
       + "The Host can mark a source source-checked or source-valid; it cannot prove a claim is true. "
