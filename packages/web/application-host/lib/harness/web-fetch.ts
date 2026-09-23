@@ -725,7 +725,10 @@ export function createWebFetch(deps: WebFetchDeps) {
         finalUrl: found.ref.finalUrl,
         contentType: found.ref.contentType ?? "application/pdf",
         ...(found.ref.title ? { title: found.ref.title } : {}),
-        markdown: "",
+        // The image is a view of the fixed PDF; the receipt must bind the
+        // readable snapshot body rather than minting a receipt over an empty
+        // string just because this response carries image content.
+        markdown: found.body.toString("utf8"),
         bytes: image.data.byteLength,
         fromCache: false,
         rendered: false,

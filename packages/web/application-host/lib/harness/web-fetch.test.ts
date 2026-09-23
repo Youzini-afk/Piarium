@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "node:crypto";
 import { createWebFetch } from "./web-fetch.js";
 import type { SsrfPolicy, DomainPolicy } from "./web-fetch.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
@@ -398,12 +399,14 @@ describe("web-fetch service", () => {
       domainPolicy: noDomainPolicy,
       materials,
       pdfPageRenderer: renderer,
+      persistReceipt,
     });
     const result = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 2 }, fetchContext);
     expect(result.status).toBe("ok");
     if (result.status === "ok") {
       expect(result.pageImage).toMatchObject({ page: 2, mimeType: "image/png", data: Buffer.from("png-page-2").toString("base64") });
       expect(result.snapshot?.snapshotId).toBe(ref.snapshotId);
+      expect(result.receipt?.contentHash).toBe(`sha256-${createHash("sha256").update("page text").digest("hex")}`);
     }
     expect(renderer).toHaveBeenCalledTimes(1);
 
