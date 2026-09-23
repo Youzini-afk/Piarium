@@ -10,8 +10,11 @@ const MaterialsParams = Type.Object({
     Type.Literal("remove"),
     Type.Literal("list"),
     Type.Literal("search"),
+    Type.Literal("share"),
   ]),
   collection_id: Type.Optional(Type.String()),
+  snapshot_id: Type.Optional(Type.String({ description: "share: a snapshot the caller can read, without a collection." })),
+  target_thread_id: Type.Optional(Type.String({ description: "share: a related thread (parent/child/sibling) that may read the material under its own authority." })),
   name: Type.Optional(Type.String()),
   persist: Type.Optional(Type.Boolean({ description: "Keep the collection after this thread settles." })),
   member: Type.Optional(Type.Object({
@@ -77,6 +80,7 @@ export function createMaterialsTool(bridge: HostServicesBridge): ToolDefinition 
       "action=search scopes the keyword query to the collection's readable member bodies — it never scans other material.",
       "Unreadable members are reported separately; a member reference does not grant content access.",
       "Adding a URL fetches and pins it through the normal web.fetch authority path first.",
+      "action=share grants a related thread read access to a collection or snapshot; the receiver still reads under its own authority and receipts stay per-Run.",
     ],
     parameters: MaterialsParams,
     executionMode: "parallel",
@@ -104,6 +108,8 @@ export function createMaterialsTool(bridge: HostServicesBridge): ToolDefinition 
           ...(member ? { member } : {}),
           ...(params.member_id ? { memberId: params.member_id } : {}),
           ...(params.query ? { query: params.query } : {}),
+          ...(params.target_thread_id ? { targetThreadId: params.target_thread_id } : {}),
+          ...(params.snapshot_id ? { snapshotId: params.snapshot_id } : {}),
         }, signal ? { signal } : undefined) as MaterialsCollectionResult;
         if (result.status !== "ok") {
           return fail(result.status, result.message ?? "no further detail", result.status === "failed");
@@ -136,6 +142,22 @@ export function createMaterialsTool(bridge: HostServicesBridge): ToolDefinition 
               ...(params.collection_id ? { collectionId: params.collection_id } : {}),
               hits,
               ...(result.unreadable ? { unreadable: result.unreadable } : {}),
+            } satisfies MaterialsDetails,
+          };
+        }
+        if (params.action === "share") {
+          const grant = result.grant;
+          if (!grant) return fail("failed", "missing grant in result");
+          return {
+            content: [{
+              type: "text",
+              text: `Shared with thread ${grant.toThreadId}: grant ${grant.grantId} (${grant.snapshotIds.length} snapshot(s), ${grant.collectionIds.length} collection(s)). The receiver reads under its own authority.`,
+            }],
+            details: {
+              kind: "materials",
+              status: result.status,
+              action: params.action,
+              members: [{ grantId: grant.grantId, toThreadId: grant.toThreadId }],
             } satisfies MaterialsDetails,
           };
         }

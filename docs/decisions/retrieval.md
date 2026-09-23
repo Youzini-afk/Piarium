@@ -1619,3 +1619,20 @@ foreign receiptId 不授权。同 URL 在飞读取按
 
 状态：已实施，未推送（待主代理验收）。
 [agent-harness-status.md](agent-harness-status.md)。
+
+### D-318 · 2026-09-23 · L4 跨线程材料授权
+
+背景：snapshotId 与 foreign receiptId 都不能是 bearer token；跨线程材料复用需要显式授权记录，同时不能把判断/摘要随材料自动继承。
+
+决定：
+
+1. retrieval preset 允许表补入 `send`/`read_thread`/`wait`/`follow_up`，通信继续走 `thread.send`/`thread.read` 的同根关系校验与冻结工具权限，不另建协作 runtime。
+2. 新增 `material.grant` 内核记录：`materials.collections` 的 `share` 动作由发送方线程向同根关系内目标线程授权（父子/兄弟，同 thread.send 可达性），覆盖 collectionId 或 snapshotId 集合。
+3. 发送方必须自身可读所授权材料；接收方经 `web-materials.read` 的 grant 回退以自身 session/thread scope 回读并另铸 receipt，不继承发送方权威。
+4. share 幂等——相同发送方/目标/内容集合的活 grant 复用；grant 随发送方线程删除与工作区对账回收。
+5. 持久化集合对工作区可读但写权限仍限属主；grant 只放开读，不放开写。
+
+验证：material-collections 套件 14/14（含 grant 授权、跨根拒绝、不可读快照拒绝、幂等、grant 随线程释放、整集共享后可列可搜不可写）；application-host 与 pi-host typecheck、protocol build 通过。真实线程间端到端（实际 dispatch→send→read 链）以既有 thread-runtime 套件为准，未新增桌面 E2E。
+
+状态：已实施，未推送（待主代理验收）。
+[agent-harness-status.md](agent-harness-status.md)。

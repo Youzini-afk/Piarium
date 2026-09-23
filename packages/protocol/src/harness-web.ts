@@ -124,13 +124,29 @@ export interface MaterialCollectionSearchHit {
 }
 
 export interface MaterialsCollectionParams {
-  action: "create" | "add" | "remove" | "list" | "search";
+  action: "create" | "add" | "remove" | "list" | "search" | "share";
   collectionId?: string;
   name?: string;
   persist?: boolean;
   member?: MaterialCollectionMemberInput;
   memberId?: string;
   query?: string;
+  /** `share`: the related thread that may read the shared material under its
+   * own authority. The grant never transfers the sender's receipt or scope. */
+  targetThreadId?: string;
+  /** `share`: a single snapshot the sender can read, without a collection. */
+  snapshotId?: string;
+}
+
+/** An explicit material grant: one thread authorizes another related thread
+ * to read named snapshots/collections under the receiver's own authority. */
+export interface MaterialGrant {
+  grantId: string;
+  fromThreadId: string;
+  toThreadId: string;
+  snapshotIds: string[];
+  collectionIds: string[];
+  createdAt: number;
 }
 
 export interface MaterialsCollectionResult {
@@ -141,6 +157,7 @@ export interface MaterialsCollectionResult {
   hits?: MaterialCollectionSearchHit[];
   /** Members whose body could not be read under the caller's authority. */
   unreadable?: string[];
+  grant?: MaterialGrant;
   message?: string;
 }
 

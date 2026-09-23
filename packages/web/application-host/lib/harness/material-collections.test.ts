@@ -211,3 +211,93 @@ describe("material collections", () => {
     expect(record?.references.some((reference) => reference.objectHash === snap.contentHash)).toBe(true);
   });
 });
+
+
+describe("material grants (L4)", () => {
+  const serviceFor = (opened: ReturnType<typeof openStore>, related = true) =>
+    createMaterialCollections(opened.workingStates, {
+      materials: opened.materials,
+      resolveThreadId: async (sessionId) => ({ s1: "t1", s2: "t2" } as Record<string, string>)[sessionId],
+      threadsRelated: async () => related,
+    });
+
+  const snapFor = (opened: ReturnType<typeof openStore>, threadId = "t1") =>
+    opened.materials.put("ws", {
+      sourceUrl: "https://a.test/", finalUrl: "https://a.test/", representation: "raw-text",
+    }, Buffer.from("grant body"), { owningWorkspaceId: "ws", sessionId: "s1", threadId });
+
+  it("grants a related thread read access under its own authority", async () => {
+    const opened = openStore();
+    const service = serviceFor(opened);
+    const snap = await snapFor(opened);
+
+    const shared = await call(service, { action: "share", snapshotId: snap.snapshotId, targetThreadId: "t2" }, "s1");
+    expect(shared.status).toBe("ok");
+    expect(shared.grant).toMatchObject({ fromThreadId: "t1", toThreadId: "t2", snapshotIds: [snap.snapshotId] });
+
+    // Receiver reads the same body under its own authority — no receipt transfer.
+    const read = await opened.materials.read("ws", snap.snapshotId, {
+      owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
+    });
+    expect(read?.body.toString()).toBe("grant body");
+    // A thread outside the grant still cannot read it.
+    expect(await opened.materials.read("ws", snap.snapshotId, {
+      owningWorkspaceId: "ws", sessionId: "s3", threadId: "t3",
+    })).toBeNull();
+  });
+
+  it("denies grants to unrelated threads and over unreadable snapshots", async () => {
+    const opened = openStore();
+    const unrelated = serviceFor(opened, false);
+    const snap = await snapFor(opened);
+    const denied = await call(unrelated, { action: "share", snapshotId: snap.snapshotId, targetThreadId: "t2" }, "s1");
+    expect(denied.status).toBe("denied");
+
+    // Sender cannot read the snapshot itself → no grant.
+    const foreignSnap = await opened.materials.put("ws", {
+      sourceUrl: "https://f.test/", finalUrl: "https://f.test/", representation: "raw-text",
+    }, Buffer.from("foreign"), { owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2" });
+    const service = serviceFor(opened);
+    const noRead = await call(service, { action: "share", snapshotId: foreignSnap.snapshotId, targetThreadId: "t2" }, "s1");
+    expect(noRead.status).toBe("denied");
+  });
+
+  it("share is idempotent and the grant dies with the granting thread", async () => {
+    const opened = openStore();
+    const service = serviceFor(opened);
+    const snap = await snapFor(opened);
+
+    const first = await call(service, { action: "share", snapshotId: snap.snapshotId, targetThreadId: "t2" }, "s1");
+    const second = await call(service, { action: "share", snapshotId: snap.snapshotId, targetThreadId: "t2" }, "s1");
+    expect(second.grant?.grantId).toBe(first.grant?.grantId);
+    expect([...opened.records.values()].filter((r) => r.recordType === "material.grant")).toHaveLength(1);
+
+    await opened.retrieval.releaseThreadEvidence("ws", "t1");
+    expect(await opened.materials.read("ws", snap.snapshotId, {
+      owningWorkspaceId: "ws", sessionId: "s2", threadId: "t2",
+    })).toBeNull();
+  });
+
+  it("shares a whole collection so the receiver can list and search it", async () => {
+    const opened = openStore();
+    const service = serviceFor(opened);
+    const snap = await snapFor(opened);
+    const created = await call(service, { action: "create", name: "shared-set" }, "s1");
+    const collectionId = created.collection!.collectionId;
+    await call(service, { action: "add", collectionId, member: { kind: "snapshot", snapshotId: snap.snapshotId } }, "s1");
+
+    const shared = await call(service, { action: "share", collectionId, targetThreadId: "t2" }, "s1");
+    expect(shared.status).toBe("ok");
+
+    const listed = await call(service, { action: "list" }, "s2");
+    expect(listed.collections).toEqual([expect.objectContaining({ collectionId })]);
+    const searched = await call(service, { action: "search", collectionId, query: "grant" }, "s2");
+    expect(searched.status).toBe("ok");
+    expect(searched.hits?.length).toBe(1);
+    // The receiver still cannot mutate the sender's collection.
+    const deniedWrite = await call(service, {
+      action: "add", collectionId, member: { kind: "paper", paper: { provider: "openalex", id: "W1" } },
+    }, "s2");
+    expect(deniedWrite.status).toBe("denied");
+  });
+});

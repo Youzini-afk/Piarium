@@ -23,6 +23,7 @@ import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { createWorkspaceOpSerializer, kernelContext } from "./retrieval-artifacts.js";
 
 export const WEB_SNAPSHOT_RECORD_TYPE = "web.snapshot";
+const MATERIAL_GRANT_RECORD_TYPE = "material.grant";
 
 export interface WebSnapshotDraft {
   sourceUrl: string;
@@ -162,9 +163,25 @@ export const createWebMaterialStore = (
           : record.sessionId !== authority.sessionId || authority.threadId !== undefined)) {
         // The snapshot id is intentionally not a workspace-wide bearer token.
         // A caller may reread it from the same Thread across sessions/Runs;
-        // another thread must receive a material through an explicit owner
-        // path instead.
-        return null;
+        // another thread needs an explicit `material.grant` record issued by
+        // the owning thread (D-315 L4). A foreign receipt id never applies.
+        const granted = authority.threadId !== undefined && await (async () => {
+          for (const candidate of await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE })) {
+            if (candidate.state === "released") continue;
+            try {
+              const grant = JSON.parse(candidate.payloadJson) as {
+                toThreadId?: unknown; fromThreadId?: unknown; snapshotIds?: unknown;
+              };
+              if (grant.toThreadId !== authority.threadId) continue;
+              if (record.threadId !== undefined && grant.fromThreadId !== record.threadId) continue;
+              if (Array.isArray(grant.snapshotIds) && grant.snapshotIds.includes(snapshotId)) return true;
+            } catch {
+              // A malformed grant grants nothing.
+            }
+          }
+          return false;
+        })();
+        if (!granted) return null;
       }
       const ref = parseSnapshotPayload(record.payloadJson);
       if (!ref || ref.snapshotId !== snapshotId) return null;

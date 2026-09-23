@@ -1753,6 +1753,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const binding = await threadRegistry.getSessionBinding(sessionId);
       return binding?.threadId;
     },
+    // Same reachability rule as thread.send: parent, child, or same-parent
+    // sibling inside the caller's root-task family.
+    threadsRelated: async (fromThreadId, toThreadId, workspaceId) => {
+      const from = await threadRegistry.getThreadById(workspaceId, fromThreadId);
+      const to = await threadRegistry.getThreadById(workspaceId, toThreadId);
+      if (!from || !to) return false;
+      return (to.parent.kind === "thread" && to.parent.id === from.id)
+        || (from.parent.kind === "thread" && from.parent.id === to.id)
+        || (to.parent.kind === from.parent.kind && to.parent.id === from.parent.id);
+    },
   });
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;

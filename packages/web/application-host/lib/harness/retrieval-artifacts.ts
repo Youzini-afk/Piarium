@@ -676,9 +676,11 @@ export const createRetrievalArtifactAccess = (
       for (const record of await context.records.list({})) {
         const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
         const isCollection = record.recordType === MATERIAL_COLLECTION_RECORD_TYPE;
+        const isGrant = record.recordType === "material.grant";
         if (!(
           isSnapshot
           || isCollection
+          || isGrant
           || record.recordType.startsWith("retrieval.evidence.")
           || record.recordType === "retrieval.artifact"
           || record.recordType === "retrieval.receipt"
@@ -773,6 +775,12 @@ export const createRetrievalArtifactAccess = (
           if (!persistedCollection(record) && record.threadId && !knownThreads.has(record.threadId)) {
             plainOrphans.push(record);
           }
+          continue;
+        }
+        if (record.recordType === "material.grant") {
+          // A grant dies with the granting thread — the receiver keeps only
+          // what it separately pinned or was handed a durable reference to.
+          if (record.threadId && !knownThreads.has(record.threadId)) plainOrphans.push(record);
           continue;
         }
         if (record.recordType !== "retrieval.artifact" && record.recordType !== "retrieval.receipt" && !isSnapshot) continue;

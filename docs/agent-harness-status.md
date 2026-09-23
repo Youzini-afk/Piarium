@@ -18,7 +18,7 @@ Last updated: 2026-09-23
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线；L4–L6 待实施。**
+**D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0 已接线，L1 连续 Web 搜索/固定快照/材料复用已接线，L2 论文发现与关系展开已接线，L3 材料集合与结构阅读已接线，L4 跨线程材料授权已接线；L5–L6 待实施。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。
 通用 `retrieval` 现在允许自然语言报告作为正常结果，`submit_facts` 只在需要结构化、Host 核验的事实时使用；
 没有结构化事实时不会覆盖有效 prose，也不会把 prose 标成 source-checked。科研 `investigation` 与普通派发仍复用同一套线程运行时。
@@ -44,6 +44,11 @@ L3 已接线（wired）：`materials.collections` Host 服务（`read.web` 能�
 `page`/`section`/`element`(table|figure)/`appendix` 选择器与 `lines` 区间，快照 `structure` 记录 headings/tables/figures/pages
 （PDF 页码经 pdf-text 页边界映射），`structure-unsupported`/`position-not-found` 与 `failed`/`snapshot-missing` 分态表达；
 retrieval preset 允许表加入 `materials`。`harnessMaterials` 客户端能力贯通 broker→host-controller→session-host→select-tools。
+L4 已接线（wired）：retrieval preset 允许表补入 `send`/`read_thread`/`wait`/`follow_up`，通信仍走 `thread.send`/`thread.read`
+的同根关系与冻结权限校验。`materials.collections` 新增 `share` 动作产生 `material.grant` 内核记录（发送方线程 → 目标线程，
+覆盖 collectionId 或 snapshotId 集合），要求发送方自身可读目标材料且两线程满足 thread.send 的同根关系（父子/兄弟）；
+接收方经 `web-materials.read` 的 grant 回退以自身 scope 回读，foreign receiptId 与无授权 snapshotId 仍不授权；
+share 幂等（同内容活 grant 复用），grant 随发送方线程删除/对账回收；持久化集合继续对工作区可读但不放开写权限。
 目标是连续搜索/原文阅读与复用、学术身份/关系/段落/图表、线程协作及 Web/学术快速决策消费者。
 来源核对不证明 claim 为真，跨线程共享正文不等于共享 Run 回执。未做真实渠道质量/延迟对比，不宣称相关收益。
 

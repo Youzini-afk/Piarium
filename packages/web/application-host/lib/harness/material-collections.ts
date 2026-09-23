@@ -19,6 +19,7 @@ import type {
   MaterialCollectionMemberInput,
   MaterialCollectionSearchHit,
   MaterialCollectionSummary,
+  MaterialGrant,
   MaterialsCollectionParams,
   MaterialsCollectionResult,
   RetrievalReceiptAuthority,
@@ -31,6 +32,7 @@ import { createWorkspaceOpSerializer, kernelContext, type KernelRecordContext } 
 import type { WebMaterialStore } from "./web-materials.js";
 
 export const MATERIAL_COLLECTION_RECORD_TYPE = "material.collection";
+export const MATERIAL_GRANT_RECORD_TYPE = "material.grant";
 
 type Authority = Pick<RetrievalReceiptAuthority, "owningWorkspaceId" | "sessionId" | "threadId">;
 
@@ -54,6 +56,8 @@ export interface MaterialCollectionsDeps {
   }>;
   /** Resolves the session's bound thread so collections carry thread ownership. */
   resolveThreadId?: (sessionId: string) => Promise<string | undefined>;
+  /** Root-task relationship check for cross-thread grants (parent/child/sibling). */
+  threadsRelated?: (fromThreadId: string, toThreadId: string, workspaceId: string) => Promise<boolean>;
   now?: () => number;
   serializer?: ReturnType<typeof createWorkspaceOpSerializer>;
 }
@@ -70,14 +74,28 @@ const parsePayload = (payloadJson: string): CollectionPayload | null => {
   }
 };
 
-/** A caller may read: its own thread/session collections, or persisted ones. */
+const parseGrant = (payloadJson: string): MaterialGrant | null => {
+  try {
+    const value = JSON.parse(payloadJson) as MaterialGrant;
+    if (!value || typeof value.grantId !== "string" || typeof value.toThreadId !== "string"
+      || !Array.isArray(value.snapshotIds) || !Array.isArray(value.collectionIds)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+};
+
+/** A caller may read: its own thread/session collections, persisted ones, or
+ * collections covered by a live grant targeting the caller's thread. */
 const collectionVisibleTo = (
   payload: CollectionPayload,
   record: { sessionId?: string; threadId?: string },
   authority: Authority | undefined,
+  grantedCollectionIds?: ReadonlySet<string>,
 ): boolean => {
   if (payload.persisted) return true;
   if (!authority) return false;
+  if (grantedCollectionIds?.has(payload.collectionId) && authority.threadId !== undefined) return true;
   if (record.threadId !== undefined) return record.threadId === authority.threadId;
   return record.sessionId === authority.sessionId && authority.threadId === undefined;
 };
@@ -107,6 +125,26 @@ export const createMaterialCollections = (
         owningWorkspaceId: workspaceId,
         sessionId: ctx.sessionId,
         ...(threadId ? { threadId } : {}),
+      };
+
+      /** Snapshot/collection ids a live grant makes readable for this caller's
+       * thread. Grants authorize reads under the receiver's own authority —
+       * they never carry over the sender's receipt or scope. */
+      const grantsFor = async (context: KernelRecordContext): Promise<{
+        snapshotIds: Set<string>;
+        collectionIds: Set<string>;
+      }> => {
+        const snapshotIds = new Set<string>();
+        const collectionIds = new Set<string>();
+        if (!authority.threadId) return { snapshotIds, collectionIds };
+        for (const record of await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE })) {
+          if (record.state === "released") continue;
+          const grant = parseGrant(record.payloadJson);
+          if (!grant || grant.toThreadId !== authority.threadId) continue;
+          for (const id of grant.snapshotIds) snapshotIds.add(id);
+          for (const id of grant.collectionIds) collectionIds.add(id);
+        }
+        return { snapshotIds, collectionIds };
       };
 
       const readBodyHash = async (snapshotId: string): Promise<WebSnapshotRef | null> => {
@@ -192,11 +230,12 @@ export const createMaterialCollections = (
               return { status: "ok", collection: payload satisfies MaterialCollection };
             }
             case "list": {
+              const grants = await grantsFor(context);
               const collections: MaterialCollectionSummary[] = [];
               for (const record of await context.records.list({ recordType: MATERIAL_COLLECTION_RECORD_TYPE })) {
                 if (record.state === "released") continue;
                 const payload = parsePayload(record.payloadJson);
-                if (!payload || !collectionVisibleTo(payload, record, authority)) continue;
+                if (!payload || !collectionVisibleTo(payload, record, authority, grants.collectionIds)) continue;
                 collections.push({
                   collectionId: payload.collectionId,
                   ...(payload.name ? { name: payload.name } : {}),
@@ -281,7 +320,8 @@ export const createMaterialCollections = (
                 throw new HarnessServiceError("invalid-params", "collection search requires collectionId and query");
               }
               const loaded = await loadCollection(context, collectionId);
-              if (!loaded || !collectionVisibleTo(loaded.payload, loaded.record, authority)) {
+              const grants = await grantsFor(context);
+              if (!loaded || !collectionVisibleTo(loaded.payload, loaded.record, authority, grants.collectionIds)) {
                 return { status: "not-found", message: `collection not found: ${collectionId}` };
               }
               // The collection boundary applies first: only member bodies are
@@ -314,6 +354,79 @@ export const createMaterialCollections = (
                 hits,
                 ...(unreadable.length ? { unreadable } : {}),
               };
+            }
+            case "share": {
+              const targetThreadId = params.targetThreadId?.trim();
+              const fromThreadId = authority.threadId;
+              if (!targetThreadId || !fromThreadId) {
+                throw new HarnessServiceError("invalid-params", "share requires targetThreadId and a thread-bound caller");
+              }
+              if (targetThreadId === fromThreadId) {
+                throw new HarnessServiceError("invalid-params", "cannot grant material to the owning thread itself");
+              }
+              const snapshotIds: string[] = [];
+              const collectionIds: string[] = [];
+              if (params.collectionId?.trim()) {
+                const loaded = await loadCollection(context, params.collectionId.trim());
+                // Sharing requires readable access: the sender can only grant
+                // what it can itself see under its own authority.
+                const senderGrants = await grantsFor(context);
+                if (!loaded || !collectionVisibleTo(loaded.payload, loaded.record, authority, senderGrants.collectionIds)) {
+                  return { status: "not-found", message: `collection not found: ${params.collectionId}` };
+                }
+                collectionIds.push(loaded.payload.collectionId);
+                for (const member of loaded.payload.members) {
+                  if (member.snapshotId) snapshotIds.push(member.snapshotId);
+                }
+              } else if (params.snapshotId?.trim()) {
+                snapshotIds.push(params.snapshotId.trim());
+              } else {
+                throw new HarnessServiceError("invalid-params", "share requires collectionId or snapshotId");
+              }
+              // The sender must actually be able to read each snapshot — a
+              // grant never covers material outside the sender's own scope.
+              for (const snapshotId of snapshotIds) {
+                if (!await readBodyHash(snapshotId)) {
+                  return { status: "denied", message: `snapshot is not readable under this authority: ${snapshotId}` };
+                }
+              }
+              // Grants stay inside the root-task family — the same reachability
+              // rule thread.send enforces (parent/child/sibling).
+              if (!await deps.threadsRelated?.(fromThreadId, targetThreadId, workspaceId)) {
+                return { status: "denied", message: `thread is outside the caller's root-task relationships: ${targetThreadId}` };
+              }
+              const grantId = `grant-${randomUUID()}`;
+              const grant: MaterialGrant = {
+                grantId,
+                fromThreadId,
+                toThreadId: targetThreadId,
+                snapshotIds,
+                collectionIds,
+                createdAt: now(),
+              };
+              // Idempotent: an identical live grant is reused, not duplicated.
+              for (const record of await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE })) {
+                if (record.state === "released") continue;
+                const existing = parseGrant(record.payloadJson);
+                if (existing
+                  && existing.fromThreadId === grant.fromThreadId
+                  && existing.toThreadId === grant.toThreadId
+                  && existing.snapshotIds.join("") === grant.snapshotIds.join("")
+                  && existing.collectionIds.join("") === grant.collectionIds.join("")) {
+                  return { status: "ok", grant: existing };
+                }
+              }
+              await context.records.put({
+                operationId: `material-grant-put:${grantId}`,
+                recordId: `material.grant:${grantId}`,
+                recordType: MATERIAL_GRANT_RECORD_TYPE,
+                state: "temporary",
+                sessionId: authority.sessionId,
+                threadId: fromThreadId,
+                payloadJson: JSON.stringify(grant),
+                references: [],
+              });
+              return { status: "ok", grant };
             }
             default:
               throw new HarnessServiceError("invalid-params", `unknown collection action: ${params.action}`);
