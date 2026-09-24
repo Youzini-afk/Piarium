@@ -418,4 +418,3 @@ The following remain open until that evidence exists:
 
 Until these are answered, the design is accepted as a boundary and direction,
 not as a promise to build every surface listed above.
-
