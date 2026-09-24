@@ -1,8 +1,8 @@
 import React from 'react';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
-import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { VarinLogo } from '@/components/ui/VarinLogo';
 import type { PiAssistantWaitingPresentation } from './piAssistantWaiting';
 import type { PiTimelineTurn } from './piTimelineProjection';
 
@@ -31,8 +31,13 @@ export const PiTurnAssistantChrome: React.FC<{
       aria-live={working ? 'polite' : undefined}
       role={working ? 'status' : undefined}
     >
-      <Icon name="ai-agent" className={cn('size-3.5 shrink-0', working && 'animate-pulse')} />
-      <span className="font-medium text-foreground/85">Pi</span>
+      <VarinLogo
+        width={14}
+        height={14}
+        className={cn('shrink-0', working && 'animate-pulse')}
+        decorative
+      />
+      <span className="font-medium text-foreground/85">Varin</span>
       {modelLabel ? <span className="truncate">{modelLabel}</span> : null}
       {working ? (
         <span className="min-w-0 truncate text-muted-foreground/80">

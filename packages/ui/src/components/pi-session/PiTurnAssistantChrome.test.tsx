@@ -49,6 +49,8 @@ describe('Pi turn assistant chrome', () => {
     expect(markup.match(/<header/g)).toHaveLength(1);
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('Varin');
+    expect(markup).not.toContain('>Pi</span>');
     expect(markup).toContain('snapshot-provider/snapshot-model');
     expect(markup.match(/animate-busy-pulse/g)).toHaveLength(3);
   });
