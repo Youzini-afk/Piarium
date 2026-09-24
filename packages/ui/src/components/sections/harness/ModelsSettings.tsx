@@ -10,7 +10,7 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 const groups = [
   { key: 'retrieval', slots: ['explore', 'retrievalAgent'] },
   { key: 'execution', slots: ['quickImplement', 'hardImplement', 'frontend'] },
-  { key: 'assistance', slots: ['review', 'check', 'reader', 'suggestions', 'permissionJudge'] },
+  { key: 'assistance', slots: ['review', 'check', 'reader', 'knowledgeSuggestions', 'permissionJudge', 'nextStep'] },
   { key: 'research', slots: ['researchInvestigation', 'researchExperimentalDesign', 'researchFastExploration', 'researchHighThroughputExecution'] },
 ] as const satisfies readonly { key: string; slots: readonly HarnessModelRole[] }[];
 
@@ -24,6 +24,12 @@ export function ModelsSettings(props: HarnessSettingsPageProps) {
   })).find((slots) => Object.keys(slots).length) : undefined;
   const additions = Object.entries(preview ?? {}).filter(([slot]) => !harness.models[slot as HarnessModelRole]);
   return <>
+    <SettingsSection title={t('settings.page.harness.nextStep.title')} settingsItem="harness.nextStep" contentClassName="space-y-3">
+      <SettingsCheckboxRow checked={harness.nextStep.enabled}
+        onChange={(enabled) => update({ nextStep: { enabled } })}
+        label={t('settings.page.harness.nextStep.enabled')} ariaLabel={t('settings.page.harness.nextStep.enabled')}
+        description={t('settings.page.harness.nextStep.description')} />
+    </SettingsSection>
     {groups.map((group) => <SettingsSection key={group.key} title={t(`settings.harness.models.${group.key}`)} settingsItem={`harness.models.${group.key}`} contentClassName="space-y-3">
       {group.slots.map((slot) => <HarnessModelField key={slot} {...props} slot={slot} />)}
     </SettingsSection>)}

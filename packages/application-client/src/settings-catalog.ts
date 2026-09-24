@@ -245,10 +245,22 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.assistance', category: 'harness', owner: 'pi-settings',
     field: { path: 'harness.models', kind: 'json', scope: 'user',
-      note: 'role → {providerId, modelId}; assistance roles: review, check, reader, suggestions, permissionJudge' },
+      note: 'role → {providerId, modelId}; assistance roles: review, check, reader, knowledgeSuggestions, permissionJudge, nextStep' },
     apply: 'next-run',
     ui: { page: 'harness-models', titleKey: 'settings.harness.models.assistance',
-      keywords: ['review', 'check', 'reader', 'suggestions', 'permissionJudge', 'model'] },
+      keywords: ['review', 'check', 'reader', 'knowledge suggestions', 'permissionJudge', 'next step', 'model'] },
+  },
+  {
+    id: 'harness.next-step', category: 'harness', owner: 'pi-settings',
+    fields: [
+      { path: 'harness.nextStep', kind: 'json', scope: 'user',
+        note: '{enabled: boolean}; user-owned and disabled by default' },
+      { path: 'harness.models.nextStep', kind: 'json', scope: 'user',
+        note: '{providerId, modelId}; dedicated model for next-step suggestions' },
+    ],
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.page.harness.nextStep.title',
+      keywords: ['next step', 'suggestion', 'follow up', 'model'] },
   },
   {
     id: 'harness.review', category: 'harness', owner: 'pi-settings',
@@ -561,24 +573,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['streaming', 'sse', 'websocket'] },
   },
   {
-    id: 'chat.session-recap', category: 'chat', owner: 'app',
-    field: { path: 'sessionRecapEnabled', kind: 'boolean' },
-    apply: 'next-run',
-    ui: { page: 'chat', titleKey: 'settings.varin.visual.field.sessionRecap',
-      keywords: ['recap', 'assist', 'small model', 'summary'] },
-  },
-  {
     id: 'chat.session-assistance', category: 'chat', owner: 'app',
     apply: 'next-run',
     ui: { page: 'chat', titleKey: 'settings.varin.visual.section.sessionAssistance',
-      keywords: ['recap', 'suggestion', 'subagent'] },
-  },
-  {
-    id: 'chat.session-suggestion', category: 'chat', owner: 'app',
-    field: { path: 'sessionSuggestionEnabled', kind: 'boolean' },
-    apply: 'next-run',
-    ui: { page: 'chat', titleKey: 'settings.varin.visual.field.sessionSuggestion',
-      keywords: ['suggestion', 'assist', 'small model', 'follow up'] },
+      keywords: ['draft starters', 'subagent'] },
   },
   {
     id: 'chat.session-goal', category: 'chat', owner: 'app',

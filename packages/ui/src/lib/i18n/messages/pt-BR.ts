@@ -2069,8 +2069,6 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.toggleChangesPanelAria": "Alternar painel de alterações",
   "header.actions.planWithShortcut": "Plano ({shortcut})",
   "header.actions.terminalPanelWithShortcut": "Painel de terminal ({shortcut})",
-  "chat.recap.aria": "Resumo da sessão",
-  "chat.recap.label": "Resumo:",
   "chat.goal.dialog.titleCreate": "Definir objetivo da sessão",
   "chat.goal.dialog.titleManage": "Objetivo da sessão",
   "chat.goal.dialog.objectiveLabel": "Objetivo",

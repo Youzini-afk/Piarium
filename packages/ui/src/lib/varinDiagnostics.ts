@@ -218,8 +218,7 @@ const summarizeSessionFeatures = (features: PiSessionFeatureState) => ({
         evaluationProvider: features.assist.evaluationProvider ?? null,
         forEntryId: features.assist.forEntryId,
         generatedAt: features.assist.generatedAt,
-        hasRecap: Boolean(features.assist.recap),
-        hasSuggestion: Boolean(features.assist.suggestion),
+        suggestionCount: features.assist.suggestions?.length ?? 0,
       }
     : null,
   goal: features.goal

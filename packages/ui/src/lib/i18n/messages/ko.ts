@@ -1998,8 +1998,6 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.toggleChangesPanelAria": "변경 패널 전환",
   'header.actions.planWithShortcut': '플랜 ({shortcut})',
   'header.actions.terminalPanelWithShortcut': '터미널 패널 ({shortcut})',
-  'chat.recap.aria': '세션 요약',
-  'chat.recap.label': '요약:',
   'chat.goal.dialog.titleCreate': '세션 목표 설정',
   'chat.goal.dialog.titleManage': '세션 목표',
   'chat.goal.dialog.objectiveLabel': '목표',

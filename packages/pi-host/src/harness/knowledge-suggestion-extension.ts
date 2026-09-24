@@ -2,7 +2,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 /**
- * When `models.suggestions` is configured, draft a knowledge proposal from the
+ * When `models.knowledgeSuggestions` is configured, draft a knowledge proposal from the
  * current user message and store it through Host `knowledge.suggest`.
  * Unconfigured sessions keep the existing user-mark and keeper paths only.
  */

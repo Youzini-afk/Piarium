@@ -1966,8 +1966,6 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.toggleChangesPanelAria": "切換變更面板",
   'header.actions.planWithShortcut': '計畫（{shortcut}）',
   'header.actions.terminalPanelWithShortcut': '終端機面板（{shortcut}）',
-  'chat.recap.aria': '工作階段回顧',
-  'chat.recap.label': '回顧：',
   'chat.goal.dialog.titleCreate': '設定工作階段目標',
   'chat.goal.dialog.titleManage': '工作階段目標',
   'chat.goal.dialog.objectiveLabel': '目標',

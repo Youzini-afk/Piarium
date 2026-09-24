@@ -1991,8 +1991,6 @@ export const dict = {
   'header.actions.toggleChangesPanelAria': 'Toggle changes panel',
   'header.actions.planWithShortcut': 'Plan ({shortcut})',
   'header.actions.terminalPanelWithShortcut': 'Terminal panel ({shortcut})',
-  'chat.recap.aria': 'Session recap',
-  'chat.recap.label': 'Recap:',
   'chat.goal.dialog.titleCreate': 'Set Session Goal',
   'chat.goal.dialog.titleManage': 'Session Goal',
   'chat.goal.dialog.objectiveLabel': 'Objective',

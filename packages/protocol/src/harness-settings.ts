@@ -69,6 +69,25 @@ export interface HarnessReviewSettings {
   gate: boolean;
 }
 
+/** User-owned post-turn next-step picker. Disabled by default. */
+export interface HarnessNextStepSettings {
+  enabled: boolean;
+}
+
+const DEFAULT_HARNESS_NEXT_STEP_SETTINGS: HarnessNextStepSettings = { enabled: false };
+
+export function resolveHarnessNextStepSettings(value: unknown): HarnessNextStepSettings {
+  if (value === undefined) return { ...DEFAULT_HARNESS_NEXT_STEP_SETTINGS };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.nextStep must be an object");
+  }
+  const input = value as Record<string, unknown>;
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    throw new HarnessSettingsValidationError("harness.nextStep.enabled must be a boolean");
+  }
+  return { enabled: input.enabled ?? DEFAULT_HARNESS_NEXT_STEP_SETTINGS.enabled };
+}
+
 /**
  * Raw persisted shape accepted while reading Pi settings. `context` is the
  * current object; `memory` is the retired keeper setting, still read so an
@@ -149,10 +168,11 @@ export function resolveHarnessContextSettings(
   };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep"> & {
   context?: HarnessContextSettingsInput;
   memory?: HarnessMemorySettingsInput;
   review?: Partial<HarnessReviewSettings>;
+  nextStep?: Partial<HarnessNextStepSettings>;
 };
 
 export interface HarnessSettings {
@@ -170,6 +190,8 @@ export interface HarnessSettings {
   context: HarnessContextSettings;
   /** User-owned automatic review of published child results. */
   review: HarnessReviewSettings;
+  /** User-owned post-turn next-step suggestions; projects cannot enable it. */
+  nextStep: HarnessNextStepSettings;
   /** Dedicated embedding backend. Not a chat model slot. */
   embedding?: HarnessEmbeddingSettings;
   /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
@@ -200,7 +222,8 @@ export type HarnessModelRole =
   | "review"
   | "check"
   | "reader"
-  | "suggestions"
+  | "knowledgeSuggestions"
+  | "nextStep"
   | "permissionJudge"
   | "researchInvestigation"
   | "researchExperimentalDesign"
@@ -220,6 +243,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   },
   context: { backgroundPreparation: true, preparationWaterline: 0.75 },
   review: { enabled: false, gate: false },
+  nextStep: { enabled: false },
   worktree: {
     copyIgnored: [],
     shareDependencies: false,
@@ -284,6 +308,7 @@ export function mergeHarnessSettings(
     fastDecision: userFastDecision,
     memory: _userMemory,
     rerank: userRerank,
+    nextStep: userNextStep,
     ...userRest
   } = user;
   const {
@@ -292,6 +317,7 @@ export function mergeHarnessSettings(
     fastDecision: _workspaceFastDecision,
     memory: _workspaceMemory,
     rerank: _workspaceRerank,
+    nextStep: _workspaceNextStep,
     ...workspaceRest
   } = workspace;
   const askBeforeKeys = new Set([
@@ -347,6 +373,9 @@ export function mergeHarnessSettings(
     context: resolveHarnessContextSettings(user.context, user.memory),
     // Automatic review enablement and the completion gate are user-owned.
     review: resolveHarnessReviewSettings(user.review),
+    // Next-step suggestions are user-owned. A project cannot enable them when
+    // the user has opted out, and project settings cannot redirect the model.
+    nextStep: resolveHarnessNextStepSettings(userNextStep),
     // Embedding and rerank bindings are user-owned. A repository cannot
     // redirect remote inference or select another provider credential.
     ...((() => {

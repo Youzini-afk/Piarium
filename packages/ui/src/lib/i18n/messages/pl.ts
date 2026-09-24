@@ -2749,8 +2749,6 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.planWithShortcut': 'Plan ({shortcut})',
   'header.actions.rightSidebarWithShortcut': 'Prawy panel boczny ({shortcut})',
   'header.actions.terminalPanelWithShortcut': 'Panel terminala ({shortcut})',
-  'chat.recap.aria': 'Podsumowanie sesji',
-  'chat.recap.label': 'Podsumowanie:',
   'chat.goal.dialog.titleCreate': 'Ustaw cel sesji',
   'chat.goal.dialog.titleManage': 'Cel sesji',
   'chat.goal.dialog.objectiveLabel': 'Cel',

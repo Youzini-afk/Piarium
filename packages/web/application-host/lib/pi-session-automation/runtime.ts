@@ -16,13 +16,13 @@ import type { generateSmallModelText } from '../small-model/index.js';
 const GOAL_IDLE_QUIET_MS = 15_000;
 const GOAL_KICKOFF_QUIET_MS = 3_000;
 const GOAL_RESUME_QUIET_MS = 250;
-const ASSIST_IDLE_QUIET_MS = 60_000;
+const ASSIST_IDLE_QUIET_MS = 0;
 const MAX_AUTO_TURNS = 20;
 const BLOCKED_STREAK_LIMIT = 3;
 const AUDIT_FAIL_LIMIT = 2;
-const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
 const NOTE_CHAR_LIMIT = 280;
+const ASSIST_USER_FACTS_CHAR_LIMIT = 2400;
 
 type AutomationMethod =
   | 'agent.prompt'
@@ -30,15 +30,14 @@ type AutomationMethod =
   | 'session.features.get'
   | 'session.features.mutate'
   | 'session.snapshot'
-  | 'session.stats';
+  | 'session.stats'
+  | 'settings.get';
 
 type GoalUpdatePatch = Omit<Extract<PiSessionFeatureMutation, { type: 'goal.update' }>, 'goalId' | 'type'>;
 type SmallModelService = { generateSmallModelText: typeof generateSmallModelText };
 
 interface AutomationSettings {
   sessionGoalEnabled?: boolean;
-  sessionRecapEnabled?: boolean;
-  sessionSuggestionEnabled?: boolean;
 }
 
 interface PiSessionAutomationOptions {
@@ -61,6 +60,7 @@ interface LatestExchange {
   assistantEntry: PiSessionMessageEntry & { message: PiAssistantMessage };
   compactedAfter: boolean;
   userEntry: (PiSessionMessageEntry & { message: PiUserMessage }) | null;
+  userEntries: Array<PiSessionMessageEntry & { message: PiUserMessage }>;
 }
 
 type AuditVerdict = 'blocked' | 'complete' | 'continue';
@@ -83,6 +83,29 @@ const errorStatus = (error: unknown): number | null => {
 };
 
 const clampText = (value: unknown, limit: number): string => String(value ?? '').trim().slice(0, limit);
+
+const excerpt = (value: string, limit: number): string => {
+  const text = value.trim();
+  if (text.length <= limit) return text;
+  const head = Math.max(1, Math.floor(limit * 0.62));
+  const tail = Math.max(1, limit - head);
+  return `${text.slice(0, head)}\n[… omitted …]\n${text.slice(-tail)}`;
+};
+
+const recentUserFacts = (entries: Array<PiSessionMessageEntry & { message: PiUserMessage }>): string => {
+  const texts = entries.map((entry) => userText(entry.message)).filter(Boolean);
+  const selected: string[] = [];
+  let used = 0;
+  for (let index = texts.length - 1; index >= 0; index -= 1) {
+    const lineLimit = Math.min(720, ASSIST_USER_FACTS_CHAR_LIMIT - used - 2);
+    if (lineLimit < 80) break;
+    const line = `- ${excerpt(texts[index]!, lineLimit)}`;
+    selected.unshift(line);
+    used += line.length + 1;
+  }
+  if (selected.length < texts.length) selected.unshift('- [earlier user messages omitted]');
+  return selected.join('\n');
+};
 
 const escapeXml = (value: unknown): string => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -121,18 +144,21 @@ const latestExchange = (entries: PiSessionEntry[]): LatestExchange | null => {
   const assistantEntry = entries[assistantIndex];
   if (!assistantEntry || assistantEntry.type !== 'message' || assistantEntry.message.role !== 'assistant') return null;
   const typedAssistantEntry = { ...assistantEntry, message: assistantEntry.message };
-  let userEntry: (PiSessionMessageEntry & { message: PiUserMessage }) | null = null;
+  const userEntries: Array<PiSessionMessageEntry & { message: PiUserMessage }> = [];
   for (let index = assistantIndex - 1; index >= 0; index -= 1) {
     const entry = entries[index];
+    if (entry?.type === 'message' && entry.message?.role === 'assistant') break;
+    if (entry?.type === 'compaction') break;
     if (entry?.type === 'message' && entry.message?.role === 'user') {
-      userEntry = { ...entry, message: entry.message };
-      break;
+      userEntries.push({ ...entry, message: entry.message });
     }
   }
+  userEntries.reverse();
   return {
     assistantEntry: typedAssistantEntry,
     compactedAfter: entries.slice(assistantIndex + 1).some((entry) => entry?.type === 'compaction'),
-    userEntry,
+    userEntry: userEntries.at(-1) ?? null,
+    userEntries,
   };
 };
 
@@ -192,13 +218,12 @@ const buildContinuationPrompt = (goal: PiSessionGoalState): string => {
   ].join('\n');
 };
 
-const buildAssistSystemPrompt = ({ recap, suggestion }: { recap: boolean; suggestion: boolean }): string => [
-  'Based only on the latest user/assistant exchange, return exactly one JSON object and nothing else.',
-  `Shape: {${[recap ? '"recap":string' : '', suggestion ? '"suggestion":string' : ''].filter(Boolean).join(',')}}`,
-  recap ? 'recap: at most 20 words; state the result or next move directly, without narration.' : '',
-  suggestion ? 'suggestion: one concise, immediately sendable next user message that advances the work. Do not offer alternatives.' : '',
-  'Use the same language as the exchange.',
-].filter(Boolean).join('\n');
+const buildAssistSystemPrompt = (): string => [
+  'Choose useful next user messages from the supplied short facts. Return exactly one JSON object and nothing else.',
+  'Shape: {"suggestions":string[]}. Return an empty array when the work is complete or facts are insufficient.',
+  'Return zero or more genuinely different directions, each concise and editable. Do not execute tools, ask for history, or recap the conversation.',
+  'Use the same language as the user facts.',
+].join('\n');
 
 const hostEvent = (event: PiRuntimeBrokerEvent): EventEnvelope | null => (
   event?.kind === 'host' && event.envelope?.kind === 'event'
@@ -224,6 +249,7 @@ export const createPiSessionAutomationRuntime = ({
   const assistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const goalInflight = new Set<string>();
   const assistInflight = new Set<string>();
+  const assistProcessed = new Map<string, string>();
   let stopped = false;
 
   const request = <Method extends AutomationMethod>(
@@ -472,77 +498,108 @@ export const createPiSessionAutomationRuntime = ({
   };
 
   const generateAssist = async (sessionId: string): Promise<void> => {
-    const settings = await readSettings().catch((): AutomationSettings => ({}));
-    const targets = {
-      recap: settings.sessionRecapEnabled !== false,
-      suggestion: settings.sessionSuggestionEnabled !== false,
-    };
-    if (!targets.recap && !targets.suggestion) return;
-    const [snapshot, entriesResult] = await Promise.all([
+    const [snapshot, entriesResult, piSettings] = await Promise.all([
       request(sessionId, 'session.snapshot'),
       request(sessionId, 'session.entries', { scope: 'branch' }),
+      request(sessionId, 'settings.get'),
     ]);
-    if (snapshot.busy || snapshot.isStreaming || snapshot.features.goal?.status === 'active') return;
+    const harness = asRecord(piSettings.global?.harness);
+    const nextStep = asRecord(harness?.nextStep);
+    const models = asRecord(harness?.models);
+    const selection = asRecord(models?.nextStep);
+    if (nextStep?.enabled !== true || typeof selection?.providerId !== 'string' || typeof selection?.modelId !== 'string') return;
+    if (snapshot.busy || snapshot.isStreaming || snapshot.pendingMessageCount > 0 || snapshot.features.goal?.status === 'active') return;
     const exchange = latestExchange(entriesResult.entries);
     if (!exchange) return;
-    const { assistantEntry, userEntry } = exchange;
+    const { assistantEntry, userEntry, userEntries } = exchange;
     const currentAssist = snapshot.features.assist;
-    if (
-      currentAssist?.forEntryId === assistantEntry.id
-      && (!targets.recap || currentAssist.recap)
-      && (!targets.suggestion || currentAssist.suggestion)
-    ) return;
+    if (currentAssist?.forEntryId === assistantEntry.id || assistProcessed.get(sessionId) === assistantEntry.id) return;
+    assistProcessed.set(sessionId, assistantEntry.id);
+    const persistResult = async (suggestions: string[], generated?: { modelID: string; providerID: string }): Promise<boolean> => {
+      const [latest, latestSnapshot, latestSettings] = await Promise.all([
+        request(sessionId, 'session.entries', { scope: 'branch' }),
+        request(sessionId, 'session.snapshot'),
+        request(sessionId, 'settings.get'),
+      ]);
+      const latestHarness = asRecord(latestSettings.global?.harness);
+      const latestNextStep = asRecord(latestHarness?.nextStep);
+      const latestSelection = asRecord(asRecord(latestHarness?.models)?.nextStep);
+      if (
+        latestExchange(latest.entries)?.assistantEntry?.id !== assistantEntry.id
+        || latestSnapshot.leafId !== snapshot.leafId
+        || latestSnapshot.busy
+        || latestSnapshot.isStreaming
+        || latestSnapshot.pendingMessageCount > 0
+        || latestSnapshot.features.goal?.status === 'active'
+        || latestNextStep?.enabled !== true
+        || latestSelection?.providerId !== selection.providerId
+        || latestSelection?.modelId !== selection.modelId
+      ) return false;
+      await request(sessionId, 'session.features.mutate', {
+        mutation: {
+          ...(generated?.modelID ? { evaluationModel: generated.modelID } : {}),
+          ...(generated?.providerID ? { evaluationProvider: generated.providerID } : {}),
+          forEntryId: assistantEntry.id,
+          generatedAt: Date.now(),
+          suggestions,
+          type: 'assist.set',
+        },
+      });
+      return true;
+    };
     const latestUserText = userText(userEntry?.message);
     const latestAssistantText = assistantText(assistantEntry.message);
-    const transcript = [
-      latestUserText ? `User:\n${latestUserText}` : '',
-      latestAssistantText ? `Assistant:\n${latestAssistantText}` : '',
+    const userFacts = recentUserFacts(userEntries);
+    const facts = [
+      userFacts ? `Recent user messages in order (original words):\n${userFacts}` : '',
+      latestAssistantText ? `Latest assistant conclusion:\n${excerpt(latestAssistantText, 1200)}` : '',
+      assistantEntry.message.stopReason === 'error' || assistantEntry.message.errorMessage
+        ? `Program failure/uncompleted state:\n${assistantEntry.message.errorMessage || assistantEntry.message.stopReason}` : '',
+      snapshot.features.goal ? `Goal state: ${snapshot.features.goal.status} — ${excerpt(snapshot.features.goal.objective, 400)}` : '',
     ].filter(Boolean).join('\n\n');
-    if (!transcript) return;
+    if (!facts) {
+      await persistResult([]).catch(() => undefined);
+      return;
+    }
 
     let service;
     try {
       service = await getSmallModelService();
     } catch {
+      await persistResult([]).catch(() => undefined);
       return;
     }
     let generated;
+
     try {
       generated = await service.generateSmallModelText({
         directory: snapshot.cwd,
-        preferredModelID: assistantEntry.message.model,
-        preferredProviderID: assistantEntry.message.provider,
-        prompt: `Latest exchange:\n\n${transcript}\n\nUse the same language as this sample: "${(latestUserText || latestAssistantText).slice(0, 200).replace(/\s+/g, ' ')}"`,
-        restrictToPreferredProvider: true,
-        system: buildAssistSystemPrompt(targets),
+        model: `${selection.providerId}/${selection.modelId}`,
+        prompt: `Short current facts:\n\n${facts}`,
+        system: buildAssistSystemPrompt(),
+        maxOutputTokens: 500,
       });
     } catch (error) {
       if (errorStatus(error) !== 404) {
         console.warn('[pi-session-assist] generation failed:', errorMessage(error));
       }
+      await persistResult([]).catch(() => undefined);
       return;
     }
     const parsed = extractJsonObject(generated?.text);
+    const suggestions = Array.isArray(parsed?.suggestions)
+      ? parsed.suggestions.map((item) => clampText(item, SUGGESTION_CHAR_LIMIT)).filter(Boolean).slice(0, 6)
+      : [];
     const inputText = `${latestUserText}\n${latestAssistantText}`;
-    let recap = targets.recap ? clampText(parsed?.recap, RECAP_CHAR_LIMIT) : '';
-    let suggestion = targets.suggestion ? clampText(parsed?.suggestion, SUGGESTION_CHAR_LIMIT) : '';
-    if (recap && hasScriptMismatch(recap, inputText)) recap = '';
-    if (suggestion && hasScriptMismatch(suggestion, inputText)) suggestion = '';
-    if (!recap && !suggestion) return;
-
-    const latest = await request(sessionId, 'session.entries', { scope: 'branch' });
-    if (latestExchange(latest.entries)?.assistantEntry?.id !== assistantEntry.id) return;
-    await request(sessionId, 'session.features.mutate', {
-      mutation: {
-        evaluationModel: generated.modelID,
-        evaluationProvider: generated.providerID,
-        forEntryId: assistantEntry.id,
-        generatedAt: Date.now(),
-        ...(recap ? { recap } : {}),
-        ...(suggestion ? { suggestion } : {}),
-        type: 'assist.set',
-      },
+    const seenSuggestions = new Set<string>();
+    const validSuggestions = suggestions.filter((item) => {
+      const key = item.toLocaleLowerCase();
+      if (seenSuggestions.has(key) || hasScriptMismatch(item, inputText)) return false;
+      seenSuggestions.add(key);
+      return true;
     });
+
+    await persistResult(validSuggestions, generated);
   };
 
   function arm(
@@ -588,6 +645,7 @@ export const createPiSessionAutomationRuntime = ({
 
     if (envelope.event === 'session.closed') {
       clearSessionTimers(sessionId);
+      assistProcessed.delete(sessionId);
       return;
     }
     if (envelope.event === 'session.snapshot') {
@@ -626,6 +684,7 @@ export const createPiSessionAutomationRuntime = ({
     for (const timer of assistTimers.values()) clearTimeout(timer);
     goalTimers.clear();
     assistTimers.clear();
+    assistProcessed.clear();
   };
 
   return {

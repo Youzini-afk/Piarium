@@ -2072,8 +2072,6 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.toggleChangesPanelAria": "Перемкнути панель змін",
   "header.actions.planWithShortcut": "План ({shortcut})",
   "header.actions.terminalPanelWithShortcut": "Термінальна панель ({shortcut})",
-  "chat.recap.aria": "Підсумок сесії",
-  "chat.recap.label": "Підсумок:",
   "chat.goal.dialog.titleCreate": "Встановити ціль сесії",
   "chat.goal.dialog.titleManage": "Ціль сесії",
   "chat.goal.dialog.objectiveLabel": "Ціль",

@@ -1814,8 +1814,6 @@ export const dict = {
   "header.actions.toggleChangesPanelAria": "Basculer le panneau des changements",
   'header.actions.planWithShortcut': 'Forfait ({shortcut})',
   'header.actions.terminalPanelWithShortcut': 'Panneau à bornes ({shortcut})',
-  'chat.recap.aria': 'Récapitulatif de la session',
-  'chat.recap.label': 'Récap :',
   'chat.goal.dialog.titleCreate': 'Définir un objectif de session',
   'chat.goal.dialog.titleManage': 'Objectif de session',
   'chat.goal.dialog.objectiveLabel': 'Objectif',

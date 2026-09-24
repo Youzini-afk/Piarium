@@ -31,8 +31,8 @@ export interface PiSessionAssistState {
   evaluationProvider?: string;
   forEntryId: string;
   generatedAt: number;
-  recap?: string;
-  suggestion?: string;
+  /** Candidates from the one-shot next-step request; an empty list is a durable no-result marker. */
+  suggestions: string[];
 }
 
 export interface PiSessionFeatureState {
@@ -71,12 +71,11 @@ export type PiSessionFeatureMutation =
       evaluationProvider?: string;
       forEntryId: string;
       generatedAt?: number;
-      recap?: string;
-      suggestion?: string;
+      suggestions: string[];
       type: "assist.set";
     }
   | {
-      field?: "all" | "recap" | "suggestion";
+      field?: "all" | "suggestions";
       forEntryId?: string;
       type: "assist.clear";
     };
@@ -195,18 +194,16 @@ export function parsePiSessionFeatureMutation(value: unknown): PiSessionFeatureM
     }
     case "assist.set": {
       const generatedAt = integerValue(source, "generatedAt", { optional: true });
-      const recap = stringValue(source, "recap", { allowEmpty: true, optional: true });
-      const suggestion = stringValue(source, "suggestion", { allowEmpty: true, optional: true });
-      if (!recap?.trim() && !suggestion?.trim()) {
-        throw new PiSessionFeatureValidationError("assist.set requires a recap or suggestion");
+      const suggestions = source.suggestions;
+      if (!Array.isArray(suggestions) || suggestions.some((item) => typeof item !== "string")) {
+        throw new PiSessionFeatureValidationError("suggestions must be an array of strings");
       }
       return {
         ...optionalStringField(source, "evaluationModel"),
         ...optionalStringField(source, "evaluationProvider"),
         forEntryId: stringValue(source, "forEntryId") as string,
         ...(generatedAt === undefined ? {} : { generatedAt }),
-        ...(recap === undefined ? {} : { recap }),
-        ...(suggestion === undefined ? {} : { suggestion }),
+        suggestions,
         type,
       };
     }
@@ -215,10 +212,9 @@ export function parsePiSessionFeatureMutation(value: unknown): PiSessionFeatureM
       if (
         fieldValue !== undefined
         && fieldValue !== "all"
-        && fieldValue !== "recap"
-        && fieldValue !== "suggestion"
+        && fieldValue !== "suggestions"
       ) {
-        throw new PiSessionFeatureValidationError("field must be all, recap, or suggestion");
+        throw new PiSessionFeatureValidationError("field must be all or suggestions");
       }
       const forEntryId = stringValue(source, "forEntryId", { optional: true });
       return {

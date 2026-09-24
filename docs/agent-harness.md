@@ -1036,10 +1036,10 @@ event、block 或文件内容。`recall` 先查工作区库再查用户库，用
 
 持久知识的写入遵循 Devin Knowledge 的形状，更新遵循 Zep 的双时态模型：
 
-- **agent 不直接写持久层，只提议。** 用户标记与已配置的用户消息 suggestions 路径生成
+- **agent 不直接写持久层，只提议。** 用户标记与已配置的用户消息 knowledgeSuggestions 路径生成
   `knowledge` 建议，`status: suggested`，每条应带**触发描述**（什么时候该想起它，语义
   匹配用）。建议进入审阅托盘；用户编辑后接受、要求重新生成、或驳回。agent 也可以对已接受的条目提议更新。建议的
-  草拟与触发描述的生成使用 `models.suggestions` 槽位（第 8.5 节）；未配置时，建议以用户标记或纠正的原文呈现、触发
+  草拟与触发描述的生成使用 `models.knowledgeSuggestions` 槽位（第 8.5 节）；未配置时，建议以用户标记或纠正的原文呈现、触发
   描述留空由用户填写，不调用主模型。
 - **自动接受是显式选项**，按作用域单独开启（workspace 级、user 级各自），默认关闭。关闭时没有任何东西不经用户看到
   就成为持久知识——这是"保证持久层就是用户的意愿"的机制。
@@ -1054,7 +1054,7 @@ event、block 或文件内容。`recall` 先查工作区库再查用户库，用
 
 Settings 提供列表视图：每条可见、可编辑、可删除、可查看取代链，并记录来源（哪个会话、由哪类时刻触发、谁接受）。
 删除是对该 id 写 `invalidAt`，不物理删节点，也不扩大到其他 scope 或相邻历史。权威正文仍在 workspace/user `.tdb`；
-派生向量随同一套 store 变更失效。`models.suggestions` 配置后由 pi-host 对用户消息草拟建议并经 Host 落库；
+派生向量随同一套 store 变更失效。`models.knowledgeSuggestions` 配置后由 pi-host 对用户消息草拟建议并经 Host 落库；
 未配置时保留用户标记，不借用主模型。D-284 删除依赖 keeper decisions 的自动建议来源，不从续接摘要另起知识提炼调用。
 已有建议、accepted 条目与取代链保留；未接受、已驳回或已被取代的条目不进入公开 recall。
 
@@ -1082,7 +1082,7 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
   事件可以增加下一次请求的容量估计，但其类型、完成与空闲本身不触发摘要。
   `kind: edit` 的 event 最终引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
 - 主 agent 的 plan/todo 与用户笔记使用既有 block 分支/CAS 写入，不由摘要任务回写。用户修改的成功修订进入尾部观察。
-- `knowledge` 建议（第 7.2.2 节）由用户标记与显式配置的 suggestions 路径生成，保持审阅与 auto-accept 策略。
+- `knowledge` 建议（第 7.2.2 节）由用户标记与显式配置的 knowledgeSuggestions 路径生成，保持审阅与 auto-accept 策略。
 - 用户的“记住这个”沿标记/建议入口保留原意；不为压缩启动额外模型，不给历史附加机器重要性评分。
 - profile 自己的采集器（research profile 的文献抓取等）。
 
@@ -1477,12 +1477,13 @@ GPTpro 上下文报告与随后讨论共同形成以下目标，实施不能只�
 | `models.review` | `review` 角色与已发布结果的 review 传感器 | **主模型** | — |
 | `models.check` | `check` 角色 | 未配置 | 角色不注册 |
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
-| `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
+| `models.knowledgeSuggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
+| `models.nextStep` | 结算后一次性的会话下一步选择 | 未配置 | 不生成建议，不借用通用小模型或主模型 |
 | `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
 | `harness.embedding` | explore 文档与查询嵌入（3.16B） | 未配置远程且已安装本地组件时使用 `all-MiniLM-L6-v2`；否则不启用向量来源 | 远程失败/未绑定 Pi 时语义来源 `failed`/`unavailable`，词法与图继续；同一查询不静默切回另一 vector space |
 | `harness.rerank` | 对当前可展示视图提供统一顺序（3.16E） | 未配置 | 保留来源排名与可读材料，details 标明未参与/失败；不使 explore 整体失败 |
 
-**配置种类与聊天槽位分开**（D-190）。前十个普通 Harness 槽位仍走 `HarnessModelRole`；embedding/rerank 不在该表里，也不能
+**配置种类与聊天槽位分开**（D-190）。普通 Harness 模型槽位仍走 `HarnessModelRole`；embedding/rerank 不在该表里，也不能
 从任意 chat model id 推断具备 embedding 或 rerank 能力。Settings 有独立的 Embedding / Rerank 入口。远程 embedding 使用明确的
 OpenAI-compatible `/embeddings` 协议；rerank 使用可配置的 HTTP `/rerank` 契约，不把 chat completion 或 embeddings 协议改名为
 rerank。不把未选定的本地交叉编码器写成现成默认。
@@ -1506,7 +1507,7 @@ ModelRuntime，不依赖后台远程 embedding 的新执行上下文。生成全
 不增加辅助费用面板或第二套模型/凭据 authority，T4 与外部缓存实验不是默认交付门槛。
 
 Settings 提供**预设**一键填充多个槽位（如 Anthropic 预设：explore / retrievalAgent / quickImplement / check / reader /
-suggestions 填 Haiku，hardImplement / review 保持主模型），但预设只是填表，每个槽位随时可单独改。规则：
+knowledgeSuggestions 填 Haiku，hardImplement / review 保持主模型；`nextStep` 不由预设填充），但预设只是填表，每个槽位随时可单独改。规则：
 
 - 依赖未配置槽位的能力**不注册、退化为无 LLM 路径**，**永不静默回退到主模型**。`websearch` 与 `grep` 本来不用 LLM。
 - 普通派发零配置可用；`hardImplement` / `review` 预设保留明示的当前模型继承，其余专用槽位未配不静默借用。工具和工作区

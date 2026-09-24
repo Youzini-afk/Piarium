@@ -4,7 +4,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { useUIStore } from '@/stores/useUIStore';
 
 const latestAssistantEntryId = (entries: PiSessionEntry[]): string | null => {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -23,8 +22,6 @@ export const PiAssistBar: React.FC<{
   snapshot: SessionSnapshot;
 }> = ({ draftEmpty, entries, onApplySuggestion, snapshot }) => {
   const { t } = useI18n();
-  const recapEnabled = useUIStore((state) => state.sessionRecapEnabled);
-  const suggestionEnabled = useUIStore((state) => state.sessionSuggestionEnabled);
   const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
   const [dismissing, setDismissing] = React.useState(false);
   const assist = snapshot.features.assist;
@@ -33,9 +30,8 @@ export const PiAssistBar: React.FC<{
     && latestAssistantEntryId(entries) === assist.forEntryId
     ? assist
     : undefined;
-  const recap = recapEnabled ? fresh?.recap : undefined;
-  const suggestion = suggestionEnabled && draftEmpty ? fresh?.suggestion : undefined;
-  if (!recap && !suggestion) return null;
+  const suggestions = draftEmpty ? fresh?.suggestions ?? [] : [];
+  if (suggestions.length === 0) return null;
 
   const dismissSuggestion = async (event: React.MouseEvent) => {
     event.stopPropagation();
@@ -43,7 +39,7 @@ export const PiAssistBar: React.FC<{
     setDismissing(true);
     try {
       await mutateFeatures(snapshot.sessionId, {
-        field: 'suggestion',
+        field: 'suggestions',
         forEntryId: fresh.forEntryId,
         type: 'assist.clear',
       });
@@ -54,14 +50,8 @@ export const PiAssistBar: React.FC<{
 
   return (
     <div className="mx-auto mb-2 w-full max-w-4xl space-y-2 px-3 sm:px-5">
-      {recap && (
-        <div aria-label={t('chat.recap.aria')} className="px-1 typography-meta text-muted-foreground/75">
-          <span className="italic text-muted-foreground/50">{t('chat.recap.label')} </span>
-          <span className="line-clamp-3">{recap}</span>
-        </div>
-      )}
-      {suggestion && (
-        <div className="relative">
+      {suggestions.map((suggestion, index) => (
+        <div className="relative" key={`${fresh?.forEntryId}:${index}`}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -88,7 +78,7 @@ export const PiAssistBar: React.FC<{
             <Icon name={dismissing ? 'loader-4' : 'close'} className={dismissing ? 'size-3 animate-spin' : 'size-3'} />
           </button>
         </div>
-      )}
+      ))}
     </div>
   );
 };

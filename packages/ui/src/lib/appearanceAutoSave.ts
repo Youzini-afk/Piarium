@@ -9,8 +9,6 @@ import type { FileEditorSettings } from '@/lib/file-editor-settings';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
-  sessionRecapEnabled: boolean;
-  sessionSuggestionEnabled: boolean;
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
@@ -63,8 +61,6 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
-    sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
-    sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
     sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
     sessionGoalDefaultBudgetEnabled: useUIStore.getState().sessionGoalDefaultBudgetEnabled,
     sessionGoalDefaultBudget: useUIStore.getState().sessionGoalDefaultBudget,
@@ -104,8 +100,6 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
-      sessionRecapEnabled: state.sessionRecapEnabled,
-      sessionSuggestionEnabled: state.sessionSuggestionEnabled,
       sessionGoalEnabled: state.sessionGoalEnabled,
       sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
       sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
@@ -151,12 +145,6 @@ export const startAppearanceAutoSave = (): void => {
 
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
-    }
-    if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
-      diff.sessionRecapEnabled = current.sessionRecapEnabled;
-    }
-    if (current.sessionSuggestionEnabled !== previous.sessionSuggestionEnabled) {
-      diff.sessionSuggestionEnabled = current.sessionSuggestionEnabled;
     }
     if (current.sessionGoalEnabled !== previous.sessionGoalEnabled) {
       diff.sessionGoalEnabled = current.sessionGoalEnabled;

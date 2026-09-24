@@ -1938,8 +1938,6 @@ export const dict: Record<I18nKey, string> = {
   'header.actions.toggleChangesPanelAria': '変更パネルの切り替え',
   'header.actions.planWithShortcut': '計画（{shortcut}）',
   'header.actions.terminalPanelWithShortcut': 'ターミナルパネル（{shortcut}）',
-  'chat.recap.aria': 'セッションの要約',
-  'chat.recap.label': '要約:',
   'chat.goal.dialog.titleCreate': 'セッションゴールを設定',
   'chat.goal.dialog.titleManage': 'セッションゴール',
   'chat.goal.dialog.objectiveLabel': '目標',

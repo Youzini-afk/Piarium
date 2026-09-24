@@ -59,18 +59,34 @@ describe("Varin session features", () => {
     );
     const withAssist = mutateSessionFeatures(manager, {
       forEntryId: "assistant-2",
-      recap: "Latest recap",
-      suggestion: "Continue the implementation",
+      suggestions: ["Continue the implementation"],
       type: "assist.set",
     });
     const unchanged = mutateSessionFeatures(manager, {
-      field: "suggestion",
+      field: "suggestions",
       forEntryId: "assistant-1",
       type: "assist.clear",
     });
     assert.equal(unchanged.revision, withAssist.revision);
-    assert.equal(unchanged.assist?.suggestion, "Continue the implementation");
+    assert.deepEqual(unchanged.assist?.suggestions, ["Continue the implementation"]);
     assert.equal(unchanged.goal?.id, started.goal?.id);
+  });
+
+  it("persists an empty assist result so the same settled entry is not retried", () => {
+    const manager = SessionManager.inMemory("/workspace");
+    const empty = mutateSessionFeatures(manager, {
+      forEntryId: "assistant-empty",
+      suggestions: [],
+      type: "assist.set",
+    });
+    assert.deepEqual(empty.assist?.suggestions, []);
+    const dismissed = mutateSessionFeatures(manager, {
+      field: "suggestions",
+      forEntryId: "assistant-empty",
+      type: "assist.clear",
+    });
+    assert.deepEqual(dismissed.assist?.suggestions, []);
+    assert.deepEqual(readSessionFeatures(manager).assist?.suggestions, []);
   });
 
   it("ignores retired pinned-context data without discarding Goal or Assist state", () => {
@@ -79,7 +95,7 @@ describe("Varin session features", () => {
       assist: {
         forEntryId: "assistant-1",
         generatedAt: 1,
-        suggestion: "Continue",
+        suggestions: ["Continue"],
       },
       pinnedContext: [{ entryId: "user-1", pinnedAt: 1, role: "user" }],
       revision: 7,
@@ -90,7 +106,7 @@ describe("Varin session features", () => {
       assist: {
         forEntryId: "assistant-1",
         generatedAt: 1,
-        suggestion: "Continue",
+        suggestions: ["Continue"],
       },
       revision: 7,
       schemaVersion: 1,

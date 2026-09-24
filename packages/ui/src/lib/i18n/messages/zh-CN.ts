@@ -2056,8 +2056,6 @@ export const dict: Record<I18nKey, string> = {
   "header.actions.toggleChangesPanelAria": "切换更改面板",
   'header.actions.planWithShortcut': '计划（{shortcut}）',
   'header.actions.terminalPanelWithShortcut': '终端面板（{shortcut}）',
-  'chat.recap.aria': '会话回顾',
-  'chat.recap.label': '回顾：',
   'chat.goal.dialog.titleCreate': '设置会话目标',
   'chat.goal.dialog.titleManage': '会话目标',
   'chat.goal.dialog.objectiveLabel': '目标',

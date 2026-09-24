@@ -14,7 +14,6 @@ import {
 
 export const VARIN_SESSION_FEATURES_ENTRY_TYPE = "varin.session-features/v1";
 
-const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
 const NOTE_CHAR_LIMIT = 280;
 const REASON_CHAR_LIMIT = 200;
@@ -90,18 +89,18 @@ function parseGoal(value: unknown): PiSessionGoalState | undefined {
 function parseAssist(value: unknown): PiSessionAssistState | undefined {
   if (!isRecord(value)) return undefined;
   const forEntryId = optionalText(value.forEntryId);
-  const recap = optionalText(value.recap, RECAP_CHAR_LIMIT);
-  const suggestion = optionalText(value.suggestion, SUGGESTION_CHAR_LIMIT);
+  const suggestions = Array.isArray(value.suggestions)
+    ? value.suggestions.map((item) => optionalText(item, SUGGESTION_CHAR_LIMIT)).filter((item): item is string => Boolean(item))
+    : [];
   const evaluationModel = optionalText(value.evaluationModel);
   const evaluationProvider = optionalText(value.evaluationProvider);
-  if (!forEntryId || (!recap && !suggestion)) return undefined;
+  if (!forEntryId || !Array.isArray(value.suggestions)) return undefined;
   return {
     ...(evaluationModel === undefined ? {} : { evaluationModel }),
     ...(evaluationProvider === undefined ? {} : { evaluationProvider }),
     forEntryId,
     generatedAt: nonNegativeInteger(value.generatedAt),
-    ...(recap === undefined ? {} : { recap }),
-    ...(suggestion === undefined ? {} : { suggestion }),
+    suggestions,
   };
 }
 
@@ -240,18 +239,17 @@ export function mutateSessionFeatures(
       });
     }
     case "assist.set": {
-      const recap = optionalText(mutation.recap, RECAP_CHAR_LIMIT);
-      const suggestion = optionalText(mutation.suggestion, SUGGESTION_CHAR_LIMIT);
+      const suggestions = (mutation.suggestions ?? [])
+        .map((item) => optionalText(item, SUGGESTION_CHAR_LIMIT))
+        .filter((item): item is string => Boolean(item));
       const evaluationModel = optionalText(mutation.evaluationModel);
       const evaluationProvider = optionalText(mutation.evaluationProvider);
-      if (!recap && !suggestion) return current;
       const assist: PiSessionAssistState = {
         ...(evaluationModel === undefined ? {} : { evaluationModel }),
         ...(evaluationProvider === undefined ? {} : { evaluationProvider }),
         forEntryId: mutation.forEntryId,
         generatedAt: mutation.generatedAt ?? now,
-        ...(recap === undefined ? {} : { recap }),
-        ...(suggestion === undefined ? {} : { suggestion }),
+        suggestions,
       };
       return appendState(manager, current, {
         ...current,
@@ -271,19 +269,16 @@ export function mutateSessionFeatures(
           ...update,
         });
       }
-      const assist = { ...current.assist };
-      delete assist[field];
-      if (!assist.recap && !assist.suggestion) {
-        const update = { ...current };
-        delete update.assist;
-        return appendState(manager, current, {
-          ...update,
-        });
+      const update = { ...current };
+      if (field === "suggestions") {
+        update.assist = {
+          ...current.assist,
+          suggestions: [],
+        };
+        return appendState(manager, current, update);
       }
-      return appendState(manager, current, {
-        ...current,
-        assist,
-      });
+      delete update.assist;
+      return current;
     }
   }
 }

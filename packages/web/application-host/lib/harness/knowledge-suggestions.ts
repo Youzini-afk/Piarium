@@ -6,7 +6,7 @@
  *
  * Triggers (only these two, no heuristics):
  * 1. User "remember this" action on message/tool result/block entry
- * 2. User message explicit pattern (only when models.suggestions configured)
+ * 2. User message explicit pattern (only when models.knowledgeSuggestions configured)
  */
 
 import {

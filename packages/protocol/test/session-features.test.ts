@@ -36,16 +36,20 @@ describe("Pi session feature protocol", () => {
       /Unsupported session feature mutation/,
     );
     assert.deepEqual(
-      parsePiSessionFeatureMutation({ forEntryId: "e1", recap: "recap", ignored: true, type: "assist.set" }),
-      { forEntryId: "e1", recap: "recap", type: "assist.set" },
+      parsePiSessionFeatureMutation({ forEntryId: "e1", suggestions: ["continue"], ignored: true, type: "assist.set" }),
+      { forEntryId: "e1", suggestions: ["continue"], type: "assist.set" },
     );
     assert.throws(
       () => parsePiSessionFeatureMutation({ forEntryId: "e1", type: "assist.set" }),
-      /requires a recap or suggestion/,
+      /suggestions must be an array/,
     );
     assert.throws(
       () => parsePiSessionFeatureMutation({ field: "bogus", type: "assist.clear" }),
-      /field must be all, recap, or suggestion/,
+      /field must be all or suggestions/,
+    );
+    assert.deepEqual(
+      parsePiSessionFeatureMutation({ forEntryId: "e1", suggestions: [], type: "assist.set" }),
+      { forEntryId: "e1", suggestions: [], type: "assist.set" },
     );
   });
 });

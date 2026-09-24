@@ -50,6 +50,9 @@ const goal: PiSessionGoalState = {
 
 interface HarnessOptions {
   audit?: { note: string; verdict: 'blocked' | 'complete' | 'continue' };
+  emptySuggestions?: boolean;
+  nextStepEnabled?: boolean;
+  precedingUserEntries?: Array<typeof userEntry>;
   withGoal?: boolean;
 }
 
@@ -64,7 +67,13 @@ const stripMutationType = <Mutation extends { type: string }>(mutation: Mutation
   return copy as Omit<Mutation, 'type'>;
 };
 
-const createHarness = ({ audit = { note: 'Verified.', verdict: 'complete' }, withGoal = true }: HarnessOptions = {}) => {
+const createHarness = ({
+  audit = { note: 'Verified.', verdict: 'complete' },
+  emptySuggestions = false,
+  nextStepEnabled = true,
+  precedingUserEntries = [],
+  withGoal = true,
+}: HarnessOptions = {}) => {
   let features: PiSessionFeatureState = {
     ...(withGoal ? { goal: { ...goal } } : {}),
     revision: 1,
@@ -93,7 +102,7 @@ const createHarness = ({ audit = { note: 'Verified.', verdict: 'complete' }, wit
         thinkingLevel: 'medium',
       };
       if (method === 'session.entries') return {
-        entries: [userEntry, assistantEntry],
+        entries: [...precedingUserEntries, userEntry, assistantEntry],
         leafId: assistantEntry.id,
         scope: 'branch',
         sessionId: 'session-1',
@@ -107,6 +116,10 @@ const createHarness = ({ audit = { note: 'Verified.', verdict: 'complete' }, wit
         toolResults: 0,
         totalMessages: 2,
         userMessages: 1,
+      };
+      if (method === 'settings.get') return {
+        global: { harness: { nextStep: { enabled: nextStepEnabled }, models: { nextStep: { providerId: 'faux', modelId: 'next-step' } } } },
+        globalRevision: '1', project: {}, projectRevision: '1', projectTrusted: false,
       };
       if (method === 'session.features.mutate') {
         const mutation = params.mutation as PiSessionFeatureMutation;
@@ -143,7 +156,7 @@ const createHarness = ({ audit = { note: 'Verified.', verdict: 'complete' }, wit
     source: 'test',
     text: system?.includes('Audit a coding agent')
       ? JSON.stringify(audit)
-      : JSON.stringify({ recap: 'Feature is verified.', suggestion: 'Package the application.' }),
+      : JSON.stringify({ suggestions: emptySuggestions ? [] : ['Package the application.', 'Review the result.'] }),
   }));
   return {
     broker,
@@ -186,19 +199,61 @@ describe('Pi-native session automation', () => {
     runtime.stop();
   });
 
-  it('stores a fresh recap and one-click follow-up on the Pi session branch', async () => {
+  it('stores multiple next-step candidates on the Pi session branch', async () => {
     const harness = createHarness({ withGoal: false });
     const runtime = createPiSessionAutomationRuntime({
       broker: harness.broker,
       getSmallModelService: async () => ({ generateSmallModelText: harness.generateSmallModelText }),
-      readSettings: async () => ({ sessionRecapEnabled: true, sessionSuggestionEnabled: true }),
     });
     await runtime.runAssistNow('session-1');
     expect(harness.features.assist).toMatchObject({
       forEntryId: 'assistant-1',
-      recap: 'Feature is verified.',
-      suggestion: 'Package the application.',
+      suggestions: ['Package the application.', 'Review the result.'],
     });
+    runtime.stop();
+  });
+
+  it('includes ordered supplemental user messages in the short facts request', async () => {
+    const harness = createHarness({
+      precedingUserEntries: [{
+        ...userEntry,
+        id: 'user-0',
+        message: { content: 'Also preserve this correction.', role: 'user', timestamp: 0 },
+      }],
+      withGoal: false,
+    });
+    const runtime = createPiSessionAutomationRuntime({
+      broker: harness.broker,
+      getSmallModelService: async () => ({ generateSmallModelText: harness.generateSmallModelText }),
+    });
+    await runtime.runAssistNow('session-1');
+    const prompt = harness.generateSmallModelText.mock.calls[0]?.[0]?.prompt ?? '';
+    expect(prompt.indexOf('Also preserve this correction.')).toBeLessThan(prompt.indexOf('Implement the feature'));
+    runtime.stop();
+  });
+
+  it('does not call a model while next-step selection is disabled', async () => {
+    const harness = createHarness({ nextStepEnabled: false, withGoal: false });
+    const runtime = createPiSessionAutomationRuntime({
+      broker: harness.broker,
+      getSmallModelService: async () => ({ generateSmallModelText: harness.generateSmallModelText }),
+    });
+    await runtime.runAssistNow('session-1');
+    expect(harness.generateSmallModelText).not.toHaveBeenCalled();
+    expect(harness.features.assist).toBeUndefined();
+    runtime.stop();
+  });
+
+  it('records an empty result and does not issue a second request for the same entry', async () => {
+    const harness = createHarness({ emptySuggestions: true, withGoal: false });
+    const runtime = createPiSessionAutomationRuntime({
+      broker: harness.broker,
+      getSmallModelService: async () => ({ generateSmallModelText: harness.generateSmallModelText }),
+    });
+    await runtime.runAssistNow('session-1');
+    await runtime.runAssistNow('session-1');
+    expect(harness.generateSmallModelText).toHaveBeenCalledTimes(1);
+    expect(harness.features.assist).toMatchObject({ forEntryId: 'assistant-1', suggestions: [] });
     runtime.stop();
   });
 });

@@ -3574,7 +3574,7 @@ export class SessionHost {
           message: `Reader model is unavailable: ${readerSelection.providerId}/${readerSelection.modelId}`,
         });
       }
-      const suggestionsSelection = harnessSettings.models.suggestions;
+      const suggestionsSelection = harnessSettings.models.knowledgeSuggestions;
       const suggestionsModel = suggestionsSelection
         ? services.modelRuntime.getModel(suggestionsSelection.providerId, suggestionsSelection.modelId)
         : undefined;

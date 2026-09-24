@@ -4,6 +4,7 @@ import {
   mergeHarnessSettings,
   resolveHarnessContextSettings,
   resolveHarnessReviewSettings,
+  resolveHarnessNextStepSettings,
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
@@ -171,6 +172,18 @@ describe("harness settings", () => {
       { review: { enabled: false } },
       {},
     ).review, { enabled: false, gate: false });
+  });
+
+  it("keeps next-step selection user-owned, disabled by default, and separate from knowledge suggestions", () => {
+    assert.deepEqual(mergeHarnessSettings({}, {}).nextStep, { enabled: false });
+    assert.equal(mergeHarnessSettings({}, { nextStep: { enabled: true } }).nextStep.enabled, false);
+    assert.equal(mergeHarnessSettings({ nextStep: { enabled: true } }, {}).nextStep.enabled, true);
+    assert.equal(mergeHarnessSettings({ models: { knowledgeSuggestions: { providerId: "p", modelId: "knowledge" } } }, {}).models.knowledgeSuggestions?.modelId, "knowledge");
+  });
+
+  it("rejects malformed next-step settings", () => {
+    assert.throws(() => resolveHarnessNextStepSettings(false), HarnessSettingsValidationError);
+    assert.throws(() => resolveHarnessNextStepSettings({ enabled: "yes" }), HarnessSettingsValidationError);
   });
 
   it("rejects malformed review settings", () => {

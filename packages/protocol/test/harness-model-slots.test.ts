@@ -23,6 +23,8 @@ describe("Harness model slots", () => {
     });
     assert.equal(anthropic.reader?.modelId, "claude-3-5-haiku");
     assert.equal(anthropic.frontend?.modelId, "claude-3-5-haiku");
+    assert.equal(anthropic.knowledgeSuggestions?.modelId, "claude-3-5-haiku");
+    assert.equal(anthropic.nextStep, undefined, "a model preset must not enable next-step suggestions");
     assert.equal(anthropic.hardImplement, undefined);
     assert.equal(anthropic.review, undefined);
 
