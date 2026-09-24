@@ -30,7 +30,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范、产品身份与阶段小结。 | 17 |
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置、阶段 W 会话等待与续接。 | 40 |
-| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、阶段 C 压缩 Agent、建议/审阅、模型槽位与召回。 | 30 |
+| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、阶段 C 压缩 Agent、建议/审阅、模型槽位与召回。 | 31 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank、阶段 F 快速决策、阶段 L Web/科研搜索与检索量具。 | 63 |
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
@@ -357,3 +357,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-316 | 2026-09-23 | L1 验收纠正：快照 owner、刷新身份、缓存域策略和读取 scope | implemented / focused acceptance | 修复跨 Thread 临时快照泄露、refresh 复用旧身份、Run 结算过早回收、缓存最终 URL 未重检与 PDF 占位正文 | retrieval；web materials/fetch；status；plan；architecture | [retrieval](decisions/retrieval.md) |
 | D-321 | 2026-09-23 | L2–L6 主代理验收修正：服务装配、工具资源元数据、持久集合授权与集合检索上限 | implemented / focused acceptance | 修复新服务未进入 HarnessServiceHost、Web-only research_decide 未装配、持久/共享集合成员读取不闭环和未声明的固定命中上限 | retrieval；material collections；service-host；select-tools；status | [retrieval](decisions/retrieval.md) |
 | D-322 | 2026-09-23 | 复杂 PDF、OCR 与图表视觉阅读：原件/解析版本/视觉视图分层，L3-P0–P2 渐进实施 | accepted design / not implemented | 当前轻量 PDF 文本与页边界不等于复杂结构阅读；后续接原件保存、页面/区域视觉、版面/OCR、表格/公式/图表与阅读器交接 | web-research-search-design；plan L3；status；architecture | [retrieval](decisions/retrieval.md) |
+| D-325 | 2026-09-24 | 会话下一步选择：单次短请求、默认关闭的独立模型槽位、零或多方向、移除自动回顾 | accepted design / pending implementation | 输入框建议与知识建议分工；不采用历史工具循环或通用小模型隐式回退 | plan 阶段 N；实施时同步 harness/status/模块文档 | [context-knowledge](decisions/context-knowledge.md) |
