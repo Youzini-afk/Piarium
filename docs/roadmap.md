@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired; Stage L (D-315) in progress
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311; Stage B source/repository rebrand implemented at D-313; Stage F (D-312) and Stage C (D-314) wired; Stage L (D-315) in progress; Office stage O design accepted at D-327 and not implemented
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -33,6 +33,7 @@ authoritative record of delivery, and each phase names the design document that 
 | F | Fast Decision Models and progressive retrieval | Implemented/wired (D-312): shared capability/binding, first Jev adapter and iterative `explore`; evidence and untested quality/latency in harness status |
 | C | Background compaction Agent and semantic continuation | Implemented/wired (D-314): dedicated `compaction` worker process, scoped read-only history/output/record queries, S0/A/B frozen material with pagination, capacity waiting on the in-flight task and session-owned native commit |
 | L | Web and scholarly search, reading and material reuse | In progress (D-315): L0 retrieval report contract and OpenAlex/Semantic Scholar discovery/detail tool wired; Web reading reuse, scholarly relations/structure, collaboration and fast-decision consumers remain |
+| O | Office and daily work continuity | Design accepted (D-327); O0–O4 are planned and not implemented. The design starts with a materials-to-editable-deliverable loop and reuses existing authorities. |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
