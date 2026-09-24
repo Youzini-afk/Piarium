@@ -24,14 +24,14 @@ const assistant = (stopReason: PiAssistantMessage['stopReason'], provider = 'run
   },
 });
 
-const turn = (liveAssistant?: PiAssistantMessage): PiTimelineTurn => ({
+const turn = (liveAssistant?: PiAssistantMessage, userContent = 'hello'): PiTimelineTurn => ({
   entries: [],
   id: 'turn:user',
   ...(liveAssistant ? { liveAssistant } : {}),
   liveUser: true,
   metadata: {},
   resultByCallId: new Map(),
-  user: { content: 'hello', role: 'user', timestamp: 1 },
+  user: { content: userContent, role: 'user', timestamp: 1 },
 });
 
 const renderChrome = (node: React.ReactNode): string => renderToStaticMarkup(
@@ -79,5 +79,15 @@ describe('Pi turn assistant chrome', () => {
     const markup = renderChrome(<PiTurnAssistantChrome turn={turn(assistant('stop', 'pi-subagents'))} />);
     expect(markup).toContain('Subagents');
     expect(markup).not.toContain('>Varin</span>');
+  });
+
+  test('prefers the invoked agent name when the subagent command carries it', () => {
+    const markup = renderChrome(
+      <PiTurnAssistantChrome
+        turn={turn(assistant('stop', 'pi-subagents'), '/run reviewer inspect the repository')}
+      />,
+    );
+    expect(markup).toContain('reviewer');
+    expect(markup).not.toContain('Subagents');
   });
 });

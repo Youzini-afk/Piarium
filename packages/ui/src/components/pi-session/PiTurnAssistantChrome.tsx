@@ -17,6 +17,16 @@ const agentProviderLabel = (provider: string | undefined): string => {
     .join(' ');
 };
 
+const invokedAgentName = (turn: PiTimelineTurn): string | undefined => {
+  const content = turn.user.content;
+  const text = typeof content === 'string'
+    ? content
+    : content.filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text)
+      .join(' ');
+  return /^\/run\s+([^\s]+)(?:\s|$)/u.exec(text.trim())?.[1];
+};
+
 export const PiTurnAssistantChrome: React.FC<{
   waiting?: PiAssistantWaitingPresentation;
   turn: PiTimelineTurn;
@@ -35,7 +45,7 @@ export const PiTurnAssistantChrome: React.FC<{
     : waiting?.model
       ? `${waiting.model.provider}/${waiting.model.id}`
       : undefined;
-  const agentLabel = agentProviderLabel(last?.provider);
+  const agentLabel = invokedAgentName(turn) ?? agentProviderLabel(last?.provider);
   const usesVarinMark = agentLabel === 'Varin';
 
   return (
