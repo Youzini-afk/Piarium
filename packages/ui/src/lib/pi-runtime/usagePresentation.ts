@@ -130,6 +130,21 @@ export const aggregateAssistantUsage = (
   assistantMessagesForTurn(entries, liveAssistant).map((message) => message.usage),
 );
 
+export const assistantTokensPerSecond = (
+  entries: readonly PiSessionEntry[],
+  startedAt: number | undefined,
+  liveAssistant?: PiAssistantMessage,
+): number | undefined => {
+  if (startedAt === undefined || !Number.isFinite(startedAt) || startedAt <= 0) return undefined;
+  const assistants = assistantMessagesForTurn(entries, liveAssistant);
+  const last = assistants.at(-1);
+  if (!last || !Number.isFinite(last.timestamp) || last.timestamp <= startedAt) return undefined;
+  const outputTokens = assistants.reduce((total, message) => total + positive(message.usage.output), 0);
+  if (outputTokens <= 0) return undefined;
+  const durationSeconds = (last.timestamp - startedAt) / 1000;
+  return durationSeconds > 0 ? outputTokens / durationSeconds : undefined;
+};
+
 export const latestAssistantTurnUsage = (
   entries: readonly PiSessionEntry[],
 ): PiUsage | undefined => {

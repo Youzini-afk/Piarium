@@ -45,7 +45,7 @@ const UsageMetric: React.FC<{
   );
 };
 
-export const PiAssistantUsageFooter: React.FC<{ usage: PiUsage }> = ({ usage }) => {
+export const PiAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage: PiUsage }> = ({ tokensPerSecond, usage }) => {
   const { t } = useI18n();
   const presentation = projectPiUsagePresentation(usage);
   if (!presentation) return null;
@@ -70,6 +70,15 @@ export const PiAssistantUsageFooter: React.FC<{ usage: PiUsage }> = ({ usage }) 
           label={t('contextSidebar.tokens.total')}
           value={presentation.total}
         />
+      ) : null}
+      {tokensPerSecond !== undefined && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? (
+        <span
+          className="inline-flex items-center gap-1 tabular-nums"
+          title={`Output token rate: ${tokensPerSecond.toFixed(1)} Tok/s`}
+        >
+          <span aria-hidden="true">{tokensPerSecond.toFixed(1)} Tok/s</span>
+          <span className="sr-only">Output token rate {tokensPerSecond.toFixed(1)} tokens per second</span>
+        </span>
       ) : null}
     </footer>
   );

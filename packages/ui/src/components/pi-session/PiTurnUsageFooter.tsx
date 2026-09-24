@@ -6,6 +6,7 @@ import type {
 import {
   aggregateAssistantUsage,
   assistantMessagesForTurn,
+  assistantTokensPerSecond,
 } from '@/lib/pi-runtime/usagePresentation';
 import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
 
@@ -19,9 +20,16 @@ const isPiAssistantTurnComplete = (
 
 export const PiTurnUsageFooter: React.FC<{
   entries: readonly PiSessionEntry[];
+  startedAt?: number;
   liveAssistant?: PiAssistantMessage;
-}> = ({ entries, liveAssistant }) => {
+}> = ({ entries, liveAssistant, startedAt }) => {
   if (!isPiAssistantTurnComplete(entries, liveAssistant)) return null;
   const usage = aggregateAssistantUsage(entries, liveAssistant);
-  return usage ? <PiAssistantUsageFooter usage={usage} /> : null;
+  if (!usage) return null;
+  return (
+    <PiAssistantUsageFooter
+      tokensPerSecond={assistantTokensPerSecond(entries, startedAt, liveAssistant)}
+      usage={usage}
+    />
+  );
 };

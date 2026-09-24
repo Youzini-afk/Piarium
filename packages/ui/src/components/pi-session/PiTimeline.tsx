@@ -185,7 +185,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         threadBusyEntryId={threadBusyEntryId}
         toolExecutions={toolExecutions}
       />
-      <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} />
+        <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} startedAt={turn.user.timestamp} />
     </div>
   );
 };

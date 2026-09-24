@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { PiSessionEntry, PiUsage } from '@varin/protocol';
 import {
   aggregatePiUsage,
+  assistantTokensPerSecond,
   latestAssistantTurnUsage,
   projectPiUsagePresentation,
 } from './usagePresentation';
@@ -175,5 +176,6 @@ describe('Pi usage presentation', () => {
       output: 6,
       totalTokens: 31,
     });
+    expect(assistantTokensPerSecond(entries, 2)).toBe(2_000);
   });
 });

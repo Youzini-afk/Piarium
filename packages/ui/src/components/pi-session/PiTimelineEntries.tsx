@@ -832,7 +832,6 @@ export const PiTurnUserMessage: React.FC<{
   threadBusyEntryId,
 }) => {
   const { t } = useI18n();
-  const isMobile = useUIStore((state) => state.isMobile);
   const messageId = entry?.id ?? `live-user:${message.timestamp}`;
   const messageText = piContentText(message.content).trim();
   const copyMessage = React.useCallback(() => {
@@ -873,9 +872,7 @@ export const PiTurnUserMessage: React.FC<{
       {messageText || (entry && (onFork || onOpenThread || onRecover)) ? (
         <div className={cn(
           'mt-1 flex h-6 items-center justify-end transition-opacity',
-          isMobile
-            ? 'opacity-100'
-            : 'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100',
+          'opacity-100',
         )}>
           {messageText ? (
             <Tooltip>
@@ -967,7 +964,6 @@ export const PiTimelineEntryList: React.FC<Omit<
   toolExecutions,
 }) => {
   const { t } = useI18n();
-  const isMobile = useUIStore((state) => state.isMobile);
   const chatRenderMode = useUIStore((state) => state.chatRenderMode);
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
@@ -1059,9 +1055,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                   {displayedMessage && (assistantText || onFork || onOpenThread) ? (
                   <div className={cn(
                     'flex h-6 items-center transition-opacity',
-                    isMobile
-                      ? 'opacity-100'
-                      : 'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100',
+                    'opacity-100',
                   )}>
                     {assistantText ? (
                       <Tooltip>

@@ -42,4 +42,18 @@ describe('Pi assistant usage footer', () => {
       totalTokens: 0,
     })).toBe('');
   });
+
+  test('renders output token rate when a measured duration is available', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider><PiAssistantUsageFooter tokensPerSecond={42.5} usage={{
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+        input: 1,
+        output: 42,
+        totalTokens: 43,
+      }} /></I18nProvider>,
+    );
+    expect(markup).toContain('42.5 Tok/s');
+  });
 });
