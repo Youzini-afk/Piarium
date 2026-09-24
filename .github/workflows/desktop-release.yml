@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      include_macos_intel:
+        description: Also package the slow macOS Intel target (manual opt-in)
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -45,49 +50,82 @@ jobs:
       - run: bun run test:pi
       - run: bun run test:cloud
 
+  release-targets:
+    name: Select release targets
+    needs: release-quality
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - name: Build target matrix
+        id: targets
+        env:
+          INCLUDE_MACOS_INTEL: ${{ inputs.include_macos_intel }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const targets = [
+            {
+              label: 'Windows x64',
+              platform: 'windows',
+              target: 'win',
+              architecture: 'x64',
+              runner: 'windows-latest',
+              artifact: 'latest-yml-x86_64-pc-windows-msvc',
+            },
+            {
+              label: 'Windows ARM64',
+              platform: 'windows',
+              target: 'win',
+              architecture: 'arm64',
+              runner: 'windows-11-arm',
+              artifact: 'latest-yml-aarch64-pc-windows-msvc',
+            },
+            {
+              label: 'Linux x64',
+              platform: 'linux',
+              target: 'linux',
+              architecture: 'x64',
+              runner: 'ubuntu-latest',
+              artifact: 'latest-yml-x86_64-unknown-linux-gnu',
+            },
+            {
+              label: 'Linux ARM64',
+              platform: 'linux',
+              target: 'linux',
+              architecture: 'arm64',
+              runner: 'ubuntu-24.04-arm',
+              artifact: 'latest-yml-aarch64-unknown-linux-gnu',
+            },
+            {
+              label: 'macOS Apple Silicon',
+              platform: 'macos',
+              target: 'mac',
+              architecture: 'arm64',
+              runner: 'macos-15',
+              artifact: 'latest-yml-aarch64-apple-darwin',
+            },
+          ];
+          if (process.env.INCLUDE_MACOS_INTEL === 'true') {
+            targets.push({
+              label: 'macOS Intel',
+              platform: 'macos',
+              target: 'mac',
+              architecture: 'x64',
+              runner: 'macos-15-intel',
+              artifact: 'latest-yml-x86_64-apple-darwin',
+            });
+          }
+          process.stdout.write(`matrix=${JSON.stringify({ include: targets })}\n`);
+          NODE
+
   package:
     name: Package and smoke ${{ matrix.label }}
-    needs: release-quality
+    needs: release-targets
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: Windows x64
-            platform: windows
-            target: win
-            architecture: x64
-            runner: windows-latest
-            artifact: latest-yml-x86_64-pc-windows-msvc
-          - label: Windows ARM64
-            platform: windows
-            target: win
-            architecture: arm64
-            runner: windows-11-arm
-            artifact: latest-yml-aarch64-pc-windows-msvc
-          - label: Linux x64
-            platform: linux
-            target: linux
-            architecture: x64
-            runner: ubuntu-latest
-            artifact: latest-yml-x86_64-unknown-linux-gnu
-          - label: Linux ARM64
-            platform: linux
-            target: linux
-            architecture: arm64
-            runner: ubuntu-24.04-arm
-            artifact: latest-yml-aarch64-unknown-linux-gnu
-          - label: macOS Intel
-            platform: macos
-            target: mac
-            architecture: x64
-            runner: macos-15-intel
-            artifact: latest-yml-x86_64-apple-darwin
-          - label: macOS Apple Silicon
-            platform: macos
-            target: mac
-            architecture: arm64
-            runner: macos-15
-            artifact: latest-yml-aarch64-apple-darwin
+      matrix: ${{ fromJSON(needs.release-targets.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     env:
       VARIN_TARGET_ARCH: ${{ matrix.architecture }}
@@ -350,16 +388,22 @@ jobs:
             -exec cp {} release-assets/ \;
           cp finalized/latest.yml finalized/latest-arm64.yml finalized/latest-mac.yml release-assets/
 
-          for required in \
+          required_assets=(
             "Varin-${version}-win-x64.exe" \
             "Varin-${version}-win-arm64.exe" \
             "Varin-${version}-linux-x86_64.AppImage" \
             "Varin-${version}-linux-arm64.AppImage" \
-            "Varin-${version}-mac-x64.dmg" \
             "Varin-${version}-mac-arm64.dmg" \
-            "Varin-${version}-mac-x64.zip" \
             "Varin-${version}-mac-arm64.zip" \
-            latest.yml latest-arm64.yml latest-linux.yml latest-linux-arm64.yml latest-mac.yml; do
+            latest.yml latest-arm64.yml latest-linux.yml latest-linux-arm64.yml latest-mac.yml
+          )
+          if [ "${{ inputs.include_macos_intel }}" = "true" ]; then
+            required_assets+=(
+              "Varin-${version}-mac-x64.dmg"
+              "Varin-${version}-mac-x64.zip"
+            )
+          fi
+          for required in "${required_assets[@]}"; do
             test -f "release-assets/$required" || { echo "Missing release asset: $required" >&2; exit 1; }
           done
           find release-assets -maxdepth 1 -type f -printf '%f\n' | sort

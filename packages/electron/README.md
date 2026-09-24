@@ -207,10 +207,11 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 ### Smoke builds
 
 Run the `Windows Desktop Build` workflow on demand for a focused Windows x64, ARM64, or dual-architecture
-build. For a release, run `Desktop Release Build` against an existing version tag. It builds and smokes
-Windows x64/ARM64, Linux x64/ARM64, and macOS Intel/Apple Silicon on matching native GitHub runners,
+build. For a release, run `Desktop Release Build` against an existing version tag. By default it builds and
+smokes Windows x64/ARM64, Linux x64/ARM64, and macOS Apple Silicon on matching native GitHub runners,
 assembles the architecture-specific updater channels, and can upload only the verified assets to an
-existing draft GitHub Release. Publishing the draft remains a separate deliberate action.
+existing draft GitHub Release. The slow macOS Intel target is a manual opt-in on that workflow, so routine
+releases do not wait for the Intel runner. Publishing the draft remains a separate deliberate action.
 
 The Linux and macOS smoke path starts the unpacked packaged application, waits for the renderer's
 `__varinAppReady` signal, rejects the React error boundary, checks `/health`, and creates and closes a
@@ -229,9 +230,9 @@ Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libf
 Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
 
 macOS release jobs retain each native builder manifest until the final assembly job. That job verifies
-every referenced `zip`/`dmg` checksum and merges Intel and Apple Silicon entries into one
-`latest-mac.yml`, so both architectures use the standard Electron updater channel without overwriting
-one another.
+every referenced `zip`/`dmg` checksum and writes the Apple Silicon entry to `latest-mac.yml`. When the
+manual Intel option is selected, it merges both architectures into that same manifest without overwriting
+either entry.
 
 ### Updater end-to-end fixture
 

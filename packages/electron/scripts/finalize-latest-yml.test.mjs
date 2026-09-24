@@ -111,6 +111,24 @@ test('merges verified Intel and Apple Silicon macOS update files', (context) => 
   assert.match(mac, /mac-arm64\.zip/);
 });
 
+test('keeps an Apple Silicon macOS channel when Intel packaging is omitted', (context) => {
+  const fixture = createFixture();
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  writeManifestFixture(
+    fixture.artifacts,
+    'latest-yml-aarch64-apple-darwin',
+    'latest-mac.yml',
+    'mac',
+    'arm64',
+  );
+
+  execFileSync(process.execPath, [script], { env: environment(fixture) });
+
+  const mac = fs.readFileSync(path.join(fixture.output, 'latest-mac.yml'), 'utf8');
+  assert.match(mac, /mac-arm64\.zip/);
+  assert.doesNotMatch(mac, /mac-x64\.zip/);
+});
+
 test('rejects a manifest whose artifact checksum no longer matches', (context) => {
   const fixture = createFixture();
   context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
