@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createHash } from "node:crypto";
 import { createWebFetch } from "./web-fetch.js";
 import type { SsrfPolicy, DomainPolicy } from "./web-fetch.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
@@ -114,6 +113,8 @@ describe("web-fetch service", () => {
   });
 
   it("returns renderer-unavailable when render requested but no renderer", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200,
+      headers: new Headers({ "content-type": "text/html" }) }) as never;
     const service = createWebFetch({
       ssrf: createMockSsrf(),
       domainPolicy: noDomainPolicy,
@@ -363,55 +364,106 @@ describe("web-fetch service", () => {
     }
   });
 
-  it("renders a requested PDF page from the pinned original bytes", async () => {
+  it("delegates PDF snapshot page views to the independent document reader", async () => {
     const source = Buffer.from("original-pdf");
     const ref = {
-      snapshotId: "snap-pdf",
-      sourceUrl: "https://example.com/paper.pdf",
-      finalUrl: "https://example.com/paper.pdf",
-      fetchedAt: 1,
-      contentHash: "sha256-text",
-      representation: "pdf-text",
-      byteLength: 9,
+      snapshotId: "snap-pdf", sourceUrl: "https://example.com/paper.pdf", finalUrl: "https://example.com/paper.pdf",
+      fetchedAt: 1, contentHash: "sha256-text", representation: "pdf-source-v1", byteLength: 0,
       contentType: "application/pdf",
-      document: {
-        kind: "pdf" as const,
-        pageCount: 2,
-        parser: "pdf-text-layout-v1",
-        source: { contentHash: "sha256-source", byteLength: source.byteLength, contentType: "application/pdf" },
-      },
+      document: { kind: "pdf" as const, parser: "source", source: { contentHash: "sha256-source", byteLength: source.byteLength, contentType: "application/pdf" } },
     };
     const materials = {
       put: async () => ref,
-      read: async (_workspaceId: string, snapshotId: string, _authority: unknown, options?: { includeSource?: boolean }) => (
-        snapshotId === ref.snapshotId
-          ? { ref, body: Buffer.from("page text"), ...(options?.includeSource ? { source: { bytes: source, contentType: "application/pdf" } } : {}) }
-          : null
-      ),
+      read: async (_workspaceId: string, snapshotId: string) => snapshotId === ref.snapshotId
+        ? { ref, body: Buffer.alloc(0), source: { bytes: source, contentType: "application/pdf" } } : null,
     };
-    const renderer = vi.fn(async (bytes: Buffer, page: number) => {
-      expect(bytes).toEqual(source);
-      expect(page).toBe(2);
-      return { data: Buffer.from("png-page-2"), mimeType: "image/png" as const };
-    });
-    const service = createWebFetch({
-      ssrf: createMockSsrf(),
-      domainPolicy: noDomainPolicy,
-      materials,
-      pdfPageRenderer: renderer,
-      persistReceipt,
-    });
+    const pageImage = { page: 2, mimeType: "image/png" as const, data: Buffer.from("png-page-2").toString("base64"),
+      byteLength: 10, width: 100, height: 200, sourceHash: "sha256-source" };
+    const read = vi.fn(async () => ({ status: "ok" as const, url: ref.sourceUrl, finalUrl: ref.finalUrl,
+      contentType: "application/pdf", markdown: "", bytes: 0, fromCache: false, rendered: false, snapshot: ref, pageImage }));
+    const persist = vi.fn(persistReceipt);
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy, materials,
+      persistReceipt: persist, documentReader: { read, ingest: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
     const result = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 2 }, fetchContext);
     expect(result.status).toBe("ok");
-    if (result.status === "ok") {
-      expect(result.pageImage).toMatchObject({ page: 2, mimeType: "image/png", data: Buffer.from("png-page-2").toString("base64") });
-      expect(result.snapshot?.snapshotId).toBe(ref.snapshotId);
-      expect(result.receipt?.contentHash).toBe(`sha256-${createHash("sha256").update("page text").digest("hex")}`);
-    }
-    expect(renderer).toHaveBeenCalledTimes(1);
+    if (result.status === "ok") expect(result.pageImage).toEqual(pageImage);
+    expect(read).toHaveBeenCalledWith(expect.objectContaining({ snapshotId: ref.snapshotId, page: 2, view: "page-image" }),
+      expect.objectContaining({ workspaceId: "ws", authority: fetchContext.authority }));
+    expect(persist).not.toHaveBeenCalled();
+  });
 
-    const outOfRange = await service.fetch({ snapshotId: ref.snapshotId, view: "page-image", page: 3 }, fetchContext);
-    expect(outOfRange).toMatchObject({ status: "page-image-unavailable", page: 3 });
+  it("shares downloaded PDF bytes but pins each caller's own source before analysis", async () => {
+    const source = Buffer.from("%PDF-shared");
+    const download = vi.fn(async () => ({ ok: true, status: 200,
+      headers: new Headers({ "content-type": "application/pdf" }),
+      arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) }));
+    globalThis.fetch = download as never;
+    const ingest = vi.fn(async (_input: unknown, ctx: { authority: { sessionId: string } }, request: { ocr?: boolean }) => ({
+      status: "ok" as const, url: "https://example.com/shared.pdf", finalUrl: "https://example.com/shared.pdf",
+      contentType: "application/pdf", markdown: request.ocr ? "OCR" : "native", bytes: 6,
+      fromCache: false, rendered: false,
+      snapshot: { snapshotId: `source-${ctx.authority.sessionId}`, sourceUrl: "https://example.com/shared.pdf",
+        finalUrl: "https://example.com/shared.pdf", fetchedAt: 1, contentHash: "sha256-text",
+        representation: "pdf-native-analysis", byteLength: 6 },
+    }));
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+      documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
+    const a = await service.fetch({ url: "https://example.com/shared.pdf" }, fetchContext);
+    const b = await service.fetch({ url: "https://example.com/shared.pdf", ocr: true }, {
+      ...fetchContext, authority: { ...fetchContext.authority, sessionId: "session-2" },
+    });
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(ingest).toHaveBeenCalledTimes(2);
+    expect(a.status === "ok" && a.snapshot?.snapshotId).toBe("source-session-1");
+    expect(b.status === "ok" && b.snapshot?.snapshotId).toBe("source-session-2");
+    expect(b.status === "ok" && b.markdown).toBe("OCR");
+  });
+
+  it("preserves PDF source bytes when HTML rendering is requested", async () => {
+    const source = Buffer.from("%PDF-visual");
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200,
+      headers: new Headers({ "content-type": "application/pdf" }),
+      arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) })) as never;
+    const renderer = vi.fn(async () => "<html>not the PDF</html>");
+    const ingest = vi.fn(async (input: { source: Buffer; sourceUrl: string }) => ({
+      status: "ok" as const, url: input.sourceUrl, finalUrl: input.sourceUrl,
+      contentType: "application/pdf", markdown: "PDF text", bytes: 8, fromCache: false, rendered: false,
+    }));
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+      renderer, documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
+    const result = await service.fetch("https://example.com/visual.pdf", { ...fetchContext, render: true });
+    expect(result.status).toBe("ok");
+    expect(renderer).not.toHaveBeenCalled();
+    expect(ingest.mock.calls[0]?.[0].source).toEqual(source);
+  });
+
+  it("delivers each overlapping PDF response's own bytes when refresh overwrites the URL cache", async () => {
+    const pending: Array<(bytes: ArrayBuffer) => void> = [];
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200,
+      headers: new Headers({ "content-type": "application/pdf" }),
+      arrayBuffer: () => new Promise<ArrayBuffer>((resolve) => { pending.push(resolve); }) })) as never;
+    const ingest = vi.fn(async (input: { source: Buffer; sourceUrl: string; forceNew?: boolean }) => {
+      const text = input.source.toString("utf8");
+      return { status: "ok" as const, url: input.sourceUrl, finalUrl: input.sourceUrl,
+        contentType: "application/pdf", markdown: text, bytes: text.length, fromCache: false, rendered: false,
+        snapshot: { snapshotId: `snap-${text}`, sourceUrl: input.sourceUrl, finalUrl: input.sourceUrl,
+          fetchedAt: 1, contentHash: `source-${text}`, representation: "pdf-source-v1", byteLength: 0 },
+      };
+    });
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: noDomainPolicy,
+      documentReader: { ingest, read: vi.fn() } as unknown as import("./document-reading.js").DocumentReader });
+    const url = "https://example.com/race.pdf";
+    const normal = service.fetch({ url }, fetchContext);
+    const refresh = service.fetch({ url, refresh: true }, fetchContext);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    for (const [index, resolve] of pending.entries()) {
+      const bytes = Buffer.from(index === 0 ? "first" : "second");
+      resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    }
+    const [normalResult, refreshedResult] = await Promise.all([normal, refresh]);
+    expect(normalResult.status === "ok" && normalResult.snapshot?.snapshotId).toBe("snap-first");
+    expect(refreshedResult.status === "ok" && refreshedResult.snapshot?.snapshotId).toBe("snap-second");
+    expect(ingest.mock.calls.find(([input]) => input.source.toString("utf8") === "second")?.[0].forceNew).toBe(true);
   });
 
   it("reports snapshot-missing for released or foreign snapshots and re-checks domain policy", async () => {

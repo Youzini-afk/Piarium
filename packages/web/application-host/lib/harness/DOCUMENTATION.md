@@ -134,6 +134,53 @@ references, collection-scoped keyword search, `persisted` workspace-readable set
 `thread.send` same-root relation rule and releases with the sender's thread. Grants let the
 receiver reread under its own session/thread authority; they never transfer the sender's receipts.
 
+### PDF material reading (`document-reading.ts`, `material-read-service.ts`, `pdf-engine.ts`)
+
+`document_read(path)` resolves a local path through the Host Documents/scope authority and ingests its
+original bytes before probing. `document_read(snapshot_id)` reads an existing web or material snapshot
+under the caller's authority. Both call `materials.read`; network `web.fetch` stores PDF source bytes in
+the same material store before it asks the reader to inspect them. The source object uses
+`representation: "pdf-source-v1"`; `document.source.contentHash` / `sourceHash` identifies the original
+PDF bytes, while the current readable snapshot's `contentHash` identifies its body. A derived view's
+`document.sourceSnapshotId` points back to the original for provenance. Subsequent reads use the current
+result's `snapshot.snapshotId`, not `sourceSnapshotId`.
+
+The four views do separate work:
+
+- `overview` returns source hash, source snapshot id, page count and rotated page geometry when probing
+  succeeds, plus `textStatus`; opening the original does not require full-text extraction.
+- `text` extracts PDF.js text for selected or all pages and can return page boundaries and literal find
+  hits. A text failure is represented separately from an unavailable original.
+- `page-image` uses packaged `pdfjs-dist` and `@napi-rs/canvas` to render actual PNG bytes, optionally at
+  a scale and normalized region. It does not require OCR or structural analysis, and does not use Poppler.
+- `structure` runs a native layout/text analysis or an explicit Docling analysis over the requested pages;
+  `ocr: true` separately requests Tesseract for selected pages. Only returned structures are exposed.
+  Unsupported, unavailable, missing, and failed results remain distinct from empty content.
+
+`WebDocumentRegion` coordinates are normalized `0..1` on the rotated page with a top-left origin, so a
+crop is stable across render scales. `sourceHash + page + region` anchors the original image. A derived
+`DocumentAnalysis` carries its own `id`, source hash, parser, actual parser `version`, selected pages, OCR
+choice, and status; layout/elements carry that `analysisId`. Parser/config/page-set changes create a new
+analysis identity without changing the original-page anchor. Docling's CLI parser version and output
+JSON `schemaVersion` are separate fields. A PDF-page link does not need an analysis version when it only
+references the original pixels.
+
+The built-in engine path is PDF.js + Canvas. Docling and Tesseract are optional Host-managed processes,
+not automatically installed. Trusted user settings `harness.documentReading.doclingCommand`,
+`tesseractCommand`, and `ocrLanguage` default to `docling`, `tesseract`, and `eng`; blank values restore
+those defaults. Host passes the configured executable and language to the managed process boundary;
+these strings are executable names/paths, never shell command text. If a runner or configured executable
+is unavailable, the requested operation reports that state. It does not silently claim an installation
+or substitute a different parser.
+
+The authenticated reader routes use the same material identity: POST
+`/api/harness/sessions/:sessionId/materials/read` selects a view, and GET
+`/api/harness/sessions/:sessionId/materials/:snapshotId/page?page=&scale=` returns a rendered PNG.
+`varin-material://` UI references resolve to the current readable snapshot, page, optional normalized
+region, and optional analysis id. `sourceSnapshotId` remains provenance, not a request locator. Parser
+availability does not establish OCR/table/formula quality, cross-platform behavior, or full-package
+validation.
+
 `research.decide` (`research-decide.ts`) is the D-315 fast-decision consumer: callers submit real
 candidates (URLs, snapshots, paper identities, snapshot sections, or new query text) with a goal and
 a judgment kind (`relevance`/`reading-value`/`complementary`/`duplicate`/`continuation`/`next`).

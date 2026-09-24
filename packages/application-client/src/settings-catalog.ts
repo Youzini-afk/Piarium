@@ -321,6 +321,17 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['browser', 'webfetch', 'render'] },
   },
   {
+    id: 'harness.document-reading', category: 'web', owner: 'pi-settings',
+    field: { path: 'harness.documentReading', kind: 'json', scope: 'user',
+      note: '{doclingCommand?, tesseractCommand?, ocrLanguage?} — direct Host executable names/paths and OCR language; user-owned',
+      default: { doclingCommand: 'docling', tesseractCommand: 'tesseract', ocrLanguage: 'eng' } },
+    apply: 'next-run',
+    helpRef: 'Optional Host-side PDF structure parsing and OCR executables; base text and page-image reading do not require them.',
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.documentReading.title',
+      descriptionKey: 'settings.page.harness.web.documentReading.description',
+      keywords: ['document reading', 'PDF', 'Docling', 'Tesseract', 'OCR'] },
+  },
+  {
     id: 'harness.web.domains', category: 'web', owner: 'pi-settings',
     field: { path: 'harness.web.domains', kind: 'json', scope: 'user-or-project',
       note: '{allow?: string[], block: string[]} — project scope can only narrow the user policy' },

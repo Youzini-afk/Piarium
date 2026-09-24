@@ -45,6 +45,7 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   send: { mutation: 'none', executionMode: 'parallel' },
   read_thread: { mutation: 'none', executionMode: 'parallel' },
   webfetch: { mutation: 'none', executionMode: 'parallel' },
+  document_read: { mutation: 'none', executionMode: 'parallel' },
   websearch: { mutation: 'none', executionMode: 'parallel' },
   research_search: { mutation: 'none', executionMode: 'parallel' },
   research_decide: { mutation: 'none', executionMode: 'parallel' },

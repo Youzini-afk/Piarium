@@ -74,7 +74,47 @@ export interface HarnessNextStepSettings {
   enabled: boolean;
 }
 
+/** User-owned optional local document parsers; empty values restore defaults. */
+export interface HarnessDocumentReadingSettings {
+  doclingCommand: string;
+  tesseractCommand: string;
+  ocrLanguage: string;
+}
+
+export interface HarnessDocumentReadingSettingsInput {
+  doclingCommand?: unknown;
+  tesseractCommand?: unknown;
+  ocrLanguage?: unknown;
+}
+
 const DEFAULT_HARNESS_NEXT_STEP_SETTINGS: HarnessNextStepSettings = { enabled: false };
+
+export const DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS: HarnessDocumentReadingSettings = {
+  doclingCommand: "docling",
+  tesseractCommand: "tesseract",
+  ocrLanguage: "eng",
+};
+
+export function resolveHarnessDocumentReadingSettings(value: unknown): HarnessDocumentReadingSettings {
+  if (value === undefined) return { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HarnessSettingsValidationError("harness.documentReading must be an object");
+  }
+  const input = value as HarnessDocumentReadingSettingsInput;
+  const resolveString = (key: keyof HarnessDocumentReadingSettings): string => {
+    const candidate = input[key];
+    if (candidate === undefined) return DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS[key];
+    if (typeof candidate !== "string") {
+      throw new HarnessSettingsValidationError(`harness.documentReading.${key} must be a string`);
+    }
+    return candidate.trim() || DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS[key];
+  };
+  return {
+    doclingCommand: resolveString("doclingCommand"),
+    tesseractCommand: resolveString("tesseractCommand"),
+    ocrLanguage: resolveString("ocrLanguage"),
+  };
+}
 
 export function resolveHarnessNextStepSettings(value: unknown): HarnessNextStepSettings {
   if (value === undefined) return { ...DEFAULT_HARNESS_NEXT_STEP_SETTINGS };
@@ -168,11 +208,12 @@ export function resolveHarnessContextSettings(
   };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review" | "nextStep" | "documentReading"> & {
   context?: HarnessContextSettingsInput;
   memory?: HarnessMemorySettingsInput;
   review?: Partial<HarnessReviewSettings>;
   nextStep?: Partial<HarnessNextStepSettings>;
+  documentReading?: HarnessDocumentReadingSettingsInput;
 };
 
 export interface HarnessSettings {
@@ -192,6 +233,8 @@ export interface HarnessSettings {
   review: HarnessReviewSettings;
   /** User-owned post-turn next-step suggestions; projects cannot enable it. */
   nextStep: HarnessNextStepSettings;
+  /** Optional Host-side document parsers and OCR language; user-owned. */
+  documentReading: HarnessDocumentReadingSettings;
   /** Dedicated embedding backend. Not a chat model slot. */
   embedding?: HarnessEmbeddingSettings;
   /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
@@ -244,6 +287,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   context: { backgroundPreparation: true, preparationWaterline: 0.75 },
   review: { enabled: false, gate: false },
   nextStep: { enabled: false },
+  documentReading: { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS },
   worktree: {
     copyIgnored: [],
     shareDependencies: false,
@@ -304,6 +348,7 @@ export function mergeHarnessSettings(
 ): HarnessSettings {
   const {
     context: _userContext,
+    documentReading: userDocumentReading,
     embedding: userEmbedding,
     fastDecision: userFastDecision,
     memory: _userMemory,
@@ -313,6 +358,7 @@ export function mergeHarnessSettings(
   } = user;
   const {
     context: _workspaceContext,
+    documentReading: _workspaceDocumentReading,
     embedding: _workspaceEmbedding,
     fastDecision: _workspaceFastDecision,
     memory: _workspaceMemory,
@@ -338,6 +384,15 @@ export function mergeHarnessSettings(
       ...(workspace.permissions?.rules === undefined ? {} : { rules: workspace.permissions.rules }),
     },
   );
+  let documentReading: HarnessDocumentReadingSettings;
+  try {
+    documentReading = resolveHarnessDocumentReadingSettings(userDocumentReading);
+  } catch {
+    // Ordinary session settings and UI projection must survive an invalid
+    // optional parser binding. Host parser consumers validate the raw user
+    // setting before attempting to launch an optional process.
+    documentReading = { ...DEFAULT_HARNESS_DOCUMENT_READING_SETTINGS };
+  }
   const merged: HarnessSettings = {
     ...DEFAULT_HARNESS_SETTINGS,
     ...userRest,
@@ -371,6 +426,9 @@ export function mergeHarnessSettings(
     // background model calls the user turned off; a legacy memory.mode "off"
     // keeps preparation disabled, and project settings cannot re-enable it.
     context: resolveHarnessContextSettings(user.context, user.memory),
+    // Local document parser executables are user-owned. Project settings can
+    // never select a process for the Host to launch.
+    documentReading,
     // Automatic review enablement and the completion gate are user-owned.
     review: resolveHarnessReviewSettings(user.review),
     // Next-step suggestions are user-owned. A project cannot enable them when

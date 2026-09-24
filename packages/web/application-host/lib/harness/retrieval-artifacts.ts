@@ -305,7 +305,14 @@ const temporarySnapshotsFor = async (
 );
 
 const bodyHashOf = (record: RecordLike): string | undefined => (
-  record.references.find((reference) => reference.slot === "body")?.objectHash
+  // A PDF source record has an intentionally empty readable body. Its original
+  // bytes, rather than the shared empty-string object, are its retention key.
+  (record.recordType === WEB_SNAPSHOT_RECORD_TYPE && (() => {
+    try { return (JSON.parse(record.payloadJson) as { representation?: string }).representation === "pdf-source-v1"; }
+    catch { return false; }
+  })()
+    ? record.references.find((reference) => reference.slot === "source")?.objectHash
+    : record.references.find((reference) => reference.slot === "body")?.objectHash)
 );
 
 /**
@@ -320,7 +327,7 @@ const referencedHashesOutside = async (
 ): Promise<Set<string>> => {
   const referenced = new Set<string>();
   for (const record of await context.records.list({})) {
-    if (candidateIds.has(record.recordId)) continue;
+    if (candidateIds.has(record.recordId) || record.state === "released") continue;
     for (const reference of record.references) referenced.add(reference.objectHash);
   }
   return referenced;

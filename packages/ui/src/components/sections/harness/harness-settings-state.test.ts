@@ -57,6 +57,25 @@ describe('Harness automatic saving', () => {
     expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, review: { enabled: false } });
   });
 
+  it('restores a document parser default by removing only that user override', async () => {
+    const write = vi.fn(async (harness: JsonValue) => snapshot(harness, 'b'));
+    const controller = new HarnessSettingsController({
+      read: async () => snapshot({ documentReading: {
+        doclingCommand: 'custom-docling', tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
+      } }, 'a'),
+      write,
+    });
+    await controller.load();
+    controller.update({ documentReading: { doclingCommand: undefined } });
+    await controller.load();
+    expect(write.mock.calls[0]![0]).toEqual({ documentReading: {
+      tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
+    } });
+    expect(controller.getSnapshot().harness?.documentReading).toEqual({
+      doclingCommand: 'docling', tesseractCommand: 'custom-tesseract', ocrLanguage: 'fra',
+    });
+  });
+
   it('refreshes an externally changed Pi settings snapshot while preserving local state', async () => {
     const read = vi.fn()
       .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))

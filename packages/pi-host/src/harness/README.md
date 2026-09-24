@@ -26,6 +26,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |
 | `websearch` | Default keyless Exa search with disclosed Parallel failover, or the user's explicit search provider; batched query/objective/URL/page items with per-item status | `web.search` |
 | `webfetch` | Read a source URL or a pinned `snapshot_id`, find literal text, expand extracted Markdown line ranges, or read structural positions (page/section/table/figure/appendix) where the parser supports them | `web.fetch` |
+| `document_read` | Read an authorized local PDF or pinned snapshot through independent overview, text, page-image, and structure views; page images include actual PNGs and optional normalized crops | `materials.read` |
 | `research_search` | OpenAlex / Semantic Scholar paper search, details, and paged relation expansion (references/citations/related) | `research.search` |
 | `materials` | Named collections of snapshot/URL/paper references with collection-scoped keyword search and explicit cross-thread `share` grants | `materials.collections` |
 | `research_decide` | Batch fast-decision scoring/selection over real URL/snapshot/paper/section/query candidates | `research.decide` |
@@ -51,8 +52,20 @@ are normal observations; provider errors remain errors. Tool cancellation reache
 details preserve the actual provider, any failover notice, and source URLs for the existing source panel.
 `webfetch` accepts `find` and inclusive one-based `start_line`/`end_line` over extracted Markdown;
 it uses the same Host fetch/cache and does not invoke a reader model unless a prompt and reader are configured.
-The read override is included only after the Host handshake advertises
-`harnessDocumentRead`; otherwise Pi's built-in read remains registered. The
+`document_read` is included only after the Host handshake advertises `harnessDocumentRead`; otherwise the
+tool is absent. It accepts exactly one `path` or `snapshot_id`; the Host authorizes local paths and pins
+their PDF bytes into the same material authority used by network snapshots. Start with `view: "overview"`
+to get source hash, page geometry and text status without extracting the full text. `text`, `page-image`,
+and `structure` are separate requests; page images work without text/structure extraction. Select a page
+or page range for focused reads, and pass regions in normalized top-left coordinates on the rotated page.
+`parser: "docling"` and `ocr: true` explicitly request optional Host components; unavailable components
+remain unavailable while native text and page images can still be read. Reuse the returned current
+`snapshot.snapshotId` for later reads. Its `sourceHash` and page/region links identify the original PDF;
+the `varin-material://` link is intercepted by the UI and reopens this reader in the same session. An
+optional analysis id identifies one derived structure result. The Host-owned user setting
+`harness.documentReading` configures direct executable paths/language, not model-supplied shell commands.
+The read override for Pi's built-in `read` is included only after the Host handshake advertises
+`harnessDocumentRead`; otherwise Pi's built-in `read` remains registered. The
 same-name `find` and `ls` overrides require `harnessDocumentPathOverlay` and
 are independently disabled by `settings.tools.find` / `settings.tools.ls`.
 

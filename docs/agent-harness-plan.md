@@ -2098,21 +2098,26 @@ Jev 是首个 adapter；不实现 Computer Use，不扩成新的长期 Agent run
 
 - 支持明确论文/材料集合内的关键词与可用语义检索，范围在召回前应用，命中能回到固定文档位置；
   不复制代码 `explore` 或要求先建立全球论文索引，无向量配置时仍可文本检索与读取。
-- 沿 L1 读取接结构化章节/页码/表格/图片/附录；当前已交付轻量 Markdown/PDF 文本、页边界和简单结构位置读取。
-  复杂 PDF 结构阅读另按 L3-P0–P2 实施：保留原始 PDF，解析版本携带输入 hash/parser/version/config，页面、区域、表格、公式、图和 OCR
-  均有稳定 provenance；不能把逐页拼接文本宣称成复杂结构支持。
-- L3-P0 已接入真实生产链：原始 PDF 作为 `web.snapshot` 的独立 source 对象保存，快照记录页数、解析器身份和文本页边界；
-  `webfetch view=page-image` 从固定快照按页返回真实 PNG，支持渲染像素区域裁剪，失败/取消/缺少 Poppler 分态返回。
-  L3-P1/P2 已接入基础纵切：PDF.js 坐标布局与明显双栏顺序、表格/公式/图像候选、可选 Tesseract OCR、图像交给 reader 模型解读、
-  受认证的快照页面路由和来源卡入口。候选带置信度并保持原件/解析版本区分；完整表格识别、复杂版面、并排阅读器和真实论文质量仍需继续观察。
-  较重运行时沿可选组件或配置服务接入，
-  不自动增加主包模型体积。
+- L3-P0 固定原件后提供互不依赖的 `overview`、`text`、`page-image`、`structure` 读取。`document_read` 接本地授权路径或固定
+  `snapshot_id`，二者通过同一 `materials.read` Host authority；Web PDF 在探测/解析前先保存原始字节。原件 `sourceHash` 与当前可读
+  `snapshotId` 分开，`overview` 可只返回原件 hash、页数/页面几何和文字状态，不先抽取全文。页图由包内 PDF.js + Canvas renderer
+  直接生成 PNG 和可选区域裁剪；不要求 Poppler，也不依赖文字或结构解析。
+- L3-P1 按请求页生成文字、版面/结构或 OCR 视图。轻量原生读取使用 PDF.js；Docling 的结构解析与 Tesseract OCR 是可选 Host
+  组件，用户级 `harness.documentReading` 配置可执行文件名/路径和 OCR 语言，空值恢复 `docling`、`tesseract`、`eng` 默认。
+  Host 通过受管进程直接启动配置的 executable，不拼接 shell 命令；不自动安装，也不因组件不可用而禁用独立文字或页图读取。
+- 原件 `sourceHash` + 页码/区域是跨分析的原件锚；结构元素和布局额外带该派生结果的 `analysisId`。分析身份随解析器、实际
+  parser version、配置、OCR 和页范围变化；无需把所有原页绑定成同一 parser 版本。Docling 的 CLI parser version 与输出 JSON 的
+  `schemaVersion` 单独记录。页面几何与区域统一以旋转后的页面为基准、左上为原点、坐标范围 `0..1`。
+- L3-P2 的阅读器共用本地 PDF 与 Web 快照：打开先看 overview，随后可查看页图、查文字、按需请求结构；`varin-material://`
+  引用回到当前可读快照和指定页/区域。选区提问把短引用及实际 crop PNG 放进当前会话草稿，只有用户提交后才进入输入；普通 Agent
+  与科研工作台沿同一材料权限服务读取。
 - 阅读结果可关联代码版本、数据和补充材料，交给既有 Thread/实验作为输入；source/对象引用保持原生命周期，
   从阅读转实践仍由正常工具权限执行，正文中的命令不自动执行。
-- 最小 UI 能打开原文位置、图表及关联资料；暂存集合和显式保存集合使用同一来源 authority。
+- 暂存集合和显式保存集合使用同一来源 authority。解析失败、缺失和未支持分别表达，不能将空正文或 schema version 冒充成功解析。
 
-完成判据：基础切片允许用户/Agent 在一组论文里找到文本方法和页码并把真实材料交给后续实践；L3-P0–P2 完成后，
-复杂版式、OCR、表格、公式、图表和区域引用能够按需展开并交给后续实践。任何阶段都不能仅凭 PDF 转成一段文本就宣称结构阅读完成。
+验收分别核对原件先固化、各视图独立读回、页/区域锚、分析身份和 UI 引用回跳；不能仅凭 PDF 转成文本宣称结构阅读完成。
+解析候选不等于内容质量：复杂版式、单元格/公式/图表准确性、真实 OCR/Docling 样本质量和跨平台完整发行仍需单独验证，
+本计划不将它们描述为已达标。
 
 ### L4：协作复用与按需继续调查（已交付，wired）
 

@@ -35,6 +35,11 @@ import type {
   PermissionInspectResult,
 } from "./permission-gate.js";
 import type {
+  DocumentAnalysis,
+  DocumentFindHit,
+  DocumentOverview,
+  DocumentPageImage,
+  DocumentReadRequest,
   MaterialsCollectionParams,
   MaterialsCollectionResult,
   ResearchDecideParams,
@@ -256,6 +261,12 @@ export type FetchResult =
     receipt?: RetrievalUrlReceipt;
     /** Content-pinned snapshot when the Host material store is wired. */
     snapshot?: WebSnapshotRef;
+    /** Original material reference, unaffected by a new text/structure analysis. */
+    sourceSnapshot?: WebSnapshotRef;
+    overview?: DocumentOverview;
+    pageImages?: DocumentPageImage[];
+    analysis?: DocumentAnalysis;
+    findHits?: DocumentFindHit[];
     /** Detected structure of the readable body (pages/headings/…). */
     structure?: WebSnapshotStructure;
     /** When a position selector was applied, the one-based line range of the
@@ -1278,6 +1289,7 @@ export interface HarnessServiceMap {
   "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: WebFetchRequest; result: FetchResult };
+  "materials.read": { params: DocumentReadRequest; result: FetchResult };
   "web.search": { params: WebSearchRequest; result: WebSearchResult };
   "materials.collections": { params: MaterialsCollectionParams; result: MaterialsCollectionResult };
   "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
@@ -1435,6 +1447,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "lsp.hover": "read.lsp",
   "fs.lock": "write.document",
   "web.fetch": "read.web",
+  "materials.read": "read.document",
   "web.search": "read.web",
   "research.search": "read.web",
   "research.decide": "read.web",
@@ -1552,6 +1565,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "lsp.hover",
   "fs.lock",
   "web.fetch",
+  "materials.read",
   "web.search",
   "research.search",
   "research.decide",

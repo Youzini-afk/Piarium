@@ -146,6 +146,45 @@ describe("web material snapshots", () => {
     expect(withSource?.source?.bytes).toEqual(source);
   });
 
+  it("uses original PDF bytes as the retention key, not every source snapshot's empty text body", async () => {
+    const opened = openStore();
+    const firstOwner = authority("session-a", "thread-a", "run-a");
+    const otherOwner = authority("session-b", "thread-b", "run-b");
+    const firstBytes = Buffer.from("%PDF-first");
+    const otherBytes = Buffer.from("%PDF-other");
+    const first = await opened.materials.put("ws", {
+      sourceUrl: "https://example.com/first.pdf", finalUrl: "https://example.com/first.pdf",
+      contentType: "application/pdf", representation: "pdf-source-v1", document: { kind: "pdf", parser: "source" },
+    }, Buffer.alloc(0), firstOwner, { source: { bytes: firstBytes, contentType: "application/pdf" } });
+    const other = await opened.materials.put("ws", {
+      sourceUrl: "https://example.com/other.pdf", finalUrl: "https://example.com/other.pdf",
+      contentType: "application/pdf", representation: "pdf-source-v1", document: { kind: "pdf", parser: "source" },
+    }, Buffer.alloc(0), otherOwner, { source: { bytes: otherBytes, contentType: "application/pdf" } });
+
+    await opened.retrieval.releaseTemporaryArtifacts("ws", firstOwner);
+    expect(await opened.materials.read("ws", first.snapshotId)).toBeNull();
+    expect(await opened.materials.read("ws", other.snapshotId, otherOwner)).not.toBeNull();
+
+    const retained = await opened.materials.put("ws", {
+      sourceUrl: "https://example.com/derived.pdf", finalUrl: "https://example.com/derived.pdf",
+      contentType: "application/pdf", representation: "pdf-native-analysis",
+      document: { kind: "pdf", parser: "native", sourceSnapshotId: other.snapshotId,
+        analysis: { id: "analysis", parser: "native", version: "v1", configHash: "config",
+          toolVersions: { pdfjs: "4.10.38" }, sourceHash: other.document!.source!.contentHash,
+          pages: [1], ocr: false, status: "ok" } },
+    }, Buffer.from("parsed text"), authority("session-b", "thread-b", "run-next"),
+    { source: { bytes: otherBytes, contentType: "application/pdf" } });
+    await opened.retrieval.releaseTemporaryArtifacts("ws", otherOwner);
+    expect(await opened.materials.read("ws", other.snapshotId, otherOwner)).not.toBeNull();
+    expect(await opened.materials.read("ws", retained.snapshotId, otherOwner)).not.toBeNull();
+    expect((await opened.materials.findAnalysisConfig("ws", other.document!.source!.contentHash, "config",
+      { pdfjs: "4.10.38" }, otherOwner, other.snapshotId))?.ref.snapshotId).toBe(retained.snapshotId);
+    expect(await opened.materials.findAnalysisConfig("ws", other.document!.source!.contentHash, "config",
+      { pdfjs: "5.0" }, otherOwner, other.snapshotId)).toBeNull();
+    expect(await opened.materials.findAnalysisConfig("ws", other.document!.source!.contentHash, "config",
+      { pdfjs: "4.10.38" }, firstOwner, other.snapshotId)).toBeNull();
+  });
+
   it("dedupes identical content within one authority and keeps snapshots separate across threads", async () => {
     const opened = openStore();
     const owner = authority("s1", "thread-a", "run-a");

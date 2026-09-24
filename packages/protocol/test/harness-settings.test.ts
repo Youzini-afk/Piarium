@@ -5,6 +5,7 @@ import {
   resolveHarnessContextSettings,
   resolveHarnessReviewSettings,
   resolveHarnessNextStepSettings,
+  resolveHarnessDocumentReadingSettings,
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
@@ -184,6 +185,54 @@ describe("harness settings", () => {
   it("rejects malformed next-step settings", () => {
     assert.throws(() => resolveHarnessNextStepSettings(false), HarnessSettingsValidationError);
     assert.throws(() => resolveHarnessNextStepSettings({ enabled: "yes" }), HarnessSettingsValidationError);
+  });
+
+  it("defaults optional document parsers, restores defaults for blank values, and keeps them user-owned", () => {
+    assert.deepEqual(resolveHarnessDocumentReadingSettings(undefined), {
+      doclingCommand: "docling",
+      tesseractCommand: "tesseract",
+      ocrLanguage: "eng",
+    });
+    assert.deepEqual(resolveHarnessDocumentReadingSettings({
+      doclingCommand: "  C:\\Tools\\docling.exe  ",
+      ocrLanguage: "fra+eng",
+    }), {
+      doclingCommand: "C:\\Tools\\docling.exe",
+      tesseractCommand: "tesseract",
+      ocrLanguage: "fra+eng",
+    });
+    assert.deepEqual(resolveHarnessDocumentReadingSettings({
+      doclingCommand: " ",
+      tesseractCommand: "",
+      ocrLanguage: "  ",
+    }), {
+      doclingCommand: "docling",
+      tesseractCommand: "tesseract",
+      ocrLanguage: "eng",
+    });
+    assert.deepEqual(mergeHarnessSettings(
+      { documentReading: { doclingCommand: "user-docling", ocrLanguage: "deu" } },
+      { documentReading: { doclingCommand: "project-docling", tesseractCommand: "project-tesseract" } },
+    ).documentReading, {
+      doclingCommand: "user-docling",
+      tesseractCommand: "tesseract",
+      ocrLanguage: "deu",
+    });
+    assert.throws(() => resolveHarnessDocumentReadingSettings(false), /must be an object/);
+    assert.throws(() => resolveHarnessDocumentReadingSettings({ tesseractCommand: 5 }), /must be a string/);
+  });
+
+  it("keeps ordinary harness merging available for malformed optional parser settings", () => {
+    const malformed = { doclingCommand: 7 };
+    assert.deepEqual(mergeHarnessSettings({ documentReading: malformed }, {}).documentReading, {
+      doclingCommand: "docling",
+      tesseractCommand: "tesseract",
+      ocrLanguage: "eng",
+    });
+    assert.throws(
+      () => resolveHarnessDocumentReadingSettings(malformed),
+      HarnessSettingsValidationError,
+    );
   });
 
   it("rejects malformed review settings", () => {

@@ -10,6 +10,7 @@ import type {
   PiSessionMessageEntry,
   PiUserMessage,
   ThinkingLevel,
+  WebDocumentRegion,
   WorkFocusId,
 } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
@@ -77,6 +78,8 @@ import { HarnessThreadStateProvider } from './HarnessThreadState';
 import { parseHarnessThreadMutation } from './harnessThreadPresentation';
 import { projectHarnessWebSources } from './harnessWebSources';
 import { useWebSourcesStore } from '@/stores/useWebSourcesStore';
+import { PdfMaterialReader } from './PdfMaterialReader';
+import { PDF_MATERIAL_OPEN_EVENT, parsePdfMaterialCitationUrl } from '@/lib/pi-runtime/pdfMaterialCitation';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -99,6 +102,16 @@ interface PiChatViewProps {
 
 const DRAFT_PROJECT_MARKER = '__VARIN_DRAFT_PROJECT__';
 const EMPTY_PI_MESSAGE_HISTORY: readonly string[] = [];
+
+interface ActivePdfMaterial {
+  sessionId: string | null;
+  title: string;
+  snapshotId: string;
+  sourceHash?: string;
+  page: number;
+  region?: WebDocumentRegion;
+  analysisId?: string;
+}
 
 const pendingUserMessage = (draft: PiDraftState): PiUserMessage => ({
   content: draft.images.length === 0
@@ -248,7 +261,32 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
   const [threadBusyEntryId, setThreadBusyEntryId] = React.useState<string | null>(null);
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
+  const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
+
+  React.useEffect(() => {
+    if (!active) {
+      setActivePdfMaterial(null);
+      return;
+    }
+    const openMaterial = (event: Event) => {
+      const detail = (event as CustomEvent<{ href?: unknown; title?: unknown }>).detail;
+      if (typeof detail?.href !== 'string') return;
+      const citation = parsePdfMaterialCitationUrl(detail.href);
+      if (!citation) return;
+      setActivePdfMaterial({
+        sessionId: usePiSessionStore.getState().currentSessionId,
+        title: typeof detail.title === 'string' && detail.title.trim() ? detail.title.trim() : t('harness.pdf.readerTitle'),
+        snapshotId: citation.snapshotId,
+        ...(citation.sourceHash ? { sourceHash: citation.sourceHash } : {}),
+        page: citation.page,
+        ...(citation.region ? { region: citation.region } : {}),
+        ...(citation.analysisId ? { analysisId: citation.analysisId } : {}),
+      });
+    };
+    window.addEventListener(PDF_MATERIAL_OPEN_EVENT, openMaterial);
+    return () => window.removeEventListener(PDF_MATERIAL_OPEN_EVENT, openMaterial);
+  }, [active, t]);
   const submission = currentRecord?.submission;
   const sending = changingWorkFocus || submission?.status === 'preparing' || submission?.status === 'dispatching';
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
@@ -1003,6 +1041,19 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         />
       ) : null}
       </HarnessThreadStateProvider>
+      {activePdfMaterial ? (
+        <PdfMaterialReader
+          open
+          sessionId={activePdfMaterial.sessionId}
+          title={activePdfMaterial.title}
+          snapshotId={activePdfMaterial.snapshotId}
+          {...(activePdfMaterial.sourceHash ? { sourceHash: activePdfMaterial.sourceHash } : {})}
+          initialPage={activePdfMaterial.page}
+          {...(activePdfMaterial.region ? { initialRegion: activePdfMaterial.region } : {})}
+          {...(activePdfMaterial.analysisId ? { analysisId: activePdfMaterial.analysisId } : {})}
+          onOpenChange={(open) => { if (!open) setActivePdfMaterial(null); }}
+        />
+      ) : null}
     </TooltipProvider>
   );
 };

@@ -21,7 +21,7 @@ export const projectHarnessWebSources = (
   const message = entry.message;
   const tool = message.toolName;
   if (tool !== 'webfetch' && tool !== 'websearch' && tool !== 'research_search'
-    && tool !== 'materials' && tool !== 'research_decide') return [];
+    && tool !== 'materials' && tool !== 'research_decide' && tool !== 'document_read') return [];
   const details = message.details;
   if (!isRecord(details)) return [];
   const sources = details.sources;
@@ -44,8 +44,13 @@ export const projectHarnessWebSources = (
       tool,
       ...(typeof source.snapshotId === 'string' && source.snapshotId ? { snapshotId: source.snapshotId } : {}),
       ...(typeof source.contentHash === 'string' && source.contentHash ? { contentHash: source.contentHash } : {}),
-      ...(isRecord(source.document) && source.document.kind === 'pdf' && typeof source.document.pageCount === 'number'
-        ? { document: { kind: 'pdf' as const, pageCount: source.document.pageCount } }
+      ...(typeof source.sourceHash === 'string' && source.sourceHash ? { sourceHash: source.sourceHash } : {}),
+      ...(isRecord(source.document) && isRecord(source.document.source)
+        && typeof source.document.source.contentHash === 'string' && source.document.source.contentHash
+        ? { sourceHash: source.document.source.contentHash }
+        : {}),
+      ...(isRecord(source.document) && source.document.kind === 'pdf'
+        ? { document: { kind: 'pdf' as const, ...(typeof source.document.pageCount === 'number' ? { pageCount: source.document.pageCount } : {}) } }
         : {}),
       ...(typeof source.provider === 'string' && source.provider ? { provider: source.provider } : {}),
       ...(typeof source.paperId === 'string' && source.paperId ? { paperId: source.paperId } : {}),

@@ -85,7 +85,7 @@ export class HostServicesBridge {
     // cancellation/lifecycle-bound, not a second fixed timeout.
     // compaction.run is worker-lifecycle-bound like the other 0-timeout waits:
     // the parent may legitimately block on it for minutes while capacity waits.
-    const timer = (method === "thread.wait" || method === "thread.send" || method === "experiment.wait" || method === "compaction.run") && timeoutMs === 0 ? undefined : setTimeout(() => {
+    const timer = (method === "thread.wait" || method === "thread.send" || method === "experiment.wait" || method === "compaction.run" || method === "materials.read") && timeoutMs === 0 ? undefined : setTimeout(() => {
       const pending = this.#pending.get(requestId);
       if (!pending) return;
       this.#emitCancel({ requestId });

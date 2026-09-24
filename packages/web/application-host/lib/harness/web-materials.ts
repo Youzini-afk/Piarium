@@ -128,7 +128,9 @@ export const createWebMaterialStore = (
             && payload.document?.kind === document?.kind
             && payload.document?.pageCount === document?.pageCount
             && payload.document?.parser === document?.parser
-            && payload.document?.source?.contentHash === document?.source?.contentHash) {
+            && payload.document?.source?.contentHash === document?.source?.contentHash
+            && payload.document?.sourceSnapshotId === document?.sourceSnapshotId
+            && payload.document?.analysis?.id === document?.analysis?.id) {
             return payload;
           }
         }
@@ -185,6 +187,7 @@ export const createWebMaterialStore = (
       const record = await context.records.get(recordIdFor(snapshotId));
       if (!record
         || record.recordType !== WEB_SNAPSHOT_RECORD_TYPE
+        || record.state === "released"
         || (record.workspaceId !== undefined && record.workspaceId !== workspaceId)) {
         return null;
       }
@@ -273,7 +276,68 @@ export const createWebMaterialStore = (
     },
   );
 
-  return { put, read };
+  /** Reuse a fixed analysis only under the caller's own material authority. */
+  const findAnalysis = async (
+    workspaceId: string,
+    sourceHash: string,
+    analysisId: string,
+    authority: WebSnapshotAuthority,
+    sourceSnapshotId?: string,
+  ): Promise<WebSnapshotContent | null> => {
+    const candidates = await kernelContext(
+      workingStates,
+      workspaceId,
+      "web-snapshot-find-analysis",
+      async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
+        .filter((record) => record.state !== "released" && (
+          record.threadId !== undefined
+            ? authority.threadId !== undefined && record.threadId === authority.threadId
+            : authority.threadId === undefined && record.sessionId === authority.sessionId
+        ))
+        .map((record) => parseSnapshotPayload(record.payloadJson))
+        .filter((ref): ref is WebSnapshotRef => ref?.document?.analysis?.id === analysisId
+          && ref.document.source?.contentHash === sourceHash
+          && (sourceSnapshotId === undefined || ref.document.sourceSnapshotId === sourceSnapshotId))
+        .map((ref) => ref.snapshotId),
+    );
+    for (const snapshotId of candidates) {
+      const found = await read(workspaceId, snapshotId, authority);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const findAnalysisConfig = async (
+    workspaceId: string,
+    sourceHash: string,
+    configHash: string,
+    toolVersions: NonNullable<NonNullable<WebSnapshotRef["document"]>["analysis"]>["toolVersions"],
+    authority: WebSnapshotAuthority,
+    sourceSnapshotId: string,
+  ): Promise<WebSnapshotContent | null> => {
+    const candidates = await kernelContext(workingStates, workspaceId, "web-snapshot-find-analysis-config",
+      async (_store, context) => (await context.records.list({ recordType: WEB_SNAPSHOT_RECORD_TYPE }))
+        .filter((record) => record.state !== "released" && (
+          record.threadId !== undefined
+            ? authority.threadId !== undefined && record.threadId === authority.threadId
+            : authority.threadId === undefined && record.sessionId === authority.sessionId
+        ))
+        .map((record) => parseSnapshotPayload(record.payloadJson))
+        .filter((ref): ref is WebSnapshotRef => ref?.document?.source?.contentHash === sourceHash
+          && ref.document.sourceSnapshotId === sourceSnapshotId
+          && ref.document.analysis?.configHash === configHash
+          && ref.document.analysis.toolVersions?.pdfjs === toolVersions?.pdfjs
+          && ref.document.analysis.toolVersions?.docling === toolVersions?.docling
+          && ref.document.analysis.toolVersions?.tesseract === toolVersions?.tesseract)
+        .map((ref) => ref.snapshotId));
+    for (const snapshotId of candidates) {
+      const found = await read(workspaceId, snapshotId, authority);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  return { put, read, findAnalysis, findAnalysisConfig };
 };
 
 export type WebMaterialStore = ReturnType<typeof createWebMaterialStore>;

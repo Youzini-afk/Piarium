@@ -54,6 +54,8 @@ import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { useDeviceInfo } from '@/lib/device';
 import { getRuntimeKey } from '@varin/application-client';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
+import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type ResourceEditorHostProps = {
   excludedProviderIds?: readonly string[];
@@ -99,6 +101,12 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionWorkspaceId = usePiSessionStore((state) => {
+    if (!state.currentSessionId) return null;
+    const workspace = state.records[state.currentSessionId]?.snapshot?.workspace;
+    return workspace?.kind === 'workspace' ? workspace.id : null;
+  });
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
   const identity = React.useMemo<DocumentIdentity>(
     () => ({ workspaceId, resourceId: tab.resourceId }),
@@ -477,10 +485,30 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.pdf || isPdfFile(path)) {
-    const src = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
+    const originalPdf = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
+    if (!currentSessionId || currentSessionWorkspaceId !== workspaceId) {
+      return (
+        <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 border-b border-border/50 px-3 py-2 text-xs text-muted-foreground">
+              {t('harness.pdf.sessionWorkspaceRequired')}
+            </div>
+            <iframe title={tab.resourceId} src={originalPdf} className="min-h-0 flex-1 border-0" />
+          </div>
+        </HostFrame>
+      );
+    }
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        <iframe title={tab.resourceId} src={src} className="h-full w-full border-0" />
+        <PdfMaterialReader
+          presentation="inline"
+          sessionId={currentSessionId}
+          title={tab.resourceId.split('/').pop() || tab.resourceId}
+          path={path}
+          onOpenOriginal={() => {
+            window.open(originalPdf, '_blank', 'noopener,noreferrer');
+          }}
+        />
       </HostFrame>
     );
   }

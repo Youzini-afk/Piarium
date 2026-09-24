@@ -55,6 +55,28 @@ chooses a model that cannot run it.
 The global `open_model_selector` shortcut controls the picker anchored to the
 active composer. Inactive profile surfaces must not mount a competing modal.
 
+## PDF attachments
+
+Pi Composer accepts PDFs through its file picker and drop target. It uploads
+each PDF through the existing Workspace API into the session's actual `cwd`:
+`.varin/attachments/<safe-session-or-pending-scope>/<upload-uuid>/<original-basename>`.
+The Host-returned absolute path and a Markdown link using the original filename
+are inserted into the draft. The built-in PDF reader can open that local path.
+A pending first-turn draft uses a stable `pending-<uuid>` scope, so creating its
+Pi session needs no file move.
+
+The PDF remains a regular workspace file and is not encoded as a Pi image
+attachment or JSONL image record. Removing its draft reference, cancelling a
+draft, or switching sessions does not delete the uploaded file. The unique
+per-file directory avoids overwriting a same-named PDF without inspecting or
+rewriting the user's `.gitignore`.
+
+PDF upload is unavailable while the selected child thread reads from a virtual
+WorkingState view: Workspace API writes to disk, while that thread's
+`document.readSource` reads its immutable WorkingState snapshot. Materialized
+thread sessions and ordinary disk-backed Pi sessions continue to use the
+workspace upload path.
+
 ## Submission order
 
 For a first prompt:

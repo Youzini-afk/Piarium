@@ -102,7 +102,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveHarnessDocumentReadingSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
 import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
@@ -135,8 +135,11 @@ import { createGrammarStore } from './lib/structure/grammar-store.js';
 import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
 import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
-import { createPopplerPdfPageRenderer } from './lib/harness/pdf-page-renderer.js';
-import { createTesseractPdfOcr } from './lib/harness/pdf-ocr.js';
+import { createDocumentReader } from './lib/harness/document-reading.js';
+import { createPdfEngine } from './lib/harness/pdf-engine.js';
+import { createUserMaterialReadAdapter } from './lib/harness/material-read-ui-adapter.js';
+import { resolveHarnessWebBinding } from './lib/harness/harness-web-settings.js';
+import { encodeDocumentText } from './lib/documents/inspect.js';
 import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
 import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
@@ -1308,6 +1311,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const managedLanguageServers = createManagedLanguageServers({ directory: VARIN_DATA_DIR, spawn: languageToolProcesses.spawn });
+  const documentReadingDirectory = path.join(VARIN_DATA_DIR, 'document-reading');
+  await fsPromises.mkdir(documentReadingDirectory, { recursive: true });
+  const documentProcesses = createKernelProcessService({
+    client: kernelClient,
+    resolveIdentity: async (cwd) => {
+      const canonicalRoot = await canonicalizePathIdentity(documentReadingDirectory);
+      const canonicalCwd = await canonicalizePathIdentity(cwd);
+      if (!isPathWithinRoot(canonicalCwd, canonicalRoot)) throw new Error('Document parser escaped its private directory');
+      const workspaceId = `document-reading:${extensionRuntime.services.hostId}`;
+      return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
+    },
+  });
   const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`varin.managed.${languageId}`, languageId]));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: ({ languageId }) => extensionRuntime.activateForEvent('workspace-match', { languageId }),
@@ -1512,28 +1527,33 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ) => Promise<import('@varin/protocol').RetrievalUrlReceipt>;
     syncThread?: (workspaceId: string, thread: import('@varin/protocol').Thread) => Promise<void>;
   } = {};
-  const pdfPageRenderer = createPopplerPdfPageRenderer();
   // Deferred until the kernel working-state access exists below; fetches
   // still deliver content but mint no snapshotId if it is unavailable.
-  const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read'] } = {};
+  const webMaterialAccess: { put?: WebMaterialStore['put']; read?: WebMaterialStore['read']; findAnalysis?: WebMaterialStore['findAnalysis']; findAnalysisConfig?: WebMaterialStore['findAnalysisConfig'] } = {};
+  const materialStore: Pick<WebMaterialStore, 'put' | 'read' | 'findAnalysis' | 'findAnalysisConfig'> = {
+    put: async (workspaceId, draft, body, authority, options) => {
+      if (!webMaterialAccess.put) throw new Error('Durable material storage is unavailable');
+      return webMaterialAccess.put(workspaceId, draft, body, authority, options);
+    },
+    read: async (workspaceId, snapshotId, authority, options) => (
+      webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId, authority, options) : null
+    ),
+    findAnalysis: (...args) => webMaterialAccess.findAnalysis ? webMaterialAccess.findAnalysis(...args) : Promise.resolve(null),
+    findAnalysisConfig: (...args) => webMaterialAccess.findAnalysisConfig ? webMaterialAccess.findAnalysisConfig(...args) : Promise.resolve(null),
+  };
+  const documentReader = createDocumentReader({
+    materials: materialStore,
+    engineFactory: (settings) => createPdfEngine(settings, { spawn: documentProcesses.spawn, temporaryRoot: documentReadingDirectory }),
+  });
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
-    pdfPageRenderer,
-    pdfOcr: createTesseractPdfOcr(pdfPageRenderer),
+    documentReader,
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
       if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
       return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
     },
-    materials: {
-      put: async (workspaceId, draft, body, authority, options) => {
-        if (!webMaterialAccess.put) throw new Error('Durable web snapshot storage is unavailable');
-        return webMaterialAccess.put(workspaceId, draft, body, authority, options);
-      },
-      read: async (workspaceId, snapshotId, authority, options) => (
-        webMaterialAccess.read ? webMaterialAccess.read(workspaceId, snapshotId, authority, options) : null
-      ),
-    },
+    materials: materialStore,
   });
   const webSearchService = createWebSearchService(
     async ({ sessionId }) => {
@@ -1751,6 +1771,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const webMaterials = createWebMaterialStore(harnessWorkingStates);
   webMaterialAccess.put = webMaterials.put;
   webMaterialAccess.read = webMaterials.read;
+  webMaterialAccess.findAnalysis = webMaterials.findAnalysis;
+  webMaterialAccess.findAnalysisConfig = webMaterials.findAnalysisConfig;
   const materialCollectionsService = createMaterialCollectionsService(harnessWorkingStates, {
     materials: webMaterials,
     // URL members go through the full web.fetch path: session binding,
@@ -2407,27 +2429,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerPdfMaterialRoutes(app, {
-    fetchPage: async ({ sessionId, snapshotId, page, region, signal }) => {
-      const binding = await harnessServiceHost.threadRegistry?.getSessionBinding(sessionId);
-      const workspaceId = binding?.owningWorkspaceId;
-      if (!workspaceId) return { status: 'failed', url: '', reason: 'no workspace' };
-      return performHarnessWebFetch(
-        harnessServiceHost,
-        {
-          snapshotId,
-          view: 'page-image',
-          page,
-          ...(region ? { region } : {}),
-        },
-        {
-          sessionId,
-          workspaceId,
-          actor: {} as never,
-          authorizedPaths: [],
-          signal,
-        },
-      );
-    },
+    readDocument: createUserMaterialReadAdapter(() => harnessServiceHost, threadRuntime, harnessPathAuthority),
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
@@ -2969,6 +2971,37 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Web services — fetch is always available (SSRF-guarded); read and search
     // depend on reader model / search provider configuration, wired later.
     webFetchService,
+    documentReader,
+    documentReadingSettings: async (sessionId) => {
+      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
+      return resolveHarnessDocumentReadingSettings(recordOf(snapshot.global.harness).documentReading);
+    },
+    materialWebPolicy: async (sessionId) => {
+      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
+      const domains = resolveHarnessWebBinding(snapshot).settings?.domains;
+      return { ...(domains?.allow === undefined ? {} : { allow: domains.allow }), block: domains?.block ?? [] };
+    },
+    readMaterialFile: async (ctx, authorized) => {
+      ctx.signal.throwIfAborted();
+      const before = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
+      if (!before || before.canonicalResourceId !== authorized.canonicalResourceId) throw new Error('Document path changed before reading');
+      const source = await harnessServiceHost.documentReadSource!(ctx.sessionId, ctx.inputContext ?? { source: 'disk' }, authorized.resourceId);
+      let bytes: Buffer;
+      if (source.status === 'working-branch') {
+        if (source.message || source.missing || source.base64 === undefined) throw new Error(source.message ?? 'Document is unavailable in the working branch');
+        bytes = Buffer.from(source.base64, 'base64');
+      } else if (source.status === 'ready') {
+        bytes = encodeDocumentText(source);
+      } else if (source.status === 'unavailable') {
+        throw new Error(source.message);
+      } else {
+        bytes = await fsPromises.readFile(authorized.canonicalResourceId, { signal: ctx.signal });
+      }
+      const after = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
+      ctx.signal.throwIfAborted();
+      if (!after || after.canonicalResourceId !== authorized.canonicalResourceId) throw new Error('Document path changed while reading');
+      return bytes;
+    },
     ...(webSearchService ? { webSearchService } : {}),
     researchSearchService,
     researchDecideService,
@@ -3518,6 +3551,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
+      await documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();

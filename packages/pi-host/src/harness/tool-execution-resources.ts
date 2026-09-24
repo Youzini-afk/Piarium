@@ -96,7 +96,7 @@ const PLANNED_HARNESS_TOOLS = new Set([
   "get_output", "write_to_process", "kill_shell", "todo", "send", "merge",
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
-  "research_source", "research_search", "research_decide", "materials",
+  "research_source", "research_search", "research_decide", "materials", "document_read",
 ]);
 
 /**
@@ -108,6 +108,8 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
   switch (name) {
     case "read":
       return exactPathPlan(cwd, args, "read");
+    case "document_read":
+      return stringArgument(args, "path") ? exactPathPlan(cwd, args, "read") : { resources: [] };
     case "write":
     case "edit":
       return exactPathPlan(cwd, args, "write");

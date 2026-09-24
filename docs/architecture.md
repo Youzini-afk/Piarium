@@ -468,10 +468,28 @@ and paged relation expansion; `materials` owns `material.collection` records and
 over real Web/scholarly candidates through the `web`/`scholarly` purpose bindings. It reuses ordinary
 dispatch and native web tools. Content reuse re-checks the reader's own scope and never transfers
 another Run's receipt authority. No parallel search scheduler, body store, or Agent runtime
-is introduced. The current L3 PDF path still provides lightweight text/page positions and simple snapshot
-structure. Complex layout recovery, OCR, table-cell/formula/figure objects, page-region visual reads, and the
-corresponding reader UI are the separate L3-P0–P2 follow-up described in the research search design; they are not
-implied by the existing `webfetch` structural selectors.
+is introduced. Local and network PDFs share the material reader: `document_read` accepts a local path or a fixed
+`snapshotId`, while `materials.read` checks the current Host authority for both. The Host authorizes and fixes
+local source bytes; `web.fetch` stores network PDF bytes before probing or parsing. `overview`, `text`,
+`page-image`, and `structure` are independent views. Overview returns the original `sourceHash`, available
+page geometry and text status without requiring a full text extraction. PDF.js and the packaged Canvas renderer
+provide native text and page/crop PNGs without Poppler; a page image does not depend on OCR or structure parsing.
+
+Native layout/text is PDF.js-backed. Docling structure extraction and Tesseract OCR are optional Host-managed
+processes configured by the user-only `harness.documentReading` (`doclingCommand`, `tesseractCommand`,
+`ocrLanguage`; empty values restore `docling`, `tesseract`, and `eng`). The Host launches the configured
+executable directly, never as a shell command string, and reports unavailable components without claiming
+they were installed. Each derived analysis records its source hash, selected pages, parser identity/version,
+configuration, OCR choice, and analysis id. Docling's CLI `parserVersion` and output `schemaVersion` are
+separate facts. Original page/region anchors use `sourceHash`, page, and normalized coordinates with the
+rotated page's top-left as origin; structure elements additionally carry their `analysisId`, so a parser
+change does not rewrite the original-page anchor or require every page to share one parser version.
+
+`varin-material://` citations open the same authenticated `PdfMaterialReader` in the current Harness panel at
+the referenced snapshot, page and optional normalized region. Asking about a selection adds its short citation
+and actual crop PNG to the current session draft; the user still submits that input. This establishes the read
+and handoff path, not a quality claim for complex layouts, table cells, formula/figure extraction, real OCR, or
+cross-platform packaged operation.
 
 `WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
 query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their

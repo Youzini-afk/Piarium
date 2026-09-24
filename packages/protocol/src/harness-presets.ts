@@ -118,6 +118,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
       "references",
       "hover",
       "webfetch",
+      "document_read",
       "websearch",
       "research_search",
       "research_decide",

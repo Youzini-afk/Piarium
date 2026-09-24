@@ -78,7 +78,7 @@ export function deriveHarnessCapabilities(
     "read.output",
   ]);
   if (tools.has("grep") || tools.has("explore")) capabilities.add("read.search");
-  if (availability.documentRead && tools.has("read")) capabilities.add("read.document");
+  if (availability.documentRead && (tools.has("read") || tools.has("document_read"))) capabilities.add("read.document");
   if (availability.documentPathOverlay && (tools.has("find") || tools.has("ls"))) capabilities.add("read.document");
   if (tools.has("webfetch") || tools.has("websearch") || tools.has("research_search")) capabilities.add("read.web");
   if (tools.has("bash")) capabilities.add("process.shell");
@@ -224,6 +224,7 @@ export interface HarnessServiceHost {
     options?: {
       signal?: AbortSignal;
       issueReceipt?: boolean;
+      engineOptions?: import("./pdf-engine.js").PdfEngineOptions;
       roots?: readonly string[];
       sessionId?: string;
       inputContext?: import("@varin/protocol").AgentInputContext;
@@ -284,6 +285,10 @@ export interface HarnessServiceHost {
   researchSearchService: import("./router.js").HarnessService<"research.search"> | null;
   researchDecideService?: import("./router.js").HarnessService<"research.decide"> | null;
   materialCollectionsService?: import("./router.js").HarnessService<"materials.collections"> | null;
+  documentReader?: import("./document-reading.js").DocumentReader | null;
+  readMaterialFile?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath) => Promise<Buffer>;
+  documentReadingSettings?: (sessionId: string) => Promise<import("@varin/protocol").HarnessSettings["documentReading"]>;
+  materialWebPolicy?: (sessionId: string) => Promise<import("@varin/protocol").HarnessWebDomainPolicy>;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
   documentWriteGuard: HarnessDocumentWriteGuard | null;
@@ -530,6 +535,10 @@ export interface HarnessServiceHostOptions {
   researchDecideService?: HarnessServiceHost["researchDecideService"];
   /** Material collections service (D-315 L3). */
   materialCollectionsService?: HarnessServiceHost["materialCollectionsService"];
+  documentReader?: HarnessServiceHost["documentReader"];
+  readMaterialFile?: HarnessServiceHost["readMaterialFile"];
+  documentReadingSettings?: HarnessServiceHost["documentReadingSettings"];
+  materialWebPolicy?: HarnessServiceHost["materialWebPolicy"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
   documentReadSource?: HarnessDocumentReadSource;
   /** Surface-aware native Pi find/ls path overlay (null when unavailable). */
@@ -987,6 +996,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     researchSearchService,
     researchDecideService,
     materialCollectionsService,
+    documentReader: options.documentReader ?? null,
+    ...(options.readMaterialFile ? { readMaterialFile: options.readMaterialFile } : {}),
+    ...(options.documentReadingSettings ? { documentReadingSettings: options.documentReadingSettings } : {}),
+    ...(options.materialWebPolicy ? { materialWebPolicy: options.materialWebPolicy } : {}),
     documentReadSource,
     documentPathOverlay,
     documentWriteGuard,

@@ -127,6 +127,33 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
         disabled={!isDesktopLocalOriginActive()} ariaLabel={t('settings.page.harness.web.render')}
         label={t('settings.page.harness.web.render')} description={t('settings.page.harness.web.render.description')} />
     </SettingsSection>
+    <SettingsSection title={t('settings.page.harness.web.documentReading.title')}
+      description={t('settings.page.harness.web.documentReading.description')}
+      settingsItem="harness.document-reading" contentClassName="space-y-4">
+      <SettingsFieldRow label={t('settings.page.harness.web.documentReading.doclingCommand')}
+        description={t('settings.page.harness.web.documentReading.executableHint')}
+        controlClassName="@xl:flex-1 @xl:max-w-80">
+        <AutoSaveInput value={harness.documentReading.doclingCommand}
+          placeholder="docling" aria-label={t('settings.page.harness.web.documentReading.doclingCommand')}
+          onCommit={(value) => update({ documentReading: { doclingCommand: value.trim() || undefined } })} />
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.web.documentReading.tesseractCommand')}
+        description={t('settings.page.harness.web.documentReading.executableHint')}
+        controlClassName="@xl:flex-1 @xl:max-w-80">
+        <AutoSaveInput value={harness.documentReading.tesseractCommand}
+          placeholder="tesseract" aria-label={t('settings.page.harness.web.documentReading.tesseractCommand')}
+          onCommit={(value) => update({ documentReading: { tesseractCommand: value.trim() || undefined } })} />
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.web.documentReading.ocrLanguage')}
+        controlClassName="@xl:flex-1 @xl:max-w-80">
+        <AutoSaveInput value={harness.documentReading.ocrLanguage}
+          placeholder="eng" aria-label={t('settings.page.harness.web.documentReading.ocrLanguage')}
+          onCommit={(value) => update({ documentReading: { ocrLanguage: value.trim() || undefined } })} />
+      </SettingsFieldRow>
+      <p className="typography-meta text-muted-foreground">
+        {t('settings.page.harness.web.documentReading.defaultsRestored')}
+      </p>
+    </SettingsSection>
     <SettingsSection title={t('settings.page.harness.web.domains.title')} description={t('settings.page.harness.web.domains.description')}
       settingsItem="harness.web.domains" contentClassName="space-y-5">
       <SettingsCheckboxRow checked={allow !== undefined} onChange={(enabled) => { allowEnabled.current = enabled; update({ web: { domains: { allow: enabled ? [] : undefined } } }); }}

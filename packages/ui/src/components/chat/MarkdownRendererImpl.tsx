@@ -42,6 +42,10 @@ import {
   type ParsedFileReference,
 } from './fileReferenceParser';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
+import {
+  PDF_MATERIAL_OPEN_EVENT,
+  pdfMaterialUrlFromMarkdownHref,
+} from '@/lib/pi-runtime/pdfMaterialCitation';
 
 type ContentChangeReason = 'text' | 'structural' | 'permission' | 'animation';
 
@@ -111,6 +115,33 @@ const useExternalLinkInteractions = ({
       container.removeEventListener('click', handleClick);
     };
   }, [containerRef, enabled]);
+};
+
+const usePdfMaterialLinkInteractions = ({
+  containerRef,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) => {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[data-varin-material-link="true"]');
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const href = pdfMaterialUrlFromMarkdownHref(anchor.getAttribute('href') ?? '');
+      if (!href) return;
+      window.dispatchEvent(new CustomEvent(PDF_MATERIAL_OPEN_EVENT, {
+        detail: { href, title: anchor.textContent?.trim() ?? '' },
+      }));
+    };
+    container.addEventListener('click', handleClick);
+    return () => container.removeEventListener('click', handleClick);
+  }, [containerRef]);
 };
 
 const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
@@ -1075,6 +1106,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     enabled: enableFileReferences && !isStreaming,
   });
   useExternalLinkInteractions({ containerRef });
+  usePdfMaterialLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
@@ -1167,6 +1199,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     enabled: enableFileReferences,
   });
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
+  usePdfMaterialLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);

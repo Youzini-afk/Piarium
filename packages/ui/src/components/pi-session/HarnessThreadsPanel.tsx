@@ -29,8 +29,20 @@ import { useHarnessThreadState } from './HarnessThreadStateContext';
 import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
 import { HarnessThreadResultHistory } from './HarnessThreadResultHistory';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
+import { PdfMaterialReader } from './PdfMaterialReader';
 
 const LazyThreadTimeline = React.lazy(() => import('./PiTimeline').then((module) => ({ default: module.PiTimeline })));
+
+interface ActivePdfMaterial {
+  sessionId: string;
+  title: string;
+  snapshotId: string;
+  sourceHash?: string;
+  page?: number;
+  region?: import('@varin/protocol').WebDocumentRegion;
+  analysisId?: string;
+  originalUrl?: string;
+}
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -102,7 +114,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
-  const [sourcePages, setSourcePages] = React.useState<Record<string, number>>({});
+  const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
@@ -498,7 +510,7 @@ export const HarnessThreadsPanel: React.FC<{
   }, [parentSessionId, reloadBlocks, reloadKnowledge, reloadSpace, workspaceId]);
 
   const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
-  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0) return null;
+  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0 && !activePdfMaterial) return null;
 
   const itemCount = blocks.length + Math.max(threads.length, space?.threads.length ?? 0) + suggestions.length + webSources.length;
   const formatLogical = (bytes: number | null, unknown: boolean): string => (
@@ -573,49 +585,35 @@ export const HarnessThreadsPanel: React.FC<{
             <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.sources.title')}</h3>
             <div className="space-y-1">
               {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
-                <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
-                  <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : source.tool === 'materials' ? 'archive-stack' : source.tool === 'research_decide' ? 'scales-3' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-                  <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
-                    <span className="block truncate text-[11px] text-foreground">{source.title}</span>
-                    <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                (() => {
+                  const isPdf = Boolean(source.snapshotId && source.document?.kind === 'pdf');
+                  const openPdf = () => setActivePdfMaterial({
+                    sessionId: parentSessionId,
+                    title: source.title,
+                    snapshotId: source.snapshotId!,
+                    ...(source.sourceHash ? { sourceHash: source.sourceHash } : {}),
+                    originalUrl: source.url,
+                  });
+                  return (
+                  <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
+                    <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : source.tool === 'materials' ? 'archive-stack' : source.tool === 'research_decide' ? 'scales-3' : isPdf ? 'file-image' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                    {isPdf ? (
+                      <div className="min-w-0 flex-1">
+                        <button type="button" className="block w-full truncate text-left text-[11px] text-foreground hover:underline" onClick={openPdf} title={source.title}>{source.title}</button>
+                        <a href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[9px] text-muted-foreground hover:text-foreground" title={source.url}>{t('harness.sources.originalSource')}</a>
+                      </div>
+                    ) : (
+                      <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
+                        <span className="block truncate text-[11px] text-foreground">{source.title}</span>
+                        <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                      </a>
+                    )}
                     {source.paperId ? (
                       <span className="block truncate text-[9px] text-muted-foreground/70" title={source.paperId}>
                         {source.provider}:{source.paperId}{source.relation ? ` · ${source.relation}` : ''}
                       </span>
                     ) : null}
-                    {source.snapshotId ? (
-                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.contentHash ?? source.snapshotId}>
-                        snapshot {source.snapshotId}
-                      </span>
-                    ) : null}
-                  </a>
-                  {source.snapshotId && source.document?.kind === 'pdf' ? (
-                    <details className="max-w-[180px] shrink-0">
-                      <summary className="cursor-pointer list-none rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100" aria-label="Open fixed material page" title="Open fixed material page">
-                        <Icon name="file-image" className="size-3" />
-                      </summary>
-                      <div className="absolute z-10 mt-1 w-52 rounded-md border border-border bg-popover p-1.5 shadow-lg">
-                        <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                          Page
-                          <input
-                            type="number"
-                            min={1}
-                            max={source.document.pageCount}
-                            value={sourcePages[source.id] ?? 1}
-                            onChange={(event) => setSourcePages((current) => ({ ...current, [source.id]: Math.max(1, Math.min(source.document!.pageCount, Number(event.target.value) || 1)) }))}
-                            className="w-12 rounded border border-border bg-background px-1 py-0.5 text-[10px] text-foreground"
-                          />
-                          / {source.document.pageCount}
-                        </label>
-                        <img
-                          src={`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/materials/${encodeURIComponent(source.snapshotId)}/page?page=${sourcePages[source.id] ?? 1}`}
-                          alt={`${source.title} page ${sourcePages[source.id] ?? 1}`}
-                          className="mt-1 max-h-64 w-full rounded border border-border/60 object-contain"
-                        />
-                      </div>
-                    </details>
-                  ) : null}
-                  <button
+                    <button
                     type="button"
                     onClick={() => source.pinned ? unpinSource(source.id) : pinSource(source.id)}
                     aria-label={t(source.pinned ? 'harness.sources.unpin' : 'harness.sources.pin')}
@@ -623,7 +621,7 @@ export const HarnessThreadsPanel: React.FC<{
                   >
                     <Icon name={source.pinned ? 'pushpin-2-fill' : 'pushpin'} className="size-3" />
                   </button>
-                  <button
+                    <button
                     type="button"
                     onClick={() => deleteSource(source.id)}
                     aria-label={t('harness.sources.remove')}
@@ -631,7 +629,9 @@ export const HarnessThreadsPanel: React.FC<{
                   >
                     <Icon name="close" className="size-3" />
                   </button>
-                </div>
+                  </div>
+                  );
+                })()
               ))}
             </div>
           </section>
@@ -979,6 +979,20 @@ export const HarnessThreadsPanel: React.FC<{
 
   return (
     <>
+      {activePdfMaterial ? (
+        <PdfMaterialReader
+          open
+          sessionId={activePdfMaterial.sessionId}
+          title={activePdfMaterial.title}
+          snapshotId={activePdfMaterial.snapshotId}
+          {...(activePdfMaterial.sourceHash ? { sourceHash: activePdfMaterial.sourceHash } : {})}
+          {...(activePdfMaterial.page ? { initialPage: activePdfMaterial.page } : {})}
+          {...(activePdfMaterial.region ? { initialRegion: activePdfMaterial.region } : {})}
+          {...(activePdfMaterial.analysisId ? { analysisId: activePdfMaterial.analysisId } : {})}
+          {...(activePdfMaterial.originalUrl ? { originalUrl: activePdfMaterial.originalUrl } : {})}
+          onOpenChange={(open) => { if (!open) setActivePdfMaterial(null); }}
+        />
+      ) : null}
       <Dialog open={historyPreview !== null} onOpenChange={(open) => { if (!open) setHistoryPreview(null); }}>
         <DialogContent className="flex h-[80dvh] max-w-[90vw] flex-col">
           <DialogHeader>

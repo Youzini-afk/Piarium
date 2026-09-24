@@ -25,28 +25,45 @@ describe("PDF material routes", () => {
     }));
     registerPdfMaterialRoutes(app, {
       requireAuth: (_request, _response, next) => next(),
-      fetchPage: async ({ snapshotId, page, region }) => fetchPage({ snapshotId, page, region }),
+      readDocument: async ({ request }) => fetchPage({ snapshotId: request.snapshotId!, page: request.page!, ...(request.region ? { region: request.region } : {}) }),
     });
     const response = await request(app)
-      .get("/api/harness/sessions/session-1/materials/snap-1/page?page=2&x=0&y=4&width=100&height=80")
+      .get("/api/harness/sessions/session-1/materials/snap-1/page?page=2&x=0&y=0.4&width=1&height=0.5")
       .expect(200);
     expect(response.headers["content-type"]).toContain("image/png");
     expect(response.body).toEqual(Buffer.from("png"));
     expect(fetchPage).toHaveBeenCalledWith({
       snapshotId: "snap-1",
       page: 2,
-      region: { x: 0, y: 4, width: 100, height: 80 },
+      region: { x: 0, y: 0.4, width: 1, height: 0.5 },
     });
   });
 
   it("rejects malformed regions before invoking the material authority", async () => {
     const app = express();
     const fetchPage = vi.fn();
-    registerPdfMaterialRoutes(app, { fetchPage });
+    registerPdfMaterialRoutes(app, { readDocument: fetchPage });
     await request(app)
       .get("/api/harness/sessions/session-1/materials/snap-1/page?page=1&x=0&width=100")
       .expect(400);
     expect(fetchPage).not.toHaveBeenCalled();
   });
-});
 
+  it("keeps a posted read alive after its request body finishes and uses the authenticated session", async () => {
+    const app = express();
+    app.use(express.json());
+    const readDocument = vi.fn(async ({ sessionId, request, signal }) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(signal.aborted).toBe(false);
+      expect(sessionId).toBe("session-1");
+      expect(request).toEqual({ path: "paper.pdf", view: "overview" });
+      return { status: "failed" as const, url: "", reason: "Example unavailable parser" };
+    });
+    registerPdfMaterialRoutes(app, { readDocument, requireAuth: (req, res, next) => req.headers.authorization ? next() : res.sendStatus(401) });
+    await request(app).post("/api/harness/sessions/session-1/materials/read").send({ path: "paper.pdf" }).expect(401);
+    expect(readDocument).not.toHaveBeenCalled();
+    const result = await request(app).post("/api/harness/sessions/session-1/materials/read")
+      .set("Authorization", "test").send({ path: "paper.pdf", view: "overview" }).expect(200);
+    expect(result.body.reason).toBe("Example unavailable parser");
+  });
+});

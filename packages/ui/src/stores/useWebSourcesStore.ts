@@ -8,11 +8,13 @@ export interface WebSource {
   title: string;
   fetchedAt: number;
   toolCallId: string;
-  tool: 'webfetch' | 'websearch' | 'research_search' | 'materials' | 'research_decide';
+  tool: 'webfetch' | 'websearch' | 'research_search' | 'materials' | 'research_decide' | 'document_read';
   /** Fixed content snapshot id when the Host pinned the fetched body. */
   snapshotId?: string;
   contentHash?: string;
-  document?: { kind: 'pdf'; pageCount: number };
+  /** Physical hash of an original PDF, distinct from extracted text identity. */
+  sourceHash?: string;
+  document?: { kind: 'pdf'; pageCount?: number };
   /** Scholarly record identity for research_search entries. */
   provider?: string;
   paperId?: string;

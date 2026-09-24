@@ -412,7 +412,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         return summary;
       }
       if (entry.owner === 'pi-settings' && piSnapshot) {
-        const projectValue = piSnapshot.projectTrusted ? getPath(piSnapshot.project, single.path) : undefined;
+        const projectValue = single.scope === 'user' || !piSnapshot.projectTrusted
+          ? undefined
+          : getPath(piSnapshot.project, single.path);
         const globalValue = getPath(piSnapshot.global, single.path);
         const effective = projectValue ?? globalValue ?? single.default;
         if (single.kind === 'secret') {
@@ -546,24 +548,26 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const values: SettingsFieldValue[] = fields.map((field) => {
       const layer = scope === 'effective' ? undefined : scope;
       const saved = layer ? pickScope(field.path, layer) : undefined;
+      const projectIsSet = field.scope !== 'user' && pickScope(field.path, 'project') !== undefined;
       return layer
         ? { path: field.path, kind: field.kind, saved, isSet: saved !== undefined }
         : {
             path: field.path,
             kind: field.kind,
             saved: pickScope(field.path, 'global'),
-            isSet: pickScope(field.path, 'global') !== undefined || pickScope(field.path, 'project') !== undefined,
+            isSet: pickScope(field.path, 'global') !== undefined || projectIsSet,
           };
     });
-    // Effective value: project override beats global; harness.* resolves
-    // through the owner's merge so retired keys and user-only fields behave
-    // exactly like the running product.
+    // Effective value: project override beats global for project-writable
+    // fields; harness.* resolves through the owner's merge so user-only fields
+    // behave exactly like the running product.
     const merged = mergeHarnessSettings(
       isRecord(snapshot.global.harness) ? snapshot.global.harness as never : {},
       isRecord(trustedProject.harness) ? trustedProject.harness as never : {},
     ) as unknown as Record<string, unknown>;
     const effectiveOf = (path: string): { value: unknown; source: 'user' | 'project' | 'default' | 'none' } => {
-      const project = pickScope(path, 'project');
+      const userOwned = fields.find((field) => field.path === path)?.scope === 'user';
+      const project = userOwned ? undefined : pickScope(path, 'project');
       if (project !== undefined) return { value: project, source: 'project' };
       const global = pickScope(path, 'global');
       if (global !== undefined) return { value: global, source: 'user' };

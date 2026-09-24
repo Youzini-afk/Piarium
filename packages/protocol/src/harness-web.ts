@@ -33,11 +33,13 @@ export interface WebSnapshotStructure {
   /** Page boundaries mapped onto extracted-text lines (one-based). Present
    * only when the parser actually segmented pages (e.g. pdf-text). */
   pages?: Array<{ page: number; startLine: number; endLine: number }>;
-  /** Coordinate text layout from a document parser, in page points. */
+  /** Page dimensions are points; line/segment coordinates are normalized 0..1. */
   layouts?: Array<{
     page: number;
     width: number;
     height: number;
+    /** The analysis that produced these positions. Coordinates are normalized. */
+    analysisId?: string;
     columns?: number;
     lines: Array<{
       text: string;
@@ -46,28 +48,45 @@ export interface WebSnapshotStructure {
       width: number;
       height: number;
       readingIndex: number;
+      region?: WebDocumentRegion;
       segments?: Array<{ text: string; x: number; width: number }>;
     }>;
   }>;
   /** Detected section headings mapped onto extracted-text lines. */
-  headings?: Array<{ title: string; level: number; line: number }>;
+  headings?: Array<{ title: string; level: number; line: number; analysisId?: string; elementId?: string; regions?: DocumentPageRegion[] }>;
   /** Detected table blocks as line ranges in the fixed body. */
   tables?: Array<{
     startLine: number;
     endLine: number;
+    page?: number;
+    text?: string;
     confidence?: "candidate";
+    analysisId?: string;
+    elementId?: string;
+    regions?: DocumentPageRegion[];
+    /** Parser supplied cell topology. `rows` above remains a text-view aid. */
+    cells?: DocumentTableCell[];
     rows?: Array<{ cells: Array<{ text: string; x: number; width: number }> }>;
   }>;
   /** Detected figure/image references (markdown image lines). */
   figures?: Array<{
     line: number;
     title?: string;
+    text?: string;
     page?: number;
     bbox?: { x: number; y: number; width: number; height: number };
     confidence?: "candidate";
+    analysisId?: string;
+    elementId?: string;
+    regions?: DocumentPageRegion[];
+    captions?: Array<{ id: string; text: string; regions: DocumentPageRegion[] }>;
   }>;
   /** Formula candidates from text/layout heuristics; never treated as LaTeX truth. */
-  formulas?: Array<{ line: number; text: string; confidence: "candidate" }>;
+  formulas?: Array<{ line: number; text: string; confidence: "candidate"; analysisId?: string; elementId?: string; regions?: DocumentPageRegion[] }>;
+  /** Parser reading order. Lines are present only when grounded in its text. */
+  blocks?: DocumentStructureBlock[];
+  /** Parser elements retain exact geometry even without a text-line mapping. */
+  elements?: DocumentStructureElement[];
   /** Aspects this representation honestly cannot express. */
   unparsed?: string[];
 }
@@ -75,9 +94,14 @@ export interface WebSnapshotStructure {
 /** A parser-backed document attached to an immutable snapshot. */
 export interface WebSnapshotDocument {
   kind: "pdf";
-  pageCount: number;
+  /** Unknown when even the PDF probe failed; the original is still retained. */
+  pageCount?: number;
   /** Parser and layout strategy that produced the current text view. */
   parser: string;
+  /** The original, immutable material record. Derived analyses point back here. */
+  sourceSnapshotId?: string;
+  pages?: DocumentPageGeometry[];
+  analysis?: DocumentAnalysis;
   ocr?: {
     status: "not-requested" | "not-needed" | "used" | "unavailable";
     engine?: string;
@@ -92,11 +116,119 @@ export interface WebSnapshotDocument {
 }
 
 export interface WebDocumentRegion {
-  /** Render-space pixels at the renderer's declared DPI. */
+  /** Normalized 0..1 coordinates on the rotated page, origin at top left. */
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export interface DocumentPageRegion { page: number; region: WebDocumentRegion }
+
+export interface DocumentTableCell {
+  text: string;
+  row: number;
+  column: number;
+  rowSpan?: number;
+  columnSpan?: number;
+  columnHeader?: boolean;
+  rowHeader?: boolean;
+  rowSection?: boolean;
+  regions: DocumentPageRegion[];
+}
+
+export interface DocumentStructureBlock {
+  id: string;
+  kind: "paragraph" | "section" | "table" | "figure" | "formula" | "caption" | "text";
+  page: number;
+  text: string;
+  regions: DocumentPageRegion[];
+  startLine?: number;
+  endLine?: number;
+  analysisId?: string;
+}
+
+export interface DocumentStructureElement {
+  id: string;
+  kind: "section" | "table" | "figure" | "formula";
+  page: number;
+  regions: DocumentPageRegion[];
+  text?: string;
+  level?: number;
+  captions?: Array<{ id: string; text: string; regions: DocumentPageRegion[] }>;
+  cells?: DocumentTableCell[];
+  startLine?: number;
+  endLine?: number;
+  analysisId?: string;
+}
+
+export interface DocumentPageGeometry {
+  page: number;
+  /** Page dimensions in PDF points after rotation. */
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+export interface DocumentPageImage {
+  page: number;
+  mimeType: "image/png";
+  data: string;
+  byteLength: number;
+  width: number;
+  height: number;
+  /** Hash of the immutable original PDF, independent of text analyses. */
+  sourceHash: string;
+  region?: WebDocumentRegion;
+}
+
+export interface DocumentOverview {
+  sourceHash: string;
+  sourceSnapshotId: string;
+  pageCount?: number;
+  pages?: DocumentPageGeometry[];
+  textStatus: "not-requested" | "available" | "unavailable";
+}
+
+/** Identity and provenance of one immutable derived analysis. */
+export interface DocumentAnalysis {
+  id: string;
+  parser: "native" | "docling";
+  version: string;
+  configHash?: string;
+  toolVersions?: { pdfjs: string; docling?: string; tesseract?: string };
+  sourceHash: string;
+  pages: number[];
+  ocr: boolean;
+  status: "ok" | "partial" | "unavailable";
+  failedPages?: number[];
+}
+
+export interface DocumentFindHit {
+  /** Primary page; multi-page parser blocks list all possible pages below. */
+  page: number;
+  pageCandidates?: number[];
+  snippet: string;
+  start: number;
+  end: number;
+  region?: WebDocumentRegion;
+}
+
+/** Independent document reading; a Host must resolve and authorize path bytes. */
+export interface DocumentReadRequest {
+  snapshotId?: string;
+  path?: string;
+  artifact?: { attemptId: string; artifactId: string };
+  view?: "overview" | "text" | "page-image" | "structure";
+  page?: number;
+  /** Explicit `all` reanalyzes the original scope of a partial snapshot. */
+  pages?: number[] | "all";
+  region?: WebDocumentRegion;
+  scale?: number;
+  ocr?: boolean;
+  parser?: "native" | "docling";
+  position?: WebReadPosition;
+  find?: string;
 }
 
 /** A structural or line-range selector into a fixed snapshot body. */
@@ -342,22 +474,12 @@ export interface WebSearchRequest {
   limit?: number;
 }
 
-export interface WebFetchRequest {
+export interface WebFetchRequest extends Omit<DocumentReadRequest, "path" | "artifact"> {
   url?: string;
   snapshotId?: string;
   /** Bypass the short-lived response cache and mint a fresh snapshot. */
   refresh?: boolean;
   render?: boolean;
-  /** Progressive document view. `page-image` is resolved from a pinned PDF snapshot. */
-  view?: "text" | "page-image";
-  /** One-based page for `view: "page-image"`. */
-  page?: number;
-  /** Optional crop in rendered page pixels; omitted means the full page. */
-  region?: WebDocumentRegion;
-  /** Request OCR for PDF pages whose text layer is empty. */
-  ocr?: boolean;
-  /** Read a structural slice of the body instead of the whole text. */
-  position?: WebReadPosition;
 }
 
 // ---------------------------------------------------------------------------

@@ -126,6 +126,12 @@ const requestPaths = (
       ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
+  if (method === "materials.read") {
+    if (record.path === undefined) return [];
+    return typeof record.path === "string" && record.path.trim()
+      ? [{ allowMissing: true, path: record.path }]
+      : "invalid";
+  }
   if (method === "document.pathOverlay") {
     return typeof record.path === "string" && record.path.trim()
       && (record.pattern === undefined || typeof record.pattern === "string")
@@ -358,7 +364,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     // Only the actor-scoped scheduler waits may outlive their dependency or
     // reply deadline. Worker cancellation, generation replacement, and Host
     // disposal still abort them.
-    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run") && data.timeoutMs === 0
+    const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read") && data.timeoutMs === 0
       ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const actor = await options.resolveActor(identity, controller.signal);

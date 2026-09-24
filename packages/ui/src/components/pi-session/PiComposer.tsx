@@ -14,6 +14,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import type { FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import {
@@ -44,7 +45,8 @@ import {
 import type { ComposerLanguageContext } from '@/components/chat/composer/language/tokenize';
 import { MAGIC_PROMPT_COMMANDS } from '@/components/chat/composer/submit/slashCommands';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
-import { getRuntimeKey } from '@varin/application-client';
+import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -61,6 +63,13 @@ import { useMessageHistory } from '@/components/chat/composer/state/useMessageHi
 import { projectPiComposerActions } from './piComposerActions';
 import type { WorkFocusId } from '@varin/protocol';
 import { PiWorkFocusControl } from './PiWorkFocusControl';
+import {
+  isSamePiComposerAttachmentTarget,
+  isPiComposerPdfUploadUnsupportedForSession,
+  splitPiComposerAttachmentFiles,
+  uploadPiComposerPdfFiles,
+  type PiComposerAttachmentTarget,
+} from './piComposerPdfAttachments';
 
 interface PiComposerProps {
   active: boolean;
@@ -160,6 +169,35 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   inheritedWorkFocus,
 }) => {
   const { t } = useI18n();
+  const { documents, workspace: workspaceApi } = useRuntimeAPIs();
+  const runtimeKey = getRuntimeKey();
+  const parentSessionId = usePiSessionStore((state) => (
+    sessionId
+      ? state.summaries.find((summary) => summary.id === sessionId)?.parentId ?? null
+      : null
+  ));
+  const pendingPdfScopeRef = React.useRef<{ cwd: string; runtimeKey: string; scopeId: string } | null>(null);
+  if (!sessionId && (
+    !pendingPdfScopeRef.current
+    || pendingPdfScopeRef.current.cwd !== cwd
+    || pendingPdfScopeRef.current.runtimeKey !== runtimeKey
+  )) {
+    pendingPdfScopeRef.current = {
+      cwd,
+      runtimeKey,
+      scopeId: `pending-${crypto.randomUUID()}`,
+    };
+  }
+  const attachmentTarget: PiComposerAttachmentTarget = {
+    cwd,
+    runtimeKey,
+    scopeId: sessionId ?? pendingPdfScopeRef.current?.scopeId ?? `pending-${crypto.randomUUID()}`,
+    sessionId: sessionId ?? null,
+    parentSessionId,
+    ...(workspace ? { workspace } : {}),
+  };
+  const latestAttachmentRef = React.useRef({ target: attachmentTarget, draft, onChangeDraft });
+  latestAttachmentRef.current = { target: attachmentTarget, draft, onChangeDraft };
   const inputRef = React.useRef<ComposerEditorHandle>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   const skillRef = React.useRef<SkillAutocompleteHandle>(null);
@@ -250,7 +288,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     if (autocomplete?.kind === 'mention' && !draft.includes('@')) setAutocomplete(null);
   }, [autocomplete?.kind, draft]);
 
-  const addFiles = React.useCallback(async (files: Iterable<File>) => {
+  const addImageFiles = React.useCallback(async (files: Iterable<File>) => {
     const imageFiles = [...files].filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
     try {
@@ -261,6 +299,60 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.attachFileFailed'));
     }
   }, [images, onChangeImages, t]);
+
+  const addPdfFiles = React.useCallback(async (files: Iterable<File>) => {
+    const pdfFiles = [...files];
+    if (pdfFiles.length === 0) return;
+    if (!workspaceApi) {
+      toast.error(t('chat.piComposer.pdfAttachment.unsupported'));
+      return;
+    }
+    const target = latestAttachmentRef.current.target;
+    const isCurrentTarget = (): boolean => (
+      getRuntimeKey() === target.runtimeKey
+      && usePiSessionStore.getState().currentSessionId === target.sessionId
+      && isSamePiComposerAttachmentTarget(latestAttachmentRef.current.target, target)
+    );
+    try {
+      const result = await uploadPiComposerPdfFiles(pdfFiles, {
+        documents,
+        isCurrentTarget,
+        randomUUID: () => crypto.randomUUID(),
+        target,
+        workspaceApi,
+        isSessionUnsupported: () => isPiComposerPdfUploadUnsupportedForSession({
+          fetchThreads: (path) => runtimeFetch(path, { cache: 'no-store' }),
+          parentSessionId: target.parentSessionId,
+          sessionId: target.sessionId,
+        }),
+      });
+      if (result.status === 'stale') return;
+      if (result.status === 'unsupported') {
+        toast.error(t('chat.piComposer.pdfAttachment.unsupported'));
+        return;
+      }
+      if (result.references.length > 0 && isCurrentTarget()) {
+        const current = latestAttachmentRef.current;
+        const separator = current.draft.length === 0 || current.draft.endsWith('\n') ? '' : '\n';
+        current.onChangeDraft(`${current.draft}${separator}${result.references.join('\n')}`);
+      }
+      for (const failure of result.failures) {
+        console.error(`Failed to attach PDF to Pi prompt (${failure.name}):`, failure.error);
+        toast.error(t('chat.piComposer.pdfAttachment.uploadFailed', { name: failure.name }));
+      }
+    } catch (error) {
+      console.error('Failed to attach PDF to Pi prompt:', error);
+      toast.error(t('chat.piComposer.pdfAttachment.uploadFailed', { name: pdfFiles[0]?.name ?? '' }));
+    }
+  }, [documents, t, workspaceApi]);
+
+  const addFiles = React.useCallback(async (files: Iterable<File>) => {
+    const classified = splitPiComposerAttachmentFiles(files);
+    await Promise.all([
+      addImageFiles(classified.images),
+      addPdfFiles(classified.pdfs),
+    ]);
+  }, [addImageFiles, addPdfFiles]);
 
   const steeringQueue = snapshot?.steering ?? [];
   const followUpQueue = snapshot?.followUp ?? [];
@@ -588,7 +680,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               const files = event.clipboardData ? [...event.clipboardData.files] : [];
               if (!files.some((file) => file.type.startsWith('image/'))) return;
               event.preventDefault();
-              void addFiles(files);
+              void addImageFiles(files);
             }}
             onKeyDown={handleEditorKeyDown}
             languageContext={languageContext}
@@ -647,7 +739,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.pdf,application/pdf"
                 multiple
                 className="hidden"
                 onChange={(event) => {

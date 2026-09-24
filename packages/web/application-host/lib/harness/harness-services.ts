@@ -1,5 +1,6 @@
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { FetchResult, HarnessServiceMap, ShellExecResultSpawnFailed, WebFetchRequest } from "@varin/protocol";
+import { createMaterialReadService } from "./material-read-service.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
@@ -62,7 +63,7 @@ const requiredWorkspaceId = (ctx: HarnessServiceContext): string => {
  * entitlement). Shared by the `web.fetch` service and `web.search` url items.
  */
 export const performHarnessWebFetch = async (
-  host: Pick<HarnessServiceHost, "threadRegistry" | "getWebBinding" | "webFetchService">,
+  host: Pick<HarnessServiceHost, "threadRegistry" | "getWebBinding" | "webFetchService" | "documentReadingSettings">,
   params: WebFetchRequest,
   ctx: HarnessServiceContext,
 ): Promise<FetchResult> => {
@@ -117,6 +118,7 @@ export const performHarnessWebFetch = async (
       render: params.render === true,
       domainPolicy,
       signal: ctx.signal,
+      ...(params.ocr === true ? { engineOptions: await host.documentReadingSettings?.(ctx.sessionId) } : {}),
       ...(issueReceipt ? { issueReceipt: true } : {}),
     },
   );
@@ -1068,6 +1070,9 @@ export function registerHarnessServices(
     router.register("web.fetch", {
       handle: (params, ctx) => performHarnessWebFetch(host, params, ctx),
     });
+  }
+  if (host.documentReader) {
+    router.register("materials.read", createMaterialReadService(host));
   }
   if (host.webSearchService) {
     router.register("web.search", host.webSearchService);

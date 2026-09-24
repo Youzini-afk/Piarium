@@ -2,6 +2,7 @@ import React from 'react';
 import type { ExperimentArtifactView, ExperimentAttemptView, ResourceGpuView, ResourceMachineView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
+import { PdfMaterialReader } from '@/components/pi-session/PdfMaterialReader';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -219,11 +220,13 @@ const ArtifactRow: React.FC<{
   const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [readerOpen, setReaderOpen] = React.useState(false);
   const remote = artifact.remote;
   const remoteAccessible = remote?.accessible;
   const downloadable = artifact.state === 'available'
     && remoteAccessible !== 'unreachable'
     && remoteAccessible !== 'expired';
+  const isPdf = artifact.kind === 'file' && /\.pdf$/i.test(artifact.name);
 
   const download = async () => {
     setBusy(true);
@@ -244,31 +247,47 @@ const ArtifactRow: React.FC<{
   };
 
   return (
-    <li className="flex items-center gap-2 py-1">
-      <span className="min-w-0 flex-1 truncate text-foreground" title={artifact.name}>{artifact.name}</span>
-      <span className="text-muted-foreground">{artifact.kind} · {artifact.state}</span>
-      {artifact.byteLength !== undefined ? <span className="text-muted-foreground">{artifact.byteLength} B</span> : null}
-      {remote ? (
-        <span className="max-w-64 truncate text-muted-foreground" title={`${remote.machineId} · ${remote.outputId} · ${remote.path}`}>
-          {t('research-facts.remoteArtifact')}: {remote.machineId} · {remote.outputId} · {remote.path}
-        </span>
+    <>
+      <li className="flex items-center gap-2 py-1">
+        <span className="min-w-0 flex-1 truncate text-foreground" title={artifact.name}>{artifact.name}</span>
+        <span className="text-muted-foreground">{artifact.kind} · {artifact.state}</span>
+        {artifact.byteLength !== undefined ? <span className="text-muted-foreground">{artifact.byteLength} B</span> : null}
+        {remote ? (
+          <span className="max-w-64 truncate text-muted-foreground" title={`${remote.machineId} · ${remote.outputId} · ${remote.path}`}>
+            {t('research-facts.remoteArtifact')}: {remote.machineId} · {remote.outputId} · {remote.path}
+          </span>
+        ) : null}
+        {isPdf && downloadable ? (
+          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setReaderOpen(true)}>
+            {t('harness.pdf.openReader')}
+          </button>
+        ) : null}
+        {downloadable ? (
+          <button type="button" disabled={busy} className="shrink-0 text-primary hover:underline disabled:opacity-50" onClick={() => { void download(); }}>
+            {t('research-facts.download')}
+          </button>
+        ) : (
+          <span className="text-muted-foreground">
+            {remoteAccessible === 'unreachable'
+              ? t('research-facts.remoteUnreachable')
+              : remoteAccessible === 'expired'
+                ? t('research-facts.remoteExpired')
+                : t('research-facts.artifactUnavailable')}
+          </span>
+        )}
+        {artifact.error ? <span className="text-muted-foreground">{artifact.error}</span> : null}
+        {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
+      </li>
+      {isPdf ? (
+        <PdfMaterialReader
+          open={readerOpen}
+          onOpenChange={setReaderOpen}
+          sessionId={sessionId}
+          title={artifact.name}
+          artifact={{ attemptId, artifactId: artifact.artifactId }}
+        />
       ) : null}
-      {downloadable ? (
-        <button type="button" disabled={busy} className="shrink-0 text-primary hover:underline disabled:opacity-50" onClick={() => { void download(); }}>
-          {t('research-facts.download')}
-        </button>
-      ) : (
-        <span className="text-muted-foreground">
-          {remoteAccessible === 'unreachable'
-            ? t('research-facts.remoteUnreachable')
-            : remoteAccessible === 'expired'
-              ? t('research-facts.remoteExpired')
-              : t('research-facts.artifactUnavailable')}
-        </span>
-      )}
-      {artifact.error ? <span className="text-muted-foreground">{artifact.error}</span> : null}
-      {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
-    </li>
+    </>
   );
 };
 

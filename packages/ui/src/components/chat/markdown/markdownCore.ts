@@ -3,6 +3,7 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
+import { pdfMaterialMarkdownHref } from '@/lib/pi-runtime/pdfMaterialCitation';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
@@ -173,6 +174,10 @@ const parser = marked.use({
     },
     link({ href, title, text }) {
       const target = href ?? '';
+      if (target.startsWith('varin-material://')) {
+        const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+        return `<a href="${escapeAttr(pdfMaterialMarkdownHref(target))}" data-varin-material-link="true"${titleAttr} class="text-primary hover:underline">${text}</a>`;
+      }
       const agentName = parseAgentHref(target);
       if (agentName) {
         return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-varin-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;

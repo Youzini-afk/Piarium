@@ -57,6 +57,25 @@ module.exports = (context) => {
   if (!fs.existsSync(path.join(packagedWebDistPath, 'index.html'))) {
     throw new Error(`Missing packaged web UI at ${packagedWebDistPath}`);
   }
+  const packagedPdfjsRoot = path.join(unpackedNodeModulesPath, 'pdfjs-dist');
+  for (const relativePath of [
+    path.join('legacy', 'build', 'pdf.mjs'),
+    path.join('legacy', 'build', 'pdf.worker.mjs'),
+    path.join('cmaps', 'Adobe-GB1-0.bcmap'),
+    path.join('standard_fonts', 'FoxitDingbats.pfb'),
+  ]) {
+    const packagedPath = path.join(packagedPdfjsRoot, relativePath);
+    let complete = false;
+    try {
+      const details = fs.statSync(packagedPath);
+      complete = details.isFile() && details.size > 0;
+    } catch {
+      // Report the same actionable path below for missing and unreadable files.
+    }
+    if (!complete) {
+      throw new Error(`Missing unpacked PDF.js runtime file at ${packagedPath}`);
+    }
+  }
   fs.rmSync(
     path.join(unpackedNodeModulesPath, '@varin', 'web', 'dist'),
     { recursive: true, force: true },
@@ -119,6 +138,74 @@ module.exports = (context) => {
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+
+  const packagedPdfjsEntry = path.join(packagedPdfjsRoot, 'legacy', 'build', 'pdf.mjs');
+  const pdfRuntimeSmoke = `
+    import { createRequire } from 'node:module';
+    import { existsSync } from 'node:fs';
+    import path from 'node:path';
+    import { sep } from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    const pdfjsEntry = ${JSON.stringify(packagedPdfjsEntry)};
+    const pdfRequire = createRequire(pdfjsEntry);
+    const canvas = pdfRequire('@napi-rs/canvas');
+    const pdfjs = await import(pathToFileURL(pdfjsEntry).href);
+    if (typeof pdfjs.getDocument !== 'function') {
+      throw new Error('PDF.js legacy runtime could not be loaded.');
+    }
+    const packageRoot = path.resolve(path.dirname(pdfjsEntry), '..', '..');
+    const unpackedRoot = packageRoot.replace('app.asar' + sep, 'app.asar.unpacked' + sep);
+    const assetRoot = existsSync(path.join(unpackedRoot, 'standard_fonts')) ? unpackedRoot : packageRoot;
+    const cMapUrl = path.join(assetRoot, 'cmaps') + sep;
+    const standardFontDataUrl = path.join(assetRoot, 'standard_fonts') + sep;
+    const content = 'q\\n0 0 1 rg\\n20 20 60 40 re\\nf\\nBT /F1 14 Tf 20 90 Td (packaged PDF render) Tj ET\\nQ\\n';
+    const objects = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 120] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      '<< /Length ' + Buffer.byteLength(content, 'ascii') + ' >>\\nstream\\n' + content + 'endstream',
+    ];
+    let source = '%PDF-1.4\\n';
+    const offsets = [0];
+    for (let index = 0; index < objects.length; index += 1) {
+      offsets.push(Buffer.byteLength(source, 'ascii'));
+      source += (index + 1) + ' 0 obj\\n' + objects[index] + '\\nendobj\\n';
+    }
+    const xrefOffset = Buffer.byteLength(source, 'ascii');
+    source += 'xref\\n0 ' + (objects.length + 1) + '\\n0000000000 65535 f \\n';
+    for (const offset of offsets.slice(1)) source += String(offset).padStart(10, '0') + ' 00000 n \\n';
+    source += 'trailer\\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\\nstartxref\\n' + xrefOffset + '\\n%%EOF\\n';
+    const loading = pdfjs.getDocument({
+      cMapPacked: true,
+      cMapUrl,
+      data: new Uint8Array(Buffer.from(source, 'ascii')),
+      standardFontDataUrl,
+    });
+    let document;
+    try {
+      document = await loading.promise;
+      const page = await document.getPage(1);
+      const viewport = page.getViewport({ scale: 1 });
+      const width = Math.ceil(viewport.width);
+      const height = Math.ceil(viewport.height);
+      const surface = canvas.createCanvas(width, height);
+      await page.render({ canvas: surface, canvasContext: surface.getContext('2d'), viewport }).promise;
+      const png = surface.toBuffer('image/png');
+      if (width !== 200 || height !== 120 || !Buffer.isBuffer(png) || png.length <= 8) {
+        throw new Error('Packaged PDF.js returned an empty or incorrectly sized render.');
+      }
+      console.log('[electron] rendered the embedded PDF with packaged PDF.js and native Canvas');
+    } finally {
+      await loading.destroy();
+    }
+  `;
+  execFileSync(packagedExecutable, ['--input-type=module', '-e', pdfRuntimeSmoke], {
+    cwd: path.resolve(__dirname, '..', '..', '..'),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: '' },
     stdio: 'inherit',
     windowsHide: true,
   });

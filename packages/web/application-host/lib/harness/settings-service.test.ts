@@ -190,6 +190,39 @@ describe("settings service catalog search", () => {
     assert.equal(result.items[0]?.owner, "pi-settings");
   });
 
+  it("discovers document-reading settings and reports their resolved user defaults", async () => {
+    const { service } = fixture();
+    const search = await service.search(caller, { id: "harness.document-reading" });
+    assert.equal(search.total, 1);
+    assert.equal(search.items[0]?.writable, true);
+    assert.deepEqual(search.items[0]?.paths, ["harness.documentReading"]);
+
+    const read = await service.read(caller, { id: "harness.document-reading" });
+    assert.equal(read.fields?.[0]?.isSet, false);
+    assert.deepEqual(read.effective, {
+      value: { doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng" },
+      source: "default",
+    });
+  });
+
+  it("does not expose a trusted project document parser override as effective or saved user state", async () => {
+    const { service } = fixture({ pi: {
+      project: { harness: { documentReading: { doclingCommand: "project-docling" } } },
+    } });
+    const search = await service.search(caller, { id: "harness.document-reading" });
+    assert.equal(search.items[0]?.summary?.source, "default");
+    assert.deepEqual(search.items[0]?.summary?.value, {
+      doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng",
+    });
+
+    const read = await service.read(caller, { id: "harness.document-reading" });
+    assert.equal(read.fields?.[0]?.isSet, false);
+    assert.equal(read.effective?.source, "default");
+    assert.deepEqual(read.effective?.value, {
+      doclingCommand: "docling", tesseractCommand: "tesseract", ocrLanguage: "eng",
+    });
+  });
+
   it("summarizes simple entries without advertising verbs from an unwired owner", async () => {
     const { service } = fixture({
       app: { timeFormatPreference: "24h" },
@@ -382,6 +415,30 @@ describe("settings update", () => {
     });
     assert.equal(result.status, "failed");
     assert.match(result.fields[0]?.error ?? "", /user-owned/);
+  });
+
+  it("keeps document parser executables user-owned", async () => {
+    const { service, pi } = fixture();
+    const userWrite = await service.update(caller, {
+      id: "harness.document-reading",
+      scope: "global",
+      set: { "harness.documentReading": {
+        doclingCommand: "C:/tools/docling.exe", tesseractCommand: "tesseract", ocrLanguage: "fra",
+      } },
+    });
+    assert.equal(userWrite.status, "applied");
+    assert.deepEqual((pi.global.harness as Record<string, unknown>).documentReading, {
+      doclingCommand: "C:/tools/docling.exe", tesseractCommand: "tesseract", ocrLanguage: "fra",
+    });
+
+    const result = await service.update(caller, {
+      id: "harness.document-reading",
+      scope: "project",
+      set: { "harness.documentReading": { doclingCommand: "project-command" } },
+    });
+    assert.equal(result.status, "failed");
+    assert.match(result.fields[0]?.error ?? "", /user-owned/);
+    assert.equal(pi.updates.length, 1);
   });
 
   it("writes pi-settings through the owner protocol with CAS", async () => {

@@ -21,6 +21,7 @@ import { createHistoryTool } from "./history-tool.js";
 import { createRelatedTool } from "./related-tool.js";
 import { createLspNavigationTools } from "./lsp-tools.js";
 import { createSurfaceAwareReadTool } from "./read-tool.js";
+import { createDocumentReadTool } from "./document-read-tool.js";
 import { createSurfaceAwareFindTool } from "./find-tool.js";
 import { createSurfaceAwareLsTool } from "./ls-tool.js";
 import {
@@ -153,6 +154,9 @@ export function selectHarnessTools(
       cwd,
       autoResizeImages === undefined ? {} : { autoResizeImages },
     ));
+  }
+  if (documentReadAvailable && tools.document_read !== false) {
+    result.push(createDocumentReadTool(bridge));
   }
   if (documentPathOverlayAvailable) {
     if (tools.find !== false) result.push(createSurfaceAwareFindTool(bridge, cwd));

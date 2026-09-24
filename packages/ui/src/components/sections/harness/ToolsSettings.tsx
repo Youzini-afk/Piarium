@@ -6,7 +6,7 @@ import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
 const tools = ['bash', 'grep', 'get_output', 'write_to_process', 'kill_shell', 'diagnostics', 'apply_patch'] as const;
-const researchTools = ['websearch', 'webfetch', 'research_search', 'materials', 'research_decide'] as const;
+const researchTools = ['websearch', 'webfetch', 'document_read', 'research_search', 'materials', 'research_decide'] as const;
 const shells = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 
 export function ToolsSettings({ harness, update }: HarnessSettingsPageProps) {

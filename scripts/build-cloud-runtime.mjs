@@ -355,11 +355,41 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@varin/extension-host/dist/index.js'); const builtins = await import('./packages/web/node_modules/@varin/extension-builtins/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Varin extension host is unavailable'); if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Varin extension builtins are unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
+    `
+      import { createRequire } from 'node:module';
+      import { existsSync } from 'node:fs';
+      import path from 'node:path';
+      import { pathToFileURL } from 'node:url';
+      const broker = await import('./packages/web/node_modules/@varin/runtime-broker/dist/index.js');
+      const extensions = await import('./packages/web/node_modules/@varin/extension-host/dist/index.js');
+      const builtins = await import('./packages/web/node_modules/@varin/extension-builtins/dist/index.js');
+      if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Varin extension host is unavailable');
+      if (!Array.isArray(builtins.VARIN_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Varin extension builtins are unavailable');
+      const entry = broker.resolveBundledPiHostEntry();
+      if (!entry) throw new Error('Pi host entry was not resolved');
+      const webRequire = createRequire(new URL('./packages/web/package.json', import.meta.url));
+      webRequire.resolve('sherpa-onnx-node');
+      webRequire.resolve('web-tree-sitter');
+      const pdfjsEntry = webRequire.resolve('pdfjs-dist/legacy/build/pdf.mjs');
+      const pdfRequire = createRequire(pdfjsEntry);
+      const canvas = pdfRequire('@napi-rs/canvas');
+      const surface = canvas.createCanvas(2, 2);
+      const context = surface.getContext('2d');
+      context.fillStyle = '#ff0000';
+      context.fillRect(0, 0, 1, 1);
+      if (context.getImageData(0, 0, 1, 1).data[0] !== 255) throw new Error('PDF Canvas native runtime did not draw');
+      const pdfjsRoot = path.dirname(webRequire.resolve('pdfjs-dist/package.json'));
+      for (const asset of ['legacy/build/pdf.worker.mjs', 'cmaps/Adobe-GB1-0.bcmap', 'standard_fonts/FoxitDingbats.pfb']) {
+        if (!existsSync(path.join(pdfjsRoot, asset))) throw new Error('PDF.js runtime asset is missing: ' + asset);
+      }
+      await import(pathToFileURL(pdfjsEntry).href);
+      console.log(entry);
+      console.log('PDF.js assets and native Canvas runtime are available');
+    `,
   ], {
     cwd: resolvedOutput,
     json,
-    label: 'Cloud runtime Pi host resolution',
+    label: 'Cloud runtime Pi and PDF runtime resolution',
   });
   run('node', [path.join(resolvedOutput, 'verify-kernel.mjs'), path.join(resolvedOutput, 'packages/web')], { cwd: resolvedOutput, json, label: 'Cloud release kernel authority smoke' });
 };
