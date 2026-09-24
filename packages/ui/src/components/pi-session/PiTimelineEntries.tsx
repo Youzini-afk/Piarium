@@ -1052,7 +1052,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                       resultByCallId={resultByCallId}
                     />
                   ) : null}
-                  {displayedMessage && (assistantText || onFork || onOpenThread) ? (
+                  {displayedMessage && assistantText ? (
                   <div className={cn(
                     'flex h-6 items-center transition-opacity',
                     'opacity-100',
