@@ -20,15 +20,15 @@ const isPiAssistantTurnComplete = (
 
 export const PiTurnUsageFooter: React.FC<{
   entries: readonly PiSessionEntry[];
-  startedAt?: number;
   liveAssistant?: PiAssistantMessage;
-}> = ({ entries, liveAssistant, startedAt }) => {
+  outputDurationsMs?: Readonly<Record<string, number>>;
+}> = ({ entries, liveAssistant, outputDurationsMs }) => {
   if (!isPiAssistantTurnComplete(entries, liveAssistant)) return null;
   const usage = aggregateAssistantUsage(entries, liveAssistant);
   if (!usage) return null;
   return (
     <PiAssistantUsageFooter
-      tokensPerSecond={assistantTokensPerSecond(entries, startedAt, liveAssistant)}
+      tokensPerSecond={assistantTokensPerSecond(entries, liveAssistant, outputDurationsMs)}
       usage={usage}
     />
   );

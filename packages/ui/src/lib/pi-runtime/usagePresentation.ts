@@ -123,6 +123,10 @@ export const assistantMessagesForTurn = (
   return messages;
 };
 
+export const assistantMessageKey = (message: Pick<PiAssistantMessage, 'model' | 'provider' | 'timestamp'>): string => (
+  `${message.timestamp}:${message.provider}:${message.model}`
+);
+
 export const aggregateAssistantUsage = (
   entries: readonly PiSessionEntry[],
   liveAssistant?: PiAssistantMessage,
@@ -132,17 +136,18 @@ export const aggregateAssistantUsage = (
 
 export const assistantTokensPerSecond = (
   entries: readonly PiSessionEntry[],
-  startedAt: number | undefined,
   liveAssistant?: PiAssistantMessage,
+  outputDurationsMs?: Readonly<Record<string, number>>,
 ): number | undefined => {
-  if (startedAt === undefined || !Number.isFinite(startedAt) || startedAt <= 0) return undefined;
   const assistants = assistantMessagesForTurn(entries, liveAssistant);
-  const last = assistants.at(-1);
-  if (!last || !Number.isFinite(last.timestamp) || last.timestamp <= startedAt) return undefined;
-  const outputTokens = assistants.reduce((total, message) => total + positive(message.usage.output), 0);
-  if (outputTokens <= 0) return undefined;
-  const durationSeconds = (last.timestamp - startedAt) / 1000;
-  return durationSeconds > 0 ? outputTokens / durationSeconds : undefined;
+  if (!outputDurationsMs) return undefined;
+  const rates = assistants.flatMap((message) => {
+    const outputTokens = positive(message.usage.output);
+    const durationMs = outputDurationsMs[assistantMessageKey(message)];
+    if (outputTokens <= 0 || !Number.isFinite(durationMs) || durationMs <= 0) return [];
+    return [outputTokens / (durationMs / 1000)];
+  });
+  return rates.length > 0 ? rates.reduce((total, rate) => total + rate, 0) / rates.length : undefined;
 };
 
 export const latestAssistantTurnUsage = (

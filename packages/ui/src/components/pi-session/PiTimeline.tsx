@@ -94,6 +94,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
     const executions = state.records[sessionId]?.toolExecutions;
     return toolCallIds.map((id) => executions?.[id]);
   }));
+  const outputDurationsMs = usePiSessionStore((state) => state.records[sessionId]?.assistantOutputDurationsMs);
   const toolExecutions = React.useMemo(() => Object.fromEntries(
     toolCallIds.flatMap((id, index) => {
       const execution = itemExecutions[index];
@@ -118,7 +119,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
-        <PiTurnUsageFooter entries={[]} liveAssistant={item.message} />
+        <PiTurnUsageFooter entries={[]} liveAssistant={item.message} outputDurationsMs={outputDurationsMs} />
       </div>
     );
   }
@@ -140,7 +141,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           threadBusyEntryId={threadBusyEntryId}
           toolExecutions={toolExecutions}
         />
-        <PiTurnUsageFooter entries={[item.entry]} />
+        <PiTurnUsageFooter entries={[item.entry]} outputDurationsMs={outputDurationsMs} />
       </div>
     );
   }
@@ -185,7 +186,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         threadBusyEntryId={threadBusyEntryId}
         toolExecutions={toolExecutions}
       />
-        <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} startedAt={turn.user.timestamp} />
+        <PiTurnUsageFooter entries={turnEntries} liveAssistant={turn.liveAssistant} outputDurationsMs={outputDurationsMs} />
     </div>
   );
 };

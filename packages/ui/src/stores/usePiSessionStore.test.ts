@@ -355,6 +355,30 @@ describe('Pi session event state', () => {
     expect(settled.settledActivityDurationMs).toBe(4_500);
   });
 
+  test('measures each assistant output from message start to end', () => {
+    const initial = {
+      extensionStates: {},
+      open: true,
+      sessionId: 'session-a',
+      snapshot: snapshot('session-a'),
+      toolExecutions: {},
+    };
+    const assistant: PiAssistantMessage = {
+      api: 'messages',
+      content: [],
+      model: 'model-a',
+      provider: 'provider',
+      role: 'assistant',
+      stopReason: 'stop',
+      timestamp: 10,
+      usage: { cacheRead: 0, cacheWrite: 0, cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 }, input: 0, output: 10, totalTokens: 10 },
+    };
+    const started = reducePiAgentEvent(initial, { message: assistant, type: 'message_start' }, 1_000);
+    const ended = reducePiAgentEvent(started, { message: assistant, type: 'message_end' }, 1_250);
+    expect(ended.assistantOutputDurationsMs?.['10:provider:model-a']).toBe(250);
+    expect(ended.assistantOutputStartedAt).toEqual({});
+  });
+
   test('reconciles an optimistic submission only when Pi projects its user message', () => {
     const sessionId = 'session-a';
     const existingEntry: PiSessionEntry = {

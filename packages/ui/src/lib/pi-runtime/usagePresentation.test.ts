@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { PiSessionEntry, PiUsage } from '@varin/protocol';
 import {
   aggregatePiUsage,
+  assistantMessageKey,
+  assistantMessagesForTurn,
   assistantTokensPerSecond,
   latestAssistantTurnUsage,
   projectPiUsagePresentation,
@@ -176,6 +178,30 @@ describe('Pi usage presentation', () => {
       output: 6,
       totalTokens: 31,
     });
-    expect(assistantTokensPerSecond(entries, 2)).toBe(2_000);
+    const calls = assistantMessagesForTurn(entries)
+      .filter((message) => message.timestamp === 3 || message.timestamp === 5);
+    expect(assistantTokensPerSecond(entries, undefined, {
+      [assistantMessageKey(calls[0]!)]: 100,
+      [assistantMessageKey(calls[1]!)]: 1000,
+    })).toBe(21);
+  });
+
+  test('averages measured output rates across multiple model calls', () => {
+    const first = {
+      api: 'messages', content: [], model: 'model-a', provider: 'provider', role: 'assistant' as const,
+      stopReason: 'toolUse' as const, timestamp: 10, usage: usage({ output: 100 }),
+    };
+    const second = {
+      api: 'messages', content: [], model: 'model-b', provider: 'provider', role: 'assistant' as const,
+      stopReason: 'stop' as const, timestamp: 20, usage: usage({ output: 50 }),
+    };
+    const entries: PiSessionEntry[] = [
+      { id: 'first', message: first, parentId: null, timestamp: '10', type: 'message' },
+      { id: 'second', message: second, parentId: 'first', timestamp: '20', type: 'message' },
+    ];
+    expect(assistantTokensPerSecond(entries, undefined, {
+      [assistantMessageKey(first)]: 1_000,
+      [assistantMessageKey(second)]: 2_000,
+    })).toBe(62.5);
   });
 });

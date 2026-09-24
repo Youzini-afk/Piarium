@@ -50,6 +50,7 @@ import {
   type PiTimelineViewportAnchor,
   type PiTimelineViewState,
 } from '@/lib/pi-runtime/piTimelineScrollState';
+import { assistantMessageKey } from '@/lib/pi-runtime/usagePresentation';
 
 export interface PiToolExecutionState {
   args: JsonValue;
@@ -81,6 +82,8 @@ export interface PiSessionSubmissionState {
 
 export interface PiSessionViewState {
   activityStartedAt?: number;
+  assistantOutputDurationsMs?: Record<string, number>;
+  assistantOutputStartedAt?: Record<string, number>;
   allEntries?: SessionEntriesResult;
   branchEntries?: SessionEntriesResult;
   branchEntriesSource?: 'live' | 'preview';
@@ -490,6 +493,16 @@ export const reducePiAgentEvent = (
         isStreaming: false,
         retryAttempt: 0,
       });
+      if (current.assistantOutputStartedAt && Object.keys(current.assistantOutputStartedAt).length > 0) {
+        next.assistantOutputDurationsMs = {
+          ...(current.assistantOutputDurationsMs ?? {}),
+          ...Object.fromEntries(Object.entries(current.assistantOutputStartedAt).map(([key, startedAt]) => [
+            key,
+            Math.max(0, now - startedAt),
+          ])),
+        };
+        delete next.assistantOutputStartedAt;
+      }
       delete next.liveUser;
       return next;
     case 'message_start':
@@ -503,6 +516,29 @@ export const reducePiAgentEvent = (
         }
         delete next.submission;
         return next;
+      }
+      if (message.role === 'assistant') {
+        const key = assistantMessageKey(message);
+        if (event.type === 'message_start') {
+          if (current.assistantOutputStartedAt?.[key] === undefined) {
+            next.assistantOutputStartedAt = {
+              ...(current.assistantOutputStartedAt ?? {}),
+              [key]: now,
+            };
+          }
+        } else if (event.type === 'message_end') {
+          const startedEntries = Object.entries(current.assistantOutputStartedAt ?? {});
+          const startedAt = current.assistantOutputStartedAt?.[key] ?? startedEntries[0]?.[1];
+          if (startedAt !== undefined) {
+            const started = { ...(current.assistantOutputStartedAt ?? {}) };
+            delete started[current.assistantOutputStartedAt?.[key] !== undefined ? key : startedEntries[0]?.[0] ?? key];
+            next.assistantOutputStartedAt = started;
+            next.assistantOutputDurationsMs = {
+              ...(current.assistantOutputDurationsMs ?? {}),
+              [key]: Math.max(0, now - startedAt),
+            };
+          }
+        }
       }
       if (
         message.role === 'assistant'
