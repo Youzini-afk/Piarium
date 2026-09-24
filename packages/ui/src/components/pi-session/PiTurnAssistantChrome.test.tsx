@@ -6,11 +6,11 @@ import { I18nProvider } from '@/lib/i18n';
 import type { PiTimelineTurn } from './piTimelineProjection';
 import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 
-const assistant = (stopReason: PiAssistantMessage['stopReason']): PiAssistantMessage => ({
+const assistant = (stopReason: PiAssistantMessage['stopReason'], provider = 'runtime-provider'): PiAssistantMessage => ({
   api: 'messages',
   content: [],
   model: 'runtime-model',
-  provider: 'runtime-provider',
+  provider,
   role: 'assistant',
   stopReason,
   timestamp: 2,
@@ -73,5 +73,11 @@ describe('Pi turn assistant chrome', () => {
     const markup = renderChrome(<PiTurnAssistantChrome turn={turn(assistant('stop'))} />);
     expect(markup).not.toContain('role="status"');
     expect(markup).not.toContain('animate-busy-pulse');
+  });
+
+  test('uses the provider agent label for non-Varin agent providers', () => {
+    const markup = renderChrome(<PiTurnAssistantChrome turn={turn(assistant('stop', 'pi-subagents'))} />);
+    expect(markup).toContain('Subagents');
+    expect(markup).not.toContain('>Varin</span>');
   });
 });
