@@ -684,18 +684,17 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     }
   };
 
-  // Helper: scan all nodes and filter in JS (avoids TQL syntax fragility)
-  function scanNodes(filter: (payload: Record<string, unknown>) => boolean): Array<{ id: number; payload: Record<string, unknown> }> {
-    const ids = db.allNodeIds();
-    const results: Array<{ id: number; payload: Record<string, unknown> }> = [];
-    for (const id of ids) {
+  // Session data and knowledge share this database with the much larger derived
+  // symbol catalog. Select through persistent indexes BEFORE reading payloads:
+  // even an empty session otherwise walks the entire catalog on the Host thread.
+  // The query budget fails closed; it must never silently truncate session data.
+  type StoredNode = { id: number; payload: Record<string, unknown> };
+  const lookup = (equalities: Record<string, unknown>): StoredNode[] => (
+    db.indexedLookup(equalities, GRAPH_RESULT_CEILING).flatMap((id) => {
       const payload = db.getPayload(id) as Record<string, unknown> | null;
-      if (payload && filter(payload)) {
-        results.push({ id, payload });
-      }
-    }
-    return results;
-  }
+      return payload ? [{ id, payload }] : [];
+    })
+  );
 
   const knowledgeFromPayload = (id: NodeId, p: Record<string, unknown>): Knowledge | null => {
     if (p["type"] !== "knowledge") return null;
@@ -741,7 +740,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     updatedAt: payload["updatedAt"] as number,
     ...(payload["sourceLeafId"] !== undefined ? { sourceLeafId: payload["sourceLeafId"] as string | null } : {}),
   });
-  const blockNodes = (sessionId: string, label?: string): StoredBlockNode[] => scanNodes((payload) => (
+  const blockNodes = (sessionId: string, label?: string): StoredBlockNode[] => lookup({ type: "block", sessionId }).filter(({ payload }) => (
     payload["type"] === "block"
     && payload["sessionId"] === sessionId
     && (label === undefined || payload["label"] === label)
@@ -814,13 +813,6 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     && (range.endLine > range.startLine || (range.endLine === range.startLine && range.endCharacter >= range.startCharacter))
   );
 
-  type GraphNode = { id: number; payload: Record<string, unknown> };
-  const lookup = (equalities: Record<string, unknown>): GraphNode[] => (
-    db.indexedLookup(equalities, GRAPH_RESULT_CEILING).flatMap((id) => {
-      const payload = db.getPayload(id) as Record<string, unknown> | null;
-      return payload ? [{ id, payload }] : [];
-    })
-  );
   const fileNodes = (path: string) => lookup({ type: "file", path });
   const symbolNodes = (path: string) => lookup({ type: "symbol", path });
   const linkNodes = (path: string) => lookup({ type: "link", path });
@@ -1084,7 +1076,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     },
 
     async listEvents(filter): Promise<StoredEvent[]> {
-      const nodes = scanNodes((payload) => {
+      const nodes = lookup({ type: "event", sessionId: filter.sessionId }).filter(({ payload }) => {
         if (payload["type"] !== "event" || payload["sessionId"] !== filter.sessionId) return false;
         const turnIndex = payload["turnIndex"];
         return filter.minTurnIndex === undefined
@@ -1309,7 +1301,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         // This lookup intentionally stays inside the single writer queue. It
         // covers every status and retired row so concurrent model proposals
         // cannot insert two identities or resurrect dismissed history.
-        const duplicate = scanNodes((payload) => (
+        const duplicate = lookup({ type: "knowledge", scope: k.scope }).filter(({ payload }) => (
           payload["type"] === "knowledge"
           && payload["scope"] === k.scope
           && typeof payload["content"] === "string"
@@ -1350,7 +1342,11 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     },
 
     async listKnowledge(filter: { scope?: KnowledgeScope; status?: KnowledgeStatus; activeOnly?: boolean }): Promise<Knowledge[]> {
-      const nodes = scanNodes((p) => {
+      const nodes = lookup({
+        type: "knowledge",
+        ...(filter.scope ? { scope: filter.scope } : {}),
+        ...(filter.status ? { status: filter.status } : {}),
+      }).filter(({ payload: p }) => {
         if (p["type"] !== "knowledge") return false;
         if (filter.scope && p["scope"] !== filter.scope) return false;
         if (filter.status && p["status"] !== filter.status) return false;
@@ -1602,7 +1598,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     },
 
     async recall(query: string, k: number): Promise<RecallResult[]> {
-      const nodes = scanNodes((p) =>
+      const nodes = lookup({ type: "knowledge", scope: recallScope, status: "accepted" }).filter(({ payload: p }) =>
         p["type"] === "knowledge"
         && p["scope"] === recallScope
         && p["status"] === "accepted"
@@ -1862,7 +1858,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
 
         const operations: TransactionOperation[] = [];
-        const newLinkRows: Array<{ file: GraphNode; candidate: AssociationCandidate; id: NodeId }> = [];
+        const newLinkRows: Array<{ file: StoredNode; candidate: AssociationCandidate; id: NodeId }> = [];
         let activated = 0;
         let deactivated = 0;
         for (const file of files) {
@@ -2139,9 +2135,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         // Find every existing relation row resolved from this anchor across
         // all files. The batch identity is the anchor — not individual paths.
-        // anchorPath/anchorLine are not indexed, so scan in JS.
+        // anchorPath/anchorLine are not indexed; filter the indexed active-link
+        // subset in JS rather than materializing every node in the catalog.
         const replacedKinds = new Set(kinds ?? ["references", "calls"]);
-        const staleIds = scanNodes((payload) => (
+        const staleIds = lookup({ type: "link", active: true }).filter(({ payload }) => (
           payload["type"] === "link"
           && payload["active"] === true
           && RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind)
@@ -2501,7 +2498,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     async deleteSession(sessionId: string): Promise<void> {
       return enqueueWrite(() => {
         // Delete all events, blocks, and session nodes for this session
-        const nodes = scanNodes((p) =>
+        const nodes = lookup({ sessionId }).filter(({ payload: p }) =>
           p["type"] !== "knowledge" && p["sessionId"] === sessionId,
         );
         let count = 0;
@@ -2517,7 +2514,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     async runRetention(now: Date, policy: { eventRetentionDays: number }): Promise<{ removed: number }> {
       const cutoff = now.getTime() - policy.eventRetentionDays * 24 * 60 * 60 * 1000;
       return enqueueWrite(() => {
-        const nodes = scanNodes((p) => {
+        const nodes = lookup({ type: "event" }).filter(({ payload: p }) => {
           if (p["type"] !== "event") return false;
           const at = p["at"] as number;
           return at < cutoff;

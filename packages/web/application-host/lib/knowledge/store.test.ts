@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,6 +40,48 @@ describe("KnowledgeStore", () => {
   afterEach(async () => {
     await store.close();
     cleanup();
+  });
+
+  it("bounds context payload reads by matched rows, not the symbol catalog", async () => {
+    await store.replaceFileSymbols("src/catalog.ts", "typescript", Array.from({ length: 512 }, (_, index) => ({
+      name: `UnrelatedSymbol${index}`,
+      kind: "function",
+      range: { startLine: index, startCharacter: 0, endLine: index, endCharacter: 1 },
+    })), "disk-catalog");
+    for (const sessionId of ["active", "other"]) {
+      await store.putEvent({ kind: "edit", at: 1, sessionId, text: sessionId, source: "user" });
+      await store.upsertBlock({
+        sessionId, label: "goal", content: sessionId, updatedBy: "user",
+        sourceLeafId: "leaf", branchEntryIds: ["leaf"],
+      });
+    }
+    const knowledgeId = await store.putKnowledge({
+      scope: "workspace", status: "accepted", content: "Fixture knowledge", trigger: "fixture",
+    });
+
+    // Count actual native payload materializations instead of asserting wall time:
+    // a catalog-wide scan must fail this budget even on a fast CI machine.
+    const payloadReads = vi.spyOn(TriviumDB.prototype, "getPayload");
+    try {
+      expect(await store.getBlocks("missing", [])).toEqual([]);
+      expect(await store.listEvents({ sessionId: "missing" })).toEqual([]);
+      expect(await store.getBlocks("active", ["leaf"])).toEqual([
+        expect.objectContaining({ sessionId: "active", label: "goal", content: "active" }),
+      ]);
+      expect(await store.listEvents({ sessionId: "active" })).toEqual([
+        expect.objectContaining({ sessionId: "active", text: "active" }),
+      ]);
+      expect(await store.listKnowledge({ scope: "workspace", activeOnly: true })).toEqual([
+        expect.objectContaining({ id: knowledgeId, content: "Fixture knowledge" }),
+      ]);
+      expect(await store.recall("__no_matching_knowledge__", 5)).toEqual([]);
+      expect(await store.createKnowledgeIfAbsent({
+        scope: "workspace", status: "suggested", content: "Fixture knowledge", trigger: "fixture",
+      })).toMatchObject({ created: false, duplicate: true, knowledge: { id: knowledgeId } });
+      expect(payloadReads.mock.calls.length).toBeLessThan(32);
+    } finally {
+      payloadReads.mockRestore();
+    }
   });
 
   describe("putEvent", () => {
