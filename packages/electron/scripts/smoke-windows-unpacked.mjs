@@ -701,5 +701,8 @@ try {
     });
   }
   await delay(500);
-  await fsp.rm(smokeRoot, { recursive: true, force: true });
+  // Windows can keep the Pi agent directory open briefly after the process tree
+  // has been terminated. Retry the removal instead of turning that teardown
+  // race into a failed package smoke check.
+  await fsp.rm(smokeRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
