@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 
 export interface WebSource {
   id: string;
@@ -60,7 +61,7 @@ export const useWebSourcesStore = create<WebSourcesState>()((set) => ({
 
 // Leaf selectors per stores/DOCUMENTATION.md selector rules
 export const useWebSources = (sessionId: string): WebSource[] =>
-  useWebSourcesStore((state) => state.sources.filter((s) => s.sessionId === sessionId));
+  useWebSourcesStore(useShallow((state) => state.sources.filter((s) => s.sessionId === sessionId)));
 
 export const usePinnedWebSources = (sessionId: string): WebSource[] =>
-  useWebSourcesStore((state) => state.sources.filter((s) => s.sessionId === sessionId && s.pinned));
+  useWebSourcesStore(useShallow((state) => state.sources.filter((s) => s.sessionId === sessionId && s.pinned)));
