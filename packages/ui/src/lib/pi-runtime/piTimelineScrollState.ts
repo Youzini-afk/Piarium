@@ -221,6 +221,24 @@ export const isPiTimelineAtEnd = (
   contentHeight - (scrollOffset + viewportHeight) <= PI_TIMELINE_EDGE_EPSILON_PX
 );
 
+export type PiTimelineScrollIntent = 'toward-end' | 'away-from-end';
+
+/**
+ * User input at the live edge should not accidentally opt out of auto-follow.
+ * Browsers still deliver wheel/touch/key events when there is nowhere farther
+ * down to scroll; treating those no-op gestures as manual ownership leaves the
+ * timeline in free-scrolling mode while streaming content grows underneath it.
+ */
+export const shouldReleasePiTimelineFollow = (
+  mode: PiTimelineScrollMode,
+  atEnd: boolean,
+  intent: PiTimelineScrollIntent,
+): boolean => (
+  mode !== 'following-end'
+  || !atEnd
+  || intent === 'away-from-end'
+);
+
 export interface PiTimelineMeasurementState {
   data: readonly unknown[];
   positionAtIndex(index: number): number;

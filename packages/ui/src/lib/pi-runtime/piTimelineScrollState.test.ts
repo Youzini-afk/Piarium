@@ -11,6 +11,7 @@ import {
   remapPiTimelineAnchor,
   requestPiTimelineReturn,
   savePiTimelineCheckpoint,
+  shouldReleasePiTimelineFollow,
 } from './piTimelineScrollState';
 
 describe('Pi timeline scroll state', () => {
@@ -78,6 +79,14 @@ describe('Pi timeline scroll state', () => {
   test('uses a device-pixel epsilon only at the live edge', () => {
     expect(isPiTimelineAtEnd(1000, 398, 600)).toBe(true);
     expect(isPiTimelineAtEnd(1000, 397, 600)).toBe(false);
+  });
+
+  test('keeps auto-follow ownership for no-op gestures toward the live edge', () => {
+    expect(shouldReleasePiTimelineFollow('following-end', true, 'toward-end')).toBe(false);
+    expect(shouldReleasePiTimelineFollow('following-end', true, 'away-from-end')).toBe(true);
+    expect(shouldReleasePiTimelineFollow('following-end', false, 'toward-end')).toBe(true);
+    expect(shouldReleasePiTimelineFollow('anchoring-new-turn', true, 'toward-end')).toBe(true);
+    expect(shouldReleasePiTimelineFollow('free-scrolling', true, 'toward-end')).toBe(true);
   });
 
   test('reveals only the overflowing part of an anchored turn', () => {

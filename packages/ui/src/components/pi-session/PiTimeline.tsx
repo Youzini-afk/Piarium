@@ -18,6 +18,8 @@ import {
   isPiTimelineAtEnd,
   isPiTimelineEntryCurrent,
   PI_TIMELINE_ANCHOR_OFFSET_PX,
+  shouldReleasePiTimelineFollow,
+  type PiTimelineScrollIntent,
   type PiTimelineScrollMode,
   type PiTimelineViewportAnchor,
 } from '@/lib/pi-runtime/piTimelineScrollState';
@@ -205,6 +207,12 @@ const PI_TIMELINE_SCROLL_KEYS = new Set([
   'PageUp',
   ' ',
 ]);
+
+const piTimelineKeyIntent = (key: string, shiftKey: boolean): PiTimelineScrollIntent => (
+  key === 'ArrowUp' || key === 'PageUp' || key === 'Home' || (key === ' ' && shiftKey)
+    ? 'away-from-end'
+    : 'toward-end'
+);
 
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const { t } = useI18n();
@@ -540,6 +548,20 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     props.sessionId,
     props.threadBusyEntryId,
   ]);
+  const endBreathingSpace = React.useMemo(() => (
+    <div
+      aria-hidden="true"
+      className={isMobile
+        ? 'h-[clamp(7rem,24dvh,13rem)]'
+        : 'h-[clamp(14rem,42dvh,30rem)]'}
+      data-pi-timeline-end-space="true"
+    />
+  ), [isMobile]);
+
+  const releaseAutomationForIntent = React.useCallback((intent: PiTimelineScrollIntent) => {
+    if (!shouldReleasePiTimelineFollow(modeRef.current, atEndRef.current, intent)) return;
+    takeManualOwnership();
+  }, [takeManualOwnership]);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -562,6 +584,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         }}
         itemsAreEqual={(previous, item) => previous === item}
         keyExtractor={(item) => item.id}
+        ListFooterComponent={endBreathingSpace}
         maintainScrollAtEnd={timelineView.scrollMode === 'following-end'
           ? {
               animated: false,
@@ -581,7 +604,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         }}
         onKeyDownCapture={(event) => {
           if (PI_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
-            takeManualOwnership();
+            releaseAutomationForIntent(piTimelineKeyIntent(event.key, event.shiftKey));
           }
         }}
         onLoad={() => {
@@ -594,14 +617,16 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
           const previous = touchYRef.current;
           touchYRef.current = y;
           if (y !== null && previous !== null && Math.abs(y - previous) > 0.5) {
-            takeManualOwnership();
+            releaseAutomationForIntent(y > previous ? 'away-from-end' : 'toward-end');
           }
         }}
         onTouchStartCapture={(event) => {
           touchYRef.current = event.touches[0]?.clientY ?? null;
         }}
         onWheelCapture={(event) => {
-          if (!event.ctrlKey && event.deltaY !== 0) takeManualOwnership();
+          if (!event.ctrlKey && event.deltaY !== 0) {
+            releaseAutomationForIntent(event.deltaY < 0 ? 'away-from-end' : 'toward-end');
+          }
         }}
         recycleItems={false}
         renderItem={renderItem}
