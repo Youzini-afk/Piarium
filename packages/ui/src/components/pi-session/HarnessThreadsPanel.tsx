@@ -31,6 +31,7 @@ import { HarnessThreadResultHistory } from './HarnessThreadResultHistory';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
 import { getGitStatus } from '@/lib/gitApiHttp';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { HarnessOverviewSection } from './HarnessOverviewSection';
 import {
@@ -547,6 +548,16 @@ export const HarnessThreadsPanel: React.FC<{
       unsubscribe();
     };
   }, [parentSessionId, reloadBlocks, reloadGitStatus, reloadKnowledge, reloadSpace, workspaceId]);
+
+  React.useEffect(() => {
+    const target = fallbackCwd?.trim();
+    if (!target) return;
+    const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
+    return workspaceEvents.onGitRefreshHint((hint) => {
+      if (normalizePath(hint.directory) !== normalizePath(target)) return;
+      void reloadGitStatus();
+    });
+  }, [fallbackCwd, reloadGitStatus]);
 
   const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
