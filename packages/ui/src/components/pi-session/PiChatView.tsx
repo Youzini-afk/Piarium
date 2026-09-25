@@ -884,7 +884,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     <TooltipProvider>
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
       <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {conversationHeader}
         {threadWorkspaceId && threadPanelMode === 'inline' ? (
           <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
