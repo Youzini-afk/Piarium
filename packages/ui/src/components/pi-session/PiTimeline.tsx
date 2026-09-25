@@ -257,6 +257,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const appliedEntryEpochRef = React.useRef(-1);
   const viewportFrameRef = React.useRef<number | null>(null);
   const anchorCorrectionFrameRef = React.useRef<number | null>(null);
+  const followEndFrameRef = React.useRef<number | null>(null);
   const positionedAnchorRef = React.useRef<string | null>(null);
   const touchYRef = React.useRef<number | null>(null);
   const manualOwnershipClaimedRef = React.useRef(false);
@@ -297,6 +298,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   React.useEffect(() => () => {
     if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current);
     if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
+    if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
     captureViewport();
     if (observedLeafIdRef.current !== undefined) {
       saveTimelineCheckpoint(
@@ -307,6 +309,22 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       );
     }
   }, [captureViewport, props.sessionId, saveTimelineCheckpoint]);
+
+  const scheduleFollowEnd = React.useCallback(() => {
+    if (followEndFrameRef.current !== null) return;
+    followEndFrameRef.current = requestAnimationFrame(() => {
+      followEndFrameRef.current = null;
+      if (!listLoadedRef.current) return;
+      const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+      if (current?.scrollMode !== 'following-end') return;
+      void listRef.current?.scrollToEnd({ animated: false });
+    });
+  }, [props.sessionId]);
+
+  React.useLayoutEffect(() => {
+    if (!listLoadedRef.current) return;
+    scheduleFollowEnd();
+  }, [projection.items, props.entries, props.liveAssistant, props.liveUser, props.toolExecutions, scheduleFollowEnd]);
 
   const applyEntryIntent = React.useCallback(() => {
     const list = listRef.current;
@@ -545,15 +563,21 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         itemsAreEqual={(previous, item) => previous === item}
         keyExtractor={(item) => item.id}
         maintainScrollAtEnd={timelineView.scrollMode === 'following-end'
-          ? { animated: false }
+          ? {
+              animated: false,
+              on: { dataChange: true, footerLayout: true, itemLayout: true, layout: true },
+            }
           : false}
-        maintainVisibleContentPosition={{ data: true, size: true }}
+        maintainVisibleContentPosition={timelineView.scrollMode === 'following-end'
+          ? false
+          : { data: true, size: true }}
         onFirstVisibleItemChanged={({ index }) => {
           firstVisibleIndexRef.current = index;
           captureViewport();
         }}
         onItemSizeChanged={({ itemKey }) => {
           if (itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
+          if (modeRef.current === 'following-end') scheduleFollowEnd();
         }}
         onKeyDownCapture={(event) => {
           if (PI_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
