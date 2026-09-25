@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { sliceUtf8ByBytes, type OutputSlice, type ShellExecResult } from "@varin/protocol";
 import type { CreateTerminalSessionInput, TerminalHandle, TerminalSessionApi } from "../terminal/session-api.js";
@@ -336,6 +337,32 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     ...interpreter.env,
   };
   if (process.platform === "linux") baseEnv.DEBIAN_FRONTEND = "noninteractive";
+
+  // git-bash reports $PWD in POSIX form (/d/work/repo). Translate drive-letter
+  // mounts so the tracked cwd stays a native path the host can stat and spawn
+  // under; other MSYS mounts and real POSIX shells are left untouched.
+  const normalizeShellCwd = (cwd: string): string => {
+    if (interpreter.kind !== "git-bash") return cwd;
+    const match = /^\/([a-zA-Z])(?:\/(.*))?$/.exec(cwd);
+    if (!match) return cwd;
+    return `${match[1]!.toUpperCase()}:\\${(match[2] ?? "").replace(/\//g, "\\")}`;
+  };
+
+  // lastCwd tracks the shell's own location: deleted directories and foreign
+  // path forms both make it an invalid spawn cwd. Validate candidates and fall
+  // back instead of failing every later command after a shell dies.
+  const resolveSpawnCwd = async (preferredCwd?: string): Promise<string> => {
+    const seen = new Set<string>();
+    for (const raw of [preferredCwd, lastCwd, deps.cwd, process.cwd()]) {
+      if (!raw) continue;
+      const candidate = normalizeShellCwd(raw);
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      const stats = await fs.promises.stat(candidate).catch(() => null);
+      if (stats?.isDirectory()) return candidate;
+    }
+    return process.cwd();
+  };
 
   const backgroundShells = new Map<string, BackgroundShell>();
   const shellChangeWaiters = new Map<string, Set<() => void>>();
@@ -701,7 +728,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }));
   };
 
-  const ensureShell = async (): Promise<void> => {
+  const ensureShell = async (preferredCwd?: string): Promise<void> => {
     if (disposed) throw new Error("Shell supervisor has been disposed");
     if (sessionHandle && unavailableHandles.has(sessionHandle)) throw unavailableHandles.get(sessionHandle)!;
     if (shellReady && sessionHandle?.status === "running") return;
@@ -727,8 +754,9 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const spawnArgs = interpreter.kind === "powershell"
         ? [...interpreter.args, "-Command", `Write-Output ${quotePowerShell(initMarker)}`]
         : interpreter.args;
+      const spawnCwd = await resolveSpawnCwd(preferredCwd);
       sessionHandle = await api.createTerminalSession({
-        cwd: lastCwd,
+        cwd: spawnCwd,
         cols,
         rows,
         owner: "harness",
@@ -740,6 +768,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           env: { ...process.env, ...baseEnv } as Record<string, string>,
         },
       });
+      lastCwd = spawnCwd;
       bindSessionHandle(sessionHandle, initMarker);
       if (interpreter.kind !== "powershell") sessionHandle.write(`echo ${initMarker}\n`);
       return ready;
@@ -769,7 +798,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         outputBuffer = outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
-        pendingCommand.cwd = sentinelLine.slice(2).trim();
+        pendingCommand.cwd = normalizeShellCwd(sentinelLine.slice(2).trim());
         lastCwd = pendingCommand.cwd;
         outputBuffer = outputBuffer.slice(0, match.index) + outputBuffer.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
@@ -793,7 +822,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         background.output = background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
       } else if (sentinelLine?.startsWith("C:")) {
-        background.cwd = sentinelLine.slice(2).trim();
+        background.cwd = normalizeShellCwd(sentinelLine.slice(2).trim());
         lastCwd = background.cwd;
         background.output = background.output.slice(0, match.index) + background.output.slice(match.index + match[0].length);
         sentinelPattern.lastIndex = 0;
@@ -914,7 +943,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       // Do not let a new wrapper cross the previous command's completion
       // callback and writer-release boundary.
       await Promise.all([...commandLifecyclePromises]);
-      await ensureShell();
+      await ensureShell(options.cwd);
       if (!sessionHandle) {
         commandStarting = false;
         return { kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" };
@@ -922,7 +951,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
       const token = randomBytes(8).toString("hex");
       const wrapped = buildCommandWrapper(command, token, interpreter.kind);
-      const cwd = options.cwd ?? lastCwd;
+      const cwd = normalizeShellCwd(options.cwd ?? lastCwd);
       const startedAt = Date.now();
       const commandRunId = sessionHandle.id;
 
