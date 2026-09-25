@@ -15,6 +15,7 @@ import {
 } from './harnessThreadPresentation';
 import type { SessionEntriesResult, WorkspaceThreadSpace } from '@varin/protocol';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
   harnessKnowledgeKey,
@@ -32,7 +33,7 @@ import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
 import { getGitStatus } from '@/lib/gitApiHttp';
 import { workspaceEvents } from '@/lib/workspaceEvents';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { HarnessOverviewSection } from './HarnessOverviewSection';
 import {
   groupOverviewBlocks,
@@ -109,6 +110,13 @@ export const HarnessThreadsPanel: React.FC<{
   ], [threadState.threads, threadState.researchBranches]);
   const webSources = useWebSources(parentSessionId);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const toggleContextPanel = useUIStore((state) => state.toggleContextPanel);
+  const contextDirectoryKey = fallbackCwd ? normalizeContextPanelDirectoryKey(fallbackCwd) : '';
+  const contextPanelOpen = useUIStore((state) => {
+    if (!contextDirectoryKey) return false;
+    const panel = state.contextPanelByDirectory[contextDirectoryKey];
+    return Boolean(panel?.isOpen && panel.tabs.length > 0);
+  });
   const pinSource = useWebSourcesStore((state) => state.pinSource);
   const unpinSource = useWebSourcesStore((state) => state.unpinSource);
   const deleteSource = useWebSourcesStore((state) => state.deleteSource);
@@ -127,8 +135,9 @@ export const HarnessThreadsPanel: React.FC<{
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
-  const [desktopCollapsed, setDesktopCollapsed] = React.useState(false);
+  const [overviewOpen, setOverviewOpen] = React.useState(false);
   const [gitStatus, setGitStatus] = React.useState<GitStatus | null>(null);
+  const floatingOverviewRef = React.useRef<HTMLDivElement>(null);
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
@@ -505,6 +514,7 @@ export const HarnessThreadsPanel: React.FC<{
     setKnowledgeDrafts({});
     setEditingBlock(null);
     setNarrowOpen(false);
+    setOverviewOpen(false);
     setConvertingThreadId(null);
     setGitStatus(null);
     void reloadBlocks(controller.signal).catch((error) => {
@@ -559,10 +569,29 @@ export const HarnessThreadsPanel: React.FC<{
     });
   }, [fallbackCwd, reloadGitStatus]);
 
+  React.useEffect(() => {
+    if (!overviewOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && floatingOverviewRef.current?.contains(target)) return;
+      setOverviewOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOverviewOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [overviewOpen]);
+
   const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
-  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0
-    && webSources.length === 0 && !activePdfMaterial && !hasWorkspaceChanges) return null;
+  const hasOverviewData = threads.length > 0 || hasThreadRecords || blocks.length > 0 || suggestions.length > 0
+    || webSources.length > 0 || hasWorkspaceChanges;
+  if (presentation === 'inline' && !hasOverviewData && !activePdfMaterial) return null;
 
   const blockGroups = groupOverviewBlocks(blocks);
   const planSummary = parseOverviewPlan(blockGroups.plan?.content ?? '');
@@ -600,8 +629,28 @@ export const HarnessThreadsPanel: React.FC<{
       <div className="border-b border-border/45 px-3 py-2.5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <p className="typography-meta font-medium text-foreground">{overviewSummary}</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{t('harness.overview.description')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {planSummary.total > 0 ? (
+                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
+                  {t('harness.overview.plan')} {planSummary.done}/{planSummary.total}
+                </span>
+              ) : null}
+              {hasOutputs ? (
+                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
+                  {t('harness.overview.outputs')} {gitDiff.files || pendingThreadDiff.files}
+                </span>
+              ) : null}
+              {threadSummary.total > 0 ? (
+                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
+                  {t('harness.overview.threads')} {threadSummary.active + threadSummary.attention + threadSummary.integrationPending}/{threadSummary.total}
+                </span>
+              ) : null}
+              {webSources.length > 0 ? (
+                <span className="rounded-md bg-muted/45 px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">
+                  {t('harness.overview.sources')} {webSources.length}
+                </span>
+              ) : null}
+            </div>
           </div>
           {attentionCount > 0 ? (
             <span className="shrink-0 rounded-full bg-[var(--status-warning)]/12 px-1.5 py-0.5 text-[9px] tabular-nums text-[var(--status-warning)]">
@@ -635,6 +684,7 @@ export const HarnessThreadsPanel: React.FC<{
           status={planSummary.total > 0
             ? t('harness.overview.planProgress', { done: planSummary.done, total: planSummary.total })
             : undefined}
+          defaultOpen={planSummary.open > 0 || planSummary.blocked > 0}
           attention={planSummary.blocked > 0}
         >
           {editingBlock === blockGroups.plan.label ? (
@@ -712,6 +762,7 @@ export const HarnessThreadsPanel: React.FC<{
           status={gitDiff.files > 0
             ? t('harness.overview.outputFiles', { count: gitDiff.files })
             : t('harness.overview.outputFiles', { count: pendingThreadDiff.files })}
+          defaultOpen
         >
           <div className="space-y-2">
             {gitStatus && gitStatus.files.length > 0 ? (
@@ -788,6 +839,7 @@ export const HarnessThreadsPanel: React.FC<{
             active: threadSummary.active + threadSummary.attention + threadSummary.integrationPending,
             completed: threadSummary.completed,
           })}
+          defaultOpen={threadSummary.active + threadSummary.attention + threadSummary.integrationPending > 0}
           attention={threadSummary.attention > 0}
         >
             <div className="flex items-center justify-end gap-2 pb-1.5">
@@ -1295,42 +1347,87 @@ export const HarnessThreadsPanel: React.FC<{
           <div className="max-h-[40dvh] overflow-auto">{content}</div>
         </details>
       ) : <>
-      {desktopCollapsed ? (
-        <aside className="hidden w-11 shrink-0 flex-col items-center border-l border-border/60 bg-[var(--surface-subtle)]/35 py-2 xl:flex" aria-label={t('harness.overview.title')}>
-          <button
-            type="button"
-            onClick={() => setDesktopCollapsed(false)}
-            className="relative flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-            aria-label={t('harness.overview.expand')}
-            title={t('harness.overview.expand')}
+      <div
+        ref={floatingOverviewRef}
+        className="pointer-events-none absolute right-3 top-2 z-40 hidden flex-col items-end xl:flex"
+      >
+        <div
+          className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-border/70 bg-background/90 p-1 shadow-sm backdrop-blur-xl"
+          data-harness-overview-controls="true"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setOverviewOpen((open) => !open)}
+                aria-expanded={overviewOpen}
+                aria-label={t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}
+                className={cn(
+                  'relative flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground',
+                  overviewOpen && 'bg-interactive-selection text-foreground',
+                )}
+              >
+                <Icon name="stack" className="size-4" />
+                {activityCount > 0 ? (
+                  <span className={cn(
+                    'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-muted px-1 text-[8px] font-semibold tabular-nums text-muted-foreground',
+                    attentionCount > 0 && 'bg-[var(--status-warning)] text-white',
+                  )}>{activityCount}</span>
+                ) : null}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t(overviewOpen ? 'harness.overview.collapse' : 'harness.overview.expand')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={!contextDirectoryKey}
+                onClick={() => {
+                  if (!contextDirectoryKey) return;
+                  setOverviewOpen(false);
+                  toggleContextPanel(contextDirectoryKey);
+                }}
+                aria-expanded={contextPanelOpen}
+                aria-label={t(contextPanelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}
+                className={cn(
+                  'flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-40',
+                  contextPanelOpen && 'bg-interactive-selection text-primary',
+                )}
+              >
+                <Icon name="layout-right" className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t(contextPanelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
+          </Tooltip>
+        </div>
+        {overviewOpen ? (
+          <section
+            aria-label={t('harness.overview.title')}
+            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(23rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-background/96 shadow-2xl backdrop-blur-xl"
+            data-harness-overview-floating="true"
           >
-            <Icon name="stack" className="size-4" />
-            {activityCount > 0 ? (
-              <span className={cn(
-                'absolute -right-1 -top-1 min-w-4 rounded-full bg-muted px-1 text-center text-[8px] tabular-nums text-muted-foreground',
-                attentionCount > 0 && 'bg-[var(--status-warning)] text-white',
-              )}>{activityCount}</span>
-            ) : null}
-          </button>
-        </aside>
-      ) : (
-        <aside className="hidden w-80 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.overview.title')}>
-          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/50 px-3">
-            <Icon name="stack" className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{t('harness.overview.title')}</span>
-            <button
-              type="button"
-              onClick={() => setDesktopCollapsed(true)}
-              className="rounded p-1 text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-              aria-label={t('harness.overview.collapse')}
-              title={t('harness.overview.collapse')}
-            >
-              <Icon name="arrow-right-s" className="size-3.5" />
-            </button>
-          </div>
-          {content}
-        </aside>
-      )}
+            <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3.5 py-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted/45 text-muted-foreground">
+                <Icon name="stack" className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="typography-meta font-semibold text-foreground">{t('harness.overview.title')}</p>
+                <p className="truncate text-[10px] text-muted-foreground">{overviewSummary}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOverviewOpen(false)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                aria-label={t('harness.overview.collapse')}
+              >
+                <Icon name="close" className="size-3.5" />
+              </button>
+            </div>
+            {content}
+          </section>
+        ) : null}
+      </div>
       <HarnessSessionStateTrigger count={activityCount} attention={attentionCount > 0} onOpen={() => setNarrowOpen(true)} />
       <MobileOverlayPanel
         open={narrowOpen}

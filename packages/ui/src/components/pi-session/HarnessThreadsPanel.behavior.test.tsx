@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   prefetchSession: vi.fn(),
   timeline: vi.fn(),
   getGitStatus: vi.fn(),
+  openContextSurface: vi.fn(),
+  toggleContextPanel: vi.fn(),
   translate: (key: string) => key,
 }));
 vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
@@ -21,7 +23,24 @@ vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
+vi.mock('@/components/ui/tooltip', () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/stores/useUIStore', () => ({
+  normalizeContextPanelDirectoryKey: (value: string) => value,
+  useUIStore: (select: (state: {
+    openContextSurface: typeof mocks.openContextSurface;
+    toggleContextPanel: typeof mocks.toggleContextPanel;
+    contextPanelByDirectory: Record<string, unknown>;
+  }) => unknown) => select({
+    openContextSurface: mocks.openContextSurface,
+    toggleContextPanel: mocks.toggleContextPanel,
+    contextPanelByDirectory: {},
+  }),
+}));
 vi.mock('@/stores/usePiSessionStore', () => ({
   usePiSessionStore: (select: (state: typeof mocks) => unknown) => select(mocks),
 }));
@@ -108,6 +127,8 @@ const clickOpen = async () => {
       <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
     </HarnessThreadStateContext.Provider>,
   ));
+  const overview = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!;
+  await act(async () => overview.click());
   const button = container.querySelector<HTMLButtonElement>('button[title="harness.threads.transcript"]')!;
   await act(async () => button.click());
   return button;
@@ -194,6 +215,9 @@ describe('work overview presentation', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
+    const overview = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!;
+    await act(async () => overview.click());
+
     expect(container.textContent).toContain('harness.overview.plan');
     expect(container.textContent).toContain('Inspect');
     expect(container.textContent).toContain('Implement');
@@ -204,20 +228,31 @@ describe('work overview presentation', () => {
     expect(container.textContent).not.toContain('memory-agent');
   });
 
-  it('can collapse the entire desktop overview to a compact activity rail and expand it again', async () => {
+  it('opens a floating overview from a shared control row with the workspace panel control to its right', async () => {
     await act(async () => root.render(
       <HarnessThreadStateContext.Provider value={state}>
         <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
       </HarnessThreadStateContext.Provider>,
     ));
 
-    const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.collapse"]');
-    expect(collapse).not.toBeNull();
-    await act(async () => collapse!.click());
     const expand = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]');
+    const openPanel = container.querySelector<HTMLButtonElement>('button[aria-label="contextPanel.actions.openPanel"]');
     expect(expand).not.toBeNull();
+    expect(openPanel).not.toBeNull();
+
+    const controls = container.querySelector('[data-harness-overview-controls="true"]');
+    const buttons = controls?.querySelectorAll('button');
+    expect(buttons?.[0]).toBe(expand);
+    expect(buttons?.[1]).toBe(openPanel);
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
+
     await act(async () => expand!.click());
-    expect(container.querySelector('button[aria-label="harness.overview.collapse"]')).not.toBeNull();
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).not.toBeNull();
+    expect(container.querySelector('aside')).toBeNull();
+
+    await act(async () => openPanel!.click());
+    expect(mocks.toggleContextPanel).toHaveBeenCalledWith('/parent');
+    expect(container.querySelector('[data-harness-overview-floating="true"]')).toBeNull();
   });
 
   it('still appears for real workspace changes when no plan, memory, source or subtask exists', async () => {
@@ -236,6 +271,9 @@ describe('work overview presentation', () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+
+    const overview = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]')!;
+    await act(async () => overview.click());
 
     expect(container.textContent).toContain('harness.overview.outputs');
     expect(container.textContent).toContain('harness.overview.workspaceChanges');

@@ -37,12 +37,12 @@ the `openContext*` actions in `useUIStore`.
 
 - Opening a surface must never require a control outside the rail, the
   command palette, or an in-content link.
-- `ContextPanelControls` exposes two independent switches. Chevrons expand/collapse
-  the icon rail without opening or closing the content panel. The panel icon uses
-  `toggleContextPanel` to restore the exact last active tab in the current workspace;
-  only an empty workspace opens a new file view. Close keeps tabs, widths and expanded
-  layout. Surface icons use `openContextSurface` to select the most recent tab of that
-  mode (or close the panel when that mode is already visible).
+- `ContextPanelControls` owns only the icon-rail visibility toggle. In chat, the
+  work-overview control row owns the generic workspace-panel toggle so overview and
+  panel controls stay adjacent without consuming a second rail. `toggleContextPanel`
+  restores the exact last active tab in the current workspace; only an empty workspace
+  opens a new file view. Surface icons use `openContextSurface` to select the most recent
+  tab of that mode (or close the panel when that mode is already visible).
 - Multi-instance and session-holding surfaces (file/editor, chat, diff,
   browser, terminal) are keep-alive panes in `ContextPanel.tsx`: switching
   surfaces must not reset their state (open tabs, xterm session, scroll

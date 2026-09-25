@@ -6,37 +6,19 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
-/** Rail visibility and the last workspace panel are independent controls. */
+/** Header control for the workspace icon rail. Panel opening lives with the chat work-overview controls. */
 export const ContextPanelControls: React.FC = () => {
   const { t } = useI18n();
   const directory = useEffectiveDirectory();
   const directoryKey = directory ? normalizeContextPanelDirectoryKey(directory) : '';
-  const panel = useUIStore((state) => directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined);
   const railOpen = useUIStore((state) => state.isContextRailOpen);
   const toggleRail = useUIStore((state) => state.toggleContextRail);
-  const togglePanel = useUIStore((state) => state.toggleContextPanel);
-  const panelOpen = Boolean(panel?.isOpen && panel.tabs.length > 0);
-  const panelLabel = t(panelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel');
   const railLabel = t(railOpen ? 'contextRail.actions.collapse' : 'contextRail.actions.expand');
   const buttonClass = 'app-region-no-drag flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground';
 
   if (!directoryKey) return null;
 
   return <div className="app-region-no-drag flex shrink-0 items-center gap-0.5">
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={panelLabel}
-          aria-expanded={panelOpen}
-          onClick={() => togglePanel(directoryKey)}
-          className={cn(buttonClass, panelOpen && 'bg-interactive-selection text-primary')}
-        >
-          <Icon name="layout-right" className="size-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{panelLabel}</TooltipContent>
-    </Tooltip>
     <Tooltip>
       <TooltipTrigger asChild>
         <button
