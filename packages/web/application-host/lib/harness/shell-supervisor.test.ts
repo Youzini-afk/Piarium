@@ -303,13 +303,19 @@ describe("background shell output", () => {
 describe("shell respawn working directory", () => {
   // Mimics the terminal runtime's cwd validation: spawn rejects directories
   // that do not exist.
-  const controlledShell = (sentinelCwd: () => string): {
+  const controlledShell = (
+    sentinelCwd: (commandIndex: number) => string,
+    shouldComplete: (commandIndex: number) => boolean = () => true,
+  ): {
     provider: PtyProvider;
     spawnCwds: string[];
     processes: PtyProcess[];
+    writes: string[];
   } => {
     const spawnCwds: string[] = [];
     const processes: PtyProcess[] = [];
+    const writes: string[] = [];
+    let commandIndex = 0;
     const provider: PtyProvider = {
       backend: "fake",
       spawn: (_executable, _args, options) => {
@@ -326,6 +332,7 @@ describe("shell respawn working directory", () => {
           onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
           resize: () => undefined,
           write: (data) => {
+            writes.push(data);
             const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
             if (ready) {
               queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
@@ -333,9 +340,15 @@ describe("shell respawn working directory", () => {
             }
             const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
             if (!token) return;
+            const index = commandIndex++;
             queueMicrotask(() => {
               for (const handler of dataHandlers) {
-                handler(`__VARIN_SENTINEL_${token}:B\n__VARIN_SENTINEL_${token}:C:${sentinelCwd()}\n__VARIN_SENTINEL_${token}:E:0\n`);
+                handler([
+                  `__VARIN_SENTINEL_${token}:B`,
+                  `__VARIN_SENTINEL_${token}:C:${sentinelCwd(index)}`,
+                  ...(shouldComplete(index) ? [`__VARIN_SENTINEL_${token}:E:0`] : []),
+                  "",
+                ].join("\n"));
               }
             });
           },
@@ -344,7 +357,7 @@ describe("shell respawn working directory", () => {
         return process;
       },
     };
-    return { provider, spawnCwds, processes };
+    return { provider, spawnCwds, processes, writes };
   };
 
   it("falls back to the session cwd when the tracked shell cwd no longer exists", async () => {
@@ -404,11 +417,12 @@ describe("shell respawn working directory", () => {
     }
   });
 
-  it("recovers when a git-bash shell reports its cwd in POSIX form", async () => {
+  it("normalizes git-bash cwd state and recovers after killing the background shell", async () => {
+    if (process.platform !== "win32") return;
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
     // git-bash $PWD uses /c/... mounts; the path must never reach spawn raw.
-    const posixWorkspace = `/${workspace[0].toLowerCase()}${workspace.slice(2).replaceAll("\\", "/")}`;
-    const { provider, spawnCwds, processes } = controlledShell(() => posixWorkspace);
+    const posixWorkspace = `/${workspace[0]!.toLowerCase()}${workspace.slice(2).replaceAll("\\", "/")}`;
+    const { provider, spawnCwds } = controlledShell(() => posixWorkspace, (index) => index !== 1);
     const outputStore = createOutputStore();
     const supervisor = createShellSupervisor({
       interpreter: { kind: "git-bash", command: "bash.exe", args: ["-l"], env: {} },
@@ -419,11 +433,94 @@ describe("shell respawn working directory", () => {
     });
     try {
       const first = await supervisor.exec("echo first", { waitMs: 1000 });
-      expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
+      expect(first).toMatchObject({ kind: "completed", exitCode: 0, cwd: workspace });
+
+      const background = await supervisor.exec("grep forever", { waitMs: 5 });
+      expect(background).toMatchObject({ kind: "background", cwd: workspace });
+      expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
+      if (background.kind !== "background") throw new Error("expected background shell");
+      await expect(supervisor.kill(background.id)).resolves.toBe(true);
+
+      const recovered = await supervisor.exec("echo ok", { waitMs: 1000 });
+      expect(recovered).toMatchObject({ kind: "completed", exitCode: 0, cwd: workspace });
+      expect(spawnCwds).toEqual([workspace, workspace]);
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("fails an explicit missing cwd before writing a command into the live shell", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
+    const missing = join(workspace, "missing");
+    const { provider, spawnCwds } = controlledShell(() => workspace);
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "explicit-missing-cwd",
+      cwd: workspace,
+      ptyProvider: provider,
+    });
+    try {
+      await expect(supervisor.exec("echo first", { waitMs: 1000 })).resolves.toMatchObject({ kind: "completed" });
+      await expect(supervisor.exec("echo should-not-run", { waitMs: 1000, cwd: missing })).resolves.toMatchObject({
+        kind: "spawn-failed",
+        reason: "invalid-cwd",
+      });
+      expect(spawnCwds).toEqual([workspace]);
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fall back to the Host cwd when the session root no longer exists", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
+    const { provider, processes } = controlledShell(() => workspace);
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "missing-session-root",
+      cwd: workspace,
+      ptyProvider: provider,
+    });
+    try {
+      await expect(supervisor.exec("echo first", { waitMs: 1000 })).resolves.toMatchObject({ kind: "completed" });
       processes[0]!.kill();
-      const second = await supervisor.exec("echo ok", { waitMs: 1000 });
-      expect(second).toMatchObject({ kind: "completed", exitCode: 0 });
-      expect(spawnCwds[1]).toBe(workspace);
+      rmSync(workspace, { recursive: true, force: true });
+      await expect(supervisor.exec("echo should-not-run", { waitMs: 1000 }))
+        .rejects.toThrow("No usable working directory remains for this shell session");
+    } finally {
+      await supervisor.dispose().catch(() => undefined);
+      outputStore.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("renders a native requested cwd in a form git-bash can cd into", async () => {
+    if (process.platform !== "win32") return;
+    const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
+    const child = join(workspace, "child");
+    mkdirSync(child);
+    const toGitBashPwd = (cwd: string): string => `/${cwd[0]!.toLowerCase()}${cwd.slice(2).replaceAll("\\", "/")}`;
+    const { provider, writes } = controlledShell((index) => toGitBashPwd(index === 0 ? workspace : child));
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "git-bash", command: "bash.exe", args: ["-l"], env: {} },
+      outputStore,
+      sessionId: "git-bash-explicit-cwd",
+      cwd: workspace,
+      ptyProvider: provider,
+    });
+    try {
+      await expect(supervisor.exec("echo first", { waitMs: 1000 })).resolves.toMatchObject({ cwd: workspace });
+      await expect(supervisor.exec("echo second", { waitMs: 1000, cwd: child })).resolves.toMatchObject({ cwd: child });
+      const commandWrite = writes.find((write) => write.includes("echo second"));
+      expect(commandWrite).toContain(`cd -- '${child.replaceAll("\\", "/")}' &&`);
     } finally {
       await supervisor.dispose();
       outputStore.dispose();

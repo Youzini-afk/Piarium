@@ -121,6 +121,7 @@ export function stripControlSequences(text: string): string {
 const SENTINEL = "__VARIN_SENTINEL_";
 
 const quotePowerShell = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
 function buildCommandWrapper(command: string, token: string, kind: ShellInterpreterKind): string {
   if (kind === "powershell") {
@@ -348,20 +349,38 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return `${match[1]!.toUpperCase()}:\\${(match[2] ?? "").replace(/\//g, "\\")}`;
   };
 
+  const shellCwdForCommand = (cwd: string): string => interpreter.kind === "git-bash"
+    ? cwd.replace(/\\/g, "/")
+    : cwd;
+
+  const resolveExistingDirectory = async (raw: string): Promise<string | null> => {
+    const candidate = normalizeShellCwd(raw);
+    try {
+      const stats = await fs.promises.stat(candidate);
+      return stats.isDirectory() ? candidate : null;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+  };
+
   // lastCwd tracks the shell's own location: deleted directories and foreign
   // path forms both make it an invalid spawn cwd. Validate candidates and fall
   // back instead of failing every later command after a shell dies.
   const resolveSpawnCwd = async (preferredCwd?: string): Promise<string> => {
     const seen = new Set<string>();
-    for (const raw of [preferredCwd, lastCwd, deps.cwd, process.cwd()]) {
+    const candidates = [preferredCwd, lastCwd, deps.cwd];
+    if (!deps.cwd) candidates.push(process.cwd());
+    for (const raw of candidates) {
       if (!raw) continue;
       const candidate = normalizeShellCwd(raw);
       if (seen.has(candidate)) continue;
       seen.add(candidate);
-      const stats = await fs.promises.stat(candidate).catch(() => null);
-      if (stats?.isDirectory()) return candidate;
+      const resolved = await resolveExistingDirectory(candidate);
+      if (resolved) return resolved;
     }
-    return process.cwd();
+    throw new Error("No usable working directory remains for this shell session");
   };
 
   const backgroundShells = new Map<string, BackgroundShell>();
@@ -943,7 +962,21 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       // Do not let a new wrapper cross the previous command's completion
       // callback and writer-release boundary.
       await Promise.all([...commandLifecyclePromises]);
-      await ensureShell(options.cwd);
+      let requestedCwd: string | undefined;
+      if (options.cwd !== undefined) {
+        const resolved = await resolveExistingDirectory(options.cwd);
+        if (!resolved) {
+          commandStarting = false;
+          return {
+            kind: "spawn-failed",
+            reason: "invalid-cwd",
+            interpreter: interpreter.command,
+            hint: `Invalid working directory: ${options.cwd}`,
+          };
+        }
+        requestedCwd = resolved;
+      }
+      await ensureShell(requestedCwd);
       if (!sessionHandle) {
         commandStarting = false;
         return { kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" };
@@ -951,7 +984,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
       const token = randomBytes(8).toString("hex");
       const wrapped = buildCommandWrapper(command, token, interpreter.kind);
-      const cwd = normalizeShellCwd(options.cwd ?? lastCwd);
+      const cwd = requestedCwd ?? lastCwd;
       const startedAt = Date.now();
       const commandRunId = sessionHandle.id;
 
@@ -1105,10 +1138,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           return;
         }
         try {
-          if (options.cwd) {
+          if (requestedCwd) {
             shell.write(interpreter.kind === "powershell"
-              ? `Set-Location -LiteralPath ${quotePowerShell(options.cwd)}; ${wrapped}\r\n`
-              : `cd ${JSON.stringify(options.cwd)} && ${wrapped}\n`);
+              ? `Set-Location -LiteralPath ${quotePowerShell(requestedCwd)}; ${wrapped}\r\n`
+              : `cd -- ${quotePosixShell(shellCwdForCommand(requestedCwd))} && ${wrapped}\n`);
           } else {
             shell.write(`${wrapped}${interpreter.kind === "powershell" ? "\r\n" : "\n"}`);
           }
