@@ -76,6 +76,7 @@ export interface PiTimelineProps {
   onOpenThread?(entry: PiSessionMessageEntry, options: { carryBlocks: boolean }): void;
   onRecover?(entry: PiSessionMessageEntry): void;
   onScrollContainerChange?(element: HTMLElement | null): void;
+  rightSafeInset?: boolean;
   recoveryBusyEntryId?: string | null;
   sessionId: string;
   threadBusyEntryId?: string | null;

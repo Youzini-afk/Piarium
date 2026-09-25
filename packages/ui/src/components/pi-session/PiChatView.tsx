@@ -187,6 +187,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = React.useRef<HTMLElement | null>(null);
   const [timelineScrollReady, setTimelineScrollReady] = React.useState(false);
+  const [workOverviewOpen, setWorkOverviewOpen] = React.useState(false);
   const handleTimelineScrollContainerChange = React.useCallback((element: HTMLElement | null) => {
     timelineScrollRef.current = element;
     setTimelineScrollReady(Boolean(element));
@@ -952,6 +953,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
                   onScrollContainerChange={handleTimelineScrollContainerChange}
+                  rightSafeInset={workOverviewOpen}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                   sessionId={currentSessionId}
                   threadBusyEntryId={threadBusyEntryId}
@@ -1047,6 +1049,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             fallbackCwd={sessionCwd}
             parentSessionId={currentSessionId}
             workspaceId={threadWorkspaceId}
+            onDesktopOpenChange={setWorkOverviewOpen}
           />
         ) : null}
       </div>

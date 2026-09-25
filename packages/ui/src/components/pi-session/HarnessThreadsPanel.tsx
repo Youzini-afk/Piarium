@@ -1,4 +1,5 @@
 import React from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { runtimeFetch, type GitStatus } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -98,7 +99,8 @@ export const HarnessThreadsPanel: React.FC<{
   fallbackCwd?: string;
   presentation?: 'sidebar' | 'inline';
   title?: string;
-}> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title }) => {
+  onDesktopOpenChange?: (open: boolean) => void;
+}> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title, onDesktopOpenChange }) => {
   const { t } = useI18n();
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const [historyPreview, setHistoryPreview] = React.useState<{ result: SessionEntriesResult; brief: string; cwd?: string } | null>(null);
@@ -586,6 +588,20 @@ export const HarnessThreadsPanel: React.FC<{
       document.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [overviewOpen]);
+
+  React.useEffect(() => {
+    if (presentation !== 'sidebar') return;
+    if (overviewOpen) {
+      onDesktopOpenChange?.(true);
+      return;
+    }
+    const release = window.setTimeout(() => onDesktopOpenChange?.(false), 190);
+    return () => window.clearTimeout(release);
+  }, [onDesktopOpenChange, overviewOpen, presentation]);
+
+  React.useEffect(() => () => {
+    if (presentation === 'sidebar') onDesktopOpenChange?.(false);
+  }, [onDesktopOpenChange, presentation]);
 
   const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
   const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
@@ -1401,10 +1417,16 @@ export const HarnessThreadsPanel: React.FC<{
             <TooltipContent side="bottom">{t(contextPanelOpen ? 'contextPanel.actions.closePanel' : 'contextPanel.actions.openPanel')}</TooltipContent>
           </Tooltip>
         </div>
+        <AnimatePresence initial={false}>
         {overviewOpen ? (
-          <section
+          <motion.section
             aria-label={t('harness.overview.title')}
-            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(23rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-background/96 shadow-2xl backdrop-blur-xl"
+            initial={{ opacity: 0, y: -8, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -5, scale: 0.99 }}
+            transition={{ duration: 0.18, ease: [0.22, 0.8, 0.2, 1] }}
+            style={{ transformOrigin: 'top right' }}
+            className="pointer-events-auto mt-2 flex max-h-[min(72dvh,46rem)] w-[min(23rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-background/96 shadow-2xl backdrop-blur-xl will-change-transform"
             data-harness-overview-floating="true"
           >
             <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3.5 py-3">
@@ -1425,8 +1447,9 @@ export const HarnessThreadsPanel: React.FC<{
               </button>
             </div>
             {content}
-          </section>
+          </motion.section>
         ) : null}
+        </AnimatePresence>
       </div>
       <HarnessSessionStateTrigger count={activityCount} attention={attentionCount > 0} onOpen={() => setNarrowOpen(true)} />
       <MobileOverlayPanel

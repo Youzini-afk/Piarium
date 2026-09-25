@@ -6,6 +6,7 @@ import { PiTimeline } from './PiTimeline';
 
 interface MockLegendProps {
   ListFooterComponent?: React.ReactNode;
+  contentContainerClassName?: string;
   onWheelCapture?: (event: { ctrlKey: boolean; deltaY: number }) => void;
 }
 
@@ -77,10 +78,11 @@ describe('PiTimeline scroll ownership', () => {
     };
   });
 
-  const renderTimeline = () => renderToStaticMarkup(
+  const renderTimeline = (rightSafeInset = false) => renderToStaticMarkup(
     <PiTimeline
       cwd="/workspace"
       entries={[]}
+      rightSafeInset={rightSafeInset}
       sessionId="session-1"
       toolExecutions={{}}
     />,
@@ -102,5 +104,11 @@ describe('PiTimeline scroll ownership', () => {
     const markup = renderTimeline();
     expect(markup).toContain('data-pi-timeline-end-space="true"');
     expect(markup).toContain('42dvh');
+  });
+
+  it('reserves a temporary desktop safe area while the floating work overview is open', () => {
+    renderTimeline(true);
+    expect(mocks.legendProps?.contentContainerClassName).toContain('xl:pr-[24rem]');
+    expect(mocks.legendProps?.contentContainerClassName).toContain('duration-200');
   });
 });
