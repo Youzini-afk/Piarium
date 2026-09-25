@@ -1000,6 +1000,12 @@ describe("follow-up service on the real kernel", () => {
     f.harness.files.set("ws:data/input.csv", { exists: true, mtimeMs: 3, size: 3 });
     emitFile(f.harness, "ws", "data/input.csv", "changed", 3);
     await until(() => f.harness.continued.length === 3, 4_000, f.harness.errors);
+    await until(async () => {
+      const detail = await f.service.get(caller(), { id: registered.followUp.id });
+      return detail.followUp.status === "waiting"
+        && detail.occurrences.length === 3
+        && detail.occurrences[2]?.delivery === "continued";
+    }, 4_000, f.harness.errors);
     const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
     assert.equal(occurrences.length, 3);
     assert.equal(occurrences[2]!.facts.sequence, 3);
