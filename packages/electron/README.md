@@ -122,6 +122,49 @@ That runs, in order:
 Build output goes to `packages/electron/dist`. Development sources and the duplicate Web-owned kernel
 are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
 
+### Windows installer payload and performance
+
+The assisted NSIS installer keeps electron-builder's 7z payload and differential blockmap, but does not
+use the stock 7z extraction path. Stock electron-builder first expands the whole archive below
+`$PLUGINSDIR`, then copies that complete tree into `$INSTDIR`; tens of thousands of small runtime files
+therefore hit the filesystem twice. Varin's `customExtractUsing7za` hook runs a pinned x86 `7za.exe`
+directly against `$INSTDIR`, checks its exit status, and retries a failed interactive extraction. App
+shutdown, old-version uninstall, registry/shortcut handling, updater cache and archive production remain
+electron-builder-owned.
+
+`bun-patches/app-builder-lib@26.15.7.patch` adds only the extraction-hook seam to the regular NSIS
+template. `prepare-installer-tool.cjs` stages the checksum-pinned Windows 7-Zip binary and its licenses;
+the installer embeds that helper in its private plugin directory rather than requiring 7-Zip on the
+user's machine. `scripts/nsis-archive.test.mjs` exercises real 7z creation, differential blockmaps,
+long Unicode paths and corrupt-payload failure so a builder upgrade cannot silently restore the
+temporary-tree path or weaken error handling.
+
+Desktop file filters omit JS/TS source maps, generated Host declarations, duplicate Web assets and
+SDK-only sources/types. They do not blanket-remove `src`, TypeScript runtime inputs or Python stubs.
+`node-module-file-policy.cjs` explicitly retains the built-in tsserver standard `.d.ts` libraries,
+which electron-builder otherwise excludes. `afterPack` compiles a small Array/String/Promise program
+with the packaged TypeScript runtime, in addition to the Pi handshake and PDF/Canvas checks.
+The kernel resource filter ships only the current executable and manifest, not stale build outputs.
+Pi workers and native/runtime assets remain outside ASAR; reducing installation file count is not
+permission to make external Node processes depend on Electron's virtual filesystem.
+
+The first upgrade from a file-heavy older release still pays that old release's uninstall cost; after
+that transition, both install and later uninstall operate on the reduced payload. To compare only the
+payload phase using the real NSIS toolchain without registering or installing Varin:
+
+```powershell
+$env:VARIN_INSTALLER_MEASURE_SAMPLES = '3'
+node packages/electron/scripts/measure-installer-payload.mjs OLD.exe OLD_UNPACKED NEW.exe NEW_UNPACKED REPORT.json
+```
+
+In the default `auto` mode the old case uses electron-builder's stock 7z temporary-tree/copy path and
+the new case uses Varin's direct extractor. Set `VARIN_INSTALLER_MEASURE_EXTRACTOR=direct` or `stock`
+to isolate payload shape from extractor choice, and `VARIN_INSTALLER_MEASURE_TIMEOUT_MS` to change the
+per-sample ceiling. The measurement uses disposable directories on the report's volume, verifies every
+completed extraction by SHA-256 outside the timed interval, and records timeouts explicitly. It excludes
+registry changes, shortcuts, app shutdown and old-version uninstall, so it is not a full upgrade
+benchmark. Do not disable antivirus or replace installation safety checks to improve the measurement.
+
 ### Optional local semantic component
 
 The base installer does not include MiniLM, transformers.js, or ONNX Runtime. Lexical and structural

@@ -47,7 +47,7 @@
     "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
     "test:runtime": "vitest run --config vitest.config.ts",
-    "test:architecture": "bun run prepare:pi-runtime && bun run test:runtime && node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:architecture": "bun run prepare:pi-runtime && bun run test:runtime && node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/desktop-payload.test.mjs ./scripts/nsis-archive.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "test:updater": "vitest run updater-capability.test.ts updater-channel.test.ts updater-check.test.ts updater-feed.test.ts --config vitest.dedicated.config.ts && node --test ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "vitest run linux-autostart.test.ts --config vitest.dedicated.config.ts && tsx ./scripts/smoke-linux-app-discovery.mjs && tsx ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
@@ -68,7 +68,11 @@
       "dist-bundle/main.mjs",
       "dist-bundle/preload.mjs",
       "!node_modules/@varin/*/{src,test,tests}/**/*",
-      "!node_modules/@varin/web/{application-host,cli,scripts,kernel}/**/*"
+      "!node_modules/@varin/web/{application-host,cli,scripts,kernel,dist,.application-host-types}/**/*",
+      "!node_modules/**/*.{js,cjs,mjs,ts,cts,mts}.map",
+      "!node_modules/**/*.d.{mts,cts}",
+      "!node_modules/**/{openai,@anthropic-ai/sdk,typebox}/**/*.d.ts",
+      "!node_modules/**/{openai,@anthropic-ai/sdk}/src/**/*"
     ],
     "asarUnpack": [
       "node_modules/**/*"
@@ -92,7 +96,8 @@
       },
       {
         "from": "resources/kernel",
-        "to": "kernel"
+        "to": "kernel",
+        "filter": ["manifest.json", "varin-kernel", "varin-kernel.exe"]
       },
       {
         "from": "../../kernel/THIRD_PARTY_NOTICES.md",
@@ -119,6 +124,8 @@
         "to": "legal/THIRD_PARTY_NOTICES.md"
       }
     ],
+    "beforePack": "scripts/prepare-installer-tool.cjs",
+    "onNodeModuleFile": "scripts/node-module-file-policy.cjs",
     "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "buildResources": "resources/icons",
@@ -150,7 +157,12 @@
         "nsis"
       ],
       "verifyUpdateCodeSignature": false,
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "extraResources": [{
+        "from": "resources/installer-tools",
+        "to": "legal/installer-7zip",
+        "filter": ["LICENSE.txt", "COPYING"]
+      }]
     },
     "linux": {
       "target": [
@@ -170,6 +182,7 @@
       }
     },
     "nsis": {
+      "differentialPackage": true,
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,

@@ -1,3 +1,5 @@
+!include "${__FILEDIR__}\installer-extract.nsh"
+
 !ifndef BUILD_UNINSTALLER
 !include "FileFunc.nsh"
 

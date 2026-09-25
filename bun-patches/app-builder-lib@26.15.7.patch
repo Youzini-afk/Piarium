@@ -1,0 +1,9 @@
+diff --git a/templates/nsis/include/extractAppPackage.nsh b/templates/nsis/include/extractAppPackage.nsh
+--- a/templates/nsis/include/extractAppPackage.nsh
++++ b/templates/nsis/include/extractAppPackage.nsh
+@@ -92,0 +93,3 @@
++  !ifmacrodef customExtractUsing7za
++    !insertmacro customExtractUsing7za "${FILE}"
++  !else
+@@ -137,0 +141 @@
++  !endif

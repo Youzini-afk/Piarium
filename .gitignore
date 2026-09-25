@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-ssr/
+/packages/electron/resources/installer-tools/
 coverage/
 .cache/
 .vite/

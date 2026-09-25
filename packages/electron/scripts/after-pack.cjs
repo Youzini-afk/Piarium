@@ -142,6 +142,17 @@ module.exports = (context) => {
     windowsHide: true,
   });
 
+  execFileSync(packagedExecutable, [
+    path.join(__dirname, 'verify-packaged-typescript.cjs'),
+    path.join(unpackedNodeModulesPath, '@varin', 'extension-builtins', 'dist', 'builtin-packages',
+      'typescript-language', 'runtime', 'typescript', 'lib', 'typescript.js'),
+  ], {
+    cwd: context.appOutDir,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+
   const packagedPdfjsEntry = path.join(packagedPdfjsRoot, 'legacy', 'build', 'pdf.mjs');
   const pdfRuntimeSmoke = `
     import { createRequire } from 'node:module';
