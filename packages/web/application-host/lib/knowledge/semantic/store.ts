@@ -1,3 +1,4 @@
+import { createStorePersistence, trackStoreMutations } from "../persistence.js";
 /**
  * Independent semantic generation store. Not the authoritative workspace .tdb
  * (that file locks a single dim at open). Host is the only writer.
@@ -209,11 +210,9 @@ export function createSemanticGenerationStore(options: {
   // A checkpoint can lag the WAL when the process stops between a database
   // transaction and current.json. Reconcile once on open, then maintain the
   // count from each committed document replacement/removal.
-  let publishedDocuments = countStoredDocuments();
+  let publishedDocuments = 0;
   let writeTail: Promise<void> = Promise.resolve();
-  let flushDirty = false;
-  let flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let flushDeadline = 0;
+  let closeTask: Promise<void> | null = null;
   let disposed = false;
   // Scoped vector searches use the native graph-first exact search over block
   // IDs. Build the document -> block ID map lazily, then update only affected
@@ -222,37 +221,23 @@ export function createSemanticGenerationStore(options: {
   let documentBlockIdsCache: Map<string, number[]> | null = null;
 
   const enqueue = <T>(work: () => T): Promise<T> => {
-    const run = writeTail.then(work, work);
+    if (disposed || closeTask) return Promise.reject(new Error("Semantic store is closing or closed"));
+    const admitted = (): T => { persistence.recover(); return work(); };
+    const run = writeTail.then(admitted, admitted);
     writeTail = run.then(() => undefined, () => undefined);
     return run;
   };
-
-  const flushNow = (): void => {
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    }
-    flushDeadline = 0;
-    if (!flushDirty || !writer) return;
-    flushDirty = false;
-    writer.flush();
-  };
-
-  const scheduleFlush = (): void => {
-    flushDirty = true;
-    const now = Date.now();
-    if (flushDeadline === 0) flushDeadline = now + FLUSH_MAX_DEFER_MS;
-    if (now >= flushDeadline) {
-      flushNow();
-      return;
-    }
-    if (flushTimer) clearTimeout(flushTimer);
-    flushTimer = setTimeout(() => {
-      flushTimer = null;
-      void enqueue(() => flushNow());
-    }, Math.min(FLUSH_QUIET_MS, Math.max(0, flushDeadline - now)));
-    flushTimer.unref?.();
-  };
+  const persistence = createStorePersistence({
+    flush: () => writer?.flush(),
+    close: () => writer?.close(),
+    enqueue,
+    quietMs: FLUSH_QUIET_MS,
+    maxDeferMs: FLUSH_MAX_DEFER_MS,
+    onError: () => console.error("[SemanticStore] Deferred checkpoint failed; pending data retained for retry"),
+  });
+  publishedDocuments = countStoredDocuments();
+  if (writer) writer = trackStoreMutations(writer, persistence);
+  const scheduleFlush = (): void => persistence.defer();
 
   const refreshCheckpoint = (): SemanticCheckpoint => {
     const refreshed: SemanticCheckpoint = {
@@ -274,7 +259,7 @@ export function createSemanticGenerationStore(options: {
   const ensureWriter = (): InstanceType<typeof TriviumDB> => {
     if (writer) return writer;
     mkdirSync(semanticGenerationDir(options.dataDir, options.hostId, options.scope, spaceId, generation), { recursive: true });
-    writer = openDb(dbFile(), space.dim, "readWrite");
+    writer = trackStoreMutations(openDb(dbFile(), space.dim, "readWrite"), persistence);
     return writer;
   };
 
@@ -671,13 +656,16 @@ export function createSemanticGenerationStore(options: {
     },
     async close(): Promise<void> {
       if (disposed) return;
-      disposed = true;
-      await enqueue(() => {
-        flushNow();
-        writer?.flush();
-        writer?.close();
+      if (closeTask) return closeTask;
+      closeTask = writeTail.then(() => {
+        persistence.close();
         writer = null;
+        disposed = true;
+      }).catch((error: unknown) => {
+        closeTask = null; // A failed close keeps its handle available for retry.
+        throw error;
       });
+      return closeTask;
     },
   };
 }

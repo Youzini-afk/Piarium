@@ -3,7 +3,8 @@ import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { openWorkspaceKnowledge, terminalCommandDedupeKey, type BlockChange, type KnowledgeStore } from "./store.js";
+import { terminalCommandDedupeKey, type BlockChange, type KnowledgeStore } from "./store-contract.js";
+import { openKnowledgeStoreEngine as openWorkspaceKnowledge } from "./store-engine.js";
 
 const require = createRequire(import.meta.url);
 const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");

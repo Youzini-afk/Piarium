@@ -24,6 +24,11 @@ That embedded Application Host starts the private Rust system kernel from `resou
 file/materialization, PTY/process, and fixed-view compute remain Host services and do not become a second
 Electron backend or renderer IPC surface.
 
+The workspace/user knowledge database is held by a private Application Host storage process using
+Electron in Node mode. Its synchronous native queries and checkpoints do not execute on the window
+thread. This does not move the Web server or introduce an Electron-specific backend; see
+[knowledge storage](../web/application-host/lib/knowledge/DOCUMENTATION.md) for persistence and failure semantics.
+
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__VARIN_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.

@@ -1,0 +1,76 @@
+# Knowledge storage
+
+The workspace/user KnowledgeStore authority remains TriviumDB 0.8.6. Its existing
+`.tdb` files, node IDs, graph links and sidecars are unchanged. There is no migration,
+second writer, replacement database or in-main fallback.
+
+## Execution ownership
+
+`store.ts` is the async Host facade; `store-contract.ts` owns its existing DTOs and
+error classes without loading a native addon. `store-process.ts` lazily starts one
+private Node storage process per Host module generation, shared by that generation's
+open workspace/user stores. `store-worker.ts` is its only entry; `store-engine.ts`
+contains the native implementation. Opening, indexed reads, graph computations,
+user writes, checkpoints and closing of these stores all run in that process.
+Electron uses its own executable in Node mode, like the existing Pi worker boundary.
+The Web Host uses the same component. No renderer API or public server is added.
+
+The last successful store close disconnects the process and waits for its exit,
+including release of Windows mmap handles. Parent disconnect drains admitted work
+and closes the remaining handles. A native close failure retains the handle for
+retry. New calls are rejected while a facade is closing; previously admitted calls
+are drained first. A lost process rejects pending operations with an unknown-outcome
+error and never automatically replays writes or silently switches storage backends.
+
+The private IPC contract has an exhaustive method allowlist, response validation,
+advanced serialization for existing Set/Date values, and reconstruction of block
+conflict/knowledge mutation errors. Only one transport batch is in flight. The
+64-request scheduling batch is not a data rejection limit: additional requests
+remain queued. The boundary snapshots arguments on admission. `removeFileSymbols`
+cancellation applies before dispatch; after dispatch the caller receives the actual
+native result, not a false cancellation of an already-committed mutation.
+
+## Checkpoints and acknowledgement
+
+`persistence.ts` tracks native data mutations and owns the checkpoint schedule.
+Graph-derived writes retain their 250 ms quiet period / 30 s maximum deferral.
+A user write requests an immediate checkpoint. Contiguous requests already admitted
+for one store share a single checkpoint; their results and commit notifications are
+not published until it succeeds. Sequential writes that await each other cannot
+be combined by this mechanism, and a batch is not a rollback transaction.
+
+A successful complete checkpoint also covers and cancels any pending graph
+checkpoint. No-op recall updates/deletions/retention do not request another full
+snapshot. A close uses TriviumDB's own final checkpoint rather than calling flush
+before native close. Backend syncMode and the user-data acknowledgement contract
+are unchanged; no success is returned merely because a debounce was scheduled.
+
+A failed checkpoint retains the dirty version and pending notifications, reports
+its failure and schedules a bounded-backoff retry. The next admitted request must
+first recover that checkpoint, including reads and duplicate-write fast paths.
+This retries persistence of already-applied state, not the original mutations.
+Notifications are observational: observer errors cannot undo a durable write.
+
+The derived code-semantic store also uses this checkpoint scheduler and has
+retryable close/final-flush semantics. Its embedding orchestration and native handle
+have not moved to the new authority-store process. Other native vector adapters
+retain their existing owners. This change does not claim every Host native operation
+is now off-thread, nor does it reduce the cost of one full TriviumDB snapshot to O(delta).
+
+## Build and verification
+
+The production Host TypeScript build emits `store-worker.js` next to its facade.
+The literal worker URL participates in `scripts/host-production-boundary.mjs`'s
+runtime graph. Desktop resolves the physical `app.asar.unpacked` Host entry;
+packaged execution needs neither TypeScript source nor a TS loader. Source-development
+children explicitly load the repository's tsx package and do not inherit the parent
+process's debugger/test-runner arguments.
+
+`store.test.ts` exercises the native implementation directly, including payload-read
+complexity instrumentation. Existing context, route, observer, relation and recall
+tests exercise its Host consumers. `store-persistence.test.ts` counts real native
+checkpoints and injects checkpoint failure; `persistence.test.ts` covers scheduling
+and failure-state transitions. `store-process.test.ts` exercises the production
+facade/child path, error identity, batching, Set/Date transport, cancellation,
+close ordering and recovery of acknowledged data after a real process kill.
+Process-kill recovery is not equivalent to a power-loss guarantee.

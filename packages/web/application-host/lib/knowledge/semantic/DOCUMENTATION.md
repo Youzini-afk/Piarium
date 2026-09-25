@@ -33,3 +33,7 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   retaining the model identity held by an in-flight query. Remote bindings are not replaced.
 - `scripts/build-local-semantic-component.mjs` builds and verifies the separate target-specific archive.
   Its Node inference dependencies and model weights never enter the normal Host or desktop build.
+
+Checkpoint scheduling is shared with `../persistence.ts`: dirty state clears only after successful
+native persistence, a failed checkpoint remains retryable, and native close supplies the final flush.
+This derived semantic store has not moved to the workspace/user knowledge storage process.

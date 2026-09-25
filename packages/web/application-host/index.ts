@@ -3571,11 +3571,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       observeKnowledgeDocumentMutation = () => undefined;
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
-      await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));
-      knowledgeStores.clear();
+      const knowledgeShutdown = await Promise.allSettled([...knowledgeStores].map(async ([workspaceId, store]) => {
+        await store.close();
+        // A failed native close retains its writer for a retry, not an orphaned
+        // handle hidden by clearing the whole map after allSettled.
+        if (knowledgeStores.get(workspaceId) === store) knowledgeStores.delete(workspaceId);
+      }));
+      for (const result of knowledgeShutdown) {
+        if (result.status !== 'rejected') continue;
+        processShutdownErrors.push(result.reason);
+        console.error('[KnowledgeStore] Shutdown incomplete:', errorMessage(result.reason));
+      }
       if (userKnowledgeStoreLoad) await userKnowledgeStoreLoad.catch(() => null);
-      await userKnowledgeStore?.close();
-      userKnowledgeStore = null;
+      try {
+        await userKnowledgeStore?.close();
+        userKnowledgeStore = null;
+      } catch (error) {
+        processShutdownErrors.push(error);
+        console.error('[KnowledgeStore] User-store shutdown incomplete:', errorMessage(error));
+      }
       harnessRouter.dispose();
       await harnessServiceHost.dispose();
       await threadRegistry.dispose();

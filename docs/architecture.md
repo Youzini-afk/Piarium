@@ -76,6 +76,9 @@ Application host: web/Electron shell + Varin broker + extension host
     |- TypeScript product policy, authenticated APIs, Thread/Run lifecycle
     |- Documents/Registry coordination, LSP/DAP protocol, knowledge/model adapters
     |
+    |- private Node knowledge storage process
+    |    `- workspace/user TriviumDB handle, queries and coalesced checkpoints
+    |
     |- private generated varin.kernel.v1 framed protocol
     |    v
     |  Rust kernel
@@ -110,7 +113,10 @@ file/structure computation. TypeScript retains the public API and admission poli
 lifecycle, Document Registry coordination, knowledge-domain services, and model/context orchestration.
 Pi worker/session management stays in runtime-broker; credentials and native Pi state remain in Pi.
 TriviumDB graph/vector stores keep their current single-writer adapters; changing the implementation
-language is not authorization to replace those databases.
+language is not authorization to replace those databases. The workspace/user KnowledgeStore handle
+runs in a private Host storage process, outside Electron main, with shared-checkpoint acknowledgement
+and no in-main fallback. Derived semantic/vector adapters retain their named owners. See
+[knowledge storage](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md).
 
 The process is an implementation component of this Host, shared by all surfaces. It does not create
 a second Electron backend. Responsibilities move with all their writers, references, consumers, and
