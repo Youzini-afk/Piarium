@@ -35,6 +35,7 @@ changelog-*.png
 /tsc/
 /varin@*/
 local-dev*
+.application-host-dev-*/
 
 .graymatter/
 .hive/

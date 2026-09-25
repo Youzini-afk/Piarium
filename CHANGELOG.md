@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Piarium are recorded here. The project is pre-1.0; the
+All notable changes to Varin are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
 ## Unreleased
