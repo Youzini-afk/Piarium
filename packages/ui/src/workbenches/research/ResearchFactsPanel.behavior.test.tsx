@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   ),
   listeners: new Set<(event: VarinEvent) => void>(),
 }));
-vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@varin/application-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@varin/application-client')>()),
+  runtimeFetch: vi.fn(),
+}));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/lib/varinEvents', () => ({
