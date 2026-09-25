@@ -288,6 +288,7 @@ const PACKAGE_MUTATION_METHODS = new Set<HostMethod>([
 ]);
 
 const AGENT_RUN_METHODS = new Set<HostMethod>([
+  "agent.compact",
   "agent.followUp",
   "agent.prompt",
   "agent.steer",

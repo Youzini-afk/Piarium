@@ -930,6 +930,35 @@ describe('Pi session store', () => {
     }]);
   });
 
+  test('runs explicit compaction through the session runtime with optional focus', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.compact') {
+        return {
+          firstKeptEntryId: 'entry-kept',
+          summary: 'Earlier work and the active constraints.',
+          tokensBefore: 12000,
+        };
+      }
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const result = await store.getState().compactSession(
+      'session-a',
+      'Keep the migration decision and the remaining validation step.',
+    );
+
+    expect(result.summary).toContain('active constraints');
+    expect(runtime.calls).toEqual([{
+      method: 'agent.compact',
+      params: {
+        customInstructions: 'Keep the migration decision and the remaining validation step.',
+        sessionId: 'session-a',
+      },
+    }]);
+  });
+
   test('loads the authoritative Pi session tree', async () => {
     const runtime = new FakeRuntime();
     const tree = {

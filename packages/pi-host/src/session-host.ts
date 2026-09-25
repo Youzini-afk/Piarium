@@ -1591,6 +1591,10 @@ export class SessionHost {
   async abort(sessionId: string): Promise<boolean> {
     this.assertSession(sessionId);
     const wasBusy = !this.session.isIdle;
+    // The public AgentSession abort seam only stops the foreground Agent loop.
+    // Manual compaction has its own controller, so cancel it before waiting for
+    // the session to become idle as well.
+    this.session.abortCompaction();
     await this.session.abort();
     const goal = readSessionFeatures(this.session.sessionManager).goal;
     if (wasBusy && goal?.status === "active") {
@@ -1602,6 +1606,12 @@ export class SessionHost {
       });
     }
     return wasBusy;
+  }
+
+  async compact(sessionId: string, customInstructions?: string) {
+    this.assertSession(sessionId);
+    await this.#applyPendingSettingsReload();
+    return this.session.compact(customInstructions);
   }
 
   clearQueue(sessionId: string): { cleared: boolean; followUp: string[]; steering: string[] } {
@@ -2051,6 +2061,10 @@ export class SessionHost {
     this.assertSession(sessionId);
     if (!command.startsWith("/")) {
       throw new HostError("invalid_command", "Slash commands must start with '/'");
+    }
+    const compact = /^\/compact(?:\s+([\s\S]*))?$/i.exec(command.trim());
+    if (compact) {
+      return toJsonValue(await this.compact(sessionId, compact[1]?.trim() || undefined));
     }
     await this.session.prompt(command);
     return { executed: true };

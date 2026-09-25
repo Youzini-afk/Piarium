@@ -146,6 +146,11 @@ export interface PiSessionStoreState {
   clearQueue(sessionId: string): Promise<boolean>;
   clearSubmission(sessionId: string, submissionId: string): void;
   cancelTimelineAutomation(sessionId: string): void;
+  compactSession(
+    sessionId: string,
+    customInstructions?: string,
+    expectedRuntimeKey?: string,
+  ): Promise<RuntimeMethodResult<'agent.compact'>>;
   completeTimelineReturn(sessionId: string, token: number): void;
   clearSessionAttention(sessionId: string): void;
   createSession(
@@ -1031,6 +1036,14 @@ export const createPiSessionStore = (
       abort: async (sessionId) => {
         const { result } = await request('agent.abort', { sessionId });
         return result.aborted;
+      },
+
+      compactSession: async (sessionId, customInstructions, expectedRuntimeKey) => {
+        const { result } = await request('agent.compact', {
+          ...(customInstructions === undefined ? {} : { customInstructions }),
+          sessionId,
+        }, expectedRuntimeKey);
+        return result;
       },
 
       beginSubmission: (sessionId, message, mode) => {

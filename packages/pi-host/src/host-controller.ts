@@ -1088,6 +1088,11 @@ export class HostController {
           optionalString(params, "instructions"),
           readAgentInputContext(params),
         );
+      case "agent.compact":
+        return this.#sessionHost.compact(
+          readString(params, "sessionId"),
+          optionalString(params, "customInstructions"),
+        );
       case "agent.steer":
         return {
           accepted: await this.#sessionHost.steer(

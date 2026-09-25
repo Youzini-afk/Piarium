@@ -213,13 +213,21 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const messageHistory = useMessageHistory(sentMessageHistory);
   const varinCommands = React.useMemo<readonly CommandInfo[]>(() => [
     ...MAGIC_VARIN_COMMANDS,
+    ...(sessionId
+      ? [{
+          description: t('chat.commandAutocomplete.command.compactDescription'),
+          id: 'varin:compact',
+          name: 'compact',
+          source: 'varin' as const,
+        }]
+      : []),
     {
       description: t('chat.timeline.description'),
       id: 'varin:tree',
       name: 'tree',
       source: 'varin',
     },
-  ], [t]);
+  ], [sessionId, t]);
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);

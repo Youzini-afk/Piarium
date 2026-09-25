@@ -10,9 +10,21 @@ describe('Pi local commands', () => {
     });
   });
 
+  test('parses compact without a focus', () => {
+    expect(parsePiLocalCommand('/compact')).toEqual({ kind: 'compact' });
+    expect(parsePiLocalCommand('  /COMPACT   ')).toEqual({ kind: 'compact' });
+  });
+
+  test('preserves an optional manual compaction focus', () => {
+    expect(parsePiLocalCommand('/compact focus on the migration decisions')).toEqual({
+      customInstructions: 'focus on the migration decisions',
+      kind: 'compact',
+    });
+  });
+
   test('does not capture ordinary prompts or similarly prefixed commands', () => {
     expect(parsePiLocalCommand('show me the tree')).toBeNull();
     expect(parsePiLocalCommand('/treehouse')).toBeNull();
+    expect(parsePiLocalCommand('/compactly explain this')).toBeNull();
   });
 });
-

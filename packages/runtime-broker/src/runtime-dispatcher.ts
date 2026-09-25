@@ -564,6 +564,14 @@ async function dispatchRuntimeRequestUnchecked(
         text: requireString(input, "text", { allowEmpty: true }),
       });
     }
+    case "agent.compact": {
+      const sessionId = requireString(input, "sessionId");
+      const customInstructions = optionalString(input, "customInstructions");
+      return broker.requestForSession(sessionId, "agent.compact", {
+        ...(customInstructions === undefined ? {} : { customInstructions }),
+        sessionId,
+      });
+    }
     case "agent.abort": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "agent.abort", { sessionId });

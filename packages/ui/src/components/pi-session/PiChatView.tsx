@@ -469,6 +469,23 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     if (!currentSessionId) return;
     const currentDraft = readPiDraft(currentSessionId, runtimeKey);
     const command = parsePiLocalCommand(currentDraft.text);
+    if (command?.kind === 'compact') {
+      if (currentDraft.images.length > 0) {
+        toast.error(t('chat.chatInput.toast.compactFailed'));
+        return;
+      }
+      try {
+        await usePiSessionStore.getState().compactSession(
+          currentSessionId,
+          command.customInstructions,
+          runtimeKey,
+        );
+        clearPiDraft(currentSessionId, runtimeKey);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+      }
+      return;
+    }
     if (command?.kind === 'tree') {
       if (currentDraft.images.length > 0) {
         toast.error(t('chat.timeline.attachmentsUnsupported'));
@@ -498,6 +515,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     const draftRuntimeKey = runtimeKey;
     const pendingDraft = readPiPendingDraft(pendingCwd, draftRuntimeKey);
     if (!pendingDraft.text.trim() && pendingDraft.images.length === 0) return;
+    if (parsePiLocalCommand(pendingDraft.text)?.kind === 'compact') {
+      toast.error(t('chat.chatInput.toast.compactFailed'));
+      return;
+    }
     setCreating(true);
     try {
       setDirectory(pendingCwd, { showOverlay: false });
@@ -514,7 +535,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     } finally {
       setCreating(false);
     }
-  }, [configureNewSession, createSession, creating, pendingCwd, pendingWorkspace, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
+  }, [configureNewSession, createSession, creating, pendingCwd, pendingWorkspace, runtimeKey, sendDraft, sending, setDirectory, t, transferPendingPiDraft]);
 
   const handleCurrentModelChange = React.useCallback(async (
     model: Pick<ModelDescriptor, 'id' | 'provider'> | undefined,
