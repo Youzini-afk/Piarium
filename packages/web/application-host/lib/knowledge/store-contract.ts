@@ -508,4 +508,3 @@ export interface OpenWorkspaceKnowledgeDeps {
   onKnowledgeChanged?: (ids: readonly NodeId[]) => void;
   onPersistenceError?: (error: unknown) => void;
 }
-
