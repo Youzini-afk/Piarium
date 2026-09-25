@@ -447,8 +447,15 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
     }
+    if (atEndRef.current) {
+      const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+      if (current?.scrollMode === 'free-scrolling' && current.pendingReturnToken === undefined) {
+        const token = requestTimelineReturn(props.sessionId);
+        if (token > 0) completeTimelineReturn(props.sessionId, token);
+      }
+    }
     scheduleViewportCapture();
-  }, [props.leafId, scheduleViewportCapture]);
+  }, [completeTimelineReturn, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture]);
 
   const handleReturnToLatest = React.useCallback(() => {
     const token = requestTimelineReturn(props.sessionId);
