@@ -217,6 +217,7 @@ const piTimelineKeyIntent = (key: string, shiftKey: boolean): PiTimelineScrollIn
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
   const projectionRef = React.useRef<PiTimelineProjection | undefined>(undefined);
   const projectionSessionRef = React.useRef(props.sessionId);
@@ -304,6 +305,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   }, [props.leafId]);
 
   React.useEffect(() => () => {
+    onScrollContainerChange?.(null);
     if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current);
     if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
     if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
@@ -316,7 +318,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         viewportRef.current,
       );
     }
-  }, [captureViewport, props.sessionId, saveTimelineCheckpoint]);
+  }, [captureViewport, onScrollContainerChange, props.sessionId, saveTimelineCheckpoint]);
 
   const scheduleFollowEnd = React.useCallback(() => {
     if (followEndFrameRef.current !== null) return;
@@ -568,7 +570,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       <LegendList
         ref={listRef}
         anchoredEndSpace={anchoredEndSpace}
-        className="min-h-0 flex-1 overscroll-contain"
+        className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 flex-1 overscroll-contain"
         contentContainerClassName="py-5"
         data={projection.items}
         dataKey={props.sessionId}
@@ -609,6 +611,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         }}
         onLoad={() => {
           listLoadedRef.current = true;
+          onScrollContainerChange?.(listRef.current?.getScrollableNode() ?? null);
           applyEntryIntent();
         }}
         onScroll={handleScroll}

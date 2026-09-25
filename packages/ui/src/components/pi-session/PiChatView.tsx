@@ -58,6 +58,7 @@ import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
 import { PiFollowUpsStrip } from './PiFollowUpsStrip';
+import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 import {
   WorkbenchReplacement,
@@ -183,6 +184,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   threadPanelTitle,
 }) => {
   const { t } = useI18n();
+  const chatScrollTrackRef = React.useRef<HTMLDivElement | null>(null);
+  const timelineScrollRef = React.useRef<HTMLElement | null>(null);
+  const [timelineScrollReady, setTimelineScrollReady] = React.useState(false);
+  const handleTimelineScrollContainerChange = React.useCallback((element: HTMLElement | null) => {
+    timelineScrollRef.current = element;
+    setTimelineScrollReady(Boolean(element));
+  }, []);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const currentRecord = usePiSessionStore((state) => (
     state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
@@ -911,6 +919,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
             fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId} />
         ) : null}
+        <div ref={chatScrollTrackRef} className="relative flex min-h-0 flex-1 flex-col">
         <WorkbenchReplacement
           target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
           fallback={entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
@@ -942,6 +951,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   onFork={previewOnly ? undefined : handleFork}
                   onOpenThread={previewOnly || !threadWorkspaceId ? undefined : handleOpenThread}
                   onRecover={previewOnly ? undefined : handleRecover}
+                  onScrollContainerChange={handleTimelineScrollContainerChange}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                   sessionId={currentSessionId}
                   threadBusyEntryId={threadBusyEntryId}
@@ -1021,6 +1031,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         ) : null}
           {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
         </section>
+        {timelineScrollReady ? (
+          <OverlayScrollbar
+            containerRef={timelineScrollRef}
+            trackRef={chatScrollTrackRef}
+            disableHorizontal
+            userIntentOnly
+            className="z-30"
+          />
+        ) : null}
+        </div>
         </div>
         {threadWorkspaceId && threadPanelMode === 'sidebar' ? (
           <HarnessThreadsPanel
