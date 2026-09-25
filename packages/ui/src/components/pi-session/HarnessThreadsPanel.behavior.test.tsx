@@ -9,8 +9,15 @@ import { HarnessThreadStateContext, type HarnessThreadStateValue } from './Harne
 import type { SessionEntriesResult } from '@varin/protocol';
 import type { HarnessThreadSnapshot } from './harnessThreadPresentation';
 
-const mocks = vi.hoisted(() => ({ openSession: vi.fn(), prefetchSession: vi.fn(), timeline: vi.fn(), translate: (key: string) => key }));
+const mocks = vi.hoisted(() => ({
+  openSession: vi.fn(),
+  prefetchSession: vi.fn(),
+  timeline: vi.fn(),
+  getGitStatus: vi.fn(),
+  translate: (key: string) => key,
+}));
 vi.mock('@varin/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@/lib/gitApiHttp', () => ({ getGitStatus: mocks.getGitStatus }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
@@ -85,6 +92,7 @@ beforeEach(() => {
   mocks.prefetchSession.mockImplementation(() => new Promise<SessionEntriesResult>((resolve, reject) => {
     finishPreview = resolve; failPreview = reject;
   }));
+  mocks.getGitStatus.mockRejectedValue(new Error('not a git repository'));
   vi.mocked(runtimeFetch).mockResolvedValue(new Response(null, { status: 404 }));
 });
 
@@ -153,5 +161,85 @@ describe('thread panel transcript is inspection, not execution', () => {
     expect(toast.error).toHaveBeenCalledExactlyOnceWith('Native transcript is unavailable');
     expect(mocks.openSession).not.toHaveBeenCalled();
     expect(vi.mocked(runtimeFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+  });
+});
+
+describe('work overview presentation', () => {
+  it('turns raw session blocks into plan, progress and decisions instead of exposing block metadata', async () => {
+    state.threads = [];
+    vi.mocked(runtimeFetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/blocks')) {
+        return new Response(JSON.stringify({
+          branchLeafId: null,
+          blocks: [
+            { label: 'plan', content: '- [x] Inspect\n- [ ] Implement', updatedBy: 'agent', updatedAt: 1 },
+            { label: 'progress', content: 'Working on tests', updatedBy: 'memory-agent', updatedAt: 2 },
+            { label: 'decisions', content: 'Use vitest', updatedBy: 'user', updatedAt: 3 },
+          ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/knowledge/suggestions')) {
+        return new Response(JSON.stringify({ suggestions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    await act(async () => {
+      root.render(
+        <HarnessThreadStateContext.Provider value={state}>
+          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" />
+        </HarnessThreadStateContext.Provider>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('harness.overview.plan');
+    expect(container.textContent).toContain('Inspect');
+    expect(container.textContent).toContain('Implement');
+    expect(container.textContent).toContain('harness.overview.memoryProgress');
+    expect(container.textContent).toContain('Working on tests');
+    expect(container.textContent).toContain('harness.overview.memoryDecisions');
+    expect(container.textContent).toContain('Use vitest');
+    expect(container.textContent).not.toContain('memory-agent');
+  });
+
+  it('can collapse the entire desktop overview to a compact activity rail and expand it again', async () => {
+    await act(async () => root.render(
+      <HarnessThreadStateContext.Provider value={state}>
+        <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
+      </HarnessThreadStateContext.Provider>,
+    ));
+
+    const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.collapse"]');
+    expect(collapse).not.toBeNull();
+    await act(async () => collapse!.click());
+    const expand = container.querySelector<HTMLButtonElement>('button[aria-label="harness.overview.expand"]');
+    expect(expand).not.toBeNull();
+    await act(async () => expand!.click());
+    expect(container.querySelector('button[aria-label="harness.overview.collapse"]')).not.toBeNull();
+  });
+
+  it('still appears for real workspace changes when no plan, memory, source or subtask exists', async () => {
+    state.threads = [];
+    mocks.getGitStatus.mockResolvedValue({
+      current: 'main', tracking: 'origin/main', ahead: 0, behind: 0, isClean: false,
+      files: [{ path: 'src/changed.ts', index: ' ', working_dir: 'M' }],
+      diffStats: { 'src/changed.ts': { insertions: 7, deletions: 2 } },
+    });
+
+    await act(async () => {
+      root.render(
+        <HarnessThreadStateContext.Provider value={state}>
+          <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" fallbackCwd="/parent" />
+        </HarnessThreadStateContext.Provider>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('harness.overview.outputs');
+    expect(container.textContent).toContain('harness.overview.workspaceChanges');
+    expect(container.textContent).toContain('src/changed.ts');
+    expect(container.textContent).toContain('+7 −2');
   });
 });

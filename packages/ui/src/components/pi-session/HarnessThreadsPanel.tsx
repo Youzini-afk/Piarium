@@ -1,5 +1,5 @@
 import React from 'react';
-import { runtimeFetch } from '@varin/application-client';
+import { runtimeFetch, type GitStatus } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
@@ -30,6 +30,16 @@ import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
 import { HarnessThreadResultHistory } from './HarnessThreadResultHistory';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 import { PdfMaterialReader } from './PdfMaterialReader';
+import { getGitStatus } from '@/lib/gitApiHttp';
+import { useUIStore } from '@/stores/useUIStore';
+import { HarnessOverviewSection } from './HarnessOverviewSection';
+import {
+  groupOverviewBlocks,
+  parseOverviewPlan,
+  summarizeGitDiff,
+  summarizeOverviewThreads,
+  summarizePendingThreadDiffs,
+} from './harnessWorkOverviewPresentation';
 
 const LazyThreadTimeline = React.lazy(() => import('./PiTimeline').then((module) => ({ default: module.PiTimeline })));
 
@@ -97,6 +107,7 @@ export const HarnessThreadsPanel: React.FC<{
     ...threadState.researchBranches,
   ], [threadState.threads, threadState.researchBranches]);
   const webSources = useWebSources(parentSessionId);
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
   const pinSource = useWebSourcesStore((state) => state.pinSource);
   const unpinSource = useWebSourcesStore((state) => state.unpinSource);
   const deleteSource = useWebSourcesStore((state) => state.deleteSource);
@@ -115,9 +126,13 @@ export const HarnessThreadsPanel: React.FC<{
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
   const [activePdfMaterial, setActivePdfMaterial] = React.useState<ActivePdfMaterial | null>(null);
+  const [desktopCollapsed, setDesktopCollapsed] = React.useState(false);
+  const [gitStatus, setGitStatus] = React.useState<GitStatus | null>(null);
   const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
+  const gitTargetRef = React.useRef(fallbackCwd ?? '');
+  gitTargetRef.current = fallbackCwd ?? '';
 
   const readError = (body: unknown, fallback: string): string => {
     if (!body || typeof body !== 'object') return fallback;
@@ -142,6 +157,22 @@ export const HarnessThreadsPanel: React.FC<{
     const next = parseHarnessThreadSpace(await response.json());
     if (spaceTargetRef.current === target) setSpace(next);
   }, [parentSessionId, spaceTargetRef, workspaceId]);
+
+  const reloadGitStatus = React.useCallback(async () => {
+    const target = fallbackCwd?.trim() ?? '';
+    if (!target) {
+      setGitStatus(null);
+      return;
+    }
+    try {
+      const next = await getGitStatus(target);
+      if (gitTargetRef.current === target) setGitStatus(next);
+    } catch {
+      // Work overview is useful outside Git repositories too. A missing or
+      // temporarily unavailable Git status must not hide the rest of it.
+      if (gitTargetRef.current === target) setGitStatus(null);
+    }
+  }, [fallbackCwd]);
 
   const refreshAfterResultRelease = React.useCallback(async () => {
     await reloadSpace();
@@ -474,6 +505,7 @@ export const HarnessThreadsPanel: React.FC<{
     setEditingBlock(null);
     setNarrowOpen(false);
     setConvertingThreadId(null);
+    setGitStatus(null);
     void reloadBlocks(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load session blocks:', error);
     });
@@ -483,15 +515,22 @@ export const HarnessThreadsPanel: React.FC<{
     void reloadSpace(controller.signal).catch((error) => {
       if (!controller.signal.aborted) console.warn('[HarnessThreadsPanel] Failed to load thread space:', error);
     });
+    void reloadGitStatus();
     const unsubscribe = subscribeVarinEvents((event) => {
       if (event.type === 'stream-ready') {
         void reloadBlocks(controller.signal).catch(() => undefined);
         void reloadKnowledge(controller.signal).catch(() => undefined);
         void reloadSpace(controller.signal).catch(() => undefined);
+        void reloadGitStatus();
         return;
       }
       if (event.type === 'harness-blocks-changed' && event.workspaceId === workspaceId && event.sessionId === parentSessionId) {
         void reloadBlocks(controller.signal).catch(() => undefined);
+        void reloadGitStatus();
+        return;
+      }
+      if (event.type === 'harness-thread-changed' && event.workspaceId === workspaceId) {
+        void reloadGitStatus();
         return;
       }
       if (event.type === 'harness-knowledge-changed' && (
@@ -507,139 +546,240 @@ export const HarnessThreadsPanel: React.FC<{
       controller.abort();
       unsubscribe();
     };
-  }, [parentSessionId, reloadBlocks, reloadKnowledge, reloadSpace, workspaceId]);
+  }, [parentSessionId, reloadBlocks, reloadGitStatus, reloadKnowledge, reloadSpace, workspaceId]);
 
   const hasThreadRecords = threads.length > 0 || (space?.threads.length ?? 0) > 0;
-  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0 && webSources.length === 0 && !activePdfMaterial) return null;
+  const hasWorkspaceChanges = (gitStatus?.files.length ?? 0) > 0;
+  if (threads.length === 0 && !hasThreadRecords && blocks.length === 0 && suggestions.length === 0
+    && webSources.length === 0 && !activePdfMaterial && !hasWorkspaceChanges) return null;
 
-  const itemCount = blocks.length + Math.max(threads.length, space?.threads.length ?? 0) + suggestions.length + webSources.length;
+  const blockGroups = groupOverviewBlocks(blocks);
+  const planSummary = parseOverviewPlan(blockGroups.plan?.content ?? '');
+  const threadSummary = summarizeOverviewThreads(threads);
+  const gitDiff = summarizeGitDiff(gitStatus);
+  const pendingThreadDiff = summarizePendingThreadDiffs(threads);
+  const memoryBlocks = [
+    ...(blockGroups.progress ? [blockGroups.progress] : []),
+    ...(blockGroups.decisions ? [blockGroups.decisions] : []),
+    ...blockGroups.other,
+  ];
+  const hasOutputs = gitDiff.files > 0 || pendingThreadDiff.files > 0;
+  const attentionCount = suggestions.length + planSummary.blocked + threadSummary.attention;
+  const activityCount = attentionCount || planSummary.open + threadSummary.active + threadSummary.integrationPending;
+  const overviewSummary = threadSummary.attention > 0
+    ? t('harness.overview.summary.attention', { count: threadSummary.attention })
+    : planSummary.blocked > 0
+      ? t('harness.overview.summary.blocked', { count: planSummary.blocked })
+      : suggestions.length > 0
+        ? t('harness.overview.summary.review', { count: suggestions.length })
+        : threadSummary.active > 0
+          ? t('harness.overview.summary.running', { count: threadSummary.active })
+          : planSummary.total > 0 && planSummary.done < planSummary.total
+            ? t('harness.overview.summary.plan', { done: planSummary.done, total: planSummary.total })
+            : planSummary.total > 0 && planSummary.done === planSummary.total
+              ? t('harness.overview.summary.done', { done: planSummary.done, total: planSummary.total })
+              : hasOutputs
+                ? t('harness.overview.summary.changed', { count: gitDiff.files || pendingThreadDiff.files })
+                : t('harness.overview.summary.context');
   const formatLogical = (bytes: number | null, unknown: boolean): string => (
     unknown || bytes === null ? t('harness.threads.space.unknownSize') : t('harness.threads.space.bytes', { bytes })
   );
   const content = (
     <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="border-b border-border/45 px-3 py-2.5">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="typography-meta font-medium text-foreground">{overviewSummary}</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{t('harness.overview.description')}</p>
+          </div>
+          {attentionCount > 0 ? (
+            <span className="shrink-0 rounded-full bg-[var(--status-warning)]/12 px-1.5 py-0.5 text-[9px] tabular-nums text-[var(--status-warning)]">
+              {attentionCount}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {suggestions.length > 0 ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.review')}
+          icon="error-warning"
+          status={t('harness.overview.reviewCount', { count: suggestions.length })}
+          defaultOpen
+          attention
+        >
         <HarnessKnowledgeReviewSection
           suggestions={suggestions}
           drafts={knowledgeDrafts}
           busy={knowledgeBusy !== null}
+          embedded
           onDraftChange={(key, draft) => setKnowledgeDrafts((current) => ({ ...current, [key]: draft }))}
           onAction={(suggestion, action) => { void actOnKnowledge(suggestion, action); }}
         />
-        {blocks.length > 0 ? (
-          <section className="border-b border-border/50 p-2" aria-label={t('harness.blocks.title')}>
-            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.blocks.title')}</h3>
-            <div className="space-y-1.5">
-              {blocks.map((block) => {
-                const editing = editingBlock === block.label;
-                return (
-                  <div key={block.label} className="rounded-lg border border-border/50 bg-background/45 p-2">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{block.label}</span>
-                      <span className="text-[9px] text-muted-foreground">{block.updatedBy}</span>
-                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'workspace')}>
-                        {t('harness.knowledge.rememberWorkspace')}
-                      </button>
-                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'user')}>
-                        {t('harness.knowledge.rememberUser')}
-                      </button>
-                      <button
-                        type="button"
-                        title={t('harness.blocks.edit')}
-                        aria-label={t('harness.blocks.edit')}
-                        onClick={() => {
-                          setEditingBlock(editing ? null : block.label);
-                          setBlockDraft(block.content);
-                        }}
-                        className="rounded p-0.5 text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                      >
-                        <Icon name={editing ? 'close' : 'edit'} className="size-3" />
-                      </button>
-                    </div>
-                    {editing ? (
-                      <div className="mt-2 space-y-2">
-                        <textarea
-                          value={blockDraft}
-                          onChange={(event) => setBlockDraft(event.target.value)}
-                          className="min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
-                        />
-                        <div className="flex justify-end gap-1.5">
-                          <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
-                            {t('harness.blocks.cancel')}
-                          </button>
-                          <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(block)}>
-                            {t('harness.blocks.save')}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[10px] leading-4 text-muted-foreground">{block.content}</p>
-                    )}
-                  </div>
-                );
-              })}
+        </HarnessOverviewSection>
+      ) : null}
+      {blockGroups.plan ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.plan')}
+          icon="file-text"
+          status={planSummary.total > 0
+            ? t('harness.overview.planProgress', { done: planSummary.done, total: planSummary.total })
+            : undefined}
+          attention={planSummary.blocked > 0}
+        >
+          {editingBlock === blockGroups.plan.label ? (
+            <div className="space-y-2">
+              <textarea
+                value={blockDraft}
+                onChange={(event) => setBlockDraft(event.target.value)}
+                className="min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
+              />
+              <div className="flex justify-end gap-1.5">
+                <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
+                  {t('harness.blocks.cancel')}
+                </button>
+                <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(blockGroups.plan!)}>
+                  {t('harness.blocks.save')}
+                </button>
+              </div>
             </div>
-          </section>
-        ) : null}
-        {webSources.length > 0 ? (
-          <section className="border-b border-border/50 p-2" aria-label={t('harness.sources.title')}>
-            <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.sources.title')}</h3>
-            <div className="space-y-1">
-              {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
-                (() => {
-                  const isPdf = Boolean(source.snapshotId && source.document?.kind === 'pdf');
-                  const openPdf = () => setActivePdfMaterial({
-                    sessionId: parentSessionId,
-                    title: source.title,
-                    snapshotId: source.snapshotId!,
-                    ...(source.sourceHash ? { sourceHash: source.sourceHash } : {}),
-                    originalUrl: source.url,
-                  });
+          ) : (
+            <>
+              {planSummary.items.length > 0 ? (
+                <div className="space-y-1.5">
+                  {planSummary.items.map((item, index) => {
+                    const current = planSummary.currentIndex === index;
+                    return (
+                      <div key={index + ':' + item.text} className={cn(
+                        'flex items-start gap-2 rounded-md px-1.5 py-1 text-[11px] leading-4',
+                        current && item.status === 'open' && 'bg-[var(--status-info)]/8 text-foreground',
+                      )}>
+                        {item.status === 'done' ? (
+                          <Icon name="checkbox-circle" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-success)]" />
+                        ) : item.status === 'blocked' ? (
+                          <Icon name="error-warning" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-warning)]" />
+                        ) : (
+                          <span className={cn(
+                            'mt-1 size-2.5 shrink-0 rounded-full border border-muted-foreground/45',
+                            current && 'border-[var(--status-info)] bg-[var(--status-info)]/25',
+                          )} />
+                        )}
+                        <span className={cn(
+                          'min-w-0 flex-1',
+                          item.status === 'done' && 'text-muted-foreground line-through decoration-muted-foreground/40',
+                          item.status === 'blocked' && 'text-[var(--status-warning)]',
+                          current && item.status === 'open' && 'font-medium',
+                        )}>{item.text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap text-[11px] leading-4 text-muted-foreground">{blockGroups.plan.content}</p>
+              )}
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                  onClick={() => {
+                    setEditingBlock(blockGroups.plan!.label);
+                    setBlockDraft(blockGroups.plan!.content);
+                  }}
+                >
+                  <Icon name="edit" className="size-3" />
+                  {t('harness.blocks.edit')}
+                </button>
+              </div>
+            </>
+          )}
+        </HarnessOverviewSection>
+      ) : null}
+
+      {hasOutputs ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.outputs')}
+          icon="git-branch"
+          status={gitDiff.files > 0
+            ? t('harness.overview.outputFiles', { count: gitDiff.files })
+            : t('harness.overview.outputFiles', { count: pendingThreadDiff.files })}
+        >
+          <div className="space-y-2">
+            {gitStatus && gitStatus.files.length > 0 ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2 px-1.5 pb-0.5">
+                  <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {t('harness.overview.workspaceChanges')}
+                  </span>
+                  <span className="text-[9px] tabular-nums text-muted-foreground">
+                    {t('harness.overview.outputDiff', {
+                      files: gitDiff.files,
+                      insertions: gitDiff.insertions,
+                      deletions: gitDiff.deletions,
+                    })}
+                  </span>
+                </div>
+                {gitStatus.files.slice(0, 6).map((file) => {
+                  const marker = file.working_dir.trim() || file.index.trim() || 'M';
+                  const stats = gitStatus.diffStats?.[file.path];
                   return (
-                  <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
-                    <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : source.tool === 'materials' ? 'archive-stack' : source.tool === 'research_decide' ? 'scales-3' : isPdf ? 'file-image' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-                    {isPdf ? (
-                      <div className="min-w-0 flex-1">
-                        <button type="button" className="block w-full truncate text-left text-[11px] text-foreground hover:underline" onClick={openPdf} title={source.title}>{source.title}</button>
-                        <a href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[9px] text-muted-foreground hover:text-foreground" title={source.url}>{t('harness.sources.originalSource')}</a>
-                      </div>
-                    ) : (
-                      <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
-                        <span className="block truncate text-[11px] text-foreground">{source.title}</span>
-                        <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
-                      </a>
-                    )}
-                    {source.paperId ? (
-                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.paperId}>
-                        {source.provider}:{source.paperId}{source.relation ? ` · ${source.relation}` : ''}
-                      </span>
-                    ) : null}
-                    <button
-                    type="button"
-                    onClick={() => source.pinned ? unpinSource(source.id) : pinSource(source.id)}
-                    aria-label={t(source.pinned ? 'harness.sources.unpin' : 'harness.sources.pin')}
-                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100"
-                  >
-                    <Icon name={source.pinned ? 'pushpin-2-fill' : 'pushpin'} className="size-3" />
-                  </button>
-                    <button
-                    type="button"
-                    onClick={() => deleteSource(source.id)}
-                    aria-label={t('harness.sources.remove')}
-                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-[var(--status-error)] group-hover/source:opacity-100"
-                  >
-                    <Icon name="close" className="size-3" />
-                  </button>
-                  </div>
+                    <div key={file.path} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-interactive-hover/45">
+                      <span className="w-4 shrink-0 font-mono text-[10px] font-medium text-muted-foreground">{marker}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-foreground" title={file.path}>{file.path}</span>
+                      {stats ? (
+                        <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                          +{stats.insertions} −{stats.deletions}
+                        </span>
+                      ) : null}
+                    </div>
                   );
-                })()
-              ))}
-            </div>
-          </section>
-        ) : null}
-        {hasThreadRecords ? (
-          <section className="p-2" aria-label={t('harness.threads.title')}>
-            <div className="flex items-center justify-between gap-2 px-1 pb-1.5">
-              <h3 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.threads.title')}</h3>
+                })}
+                {gitStatus.files.length > 6 ? (
+                  <p className="px-1.5 text-[9px] text-muted-foreground">
+                    {t('harness.overview.moreItems', { count: gitStatus.files.length - 6 })}
+                  </p>
+                ) : null}
+                <div className="flex items-center justify-end gap-2 px-1.5 pt-1 text-[9px] text-muted-foreground">
+                  {fallbackCwd ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-1 hover:bg-interactive-hover hover:text-foreground"
+                      onClick={() => openContextSurface(fallbackCwd, 'git')}
+                    >
+                      {t('harness.overview.viewChanges')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {pendingThreadDiff.files > 0 ? (
+              <div className="rounded-lg border border-border/45 bg-background/35 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-medium text-foreground">{t('harness.overview.pendingThreadChanges')}</span>
+                  <span className="text-[9px] tabular-nums text-muted-foreground">
+                    {t('harness.overview.outputDiff', {
+                      files: pendingThreadDiff.files,
+                      insertions: pendingThreadDiff.insertions,
+                      deletions: pendingThreadDiff.deletions,
+                    })}
+                  </span>
+                </div>
+                <p className="mt-1 text-[9px] leading-4 text-muted-foreground">{t('harness.overview.pendingThreadChangesDescription')}</p>
+              </div>
+            ) : null}
+          </div>
+        </HarnessOverviewSection>
+      ) : null}
+
+      {hasThreadRecords ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.threads')}
+          icon="git-branch"
+          status={t('harness.overview.threadsSummary', {
+            active: threadSummary.active + threadSummary.attention + threadSummary.integrationPending,
+            completed: threadSummary.completed,
+          })}
+          attention={threadSummary.attention > 0}
+        >
+            <div className="flex items-center justify-end gap-2 pb-1.5">
               <button
                 type="button"
                 onClick={() => threadState.setIncludeArchived(!threadState.includeArchived)}
@@ -648,10 +788,8 @@ export const HarnessThreadsPanel: React.FC<{
                 {t(threadState.includeArchived ? 'harness.threads.hideArchived' : 'harness.threads.showArchived')}
               </button>
             </div>
-            {space ? (
+            {space && (space.status === 'over-budget' || space.status === 'low-free' || space.status === 'enospc') ? (
               <div className="mb-2 rounded-md border border-border/50 bg-background/40 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground">
-                <p>{t('harness.threads.space.title')}: {formatLogical(space.materializedLogicalBytes, space.status === 'unknown')}</p>
-                <p>{space.note}</p>
                 {space.status === 'over-budget' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.overBudget')}</p> : null}
                 {space.status === 'low-free' ? <p className="text-[var(--status-warning)]">{t('harness.threads.space.lowFree')}</p> : null}
                 {space.status === 'enospc' ? <p className="text-[var(--status-error)]">{t('harness.threads.space.enospc')}</p> : null}
@@ -704,75 +842,10 @@ export const HarnessThreadsPanel: React.FC<{
                     ? {entry.thread.waitingFor.text}
                   </p>
                 ) : null}
-                {(() => {
-                  const last = entry.thread.messages?.[entry.thread.messages.length - 1];
-                  if (!last) return null;
-                  const peer = last.from.kind === 'user'
-                    ? t('harness.threads.peer.user')
-                    : last.from.kind === 'session'
-                      ? t('harness.threads.peer.session')
-                      : last.from.id;
-                  return (
-                    <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground/80">
-                      {last.direction === 'in' ? '↓' : '↑'} {peer} · {t(last.kind === 'request' ? 'harness.threads.msg.request' : 'harness.threads.msg.inform')}
-                      {(last.status === 'held' || last.status === 'pending') ? ` · ${t('harness.threads.msg.held')}` : ''}
-                    </p>
-                  );
-                })()}
                 {entry.thread.deletion ? (
                   <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--status-warning)]">
                     {t('harness.threads.deleting')} · {entry.thread.deletion.phase}
                     {entry.thread.deletion.error ? ` · ${entry.thread.deletion.error}` : ''}
-                  </p>
-                ) : null}
-                {entry.thread.verification?.childChecks ? (
-                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
-                    {t('harness.threads.verification.child', { revision: String(entry.thread.verification.childChecks.resultRevision) })}
-                    {': '}
-                    {entry.thread.verification.childChecks.commands.length === 0
-                      ? t('harness.threads.verification.childEmpty')
-                      : entry.thread.verification.childChecks.commands
-                        .map((command) => t('harness.threads.verification.command', {
-                          code: command.exitCode === null ? '—' : String(command.exitCode),
-                          command: command.command,
-                        }))
-                        .join('; ')}
-                    {entry.thread.verification.childChecks.binding === 'uncertain' && entry.thread.verification.childChecks.bindingReason
-                      ? ` · ${t('harness.threads.verification.childUncertain', { reason: entry.thread.verification.childChecks.bindingReason })}`
-                      : ''}
-                  </p>
-                ) : null}
-                {entry.thread.integrationBinding ? (
-                  <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-                    {t('harness.threads.verification.merge')}
-                    {': '}
-                    {entry.thread.integrationBinding.valid === false
-                      ? t('harness.threads.previewStale')
-                      : entry.thread.integrationBinding.mergeReady
-                        ? t('harness.threads.state.merge-ready')
-                        : t('harness.threads.state.dirty')}
-                  </p>
-                ) : null}
-                {entry.thread.verification?.parentChecks ? (
-                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
-                    {t('harness.threads.verification.parent')}
-                    {': '}
-                    {entry.thread.verification.parentChecks.draftUnsaved
-                      ? t('harness.threads.verification.parentUnsaved')
-                      : entry.thread.verification.parentChecks.binding === 'not-recorded'
-                        ? t('harness.threads.verification.parentNone')
-                        : entry.thread.verification.parentChecks.note ?? entry.thread.verification.parentChecks.binding}
-                  </p>
-                ) : null}
-                {entry.thread.verification?.review && entry.thread.verification.review.status !== 'none' ? (
-                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
-                    {t('harness.threads.verification.review', { revision: String(entry.thread.verification.review.resultRevision) })}
-                    {': '}
-                    {entry.thread.verification.review.status === 'running'
-                      ? t('harness.threads.verification.reviewRunning')
-                      : entry.thread.verification.review.conclusion
-                        ?? entry.thread.verification.review.error
-                        ?? entry.thread.verification.review.status}
                   </p>
                 ) : null}
                 <div className="mt-1.5 flex items-center gap-2 text-[10px] tabular-nums text-muted-foreground/80">
@@ -780,18 +853,7 @@ export const HarnessThreadsPanel: React.FC<{
                   {entry.thread.diffStats && entry.thread.diffStats.files > 0 ? (
                     <span>Δ {entry.thread.diffStats.files} · +{entry.thread.diffStats.insertions} −{entry.thread.diffStats.deletions}</span>
                   ) : null}
-                  {occupancy ? (
-                    <span>{t('harness.threads.space.logical', { bytes: formatLogical(occupancy.materialized.logicalBytes, occupancy.materialized.unknown) })}</span>
-                  ) : null}
                 </div>
-                {occupancy && occupancy.keepReasons.length > 0 ? (
-                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted-foreground">
-                    {t('harness.threads.space.kept', { reason: occupancy.keepReasons.join('; ') })}
-                  </p>
-                ) : null}
-                {entry.thread.worktree?.retentionReason ? (
-                  <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
-                ) : null}
               </button>
               {!deletionPending && entry.thread.kind === 'implementation'
                 && (entry.thread.integration === 'dirty'
@@ -804,6 +866,83 @@ export const HarnessThreadsPanel: React.FC<{
                   onThread={(next) => threadState.merge({ thread: next, activeRun: entry.activeRun })}
                 />
               ) : null}
+              <details className="group/details border-t border-border/35">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-background/45 hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  <Icon name="arrow-right-s" className="size-3 transition-transform group-open/details:rotate-90" />
+                  <span>{t('harness.overview.runDetails')}</span>
+                  {occupancy ? (
+                    <span className="ml-auto tabular-nums text-[9px] text-muted-foreground/75">
+                      {t('harness.threads.space.logical', { bytes: formatLogical(occupancy.materialized.logicalBytes, occupancy.materialized.unknown) })}
+                    </span>
+                  ) : null}
+                </summary>
+                <div className="border-t border-border/30 bg-background/20 px-2.5 py-2">
+                  {(() => {
+                    const last = entry.thread.messages?.[entry.thread.messages.length - 1];
+                    if (!last) return null;
+                    const peer = last.from.kind === 'user'
+                      ? t('harness.threads.peer.user')
+                      : last.from.kind === 'session'
+                        ? t('harness.threads.peer.session')
+                        : last.from.id;
+                    return (
+                      <p className="mb-1.5 line-clamp-2 text-[10px] leading-4 text-muted-foreground/80">
+                        {last.direction === 'in' ? '↓' : '↑'} {peer} · {t(last.kind === 'request' ? 'harness.threads.msg.request' : 'harness.threads.msg.inform')}
+                        {(last.status === 'held' || last.status === 'pending') ? ` · ${t('harness.threads.msg.held')}` : ''}
+                      </p>
+                    );
+                  })()}
+                  {entry.thread.verification?.childChecks ? (
+                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                      {t('harness.threads.verification.child', { revision: String(entry.thread.verification.childChecks.resultRevision) })}: {' '}
+                      {entry.thread.verification.childChecks.commands.length === 0
+                        ? t('harness.threads.verification.childEmpty')
+                        : entry.thread.verification.childChecks.commands
+                          .map((command) => t('harness.threads.verification.command', {
+                            code: command.exitCode === null ? '—' : String(command.exitCode),
+                            command: command.command,
+                          }))
+                          .join('; ')}
+                    </p>
+                  ) : null}
+                  {entry.thread.integrationBinding ? (
+                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                      {t('harness.threads.verification.merge')}: {' '}
+                      {entry.thread.integrationBinding.valid === false
+                        ? t('harness.threads.previewStale')
+                        : entry.thread.integrationBinding.mergeReady
+                          ? t('harness.threads.state.merge-ready')
+                          : t('harness.threads.state.dirty')}
+                    </p>
+                  ) : null}
+                  {entry.thread.verification?.parentChecks ? (
+                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                      {t('harness.threads.verification.parent')}: {' '}
+                      {entry.thread.verification.parentChecks.draftUnsaved
+                        ? t('harness.threads.verification.parentUnsaved')
+                        : entry.thread.verification.parentChecks.binding === 'not-recorded'
+                          ? t('harness.threads.verification.parentNone')
+                          : entry.thread.verification.parentChecks.note ?? entry.thread.verification.parentChecks.binding}
+                    </p>
+                  ) : null}
+                  {entry.thread.verification?.review && entry.thread.verification.review.status !== 'none' ? (
+                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                      {t('harness.threads.verification.review', { revision: String(entry.thread.verification.review.resultRevision) })}: {' '}
+                      {entry.thread.verification.review.status === 'running'
+                        ? t('harness.threads.verification.reviewRunning')
+                        : entry.thread.verification.review.conclusion
+                          ?? entry.thread.verification.review.error
+                          ?? entry.thread.verification.review.status}
+                    </p>
+                  ) : null}
+                  {occupancy && occupancy.keepReasons.length > 0 ? (
+                    <p className="mb-1 text-[10px] leading-4 text-muted-foreground">
+                      {t('harness.threads.space.kept', { reason: occupancy.keepReasons.join('; ') })}
+                    </p>
+                  ) : null}
+                  {entry.thread.worktree?.retentionReason ? (
+                    <p className="mb-1 text-[10px] leading-4 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
+                  ) : null}
               {!deletionPending ? (
                 <HarnessThreadResultHistory
                   parentSessionId={parentSessionId}
@@ -968,12 +1107,140 @@ export const HarnessThreadsPanel: React.FC<{
                       : 'harness.threads.delete')}
                 </button>
               </div>
+                </div>
+              </details>
             </div>
           );
         })}
             </div>
-          </section>
-        ) : null}
+        </HarnessOverviewSection>
+      ) : null}
+      {webSources.length > 0 ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.sources')}
+          icon="global"
+          status={webSources.length}
+        >
+          <div className="space-y-1">
+              {[...webSources].sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.fetchedAt - left.fetchedAt).map((source) => (
+                (() => {
+                  const isPdf = Boolean(source.snapshotId && source.document?.kind === 'pdf');
+                  const openPdf = () => setActivePdfMaterial({
+                    sessionId: parentSessionId,
+                    title: source.title,
+                    snapshotId: source.snapshotId!,
+                    ...(source.sourceHash ? { sourceHash: source.sourceHash } : {}),
+                    originalUrl: source.url,
+                  });
+                  return (
+                  <div key={source.id} className="group/source flex items-start gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-interactive-hover">
+                    <Icon name={source.tool === 'websearch' ? 'search' : source.tool === 'research_search' ? 'book' : source.tool === 'materials' ? 'archive-stack' : source.tool === 'research_decide' ? 'scales-3' : isPdf ? 'file-image' : 'global'} className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                    {isPdf ? (
+                      <div className="min-w-0 flex-1">
+                        <button type="button" className="block w-full truncate text-left text-[11px] text-foreground hover:underline" onClick={openPdf} title={source.title}>{source.title}</button>
+                        <a href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[9px] text-muted-foreground hover:text-foreground" title={source.url}>{t('harness.sources.originalSource')}</a>
+                      </div>
+                    ) : (
+                      <a href={source.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1" title={source.url}>
+                        <span className="block truncate text-[11px] text-foreground">{source.title}</span>
+                        <span className="block truncate text-[9px] text-muted-foreground">{source.url}</span>
+                      </a>
+                    )}
+                    {source.paperId ? (
+                      <span className="block truncate text-[9px] text-muted-foreground/70" title={source.paperId}>
+                        {source.provider}:{source.paperId}{source.relation ? ` · ${source.relation}` : ''}
+                      </span>
+                    ) : null}
+                    <button
+                    type="button"
+                    onClick={() => source.pinned ? unpinSource(source.id) : pinSource(source.id)}
+                    aria-label={t(source.pinned ? 'harness.sources.unpin' : 'harness.sources.pin')}
+                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground group-hover/source:opacity-100"
+                  >
+                    <Icon name={source.pinned ? 'pushpin-2-fill' : 'pushpin'} className="size-3" />
+                  </button>
+                    <button
+                    type="button"
+                    onClick={() => deleteSource(source.id)}
+                    aria-label={t('harness.sources.remove')}
+                    className="rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-[var(--status-error)] group-hover/source:opacity-100"
+                  >
+                    <Icon name="close" className="size-3" />
+                  </button>
+                  </div>
+                  );
+                })()
+              ))}
+          </div>
+        </HarnessOverviewSection>
+      ) : null}
+      {memoryBlocks.length > 0 ? (
+        <HarnessOverviewSection
+          title={t('harness.overview.memory')}
+          icon="brain"
+          status={memoryBlocks.length}
+        >
+          <div className="space-y-2">
+            {memoryBlocks.map((block) => {
+              const editing = editingBlock === block.label;
+              const friendlyLabel = block.label === 'progress'
+                ? t('harness.overview.memoryProgress')
+                : block.label === 'decisions'
+                  ? t('harness.overview.memoryDecisions')
+                  : block.label;
+              return (
+                <div key={block.label} className="rounded-lg border border-border/45 bg-background/35 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">{friendlyLabel}</span>
+                    <button
+                      type="button"
+                      title={t('harness.blocks.edit')}
+                      aria-label={t('harness.blocks.edit')}
+                      onClick={() => {
+                        setEditingBlock(editing ? null : block.label);
+                        setBlockDraft(block.content);
+                      }}
+                      className="rounded p-0.5 text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                    >
+                      <Icon name={editing ? 'close' : 'edit'} className="size-3" />
+                    </button>
+                  </div>
+                  {editing ? (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        value={blockDraft}
+                        onChange={(event) => setBlockDraft(event.target.value)}
+                        className="min-h-24 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-4 text-foreground outline-none focus:border-primary"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button type="button" className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-interactive-hover" onClick={() => setEditingBlock(null)}>
+                          {t('harness.blocks.cancel')}
+                        </button>
+                        <button type="button" disabled={savingBlock} className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50" onClick={() => void saveBlock(block)}>
+                          {t('harness.blocks.save')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-1 whitespace-pre-wrap text-[10px] leading-4 text-muted-foreground">{block.content}</p>
+                  )}
+                  {!editing ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'workspace')}>
+                        {t('harness.knowledge.rememberWorkspace')}
+                      </button>
+                      <button type="button" disabled={knowledgeBusy !== null} className="rounded px-1.5 py-1 text-[9px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50" onClick={() => void rememberBlock(block, 'user')}>
+                        {t('harness.knowledge.rememberUser')}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </HarnessOverviewSection>
+      ) : null}
+
     </div>
   );
 
@@ -1011,24 +1278,53 @@ export const HarnessThreadsPanel: React.FC<{
         <details className="group shrink-0 border-b border-border/60">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
             <Icon name="arrow-right-s" className="size-3.5 transition-transform group-open:rotate-90" />
-            <span>{title ?? t('harness.context.title')}</span>
-            {itemCount ? <span className="ml-auto tabular-nums">{itemCount}</span> : null}
+            <span>{title ?? t('harness.overview.title')}</span>
+            <span className="ml-auto min-w-0 truncate text-[10px] text-muted-foreground/80">{overviewSummary}</span>
           </summary>
           <div className="max-h-[40dvh] overflow-auto">{content}</div>
         </details>
       ) : <>
-      <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
-          <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
-          <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">{itemCount}</span>
-        </div>
-        {content}
-      </aside>
-      <HarnessSessionStateTrigger count={itemCount} onOpen={() => setNarrowOpen(true)} />
+      {desktopCollapsed ? (
+        <aside className="hidden w-11 shrink-0 flex-col items-center border-l border-border/60 bg-[var(--surface-subtle)]/35 py-2 xl:flex" aria-label={t('harness.overview.title')}>
+          <button
+            type="button"
+            onClick={() => setDesktopCollapsed(false)}
+            className="relative flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            aria-label={t('harness.overview.expand')}
+            title={t('harness.overview.expand')}
+          >
+            <Icon name="stack" className="size-4" />
+            {activityCount > 0 ? (
+              <span className={cn(
+                'absolute -right-1 -top-1 min-w-4 rounded-full bg-muted px-1 text-center text-[8px] tabular-nums text-muted-foreground',
+                attentionCount > 0 && 'bg-[var(--status-warning)] text-white',
+              )}>{activityCount}</span>
+            ) : null}
+          </button>
+        </aside>
+      ) : (
+        <aside className="hidden w-80 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.overview.title')}>
+          <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+            <Icon name="stack" className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{t('harness.overview.title')}</span>
+            <button
+              type="button"
+              onClick={() => setDesktopCollapsed(true)}
+              className="rounded p-1 text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+              aria-label={t('harness.overview.collapse')}
+              title={t('harness.overview.collapse')}
+            >
+              <Icon name="arrow-right-s" className="size-3.5" />
+            </button>
+          </div>
+          {content}
+        </aside>
+      )}
+      <HarnessSessionStateTrigger count={activityCount} attention={attentionCount > 0} onOpen={() => setNarrowOpen(true)} />
       <MobileOverlayPanel
         open={narrowOpen}
         onClose={() => setNarrowOpen(false)}
-        title={t('harness.context.title')}
+        title={t('harness.overview.title')}
         className="h-[min(82dvh,720px)]"
         contentMaxHeightClassName="flex-1"
       >

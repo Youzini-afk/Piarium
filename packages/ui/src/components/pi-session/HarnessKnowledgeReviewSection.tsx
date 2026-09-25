@@ -15,14 +15,15 @@ export const HarnessKnowledgeReviewSection: React.FC<{
   suggestions: HarnessKnowledgeSuggestion[];
   drafts: Record<string, KnowledgeDraft>;
   busy: boolean;
+  embedded?: boolean;
   onDraftChange: (key: string, draft: KnowledgeDraft) => void;
   onAction: (suggestion: HarnessKnowledgeSuggestion, action: 'save' | 'accept' | 'dismiss') => void;
-}> = ({ suggestions, drafts, busy, onDraftChange, onAction }) => {
+}> = ({ suggestions, drafts, busy, embedded = false, onDraftChange, onAction }) => {
   const { t } = useI18n();
   if (suggestions.length === 0) return null;
   return (
-    <section className="border-b border-border/50 p-2" aria-label={t('harness.knowledge.title')}>
-      <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.knowledge.title')}</h3>
+    <section className={embedded ? '' : 'border-b border-border/50 p-2'} aria-label={t('harness.knowledge.title')}>
+      {!embedded ? <h3 className="px-1 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('harness.knowledge.title')}</h3> : null}
       <div className="space-y-2">
         {suggestions.map((suggestion) => {
           const key = harnessKnowledgeKey(suggestion);
@@ -31,7 +32,6 @@ export const HarnessKnowledgeReviewSection: React.FC<{
             <div key={key} className="rounded-lg border border-border/50 bg-background/45 p-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{t(`harness.knowledge.scope.${suggestion.scope}`)}</span>
-                <span className="text-[9px] text-muted-foreground">#{suggestion.id}</span>
               </div>
               <textarea
                 value={draft.content}
@@ -61,7 +61,7 @@ export const HarnessKnowledgeReviewSection: React.FC<{
                             : draft.supersedes.filter((id) => id !== candidate.id),
                         })}
                       />
-                      <span className="line-clamp-2">#{candidate.id} {candidate.content}</span>
+                      <span className="line-clamp-2">{candidate.content}</span>
                     </label>
                   ))}
                 </div>
