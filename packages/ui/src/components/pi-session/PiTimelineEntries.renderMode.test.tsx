@@ -110,6 +110,17 @@ describe('Pi timeline chat render mode', () => {
     expect(markup).toContain('group/thinking');
   });
 
+  test('does not render an intentional abort as a red assistant error', () => {
+    useUIStore.setState({ chatRenderMode: 'live' });
+    const markup = renderTimeline({
+      ...liveAssistant,
+      errorMessage: 'This operation was aborted',
+      stopReason: 'aborted',
+    });
+
+    expect(markup).not.toContain('This operation was aborted');
+  });
+
   test('live mode folds consecutive known read-only tools but keeps writes separate', () => {
     useUIStore.setState({ chatRenderMode: 'live' });
     const assistant: PiAssistantMessage = {

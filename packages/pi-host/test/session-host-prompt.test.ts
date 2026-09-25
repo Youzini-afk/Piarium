@@ -278,4 +278,62 @@ describe("SessionHost prompt streaming", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("acknowledges manual abort after signalling cancellation without waiting for idle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-abort-"));
+    const agentDir = join(root, "agent");
+    const faux = registerFauxProvider();
+    faux.setResponses([() => fauxAssistantMessage("unused")]);
+    const model = faux.getModel();
+    const configureServices = async (services: AgentSessionServices) => {
+      services.modelRuntime.registerProvider(model.provider, {
+        api: model.api,
+        baseUrl: model.baseUrl,
+        models: [{
+          api: model.api,
+          baseUrl: model.baseUrl,
+          contextWindow: model.contextWindow,
+          cost: model.cost,
+          id: model.id,
+          input: model.input,
+          maxTokens: model.maxTokens,
+          name: model.name,
+          reasoning: model.reasoning,
+        }],
+      });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+      return { model };
+    };
+    const host = new SessionHost({
+      agentDir,
+      configureServices,
+      emit: () => undefined,
+      projectTrustOverride: true,
+    });
+
+    try {
+      const snapshot = await host.create(root);
+      const session = host.session;
+      const mutableAgent = session.agent as unknown as { abort: () => void };
+      const mutableSession = session as unknown as { waitForIdle: () => Promise<void> };
+      const originalAgentAbort = mutableAgent.abort.bind(session.agent);
+      const originalWaitForIdle = mutableSession.waitForIdle.bind(session);
+      let abortSignals = 0;
+      mutableAgent.abort = () => { abortSignals += 1; };
+      mutableSession.waitForIdle = async () => {
+        throw new Error("SessionHost.abort must not wait for idle");
+      };
+      try {
+        assert.equal(await host.abort(snapshot.sessionId), false);
+        assert.equal(abortSignals, 1);
+      } finally {
+        mutableAgent.abort = originalAgentAbort;
+        mutableSession.waitForIdle = originalWaitForIdle;
+      }
+    } finally {
+      await host.dispose();
+      faux.unregister();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

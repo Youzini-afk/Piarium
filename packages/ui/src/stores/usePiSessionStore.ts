@@ -51,6 +51,7 @@ import {
   type PiTimelineViewState,
 } from '@/lib/pi-runtime/piTimelineScrollState';
 import { assistantMessageKey } from '@/lib/pi-runtime/usagePresentation';
+import { isPiAbortError } from '@/lib/pi-runtime/abort';
 
 export interface PiToolExecutionState {
   args: JsonValue;
@@ -261,6 +262,11 @@ const canonicalWorkspaceBinding = async (
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
 );
+
+const markAssistantAborted = (message: PiAssistantMessage): PiAssistantMessage => {
+  const { errorMessage: _errorMessage, ...rest } = message;
+  return { ...rest, stopReason: 'aborted' };
+};
 
 const sortSummaries = (summaries: SessionSummary[]): SessionSummary[] => (
   [...summaries].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -729,6 +735,7 @@ export const createPiSessionStore = (
   const previewRequests = new Map<string, Promise<SessionEntriesResult>>();
   const deletingSessionIds = new Set<string>();
   const deletedSessionIds = new Set<string>();
+  const manuallyAbortingSessionIds = new Set<string>();
   const statsGeneration = new Map<string, number>();
 
   const store = create<PiSessionStoreState>((set, get) => {
@@ -851,6 +858,7 @@ export const createPiSessionStore = (
         }
         case 'session.closed': {
           const { sessionId } = envelope.data;
+          manuallyAbortingSessionIds.delete(sessionId);
           if (get().currentSessionId === sessionId) beginSelectionIntent();
           set((state) => ({
             attentionBySession: clearAttention(state.attentionBySession, sessionId),
@@ -864,6 +872,7 @@ export const createPiSessionStore = (
         }
         case 'session.worker.exited': {
           const { expected, sessionId } = envelope.data;
+          manuallyAbortingSessionIds.delete(sessionId);
           set((state) => ({
             attentionBySession: expected || isPiSessionActivelyVisible(sessionId, state.currentSessionId)
               ? state.attentionBySession
@@ -878,6 +887,20 @@ export const createPiSessionStore = (
         }
         case 'agent.event': {
           const { sessionId, event } = envelope.data;
+          if (event.type === 'agent_start') manuallyAbortingSessionIds.delete(sessionId);
+          const manuallyAborting = manuallyAbortingSessionIds.has(sessionId);
+          if (
+            manuallyAborting
+            && (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')
+            && event.message.role === 'assistant'
+          ) {
+            // The abort signal has already been accepted locally. Ignore late
+            // provider chunks while Pi is unwinding so the UI stops at the
+            // exact point where the user pressed Stop instead of visibly
+            // continuing until agent_settled arrives.
+            return;
+          }
+          if (event.type === 'agent_settled') manuallyAbortingSessionIds.delete(sessionId);
           const attentionKind = piAgentEventAttentionKind(event);
           if (event.type === 'entry_appended') {
             entriesAppendedDuringRequest.get(entriesRequestKey(sessionId, 'branch'))?.add(event.entry.id);
@@ -1034,8 +1057,31 @@ export const createPiSessionStore = (
       ...initialFields(runtime.currentKey()),
 
       abort: async (sessionId) => {
-        const { result } = await request('agent.abort', { sessionId });
-        return result.aborted;
+        manuallyAbortingSessionIds.add(sessionId);
+        set((state) => ({
+          lastError: null,
+          records: upsertRecord(state.records, sessionId, (current) => ({
+            ...current,
+            ...(current.liveAssistant
+              ? { liveAssistant: markAssistantAborted(current.liveAssistant) }
+              : {}),
+            snapshot: updateSnapshot(current.snapshot, {
+              isCompacting: false,
+              isStreaming: false,
+              retryAttempt: 0,
+            }),
+          })),
+        }));
+        try {
+          const { result } = await request('agent.abort', { sessionId }, undefined, false);
+          if (!result.aborted) manuallyAbortingSessionIds.delete(sessionId);
+          return result.aborted;
+        } catch (error) {
+          if (isPiAbortError(error)) return true;
+          manuallyAbortingSessionIds.delete(sessionId);
+          commitError(runtime.currentKey(), error);
+          throw error;
+        }
       },
 
       compactSession: async (sessionId, customInstructions, expectedRuntimeKey) => {

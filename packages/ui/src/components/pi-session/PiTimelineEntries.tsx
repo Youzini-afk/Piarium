@@ -699,7 +699,7 @@ const AssistantMessage: React.FC<{
   }
   return <div className="max-w-full">
     {rendered}
-    {message.errorMessage && (
+    {message.errorMessage && message.stopReason !== 'aborted' && (
       <div className="mt-2 rounded-md bg-[var(--status-error)]/10 px-3 py-2 typography-meta text-[var(--status-error)]">
         {message.errorMessage}
       </div>

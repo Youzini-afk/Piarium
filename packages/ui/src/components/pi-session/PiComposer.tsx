@@ -60,6 +60,7 @@ import { insertPiComposerMention } from './piComposerMentions';
 import { PiComposerAgentControl } from './PiComposerAgentControl';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
+import { isPiAbortError } from '@/lib/pi-runtime/abort';
 import { projectPiComposerActions } from './piComposerActions';
 import type { WorkFocusId } from '@varin/protocol';
 import { PiWorkFocusControl } from './PiWorkFocusControl';
@@ -384,7 +385,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     try {
       await onAbort();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      if (!isPiAbortError(error)) toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setAborting(false);
     }

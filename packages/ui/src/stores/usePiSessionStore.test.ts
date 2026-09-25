@@ -914,6 +914,86 @@ describe('Pi session store', () => {
     expect(store.getState().attentionBySession).toEqual({});
   });
 
+  test('manual abort freezes visible assistant output before the remote abort request settles', async () => {
+    const runtime = new FakeRuntime();
+    const abortGate = deferred<{ aborted: boolean }>();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return abortGate.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-manual-abort';
+
+    runtime.event('session.snapshot', {
+      ...snapshot(sessionId),
+      busy: true,
+      isStreaming: true,
+    }, sessionId);
+    runtime.event('agent.event', {
+      event: {
+        message: assistant('visible before stop', 'pending'),
+        type: 'message_start',
+      },
+      sessionId,
+    }, sessionId);
+
+    const pendingAbort = store.getState().abort(sessionId);
+    await flushAsync();
+
+    const immediatelyStopped = store.getState().records[sessionId];
+    expect(immediatelyStopped?.liveAssistant?.content).toEqual([{ text: 'visible before stop', type: 'text' }]);
+    expect(immediatelyStopped?.liveAssistant?.stopReason).toBe('aborted');
+    expect(immediatelyStopped?.liveAssistant?.errorMessage).toBeUndefined();
+    // Keep the session busy until Pi really settles so a second prompt cannot
+    // race the run that is still unwinding, but stop its visible streaming now.
+    expect(immediatelyStopped?.snapshot?.busy).toBe(true);
+    expect(immediatelyStopped?.snapshot?.isStreaming).toBe(false);
+
+    runtime.event('agent.event', {
+      event: {
+        message: assistant('late provider chunk', 'pending'),
+        type: 'message_update',
+        update: { contentIndex: 0, delta: ' late provider chunk', type: 'text_delta' },
+      },
+      sessionId,
+    }, sessionId);
+    expect(store.getState().records[sessionId]?.liveAssistant?.content).toEqual([
+      { text: 'visible before stop', type: 'text' },
+    ]);
+
+    abortGate.resolve({ aborted: true });
+    expect(await pendingAbort).toBe(true);
+
+    runtime.event('agent.event', {
+      event: positionedAgentEvent({ type: 'agent_settled' }),
+      sessionId,
+    }, sessionId);
+    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(false);
+  });
+
+  test('treats an AbortError from the stop request as cancellation rather than a user-visible failure', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') throw new DOMException('This operation was aborted', 'AbortError');
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-abort-error';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, isStreaming: true }, sessionId);
+    runtime.event('agent.event', {
+      event: { message: assistant('partial', 'pending'), type: 'message_start' },
+      sessionId,
+    }, sessionId);
+
+    expect(await store.getState().abort(sessionId)).toBe(true);
+    expect(store.getState().lastError).toBeNull();
+    expect(store.getState().records[sessionId]?.liveAssistant?.stopReason).toBe('aborted');
+  });
+
   test('executes extension commands through the active Pi session', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
