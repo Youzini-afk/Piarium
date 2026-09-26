@@ -1031,7 +1031,9 @@ describe("session e2e — context preparation chain", () => {
         harness: { context: { preparationWaterline: 0.5 } },
       }), "utf8");
       await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 50_000, maxTokens: 800, reasoning: true }] });
+      // Leave the first two turns below capacity and make the third cross it
+      // despite platform-dependent system-prompt path lengths.
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 44_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;

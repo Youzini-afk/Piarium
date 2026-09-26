@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -39,6 +39,17 @@ const serviceContext = (sessionId: string, workspaceId: string): HarnessServiceC
 const hosts: Array<ReturnType<typeof createHarnessServiceHost>> = [];
 const terminals: Array<ReturnType<typeof createIsolatedTerminalSessionApi>> = [];
 const dirs: string[] = [];
+
+// Windows runners may report the same directory through an 8.3 alias or its
+// long name. Assert the directory identity, which is what shell cwd promises.
+const expectCwd = (result: unknown, expected: string): void => {
+  const cwd = (result as { cwd?: unknown }).cwd;
+  expect(typeof cwd).toBe("string");
+  const actual = statSync(cwd as string, { bigint: true });
+  const target = statSync(expected, { bigint: true });
+  expect(actual.isDirectory()).toBe(true);
+  expect({ dev: actual.dev, ino: actual.ino }).toEqual({ dev: target.dev, ino: target.ino });
+};
 
 const createHost = (
   options: Parameters<typeof createHarnessServiceHost>[0],
@@ -181,11 +192,15 @@ describe("production shell assembly", () => {
     expect(await run("export VARIN_TEST_KEEP=retained; cat <<'EOF'\nheredoc-marker\nEOF"))
       .toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("heredoc-marker") });
     await host.workContextSelect((await host.resolveActor(actor("session-context")))!, { path: "second", expectedRevision: 0 });
-    expect(await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd'))
-      .toMatchObject({ kind: "completed", exitCode: 0, cwd: realpathSync(second), stdout: expect.stringContaining("retained") });
-    expect(await run("cd nested # tail comment"))
-      .toMatchObject({ kind: "completed", exitCode: 0, cwd: realpathSync(join(second, "nested")) });
-    expect(await run("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
+    const retained = await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd');
+    expect(retained).toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("retained") });
+    expectCwd(retained, second);
+    const nested = await run("cd nested # tail comment");
+    expect(nested).toMatchObject({ kind: "completed", exitCode: 0 });
+    expectCwd(nested, join(second, "nested"));
+    const pwd = await run("pwd");
+    expect(pwd).toMatchObject({ kind: "completed" });
+    expectCwd(pwd, join(second, "nested"));
     const syntax = await run("if then");
     expect(syntax.kind).toBe("completed");
     if (syntax.kind === "completed") expect(syntax.exitCode).not.toBe(0);
@@ -229,16 +244,24 @@ describe("production shell assembly", () => {
     await host.workContextSelect(oldActor, { path: "second", expectedRevision: 0 });
     releaseMaterialization();
 
-    expect(await acceptedBeforeSelect).toMatchObject({ kind: "completed", cwd: realpathSync(first) });
+    const beforeSelect = await acceptedBeforeSelect;
+    expect(beforeSelect).toMatchObject({ kind: "completed" });
+    expectCwd(beforeSelect, first);
 
     const runAtCurrentContext = async (command: string) => {
       const ctx = serviceContext("session-anchor-admission", "ws-anchor-admission");
       ctx.actor = (await host.resolveActor(actor("session-anchor-admission")))!;
       return createShellExecService(host).handle({ command, waitMs: 15_000 }, ctx);
     };
-    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(second) });
-    expect(await runAtCurrentContext("cd nested")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
-    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
+    const selected = await runAtCurrentContext("pwd");
+    expect(selected).toMatchObject({ kind: "completed" });
+    expectCwd(selected, second);
+    const nested = await runAtCurrentContext("cd nested");
+    expect(nested).toMatchObject({ kind: "completed" });
+    expectCwd(nested, join(second, "nested"));
+    const pwd = await runAtCurrentContext("pwd");
+    expect(pwd).toMatchObject({ kind: "completed" });
+    expectCwd(pwd, join(second, "nested"));
   }, 45_000);
 
   nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
@@ -286,8 +309,9 @@ describe("production shell assembly", () => {
     expect(await supervisor.exec("if (", { waitMs: 10_000 }))
       .toMatchObject({ kind: "completed", exitCode: 1 });
     deleteSelectedCwd = true;
-    expect(await supervisor.exec("Set-Content -LiteralPath marker.txt -Value wrong", { cwd: vanished, waitMs: 10_000 }))
-      .toMatchObject({ kind: "completed", exitCode: 1, cwd: realpathSync(workspace) });
+    const missingCwd = await supervisor.exec("Set-Content -LiteralPath marker.txt -Value wrong", { cwd: vanished, waitMs: 10_000 });
+    expect(missingCwd).toMatchObject({ kind: "completed", exitCode: 1 });
+    expectCwd(missingCwd, workspace);
     expect(existsSync(join(workspace, "marker.txt"))).toBe(false);
     if (first.kind === "completed") expect(first.stdout).toContain("varin-powershell-one");
     if (second.kind === "completed") expect(second.stdout).toContain("varin-powershell-two");

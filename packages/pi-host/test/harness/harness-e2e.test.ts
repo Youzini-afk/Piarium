@@ -286,23 +286,30 @@ describe("harness e2e integration", () => {
       const runtimeShellMatch = transcript.match(/recovered runtime shell: (sh_\d+)/);
       const shellId = accepted.kind === "background" ? acceptedHandle : runtimeShellMatch?.[1];
       assert.ok(shellId && /^sh_\d+$/u.test(shellId), `get_output should expose the final runtime shell identity: ${transcript}`);
-      assert.match(transcript, /done/, "the initial snapshot or incremental reads must contain the completed output");
-      const incrementalOutput = reads.find((read) => /done/.test(read));
-      if (incrementalOutput) {
-        assert.match(incrementalOutput, /\+\d+ bytes since last read/s, `the incremental read should include only new bytes: got "${incrementalOutput}"`);
+      // The echoed command contains the word "done" before Node prints it.
+      // Match the actual output line, not the submitted command text.
+      const completedLine = /(?:^|\r?\n)done(?:\r?\n|$)/;
+      assert.match(transcript, completedLine, "the initial snapshot or incremental reads must contain the completed output");
+      const completedReadIndex = reads.findIndex((read) => completedLine.test(read));
+      if (completedReadIndex >= 0) {
+        const completedRead = reads[completedReadIndex]!;
+        assert.match(completedRead, completedReadIndex === 0
+          ? /initial read|\+\d+ bytes since last read/s
+          : /\+\d+ bytes since last read/s,
+        `the completed output must use the correct read baseline: got "${completedRead}"`);
       } else {
-        assert.match(bgText, /done/, "output absent from incremental reads must already be in the background snapshot");
+        assert.match(bgText, completedLine, "output absent from incremental reads must already be in the background snapshot");
       }
       assert.match(outputText, /exited 0/s, `the final observation must report the real exit state: got "${outputText}"`);
       const runtimeBaseline = await executeTool(getOutputTool, { handle: shellId });
-      assert.match(runtimeBaseline, /done/, `the recovered runtime shell must yield its full output: ${runtimeBaseline}`);
+      assert.match(runtimeBaseline, completedLine, `the recovered runtime shell must yield its full output: ${runtimeBaseline}`);
       assert.match(runtimeBaseline, /exited 0/s, `the recovered runtime shell must report the actual exit: ${runtimeBaseline}`);
       const unchanged = await executeTool(getOutputTool, { handle: acceptedHandle });
       assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
       await bridge.request("context.retained", { retainedObservationRefs: [], retainedGit: false });
       const reset = await executeTool(getOutputTool, { handle: acceptedHandle });
       assert.match(reset, /initial read.*exited 0/s, `compaction should restore a full shell baseline with its exit state: got "${reset}"`);
-      assert.match(reset, /done/, `the reset baseline should contain the complete shell output: got "${reset}"`);
+      assert.match(reset, completedLine, `the reset baseline should contain the complete shell output: got "${reset}"`);
     } finally {
       await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
