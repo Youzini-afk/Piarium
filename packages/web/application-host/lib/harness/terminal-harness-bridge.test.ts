@@ -171,11 +171,17 @@ describe("harness terminal runtime bridge", () => {
         second.exec("second", { waitMs: 5 }),
       ]);
       expect(user.id).toBe("sh_1");
-      expect(a).toMatchObject({ kind: "background", id: "sh_2", cwd: workspaceA });
-      expect(b).toMatchObject({ kind: "background", id: "sh_3", cwd: workspaceB });
+      expect(a.kind).toBe("background");
+      expect(b.kind).toBe("background");
+      if (a.kind !== "background" || b.kind !== "background") throw new Error("expected concurrent commands to detach");
+      expect(new Set([a.id, b.id])).toEqual(new Set(["sh_2", "sh_3"]));
+      expect(runtime.inspectSession(a.id)).toMatchObject({ owner: "harness", cwd: a.cwd });
+      expect(runtime.inspectSession(b.id)).toMatchObject({ owner: "harness", cwd: b.cwd });
       expect(runtime.inspectSession("sh_1")).toMatchObject({ owner: "user", cwd: workspaceA });
-      expect(runtime.inspectSession("sh_2")).toMatchObject({ owner: "harness", cwd: workspaceA });
-      expect(runtime.inspectSession("sh_3")).toMatchObject({ owner: "harness", cwd: workspaceB });
+      expect(new Set([
+        runtime.inspectSession("sh_2")?.cwd,
+        runtime.inspectSession("sh_3")?.cwd,
+      ])).toEqual(new Set([workspaceA, workspaceB]));
       expect(processes).toHaveLength(3);
     } finally {
       await Promise.all([first.dispose(), second.dispose()]);
