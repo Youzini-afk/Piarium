@@ -1,6 +1,6 @@
 # Agent 运行时可靠性与多项目工作区实施计划
 
-Status: accepted implementation plan; RR0–RR6 pending; this document does not claim implementation or runtime verification
+Status: accepted implementation plan; RR0–RR6 已全部实施（wired），真实平台/打包纵切边界在 status 表 RR6 行如实记录；交付事实以 docs/agent-harness-status.md 为准
 
 Last updated: 2026-09-26
 

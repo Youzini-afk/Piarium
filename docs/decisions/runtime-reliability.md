@@ -51,3 +51,11 @@
 考虑过的替代：整段放行保留地址（明确禁止，安全旁路）；让用户关代理（非产品行为）；在 `checkSsrf` 保留 DNS 预检（查的与连的不是同一地址，DNS rebinding 可绕）；要求 Electron 系统代理接管（Node 进程内 fetch 不可见系统代理）。
 影响：`packages/web` 增 `undici@7.29.1` 依赖；`egress.ts`/`ssrf-policy.ts`/`web-fetch.ts`/`index.ts`；protocol 增 `FetchErrorClass`、`NetworkDiagnoseParams/Result`、`network.diagnose` 方法；pi-host 增 `network_diag` 工具并渲染 `errorClass`。边界：SOCKS 代理明确拒绝为 unsupported scheme（如实报告而非悄悄直连）；Electron 渲染层/系统代理不在此范围；真实 fake-IP 环境纵切留给 RR6。
 状态：已实施
+
+### D-334 · 2026-09-26 · RR6
+类型：验证与收口
+决定：跨层故障注入按"能真则真"补齐——`gateway.test.ts` 新增用例用真 `ws` 服务器、`WebSocketRuntimeTransport` 与 `PiRuntimeClient` 建立真实握手，在 `session.list` 在飞时 `socket.terminate()` 拔掉线缆：pending 请求必须落到 `PiRuntimeAmbiguousRequestError`（响应可能丢失，不冒充成功也非干净失败）、`onConnectionLost` 必须触发、死 client 拒绝后续请求、同一网关上的新 client 立即恢复——这正是 UI 监督器驱动的重连+权威重同步路径在真实传输层的可行性证据。打包安装、Electron env 代理、真实 fake-IP 链路、远端 CI 与付费环境在当前机器无验证手段，status 中逐项标为未测而非笼统全绿。
+原因：RR1–RR5 各层已分别有 FakeRuntime/真 shell/真 CONNECT stub/真 kernel 的层级证据，但"传输断→client 感知→重连可用"缺一个真实线缆上的联合验收用例；同时计划要求未测边界明确记录。
+考虑过的替代：搭全 Host+Pi+UI 的端到端断线编排（投入远超剩余预算且与既有层级证据重复大半）；把 MemoryTransport 断开用例当跨层证据（不含真实 socket 语义）。
+影响：`packages/web` devDep 增 `@varin/runtime-client`（workspace）；`gateway.test.ts` 增 1 个真 socket 用例（7/7 绿）；status RR6 行与 plan Status 头更新为已实施+未测边界。
+状态：已实施

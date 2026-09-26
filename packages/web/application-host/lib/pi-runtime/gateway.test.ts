@@ -14,6 +14,7 @@ import {
   type PiRuntimeBrokerEvent,
 } from '@varin/runtime-broker';
 import { WebSocket } from 'ws';
+import { PiRuntimeAmbiguousRequestError, PiRuntimeClient, WebSocketRuntimeTransport } from '@varin/runtime-client';
 import { createPiRuntimeGateway, PI_RUNTIME_WS_PATH } from './gateway.js';
 
 const active: Array<() => Promise<void>> = [];
@@ -235,5 +236,57 @@ describe('Pi runtime gateway', () => {
 
     expect(await responsePromise).toMatchObject({ id: 'large-list', ok: true, result: [] });
     socket.close();
+  });
+
+  it("carries a real client through a killed socket: ambiguous pending, connection-lost signal, reconnect resume", async () => {
+    const { broker, url } = await setup();
+
+    const openClient = async () => {
+      let lost: Error | undefined;
+      let liveSocket: WebSocket | undefined;
+      const transport = new WebSocketRuntimeTransport({
+        url,
+        webSocketFactory: (socketUrl: string) => {
+          liveSocket = new WebSocket(socketUrl, { headers: { Origin: 'http://127.0.0.1' } });
+          return liveSocket as never;
+        },
+      });
+      const client = new PiRuntimeClient({
+        transport,
+        onConnectionLost: (error) => { lost = error ?? new Error('transport closed'); },
+      });
+      await client.connect();
+      const hs = await client.request('host.handshake', {
+        clientName: 'gateway-test',
+        clientVersion: '0.1.0',
+        mode: 'test',
+        protocolVersions: [VARIN_PROTOCOL_VERSION],
+      });
+      expect(hs).toMatchObject({ protocolVersion: VARIN_PROTOCOL_VERSION });
+      return { client, wasLost: () => lost !== undefined, kill: () => liveSocket?.terminate() };
+    };
+
+    // First connection: keep session.list in-flight, then kill the wire.
+    let hangList = true;
+    broker.listSessions = () => (hangList ? new Promise<never>(() => {}) : Promise.resolve([]));
+    const first = await openClient();
+    const pending = first.client.request('session.list', {}, 15_000);
+    const pendingOutcome = pending.then(
+      () => ({ resolved: true as const }),
+      (error: unknown) => ({ resolved: false as const, error }),
+    );
+    first.kill();
+    const outcome = await pendingOutcome;
+    expect(outcome.resolved).toBe(false);
+    expect(!outcome.resolved && outcome.error instanceof PiRuntimeAmbiguousRequestError).toBe(true);
+    expect(first.wasLost()).toBe(true);
+    // A dead client must not silently keep serving requests.
+    await expect(first.client.request('session.list', {})).rejects.toThrow(/closed|not connected/i);
+
+    // The reconnect path the UI supervisor drives: new transport + client on
+    // the same gateway resumes requests without replaying the killed one.
+    hangList = false;
+    const second = await openClient();
+    await expect(second.client.request('session.list', {})).resolves.toEqual([]);
   });
 });

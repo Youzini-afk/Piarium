@@ -112,7 +112,6 @@
   },
   "devDependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@varin/ui": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.0",
@@ -128,7 +127,10 @@
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "@types/yazl": "^3.3.1",
+    "@varin/runtime-client": "workspace:*",
+    "@varin/ui": "workspace:*",
     "@vitejs/plugin-react": "^6.1.1",
+    "better-sqlite3": "^13.0.3",
     "eslint": "^10.10.0",
     "nodemon": "^3.1.7",
     "supertest": "^7.2.2",
@@ -140,8 +142,7 @@
     "vite": "^8.3.0",
     "vite-plugin-pwa": "^1.0.3",
     "vitest": "^5.0.0",
-    "workbox-window": "^7.4.1",
-    "better-sqlite3": "^13.0.3"
+    "workbox-window": "^7.4.1"
   },
   "files": [
     "dist",
