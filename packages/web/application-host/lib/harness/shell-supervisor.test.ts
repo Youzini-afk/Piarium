@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { discoverShells } from "./shell-discovery.js";
 import {
   createShellSupervisor,
   selectInterpreter,
