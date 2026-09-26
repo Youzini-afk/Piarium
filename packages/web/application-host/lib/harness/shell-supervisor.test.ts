@@ -939,3 +939,147 @@ describe("shell-supervisor disposal protection", () => {
     }
   });
 });
+
+
+describe("RR3 command payload framing and execution identity", () => {
+  /** A fake PTY that records writes and answers a framed command. */
+  const fakeShell = (onCommand?: (commandWrite: string) => string[]) => {
+    const dataHandlers = new Set<(data: string) => void>();
+    const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const writes: string[] = [];
+    const process: PtyProcess = {
+      kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
+      onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+      onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+      resize: () => undefined,
+      write: (data) => {
+        writes.push(data);
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
+        if (ready) {
+          queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}
+`); });
+          return;
+        }
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+        if (!token) return;
+        const lines = onCommand?.(data) ?? ["payload-output", 0];
+        queueMicrotask(() => {
+          // Real shells stream output in chunks: begin + body arrive before
+          // the cwd/exit sentinels so the foreground command stays live while
+          // observing output.
+          for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\n${String(lines[0])}\n`);
+        });
+        queueMicrotask(() => {
+          for (const handler of dataHandlers) {
+            handler(`__VARIN_SENTINEL_${token}:C:/workspace\n` + (lines[1] === undefined ? "" : `__VARIN_SENTINEL_${token}:E:${lines[1]}\n`));
+          }
+        });
+      },
+    };
+    return { process, writes };
+  };
+
+  it("sends the user command as a self-contained eval payload, not inside the control syntax", async () => {
+    const { process, writes } = fakeShell();
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "framing",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      // A heredoc without a trailing newline followed by a tail comment — the
+      // old `{ …; }` interpolation glued the epilogue onto the delimiter line.
+      const heredoc = "cat <<EOF\nbody\nEOF # done";
+      await supervisor.exec(heredoc, { waitMs: 1000 });
+      const commandWrite = writes.find((write) => write.includes(":B"));
+      expect(commandWrite).toBeDefined();
+      expect(commandWrite).toContain("eval $'");
+      expect(commandWrite).not.toContain("{ cat <<EOF");
+      // The payload keeps the literal heredoc inside the quoted unit, with a
+      // real newline appended inside the eval string.
+      expect(commandWrite).toContain("cat <<EOF\\nbody\\nEOF # done\\n");
+      // Control framing lives outside the payload on the same line.
+      expect(commandWrite).toContain(":B'; eval $'");
+      expect(commandWrite).toContain("__ec=$?");
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
+  });
+
+  it("reports an unsettled accepted execution as running, not 'not found'", async () => {
+    // Command never finishes — the accepted toolCallId still resolves to the
+    // live foreground output.
+    const { process } = fakeShell(() => ["partial-output", undefined as never]);
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "pending-read",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const pending = supervisor.exec("long running", { waitMs: 60_000, toolCallId: "call_live" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const slice = await supervisor.read("call_live");
+      expect(slice).toMatchObject({ running: true, command: "long running" });
+      expect(slice.text).toContain("partial-output");
+      // Simulated lost receipt: kill the process mid-flight; the same
+      // toolCallId still returns the real terminal exit afterwards.
+      process.kill();
+      const result = await pending;
+      expect(result).toMatchObject({ kind: "completed", exitCode: 0 });
+      const after = await supervisor.read("call_live");
+      expect(after).toMatchObject({ running: false, exitCode: 0 });
+      expect(after.text).toContain("partial-output");
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
+  });
+
+  it("reports a known accepted id that spawn-failed instead of 'not found'", async () => {
+    const { process } = fakeShell();
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "spawn-failed-read",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const result = await supervisor.exec("echo x", { waitMs: 1000, cwd: "/no/such/dir/here", toolCallId: "call_bad" });
+      expect(result.kind).toBe("spawn-failed");
+      const slice = await supervisor.read("call_bad");
+      expect(slice).toMatchObject({ running: false, spawnFailed: "invalid-cwd", eof: true });
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
+  });
+
+  it("stamps stage timing on completed results", async () => {
+    const { process } = fakeShell();
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "timing",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const result = await supervisor.exec("echo hi", { waitMs: 1000 });
+      expect(result).toMatchObject({ kind: "completed", exitCode: 0 });
+      const timing = result.kind === "completed" ? result.timing : undefined;
+      expect(timing).toBeDefined();
+      expect(timing!.acceptedAt).toBeLessThanOrEqual(timing!.sentAt!);
+      expect(timing!.sentAt).toBeLessThanOrEqual(timing!.endedAt!);
+      expect(timing!.firstOutputAt).toBeDefined();
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+    }
+  });
+});

@@ -26,7 +26,7 @@ import { registerHarnessServices } from "../../../web/application-host/lib/harne
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createBashTool } from "../../src/harness/bash-tool.js";
 import { createGrepTool } from "../../src/harness/grep-tool.js";
-import { createDiagnosticsTool, createGetOutputTool } from "../../src/harness/output-tools.js";
+import { createDiagnosticsTool, createGetOutputTool, createWriteToProcessTool } from "../../src/harness/output-tools.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { DiagnosticItem } from "@varin/protocol";
 import type { DiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-service.js";
@@ -145,6 +145,72 @@ describe("harness e2e integration", () => {
       const pwdLine = afterCd.split("\n").find((l) => l.includes("packages"));
       assert.ok(pwdLine, `pwd output should contain a line with "packages": got "${afterCd}"`);
       assert.ok(pwdLine!.trim().endsWith("packages"), `pwd path should end with "packages": got "${pwdLine!.trim()}"`);
+    } finally {
+      await dispose();
+      try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
+    }
+  });
+
+  it("RR3: heredoc without trailing newline, syntax error recovery, and lost-receipt output recovery", { timeout: 60_000 }, async () => {
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
+    try {
+      const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
+      const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
+
+      // E02: a heredoc whose delimiter is the last line with no trailing
+      // newline must terminate — the payload is a quoted unit, not inline
+      // text merged with the epilogue.
+      const heredoc = await executeTool(bashTool, {
+        command: "cat <<'EOF'\nline one\nline two\nEOF",
+        waitMs: 15_000,
+      });
+      assert.match(heredoc, /line one[\s\S]*line two/, `heredoc output: ${heredoc}`);
+      assert.match(heredoc, /\[exit 0\]/, `heredoc must complete: ${heredoc}`);
+
+      // E03: a syntax error reports its real code and does not poison the
+      // next command.
+      const broken = await executeTool(bashTool, {
+        command: "if true; then echo unterminated",
+        waitMs: 15_000,
+      });
+      assert.match(broken, /\[exit (1|2)\]/, `syntax error reports a non-zero exit: ${broken}`);
+      const healthy = await executeTool(bashTool, { command: "echo still-alive", waitMs: 15_000 });
+      assert.match(healthy, /still-alive/, `shell survives a syntax error: ${healthy}`);
+      assert.match(healthy, /\[exit 0\]/);
+
+      // Tail comment and quoting do not leak into the epilogue.
+      const comment = await executeTool(bashTool, { command: "echo kept # trailing comment", waitMs: 15_000 });
+      assert.match(comment, /kept/);
+      assert.match(comment, /\[exit 0\]/);
+
+      // E04/7.2: simulate a lost receipt — a command accepted under its
+      // toolCallId can still be read back with the real exit code.
+      const callId = `test-call-lost-${++toolCallSequence}`;
+      const execResult = await bashTool.execute(callId, { command: "echo recovered-output", waitMs: 15_000 } as never, undefined, undefined, undefined as never);
+      const execText = (execResult as { content: Array<{ text: string }> }).content.map((c) => c.text).join("\n");
+      assert.match(execText, /\[exit 0\]/, `accepted command completes: ${execText}`);
+      const recovered = await executeTool(getOutputTool, { handle: callId });
+      assert.match(recovered, /recovered-output/, `the toolCallId re-reads real output: ${recovered}`);
+      assert.match(recovered, /exited 0/, `the toolCallId carries the real exit state: ${recovered}`);
+
+      // stdin still reaches the payload: the command blocks on `read`, goes
+      // background, then write_to_process delivers the line it consumes.
+      const writeTool = createWriteToProcessTool(bridge, SESSION_ID);
+      const waiting = await executeTool(bashTool, {
+        command: "read -r answer; echo got-$answer",
+        waitMs: 500,
+      });
+      const stdinShell = waiting.match(/sh_\w+/)?.[0];
+      assert.ok(stdinShell, `read should go background with an sh_ id: ${waiting}`);
+      await executeTool(writeTool, { shellId: stdinShell, text: "hello-stdin\n" });
+      let stdinObservation = "";
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        stdinObservation = await executeTool(getOutputTool, { handle: stdinShell });
+        if (/exited/.test(stdinObservation)) break;
+      }
+      assert.match(stdinObservation, /got-hello-stdin/, `stdin reached the payload: ${stdinObservation}`);
+      assert.match(stdinObservation, /exited 0/, `read exits 0 after input: ${stdinObservation}`);
     } finally {
       await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

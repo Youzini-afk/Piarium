@@ -71,6 +71,21 @@ export interface OutputRef {
 
 export type ShellOutputKind = "vitest" | "tsc" | "eslint" | "git" | "package-manager" | "generic";
 
+/**
+ * Stage timestamps for one accepted shell command. `acceptedAt` is when the
+ * Host admitted the execution; `sentAt` when the framed payload reached the
+ * shell; `firstOutputAt` the first observed output byte; `endedAt` the real
+ * terminal event or the moment the call detached into a background handle.
+ * Consumers must treat `waitMs` as a post-accept observation budget: the gap
+ * between `acceptedAt` and `sentAt` is spawn/queue time, not command runtime.
+ */
+export interface ShellExecTiming {
+  acceptedAt: number;
+  sentAt?: number;
+  firstOutputAt?: number;
+  endedAt?: number;
+}
+
 export interface ShellOutputOrganization {
   kind: ShellOutputKind;
   omitted: boolean;
@@ -92,6 +107,7 @@ export interface ShellExecResultCompleted {
   toolCallId?: string;
   executionId?: string;
   target?: string;
+  timing?: ShellExecTiming;
 }
 
 export interface ShellExecResultBackground {
@@ -107,6 +123,7 @@ export interface ShellExecResultBackground {
   toolCallId?: string;
   executionId?: string;
   target?: string;
+  timing?: ShellExecTiming;
 }
 
 export interface ShellExecResultSpawnFailed {
@@ -133,6 +150,12 @@ export interface ShellReadResult extends OutputSlice {
   /** Actual runtime shell identity when `id` was a recovery alias. */
   shellId?: string;
   target?: string;
+  /**
+   * The queried identity resolves to an accepted execution that never ran
+   * (spawn failure, disposal). The value carries the failure reason; the
+   * output slice stays empty. Distinct from "not found" (unknown identity).
+   */
+  spawnFailed?: string;
   observation?: {
     mode: "incremental";
     first: boolean;
@@ -1338,6 +1361,12 @@ export interface HarnessServiceMap {
   "context.select": { params: ContextSelectParams; result: ContextGetResult };
   "context.scope": { params: ContextScopeParams; result: ContextGetResult };
   "context.reset": { params: ContextResetParams; result: ContextGetResult };
+  /**
+   * `waitMs` is the post-accept foreground observation budget, not a command
+   * execution deadline: the call may still carry admission and transport time
+   * before acceptance, and expiry returns the real pending/background state
+   * with a queryable identity instead of a failure.
+   */
   "shell.exec": { params: { command: string; cwd?: string; waitMs?: number; toolCallId?: string; target?: string }; result: ShellExecResult };
   "shell.read": { params: { id: string; offset?: number; length?: number; waitMs?: number; target?: string }; result: ShellReadResult };
   "shell.write": { params: { id: string; text: string }; result: { accepted: boolean } };

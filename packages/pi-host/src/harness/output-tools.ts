@@ -36,7 +36,7 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         // Try output.read first (for out_ handles), fall back to shell.read (for sh_ IDs)
-        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "cancelled" | "executionId" | "observation" | "display" | "organized" | "shellId">>;
+        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "cancelled" | "executionId" | "observation" | "display" | "organized" | "shellId" | "spawnFailed">>;
         if (params.handle.startsWith("out_")) {
           const slice = await bridge.request("output.read", {
             handle: params.handle,
@@ -100,6 +100,9 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
           };
         }
         const lines: string[] = [result.display ?? result.text];
+        if (result.spawnFailed) {
+          lines.unshift(`[shell ${params.handle} · spawn failed: ${result.spawnFailed}]`);
+        }
         if (result.shellId && result.shellId !== params.handle) {
           lines.push(`\n[recovered runtime shell: ${result.shellId} — use this id for input or termination]`);
         }

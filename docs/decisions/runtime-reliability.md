@@ -27,3 +27,11 @@
 考虑过的替代：全局绝对化（已实证破坏 Host 契约并造成双重前缀）；把 opDir 换算下放给每个工具（重复且易漏，`bash` 的 cwd 之类容易被绕开）；Host 主动推送 context（现有通道是 request/respond，piggyback 已够用且不新增往返）。
 影响：`protocol` 增 `HarnessWorkContextState`、context.* 服务、`HarnessActorContext.operationDir/contextRevision`、`SessionSnapshot.workContext`、`respond` piggyback；`app-host` 新增 work-context 模块并把 opDir 接进 path-authority 解析基准与 shell.exec 授权 cwd；`pi-host` 新增镜像/同步/work_context 工具，本地边界统一锚定；UI 会话头部显示当前操作目录。限制：RR4 才消费 queryScope 做检索裁剪；当前 select 不级联删除进行中的 shell 会话 cwd（仅影响新 spawn）。
 状态：已实施
+
+### D-331 · 2026-09-26 · RR3
+类型：问题与解法
+决定：用户命令与监督控制帧彻底分离。POSIX 包装改为 `echo B; eval $<ANSI-C 引用载荷>; __ec=$?; echo C:$PWD; echo E:$__ec`——命令文本以 `$'…'` 转义为单个词元经 `eval` 求值（载荷自带结尾换行，无尾换行 heredoc/尾注释/未闭合结构只影响载荷内部）；PowerShell 改为 base64 载荷 + `Invoke-Expression`。请求 cwd 折叠进同一帧：`cd -- <dir> && { echo B; eval …; }; __ec=$?; echo C/E`，cd 失败不在旧目录执行且 epilogue 报 cd 退出码。受理记账：以 toolCallId 为键的 `acceptedExecutions` 记录承诺与结果——同 id 重入返回同一承诺；`shell.read` 对未结算 id 返回实时缓冲（running 而非 not found），spawn-failed 返回 `spawnFailed` 原因，`executionId`（生命周期事件/工具 details 携带的执行身份）同样可读回真实输出。分段计时 `acceptedAt/sentAt/firstOutputAt/endedAt` 贯穿 pending→background→completed 并进生命周期事件。`waitMs` 用 `shellChangeWaiters` 按字节变化预算等待。
+原因：旧 `{ <cmd>; }` 内插把任意命令文本放进控制语法——无尾换行 heredoc 会把 epilogue sentinel 吸进载荷、尾注释吃掉同一段落、语法错误留下未决 `{`；kill 后 cwd 污染（已修）之外还有"accepted 但未完成"的黑洞：`shell.read(toolCallId)` 报 not found，输出引用无法按原样取回（E02/E04）。
+考虑过的替代：给包装加 delimiter/转义修补（仍把任意文本混入控制语法，解析边界永远证明不完）；heredoc 传输载荷（stdin 通道与命令 stdin 竞争，且 powershell 无对应机制）；用 pty 的 process exit 做完成检测（前台共享 shell 的 exit 会杀掉整个会话，背景化依赖 sentinel 才能完成——现状的 E sentinel 契约保留）。
+影响：`shell-supervisor.ts` 包装/记账/计时/read 路径；`harness.ts` 增 `ShellExecTiming` 与 `ShellReadResult.spawnFailed`；`output-tools.ts` 呈现 spawn-failed/recovered id。语法错误命令的退出码现在反映载荷真实退出（eval 语义），不再被外层 `;` 吞掉。限制：`exit`/`exec` 仍经 pty exit 事件路径回收（行为未变）；PowerShell 路径只在单测构造验证，未实机跑——RR6。
+状态：已实施
