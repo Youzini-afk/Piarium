@@ -26,6 +26,7 @@ or implementation in the same coherent change.
 | Product/process/data architecture | [architecture.md](architecture.md) |
 | Varin naming and distribution cutover | [varin-rebrand-design.md](varin-rebrand-design.md), Stage B in the harness plan; source/repository implemented, first publication tracked in status |
 | Agent harness contract, plan, status, decision log | [agent-harness.md](agent-harness.md), [agent-harness-plan.md](agent-harness-plan.md), [agent-harness-status.md](agent-harness-status.md), [agent-harness-decisions.md](agent-harness-decisions.md) |
+| Agent runtime reliability and multi-project workspaces (RR, accepted / pending) | [agent-runtime-reliability-plan.md](agent-runtime-reliability-plan.md): autonomous operation context, live-session recovery and cancellation, shell/output reliability, scoped retrieval, and proxy-aware outbound networking |
 | Background compaction Agent (D-314, wired) | [context-compaction-agent-design.md](context-compaction-agent-design.md); Stage C in the harness plan |
 | Web and scholarly search (D-315, L0/L2 initial slices wired) | [web-research-search-design.md](web-research-search-design.md); Stage L in the harness plan; reuses existing retrieval/investigation threads |
 | Office and daily work continuity (D-327, design accepted / not implemented) | [office-work-continuity-design.md](office-work-continuity-design.md); future O0–O4 delivery stages; reuses existing workbench, Thread/Run, materials, artifacts, follow-up, and Rust authorities |

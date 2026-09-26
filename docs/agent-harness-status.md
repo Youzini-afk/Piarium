@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-23
+Last updated: 2026-09-26
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,24 @@ Last updated: 2026-09-23
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**运行时可靠性专项 RR（2026-09-26：计划已接受，尚未实施）。**
+
+实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](agent-runtime-reliability-plan.md)。
+本次仅完成基于 `0135144f` 的源码核查与计划编写，未运行新的故障复现、未修改实现，不能将既有局部修复视为本专项完成。
+执行者在下表记录生产接线、行为证据、提交及明确未测项；不通过增加单测数量自动提升状态。
+
+| 阶段 | 待交付内容 | 当前事实 / 验证 |
+| --- | --- | --- |
+| RR0 | 隔离夹具、故障分层及必要诊断 | 源码线索已入计划；新的运行时复现待执行 |
+| RR1 | 聊天自动追赶、可靠停止与权威状态收敛 | 待实施；重点复审 `3044800b` 的事件屏蔽与停止 RPC 错误处理 |
+| RR2 | Agent 自主操作上下文、统一路径及并发修订 | 待实施；大工作区与授权内跨项目导航必须保留 |
+| RR3 | shell 命令边界、输出恢复、waitMs 预算 | 待实施；已有 cwd 恢复行为列为非回归项 |
+| RR4 | 多项目检索范围、索引覆盖、todo 与工具反馈 | 待实施；共享存储不等于可以混用状态/覆盖语义 |
+| RR5 | Host 出站配置、代理兼容与 SSRF 错误分型 | 待实施；具体 fake-IP 拦截原因待实际 Host 取证 |
+| RR6 | 跨层故障注入、真实平台 smoke 与收口 | 待执行；没有本专项的安装包、远端 CI 或真实代理环境验证结论 |
+
+下文既有阶段的历史交付记录保留；它们不覆盖上表新发现的缺陷与修复目标。
 
 **D-315 / 阶段 L：Web 与科研检索（2026-09-23），L0–L6 均已接线。**
 设计见 [web-research-search-design.md](web-research-search-design.md)，计划为 L0–L6。

@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-24
+Last updated: 2026-09-26
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
@@ -42,6 +42,12 @@ L2 论文发现与关系展开、L3 材料集合与结构阅读均已接线。L4
 **阶段 N：会话下一步选择（D-325，已实施）。** 已将输入框上方默认启用的单条建议改为用户主动配置的模型分工能力：
 Agent 结束后发起一次短输入、短输出的后台模型请求，可返回零条或多个不同方向的草稿；移除自动会话回顾。
 知识库的 `models.knowledgeSuggestions` 属于另一项已交付能力。实现、验证和边界见下文阶段 N。
+
+**阶段 RR：Agent 运行时可靠性与多项目工作区（2026-09-26，方向已接受，待实施）。**
+本轮体检和维护者反馈已整理为 [专项实施计划](agent-runtime-reliability-plan.md)，按 RR0 → RR1 → RR2 → RR3 → RR4 → RR5 → RR6 推进。
+优先闭环聊天断线追赶/停止语义与 Agent 自主操作上下文，再处理命令包装和输出恢复、多项目检索及 Host 代理兼容。
+大工作区不收缩为单仓库，授权内导航由 Agent 自主完成；不以丢弃权威事件、自动重发任务或关闭网络安全保护代替修复。
+专项中的报告现象与源码确认分开记录；本次仅编写计划，不宣称任何 RR 阶段已经交付，交付证据仍统一维护在 status。
 
 ## 0. 执行者须知
 
