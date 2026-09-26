@@ -13,6 +13,8 @@ const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boole
 export function createHarnessSessionRegistration(options: {
   host: Pick<HarnessServiceHost, "registerSession" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
   readSettings(context: HarnessSessionContext): Promise<PiSettingsSnapshot>;
+  /** Resolve the authorized workspace root for seeding the work context (RR2). */
+  resolveWorkspaceRoot?: (workspaceId: string) => Promise<string | null>;
 }) {
   const pending = new Map<string, { actor: HarnessActorIdentity; controller: AbortController; promise: Promise<void> }>();
   let disposed = false;
@@ -47,7 +49,16 @@ export function createHarnessSessionRegistration(options: {
         } } };
       }
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
-      options.host.registerSession({ ...context, actor: entry.actor, ...resolved });
+      const authorityWorkspaceRoot = context.workspaceId
+        ? await options.resolveWorkspaceRoot?.(context.workspaceId).catch(() => null) ?? undefined
+        : undefined;
+      if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
+      options.host.registerSession({
+        ...context,
+        actor: entry.actor,
+        ...resolved,
+        ...(authorityWorkspaceRoot !== undefined ? { authorityWorkspaceRoot } : {}),
+      });
     })().finally(() => {
       if (pending.get(context.actor.sessionId) === entry) pending.delete(context.actor.sessionId);
     });

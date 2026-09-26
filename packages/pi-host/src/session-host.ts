@@ -154,6 +154,7 @@ import {
 import {
   HostServicesBridge,
 } from "./harness/host-services-bridge.js";
+import { createWorkContextMirror, WorkContextSync, type WorkContextMirror } from "./harness/work-context.js";
 import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
@@ -664,6 +665,8 @@ export class SessionHost {
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
+  #workContext: WorkContextMirror | undefined;
+  #workContextSync: WorkContextSync | undefined;
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
@@ -778,11 +781,20 @@ export class SessionHost {
   respondHarness(
     sessionId: string,
     requestId: string,
-    outcome: { ok: boolean; result?: unknown; error?: { code: string; message: string; retryable?: boolean } },
+    outcome: {
+      ok: boolean;
+      result?: unknown;
+      error?: { code: string; message: string; retryable?: boolean };
+      harnessContext?: { workContextRevision: number };
+    },
   ): boolean {
     if (!this.#hostServicesBridge) return false;
     if (outcome.ok) {
-      return this.#hostServicesBridge.respond(sessionId, requestId, { ok: true, result: outcome.result });
+      return this.#hostServicesBridge.respond(sessionId, requestId, {
+        ok: true,
+        result: outcome.result,
+        ...(outcome.harnessContext !== undefined ? { harnessContext: outcome.harnessContext } : {}),
+      });
     }
     if (!outcome.error) return false;
     return this.#hostServicesBridge.respond(sessionId, requestId, {
@@ -942,6 +954,9 @@ export class SessionHost {
         selected: { ...this.#workFocus },
         status: "applied",
       },
+      ...(this.#workContext !== undefined && this.#workContext.revision !== null
+        ? { workContext: { operationDir: this.#workContext.operationDir, revision: this.#workContext.revision } }
+        : {}),
     };
   }
 
@@ -3341,12 +3356,18 @@ export class SessionHost {
           })
         : undefined;
       this.#workspaceMutationJournal = workspaceMutationJournal;
+      this.#workContext = createWorkContextMirror(cwd);
       const hostServicesBridge = new HostServicesBridge({
         emit: (event, data) => this.#emit(event, data),
         getInputContext: () => this.#inputContext,
         sessionId: sessionManager.getSessionId(),
+        onWorkContextRevision: (revision) => this.#workContextSync?.noteRevision(revision),
       });
       this.#hostServicesBridge = hostServicesBridge;
+      this.#workContextSync = new WorkContextSync(hostServicesBridge, this.#workContext);
+      // Seed the mirror eagerly so relative-path tools anchor at the Host
+      // operation dir from the first call, not only after a stale piggyback.
+      void this.#workContextSync.refresh();
       const harnessCounters = createHarnessCounterTracker();
       this.#harnessCounters = harnessCounters;
       const requiresTrust = hasVarinTrustRequiringProjectResources(cwd);
@@ -3717,7 +3738,10 @@ export class SessionHost {
           sessionManager.getSessionId(),
           // The fixed-draft read override and surface writes are the two sides
           // of one source contract, so they are gated together (D-225).
-          { surfaceWrite: this.#harnessDocumentReadEnabled },
+          {
+            surfaceWrite: this.#harnessDocumentReadEnabled,
+            getOperationDir: () => this.#workContext?.operationDirAbs ?? cwd,
+          },
         ));
       }
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
@@ -3753,6 +3777,7 @@ export class SessionHost {
         scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
+        ...(this.#workContextSync !== undefined ? { workContext: this.#workContextSync } : {}),
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));

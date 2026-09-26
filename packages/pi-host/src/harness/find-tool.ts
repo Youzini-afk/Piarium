@@ -97,13 +97,17 @@ const createFormattingOperations = (combined: readonly FindPath[]): FindOperatio
 export function createSurfaceAwareFindTool(
   bridge: HostServicesBridge,
   cwd: string,
+  operationDir?: () => string,
 ): ToolDefinition {
   const native = createFindToolDefinition(cwd);
   const wrapped: ReturnType<typeof createFindToolDefinition> = {
     ...native,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       signal?.throwIfAborted();
-      const rootPath = resolveToCwd(params.path, cwd);
+      // RR2: anchor at the live operation dir; local fs and the Host overlay
+      // share this one absolute resolution.
+      const rootPath = resolveToCwd(params.path, operationDir?.() ?? cwd);
+      const anchoredParams = { ...params, path: rootPath };
       const overlay = await bridge.request(
         "document.pathOverlay",
         { path: rootPath, pattern: params.pattern },
@@ -111,7 +115,7 @@ export function createSurfaceAwareFindTool(
       );
       signal?.throwIfAborted();
       if (overlay.status === "disk") {
-        return native.execute(toolCallId, params, signal, onUpdate, ctx);
+        return native.execute(toolCallId, anchoredParams, signal, onUpdate, ctx);
       }
       const limit = params.limit ?? DEFAULT_FIND_LIMIT;
       const fixedPaths = overlayResultPaths(overlay);
@@ -126,7 +130,7 @@ export function createSurfaceAwareFindTool(
           const nativeLimit = fixedPaths.length > 0 ? limit + fixedPaths.length : limit;
           diskResult = await native.execute(
             toolCallId,
-            { ...params, limit: nativeLimit },
+            { ...anchoredParams, limit: nativeLimit },
             signal,
             onUpdate,
             ctx,
@@ -156,7 +160,7 @@ export function createSurfaceAwareFindTool(
       // Re-enter Pi's own definition with a bounded custom operation. It
       // performs the canonical entry limit, notice, and 50KB byte truncation.
       const formatter = createFindToolDefinition(cwd, { operations: createFormattingOperations(sorted) });
-      return formatter.execute(toolCallId, { ...params, limit }, signal, onUpdate, ctx);
+      return formatter.execute(toolCallId, { ...anchoredParams, limit }, signal, onUpdate, ctx);
     },
   };
   return wrapped as unknown as ToolDefinition;

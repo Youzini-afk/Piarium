@@ -2865,6 +2865,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return null;
       }
     },
+    pathAuthority: harnessPathAuthority,
     createTerminalSession: async (input) => {
       const runtime = terminalRuntime;
       if (!runtime?.createTerminalSession) {
@@ -3072,6 +3073,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!broker) throw new Error('Pi settings are unavailable');
       return broker.requestForSession(actor.sessionId, 'settings.get', {});
     },
+    resolveWorkspaceRoot: async (workspaceId) => {
+      try {
+        const workspace = await documentsAuthority.inspectWorkspace(workspaceId);
+        return workspace.root;
+      } catch {
+        return null;
+      }
+    },
   });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
@@ -3167,10 +3176,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {
+      // Piggyback the work-context revision so the worker notices a context
+      // change without a dedicated push channel (RR2).
+      const revision = outcome.ok
+        ? harnessServiceHost.workContextRevision(identity.sessionId)
+        : undefined;
       await piRuntimeBroker.requestForWorker(
         identity.workerId,
         'harness.respond',
-        buildHarnessRespondParams(identity.sessionId, requestId, outcome),
+        buildHarnessRespondParams(
+          identity.sessionId,
+          requestId,
+          outcome,
+          revision === undefined ? undefined : { workContextRevision: revision },
+        ),
       );
     },
     resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),

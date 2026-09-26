@@ -50,6 +50,8 @@ import { createFollowUpTool } from "./follow-up-tools.js";
 import { createScheduledTaskTool } from "./scheduled-task-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
+import { createWorkContextTool } from "./work-context-tool.js";
+import type { WorkContextSync } from "./work-context.js";
 import { withToolExecutionResources } from "./tool-execution-resources.js";
 
 export interface SelectHarnessToolsDeps {
@@ -97,6 +99,12 @@ export interface SelectHarnessToolsDeps {
   getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
   sessionToolAllowlist?: readonly string[];
+  /**
+   * RR2 session work-context mirror. When present, every relative tool path
+   * anchors at the session operation dir instead of the launch cwd, and the
+   * work_context tool is registered.
+   */
+  workContext?: WorkContextSync;
 }
 
 /**
@@ -142,8 +150,14 @@ export function selectHarnessTools(
     resolvedResearchCapabilities,
     getActiveToolNames,
     sessionToolAllowlist,
+    workContext,
   } = deps;
+  const getOperationDir = () => workContext?.mirror.operationDirAbs ?? cwd;
   const result: ToolDefinition[] = [];
+
+  if (workContext && tools.work_context !== false) {
+    result.push(createWorkContextTool(bridge, workContext));
+  }
 
   if (tools.bash !== false) {
     result.push(createBashTool(bridge, sessionId, cwd, settings.bash.waitMs));
@@ -152,15 +166,15 @@ export function selectHarnessTools(
     result.push(createSurfaceAwareReadTool(
       bridge,
       cwd,
-      autoResizeImages === undefined ? {} : { autoResizeImages },
+      { ...(autoResizeImages === undefined ? {} : { autoResizeImages }), operationDir: getOperationDir },
     ));
   }
   if (documentReadAvailable && tools.document_read !== false) {
     result.push(createDocumentReadTool(bridge));
   }
   if (documentPathOverlayAvailable) {
-    if (tools.find !== false) result.push(createSurfaceAwareFindTool(bridge, cwd));
-    if (tools.ls !== false) result.push(createSurfaceAwareLsTool(bridge, cwd));
+    if (tools.find !== false) result.push(createSurfaceAwareFindTool(bridge, cwd, getOperationDir));
+    if (tools.ls !== false) result.push(createSurfaceAwareLsTool(bridge, cwd, getOperationDir));
   }
   if (tools.grep !== false) {
     result.push(createGrepTool(bridge, sessionId));
@@ -185,7 +199,7 @@ export function selectHarnessTools(
   }
   if (isOpenAIFamily && tools.apply_patch !== false) {
     result.push(
-      createApplyPatchTool(bridge, sessionId, cwd, workspaceMutationJournal, {
+      createApplyPatchTool(bridge, sessionId, getOperationDir, workspaceMutationJournal, {
         // Reads follow the fixed draft only when the Host advertises that
         // source, so surface writes apply under the same condition (D-225).
         surfaceWrite: documentReadAvailable === true,
@@ -311,5 +325,5 @@ export function selectHarnessTools(
     result.push(createSubmitFactsTool(bridge));
   }
 
-  return result.map((tool) => withToolExecutionResources(tool, cwd));
+  return result.map((tool) => withToolExecutionResources(tool, cwd, getOperationDir));
 }

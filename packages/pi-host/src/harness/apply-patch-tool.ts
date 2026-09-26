@@ -208,10 +208,11 @@ function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string;
 export function createApplyPatchTool(
   bridge: HostServicesBridge,
   _sessionId: string,
-  cwd: string,
+  operationDir: string | (() => string),
   _mutationJournal?: WorkspaceMutationJournalBridge,
   options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition {
+  const getOperationDir = typeof operationDir === "function" ? operationDir : () => operationDir;
   return defineTool({
     name: "apply_patch",
     label: "Apply Patch",
@@ -232,7 +233,10 @@ export function createApplyPatchTool(
         };
       }
 
-      const filePaths = parsed.operations.map((operation) => resolve(cwd, operation.path));
+      // Resolve once at execution time against the live operation dir (RR2):
+      // the same absolute path is read locally and forwarded to Host services,
+      // so a stale mirror can never patch a different file than authorized.
+      const filePaths = parsed.operations.map((operation) => resolve(getOperationDir(), operation.path));
 
       const decodeDraft = (source: { source: string; base64?: string }): string | null => {
         if ((source.source !== "working-branch" && source.source !== "surface-draft") || !source.base64) {

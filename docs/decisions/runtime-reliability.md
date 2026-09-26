@@ -19,3 +19,11 @@
 考虑过的替代：保留事件屏蔽但改在 settle 后清理（仍丢真实 chunk，且 settled 未到就永远不一致）；乐观地把 AbortError 当成功（计划明确禁止）；冻结渲染但不记 `stopState`（无法区分"正在停"与"停成功/未知"）。
 影响：`usePiSessionStore` 停止请求 Map/冻结视图/清算路径；`PiChatView` 以 `stoppedAssistant ?? liveAssistant` 渲染；`agent.abort` 加 10s 超时以产出 typed timeout；reset/closed/exited/agent_start 均清算。真实远端拒绝（`aborted:false`）立即解除冻结。
 状态：已实施
+
+### D-330 · 2026-09-26 · RR2
+类型：问题与解法
+决定：会话工作上下文由 Host 独占持有——`HarnessWorkContextState { operationDir, queryScope, revision }` 挂在注册会话条目上，经 `context.get/select/scope/reset/discover` 服务暴露给 `work_context` Agent 工具；所有变更先过 `path-authority`（含 `workspaceScope` 检查）再落 CAS 递增。路径合同分层而不是全局统一：Host 桥接参数保持工作区相对形式（path-authority 以 `actor.operationDir` 为解析基准），Pi 本地磁盘边界（native find/ls/read 回退、write/edit 日志、apply_patch 落盘）经 `WorkContextMirror.operationDirAbs` 锚定绝对路径；资源调度计划同样以镜像锚定。上下文同步走 piggyback：每个 `harness.respond` 附带 `workContextRevision`，失配时 `WorkContextSync` 恰好发一次 `context.get`（`#hostRevision` 去重，显式读用 `force`），不进入刷新循环。shell 监督器新增声明式 `anchorCwd`，select/reset 即更新 spawn 锚点，运行中的 shell cwd 不被回改。
+原因：RR2 需要 Agent 在授权大工作区内自主发现/切换子项目且所有工具路径一致。初版实现把工具参数统一改绝对路径，破坏了 Host 服务契约（`document.*`、diagnostics、surface 读都以工作区相对路径为入参）——绝对路径会被二次拼接。正确边界是"同一授权链、两种表示"：Host 侧相对解析（含 scope 授权），本地侧绝对锚定，调度身份取规范化绝对形式。
+考虑过的替代：全局绝对化（已实证破坏 Host 契约并造成双重前缀）；把 opDir 换算下放给每个工具（重复且易漏，`bash` 的 cwd 之类容易被绕开）；Host 主动推送 context（现有通道是 request/respond，piggyback 已够用且不新增往返）。
+影响：`protocol` 增 `HarnessWorkContextState`、context.* 服务、`HarnessActorContext.operationDir/contextRevision`、`SessionSnapshot.workContext`、`respond` piggyback；`app-host` 新增 work-context 模块并把 opDir 接进 path-authority 解析基准与 shell.exec 授权 cwd；`pi-host` 新增镜像/同步/work_context 工具，本地边界统一锚定；UI 会话头部显示当前操作目录。限制：RR4 才消费 queryScope 做检索裁剪；当前 select 不级联删除进行中的 shell 会话 cwd（仅影响新 spawn）。
+状态：已实施

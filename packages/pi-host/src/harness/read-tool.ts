@@ -4,6 +4,7 @@ import {
   type ReadToolOptions,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import path from "node:path";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 
 /**
@@ -13,19 +14,25 @@ import type { HostServicesBridge } from "./host-services-bridge.js";
 export function createSurfaceAwareReadTool(
   bridge: HostServicesBridge,
   cwd: string,
-  options: Pick<ReadToolOptions, "autoResizeImages"> = {},
+  options: Pick<ReadToolOptions, "autoResizeImages"> & { operationDir?: () => string } = {},
 ): ToolDefinition {
   const native = createReadToolDefinition(cwd, options);
   const wrapped: ReturnType<typeof createReadToolDefinition> = {
     ...native,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      // RR2: the Host read source resolves the original (workspace-relative)
+      // path against the authoritative operation dir; local fallbacks resolve
+      // the same name against the pi-side mirror anchor.
+      const anchoredParams = params.path === undefined
+        ? params
+        : { ...params, path: path.resolve(options.operationDir?.() ?? cwd, params.path) };
       const source = await bridge.request(
         "document.readSource",
         { path: params.path },
         signal === undefined ? {} : { signal },
       );
       if (source.source === "disk") {
-        return native.execute(toolCallId, params, signal, onUpdate, ctx);
+        return native.execute(toolCallId, anchoredParams, signal, onUpdate, ctx);
       }
       if (source.source === "working-branch") {
         if (source.missing || typeof source.base64 !== "string") {
@@ -52,7 +59,7 @@ export function createSurfaceAwareReadTool(
           readFile: async () => bytes,
         };
         const branch = createReadToolDefinition(cwd, { ...options, operations });
-        const result = await branch.execute(toolCallId, params, signal, onUpdate, ctx);
+        const result = await branch.execute(toolCallId, anchoredParams, signal, onUpdate, ctx);
         return {
           ...result,
           details: {
@@ -80,7 +87,7 @@ export function createSurfaceAwareReadTool(
         ...options,
         operations,
       });
-      const result = await surface.execute(toolCallId, params, signal, onUpdate, ctx);
+      const result = await surface.execute(toolCallId, anchoredParams, signal, onUpdate, ctx);
       return {
         ...result,
         details: {

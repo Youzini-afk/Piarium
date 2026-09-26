@@ -1003,6 +1003,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           </div>
         ) : null}
 
+        {!previewOnly && snapshot?.workContext?.operationDir ? (
+          <div className="chat-input-column px-3 pb-2 sm:px-5" role="note">
+            <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+              <span className="truncate font-mono">
+                {t('chat.context.operationDir', { dir: snapshot.workContext.operationDir })}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
         {!readOnly && previewOnly ? (
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}

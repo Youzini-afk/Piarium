@@ -368,9 +368,13 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   // lastCwd tracks the shell's own location: deleted directories and foreign
   // path forms both make it an invalid spawn cwd. Validate candidates and fall
   // back instead of failing every later command after a shell dies.
+  // anchorCwd is the session's declared work-context operation dir: a respawn
+  // lands on it before lastCwd so a crashed shell restarts at the selected
+  // project rather than a stale cd target.
+  let anchorCwd: string | undefined;
   const resolveSpawnCwd = async (preferredCwd?: string): Promise<string> => {
     const seen = new Set<string>();
-    const candidates = [preferredCwd, lastCwd, deps.cwd];
+    const candidates = [preferredCwd, anchorCwd, lastCwd, deps.cwd];
     if (!deps.cwd) candidates.push(process.cwd());
     for (const raw of candidates) {
       if (!raw) continue;
@@ -1490,6 +1494,10 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return null;
   };
 
+  const setAnchorCwd = (directory: string | undefined): void => {
+    anchorCwd = directory;
+  };
+
   return {
     exec,
     read,
@@ -1500,5 +1508,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     hasActiveCommandAt,
     inspectExecution,
     readExecutionOutput,
+    setAnchorCwd,
   };
 }

@@ -32,9 +32,15 @@ export function createHarnessPathAuthority({
     ): Promise<HarnessAuthorizedPath | null> {
       if (!actor.workspaceId) return null;
       const workspace = await documents.inspectWorkspace(actor.workspaceId);
+      // Relative paths anchor at the session's operation dir (RR2 work
+      // context), not always the workspace root. `operationDir` is stored
+      // relative to the root; absent it falls back to the root itself.
+      const baseDir = actor.operationDir
+        ? pathModule.resolve(workspace.root, actor.operationDir)
+        : workspace.root;
       const absolutePath = pathModule.isAbsolute(inputPath)
         ? inputPath
-        : pathModule.resolve(workspace.root, inputPath);
+        : pathModule.resolve(baseDir, inputPath);
       try {
         const resolved = await assertAbsolutePathInWorkspace(absolutePath, {
           root: workspace.root,

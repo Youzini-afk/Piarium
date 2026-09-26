@@ -97,7 +97,10 @@ const PLANNED_HARNESS_TOOLS = new Set([
   "update", "kill", "wait", "threads", "read_thread", "dispatch", "webfetch",
   "websearch", "explore", "recall", "related", "history", "resources",
   "research_source", "research_search", "research_decide", "materials", "document_read",
+  "work_context", "submit_facts",
 ]);
+
+
 
 /**
  * Owned Harness tools declare their effects here. This is an execution
@@ -187,10 +190,15 @@ const planForHarnessTool = async (name: string, cwd: string, args: ToolArguments
   }
 };
 
-export const withToolExecutionResources = <T extends ToolDefinition>(tool: T, cwd: string): T => {
+export const withToolExecutionResources = <T extends ToolDefinition>(
+  tool: T,
+  cwd: string,
+  getOperationDir?: () => string,
+): T => {
   if (!PLANNED_HARNESS_TOOLS.has(tool.name)) return tool;
+  const anchorDir = () => getOperationDir?.() ?? cwd;
   return {
     ...tool,
-    prepareExecution: async (args) => (await planForHarnessTool(tool.name, cwd, args as ToolArguments)) ?? { barrier: true },
+    prepareExecution: async (args) => (await planForHarnessTool(tool.name, anchorDir(), args as ToolArguments)) ?? { barrier: true },
   } as T;
 };

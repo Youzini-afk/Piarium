@@ -486,6 +486,65 @@ export interface ContextRetentionParams {
   retainedGit: boolean;
 }
 
+// ── Autonomous work context (RR2) ──────────────────────────────────
+
+/**
+ * Host-owned per-session work context. `operationDir` is the anchor that
+ * resolves every relative tool path (POSIX-style path relative to the
+ * authorized workspace root; `""` addresses the root itself). `queryScope`
+ * is an optional retrieval scope expressed the same way; `null` means the
+ * whole authorized workspace. `revision` is a CAS token that increments on
+ * every accepted mutation so an Agent never silently applies a stale view.
+ */
+export interface HarnessWorkContextState {
+  operationDir: string;
+  queryScope: readonly string[] | null;
+  revision: number;
+}
+
+export interface ContextDiscoverParams {
+  /** Maximum returned candidates; Host clamps to its scan budget. */
+  maxResults?: number;
+  /** Directory depth below the workspace root to scan; default 3. */
+  depth?: number;
+}
+
+export interface ContextDiscoverCandidate {
+  /** POSIX path relative to the workspace root, suitable for `context.select`. */
+  path: string;
+  label: string;
+  /** Project markers found in the directory (e.g. `.git`, `package.json`). */
+  markers: string[];
+}
+
+export interface ContextDiscoverResult {
+  candidates: ContextDiscoverCandidate[];
+  truncated: boolean;
+}
+
+export interface ContextGetResult {
+  context: HarnessWorkContextState;
+  /** Absolute authorized workspace root for composing/displaying paths. */
+  workspaceRoot: string;
+}
+
+export interface ContextSelectParams {
+  /** Directory to make the operation dir: absolute or relative to the workspace root. */
+  path: string;
+  /** CAS guard; rejects when the stored revision no longer matches. */
+  expectedRevision?: number;
+}
+
+export interface ContextScopeParams {
+  /** Retrieval scope roots: absolute or relative to the workspace root. */
+  paths: string[];
+  expectedRevision?: number;
+}
+
+export interface ContextResetParams {
+  expectedRevision?: number;
+}
+
 /** Complete current scoped team snapshot, transient for one model request. */
 export type Zone2StatusParams = Record<string, never>;
 
@@ -1274,6 +1333,11 @@ export interface ExploreSearchResult {
 export interface HarnessServiceMap {
   "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
   "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
+  "context.discover": { params: ContextDiscoverParams; result: ContextDiscoverResult };
+  "context.get": { params: Record<string, never>; result: ContextGetResult };
+  "context.select": { params: ContextSelectParams; result: ContextGetResult };
+  "context.scope": { params: ContextScopeParams; result: ContextGetResult };
+  "context.reset": { params: ContextResetParams; result: ContextGetResult };
   "shell.exec": { params: { command: string; cwd?: string; waitMs?: number; toolCallId?: string; target?: string }; result: ShellExecResult };
   "shell.read": { params: { id: string; offset?: number; length?: number; waitMs?: number; target?: string }; result: ShellReadResult };
   "shell.write": { params: { id: string; text: string }; result: { accepted: boolean } };
@@ -1455,6 +1519,11 @@ export const HARNESS_METHOD_CAPABILITY = {
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
   "zone2.delivered": "context.session",
+  "context.discover": "context.session",
+  "context.get": "context.session",
+  "context.select": "context.session",
+  "context.scope": "context.session",
+  "context.reset": "context.session",
   "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
@@ -1538,6 +1607,14 @@ export interface HarnessActorIdentity {
 export interface HarnessActorContext extends HarnessActorIdentity {
   workspaceId: string | null;
   workspaceScope?: readonly string[];
+  /**
+   * Session operation dir relative to the workspace root; relative path
+   * parameters resolve against it instead of the root. Absent/`""`/`null`
+   * means the workspace root. Pinned per request at actor resolution.
+   */
+  operationDir?: string | null;
+  /** Work-context revision the actor resolution pinned. */
+  contextRevision?: number;
   grantedCapabilities: readonly HarnessCapability[];
   /**
    * Internal auxiliary actors (e.g. a session's compaction worker) may carry
@@ -1573,6 +1650,11 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "zone2.assemble",
   "zone2.status",
   "zone2.delivered",
+  "context.discover",
+  "context.get",
+  "context.select",
+  "context.scope",
+  "context.reset",
   "context.retained",
   "todo.upsert",
   "recall.search",
@@ -1678,7 +1760,16 @@ export type HarnessRespondParams = {
   requestId: string;
   sessionId: string;
 } & (
-  | { ok: true; result: unknown }
+  | {
+      ok: true;
+      result: unknown;
+      /**
+       * Cheap host-side liveness piggyback so the worker notices a work
+       * context change without a dedicated push channel. Absent when the
+       * session has no registered work context.
+       */
+      harnessContext?: { workContextRevision: number };
+    }
   | { ok: false; error: HarnessError }
 );
 
@@ -1691,9 +1782,12 @@ export function buildHarnessRespondParams(
   sessionId: string,
   requestId: string,
   outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
+  harnessContext?: { workContextRevision: number },
 ): HarnessRespondParams {
   if (outcome.ok) {
-    return { requestId, sessionId, ok: true, result: outcome.result };
+    return harnessContext === undefined
+      ? { requestId, sessionId, ok: true, result: outcome.result }
+      : { requestId, sessionId, ok: true, result: outcome.result, harnessContext };
   }
   return { requestId, sessionId, ok: false, error: outcome.error };
 }

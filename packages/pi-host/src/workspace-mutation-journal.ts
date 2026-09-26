@@ -259,10 +259,13 @@ export function createWorkspaceMutationJournalTools(
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
   _sessionId?: string,
-  options: { surfaceWrite?: boolean } = {},
+  options: { surfaceWrite?: boolean; getOperationDir?: () => string } = {},
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
+  // RR2: bridge params stay as typed (the Host resolves them against the
+  // authoritative operation dir); the local disk path anchors at the mirror.
+  const anchorPath = (input: string) => resolve(options.getOperationDir?.() ?? cwd, input);
   const surface = options.surfaceWrite === true;
   const journaledWrite = defineTool({
     ...write,
@@ -288,11 +291,12 @@ export function createWorkspaceMutationJournalTools(
         }
         throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");
       }
+      const anchored = { ...params, path: anchorPath(params.path) };
       return executeWithMutationJournal({
         bridge,
         cwd,
-        execute: () => write.execute(toolCallId, params, signal, onUpdate, ctx),
-        inputPath: params.path,
+        execute: () => write.execute(toolCallId, anchored, signal, onUpdate, ctx),
+        inputPath: anchored.path,
         toolCallId,
         toolName: "write",
       });
@@ -322,15 +326,20 @@ export function createWorkspaceMutationJournalTools(
         }
         throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");
       }
+      const anchored = { ...params, path: anchorPath(params.path) };
       return executeWithMutationJournal({
         bridge,
         cwd,
-        execute: () => edit.execute(toolCallId, params, signal, onUpdate, ctx),
-        inputPath: params.path,
+        execute: () => edit.execute(toolCallId, anchored, signal, onUpdate, ctx),
+        inputPath: anchored.path,
         toolCallId,
         toolName: "edit",
       });
     },
   });
-  return [journaledWrite, journaledEdit].map((tool) => withToolExecutionResources(tool, cwd));
+  return [journaledWrite, journaledEdit].map((tool) => withToolExecutionResources(
+    tool,
+    cwd,
+    options.getOperationDir,
+  ));
 }

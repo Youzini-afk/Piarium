@@ -306,8 +306,12 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         const hint = interpreter && "unavailable" in interpreter ? interpreter.unavailable.hint : "Session not registered";
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
+      // The router authorized params.cwd against the actor's operation dir;
+      // run against the resolved absolute, not the raw relative (which would
+      // silently anchor at the Host process cwd).
+      const authorizedCwd = params.cwd === undefined ? undefined : ctx.authorizedPaths[0]?.canonicalResourceId;
       const result = await supervisor.exec(params.command, {
-        ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
+        ...(params.cwd !== undefined ? { cwd: authorizedCwd ?? params.cwd } : {}),
         ...(params.toolCallId !== undefined ? { toolCallId: params.toolCallId } : {}),
         signal: ctx.signal,
         waitMs: params.waitMs ?? 60_000,
@@ -1092,6 +1096,24 @@ export function registerHarnessServices(
     router.register("zone2.assemble", createZone2AssembleService(host, zone2Delivery));
     router.register("zone2.delivered", createZone2DeliveredService(zone2Delivery));
   }
+  // RR2: session work context — autonomous project select/scope within the
+  // authorized workspace. Registered on every host; the service host rejects
+  // mutations when no path authority is wired.
+  router.register("context.discover", {
+    handle: (params, ctx) => host.workContextDiscover(ctx.actor, params),
+  });
+  router.register("context.get", {
+    handle: (_params, ctx) => Promise.resolve(host.workContextGet(ctx.actor)),
+  });
+  router.register("context.select", {
+    handle: (params, ctx) => host.workContextSelect(ctx.actor, params),
+  });
+  router.register("context.scope", {
+    handle: (params, ctx) => host.workContextScope(ctx.actor, params),
+  });
+  router.register("context.reset", {
+    handle: (params, ctx) => Promise.resolve(host.workContextReset(ctx.actor, params)),
+  });
   // Every Host can acknowledge compaction and reset observer baselines.
   router.register("context.retained", createContextRetainedService(host));
   // D-314: the owning session worker submits frozen compaction tasks; the

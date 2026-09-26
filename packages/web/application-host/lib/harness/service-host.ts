@@ -1,3 +1,4 @@
+import path from "node:path";
 import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
@@ -24,6 +25,17 @@ import { createObservationCursorStore, type ObservationCursorStore } from "./obs
 import { createZone2DeliveryService } from "./zone2-threads.js";
 import { clearManagedShellCompletionWatches } from "./harness-services.js";
 import { HarnessServiceError } from "./service-error.js";
+import type { HarnessPathAuthority } from "./path-authority.js";
+import {
+  discoverProjects,
+  getWorkContext,
+  operationDirAbsolute,
+  resetWorkContext,
+  seedWorkContext,
+  selectOperationDir,
+  setQueryScope,
+  type WorkContextDeps,
+} from "./work-context.js";
 import { readHistoryPage } from "@varin/protocol";
 import {
   COMPACTION_QUERY_CAPABILITIES,
@@ -32,9 +44,16 @@ import {
 import type {
   CompactionHistoryParams,
   CompactionHistoryResult,
+  ContextDiscoverParams,
+  ContextDiscoverResult,
+  ContextGetResult,
+  ContextResetParams,
+  ContextScopeParams,
+  ContextSelectParams,
   HarnessActorContext,
   HarnessActorIdentity,
   HarnessCapability,
+  HarnessWorkContextState,
   AgentInputContext,
 } from "@varin/protocol";
 import type {
@@ -47,6 +66,8 @@ export interface HarnessSessionContext {
   grantedCapabilities: readonly HarnessCapability[] | Promise<readonly HarnessCapability[]>;
   workspaceId: string | null;
   workspaceRoot: string;
+  /** Absolute authorized workspace root; used to seed the work context. */
+  authorityWorkspaceRoot?: string;
   /** Resolved for this workspace at session register. Host-wide options are only a fallback. */
   shellSetting?: HarnessShellSetting;
   shellResolution?: { invalid: { reason: string; hint: string } };
@@ -61,7 +82,10 @@ interface SessionEntry {
   interpreter: ShellInterpreter | { unavailable: { reason: string; hint: string } };
   workspaceId: string | null;
   workspaceRoot: string;
+  /** Absolute authorized workspace root (the base `operationDir` is relative to). */
+  authorityRoot: string;
   workspaceScope?: readonly string[];
+  workContext: HarnessWorkContextState;
   webBinding?: HarnessWebBinding;
 }
 
@@ -416,6 +440,16 @@ export interface HarnessServiceHost {
   ) => Promise<import("@varin/protocol").CompactionRunResult>) | null;
   hasActor(identity: HarnessActorIdentity): boolean;
   resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
+  // RR2: session work context (operation dir + query scope, Host-owned, CAS-revised)
+  workContextGet(actor: HarnessActorContext): ContextGetResult;
+  workContextSelect(actor: HarnessActorContext, params: ContextSelectParams): Promise<ContextGetResult>;
+  workContextScope(actor: HarnessActorContext, params: ContextScopeParams): Promise<ContextGetResult>;
+  workContextReset(actor: HarnessActorContext, params: ContextResetParams): ContextGetResult;
+  workContextDiscover(actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult>;
+  /** Current context revision for respond piggyback; undefined without a registered session. */
+  workContextRevision(sessionId: string): number | undefined;
+  /** Absolute operation dir for shell anchoring; undefined without a registered session. */
+  workContextOperationDir(sessionId: string): string | undefined;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
   /** Wait for this session's current and retiring shells to stop and release their writers. */
   closeSessionShell(sessionId: string): Promise<void>;
@@ -481,6 +515,8 @@ export interface HarnessServiceHost {
 export interface HarnessServiceHostOptions {
   search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  /** Path authority shared with the router; authorizes context mutations. */
+  pathAuthority?: HarnessPathAuthority;
   /** Production injects the Rust-kernel lease authority; tests may use the local helper. */
   pathLockService?: PathLockService;
   readExploreFile?: ExploreFileReader;
@@ -761,6 +797,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         actor: ctx.actor,
       });
     }
+    const authorityRoot = ctx.authorityWorkspaceRoot ?? ctx.workspaceRoot;
     sessions.set(sessionId, {
       actor,
       grantedCapabilities: Promise.resolve(ctx.grantedCapabilities).then((capabilities) => (
@@ -770,9 +807,16 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       interpreter: interpreterResult,
       workspaceId: ctx.workspaceId,
       workspaceRoot: ctx.workspaceRoot,
+      authorityRoot,
+      workContext: seedWorkContext(ctx.authorityWorkspaceRoot, ctx.workspaceRoot),
       ...(ctx.actor.workspaceScope?.length ? { workspaceScope: [...ctx.actor.workspaceScope] } : {}),
       ...(ctx.webBinding ? { webBinding: ctx.webBinding } : {}),
     });
+    // A fresh shell anchors at the session's initial operation dir.
+    shellSupervisor?.setAnchorCwd(operationDirAbsolute(
+      sessions.get(sessionId)!.workContext,
+      authorityRoot,
+    ));
   };
 
   const dropSession = (sessionId: string, actor?: HarnessActorIdentity): void => {
@@ -902,6 +946,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         ...identity,
         allowedMethods: [...COMPACTION_QUERY_METHODS],
         workspaceId: entry.workspaceId,
+        operationDir: entry.workContext.operationDir,
+        contextRevision: entry.workContext.revision,
         ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
         grantedCapabilities: [...COMPACTION_QUERY_CAPABILITIES],
       };
@@ -910,9 +956,75 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return {
       ...identity,
       workspaceId: entry.workspaceId,
+      operationDir: entry.workContext.operationDir,
+      contextRevision: entry.workContext.revision,
       ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
       grantedCapabilities: await entry.grantedCapabilities,
     };
+  };
+
+  // ── RR2: session work context ─────────────────────────────────────
+  const workContextDeps = (actor: HarnessActorContext): (WorkContextDeps & { authorizeScopeRoots: string[] }) | null => {
+    const entry = sessions.get(actor.sessionId);
+    if (!entry || !options.pathAuthority) return null;
+    const workspaceRoot = entry.authorityRoot;
+    const authority = options.pathAuthority;
+    return {
+      workspaceRoot,
+      sessionRoot: entry.workspaceRoot,
+      authorize: (candidate, authorizeOptions) => authority.resolve(actor, candidate, authorizeOptions),
+      authorizeScopeRoots: actor.workspaceScope?.length
+        ? actor.workspaceScope.map((scope) => (path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope)))
+        : [workspaceRoot],
+    };
+  };
+
+  const workContextEntry = (actor: HarnessActorContext): { entry: SessionEntry; deps: WorkContextDeps & { authorizeScopeRoots: string[] } } => {
+    const entry = sessions.get(actor.sessionId);
+    const deps = entry ? workContextDeps(actor) : null;
+    if (!entry || !deps) {
+      throw new HarnessServiceError("unavailable", "Work context is unavailable for this session");
+    }
+    return { entry, deps };
+  };
+
+  const workContextGet = (actor: HarnessActorContext): ContextGetResult => {
+    const { entry, deps } = workContextEntry(actor);
+    return getWorkContext(entry.workContext, deps);
+  };
+
+  const workContextSelect = async (actor: HarnessActorContext, params: ContextSelectParams): Promise<ContextGetResult> => {
+    const { entry, deps } = workContextEntry(actor);
+    const next = await selectOperationDir(entry.workContext, params, deps);
+    // New shells land on the selected dir; a running shell keeps its own cwd.
+    entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, deps.workspaceRoot));
+    return next;
+  };
+
+  const workContextScope = async (actor: HarnessActorContext, params: ContextScopeParams): Promise<ContextGetResult> => {
+    const { entry, deps } = workContextEntry(actor);
+    return setQueryScope(entry.workContext, params, deps);
+  };
+
+  const workContextReset = (actor: HarnessActorContext, params: ContextResetParams): ContextGetResult => {
+    const { entry, deps } = workContextEntry(actor);
+    const next = resetWorkContext(entry.workContext, params, deps);
+    entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, deps.workspaceRoot));
+    return next;
+  };
+
+  const workContextDiscover = async (actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult> => {
+    const { deps } = workContextEntry(actor);
+    return discoverProjects(params, deps);
+  };
+
+  const workContextRevision = (sessionId: string): number | undefined => (
+    sessions.get(sessionId)?.workContext.revision
+  );
+
+  const workContextOperationDir = (sessionId: string): string | undefined => {
+    const entry = sessions.get(sessionId);
+    return entry ? operationDirAbsolute(entry.workContext, entry.authorityRoot) : undefined;
   };
 
   const compactionHistory = async (
@@ -1047,6 +1159,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     dropSession,
     hasActor,
     resolveActor,
+    workContextGet,
+    workContextSelect,
+    workContextScope,
+    workContextReset,
+    workContextDiscover,
+    workContextRevision,
+    workContextOperationDir,
     getShellSupervisor,
     closeSessionShell,
     hasActiveCommandAtDirectory,

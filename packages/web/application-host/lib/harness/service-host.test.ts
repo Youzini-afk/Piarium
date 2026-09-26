@@ -125,6 +125,10 @@ describe("harness service host authorization", () => {
         workspaceId: "workspace-1",
         workspaceScope: ["packages/web"],
         grantedCapabilities: ["read.output"],
+        // RR2: the actor carries the session work context — seeded at the
+        // launch dir ("" = workspace root) with revision 0 until first select.
+        operationDir: "",
+        contextRevision: 0,
       });
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, workerGeneration: 2 })).resolves.toBeNull();

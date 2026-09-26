@@ -84,4 +84,36 @@ describe("harness path authority", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("anchors relative paths at the actor operation dir, not the workspace root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-opdir-"));
+    const project = join(root, "packages", "web");
+    fs.mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, "inside.ts"), "inside");
+    writeFileSync(join(root, "root-only.ts"), "root");
+    const authority = createHarnessPathAuthority({
+      authorityId: "host-1",
+      documents: { inspectWorkspace: async () => ({ root }) },
+    });
+    const anchored = { ...actor(), operationDir: "packages/web" };
+    try {
+      // A relative path resolves against the operation dir.
+      const resolved = await authority.resolve(anchored, "inside.ts", { allowMissing: false });
+      expect(resolved).not.toBeNull();
+      expect(resolved?.resourceId).toBe("packages/web/inside.ts");
+      // The same relative name does not fall back to a same-named root file —
+      // it is simply missing under the operation dir (ENOENT like any miss).
+      await expect(authority.resolve(anchored, "root-only.ts", { allowMissing: false }))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      // With allowMissing the miss resolves as an authorized future path.
+      expect((await authority.resolve(anchored, "root-only.ts", { allowMissing: true }))?.resourceId)
+        .toBe("packages/web/root-only.ts");
+      // Absolute and scope authorization still apply unchanged.
+      const scoped = { ...anchored, workspaceScope: ["packages/web"] };
+      await expect(authority.resolve(scoped, "inside.ts", { allowMissing: false })).resolves.not.toBeNull();
+      await expect(authority.resolve(scoped, join(root, "root-only.ts"), { allowMissing: false })).resolves.toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

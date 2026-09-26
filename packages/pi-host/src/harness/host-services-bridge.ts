@@ -21,6 +21,8 @@ export interface HostServicesBridgeOptions {
   sessionId: string;
   defaultTimeoutMs?: number;
   getInputContext?: () => AgentInputContext;
+  /** Called with the work-context revision piggybacked on each successful respond. */
+  onWorkContextRevision?: (revision: number) => void;
 }
 
 export class HarnessRequestError extends Error {
@@ -40,6 +42,7 @@ export class HostServicesBridge {
   readonly #sessionId: string;
   readonly #defaultTimeoutMs: number;
   readonly #getInputContext: (() => AgentInputContext) | undefined;
+  readonly #onWorkContextRevision: ((revision: number) => void) | undefined;
   #disposed = false;
 
   constructor(options: HostServicesBridgeOptions) {
@@ -47,6 +50,7 @@ export class HostServicesBridge {
     this.#sessionId = options.sessionId;
     this.#defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
     this.#getInputContext = options.getInputContext;
+    this.#onWorkContextRevision = options.onWorkContextRevision;
   }
 
   /**
@@ -134,7 +138,9 @@ export class HostServicesBridge {
   respond(
     sessionId: string,
     requestId: string,
-    outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
+    outcome:
+      | { ok: true; result: unknown; harnessContext?: { workContextRevision: number } }
+      | { ok: false; error: HarnessError },
   ): boolean {
     const pending = this.#pending.get(requestId);
     if (!pending || pending.sessionId !== sessionId) return false;
@@ -142,6 +148,13 @@ export class HostServicesBridge {
     if (pending.timer) clearTimeout(pending.timer);
     pending.cleanup?.();
     if (outcome.ok) {
+      if (outcome.harnessContext !== undefined) {
+        try {
+          this.#onWorkContextRevision?.(outcome.harnessContext.workContextRevision);
+        } catch {
+          // Mirror refresh is best-effort; never fail a settled response.
+        }
+      }
       pending.resolve(outcome.result);
     } else {
       pending.reject(new HarnessRequestError(

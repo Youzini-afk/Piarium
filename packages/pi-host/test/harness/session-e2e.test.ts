@@ -956,7 +956,7 @@ describe("session e2e — context preparation chain", () => {
         harness: { context: { preparationWaterline: 0.5 } },
       }), "utf8");
       await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 42_000, maxTokens: 800, reasoning: true }] });
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 50_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;
