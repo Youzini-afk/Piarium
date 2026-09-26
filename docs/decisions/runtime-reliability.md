@@ -35,3 +35,11 @@
 考虑过的替代：给包装加 delimiter/转义修补（仍把任意文本混入控制语法，解析边界永远证明不完）；heredoc 传输载荷（stdin 通道与命令 stdin 竞争，且 powershell 无对应机制）；用 pty 的 process exit 做完成检测（前台共享 shell 的 exit 会杀掉整个会话，背景化依赖 sentinel 才能完成——现状的 E sentinel 契约保留）。
 影响：`shell-supervisor.ts` 包装/记账/计时/read 路径；`harness.ts` 增 `ShellExecTiming` 与 `ShellReadResult.spawnFailed`；`output-tools.ts` 呈现 spawn-failed/recovered id。语法错误命令的退出码现在反映载荷真实退出（eval 语义），不再被外层 `;` 吞掉。限制：`exit`/`exec` 仍经 pty exit 事件路径回收（行为未变）；PowerShell 路径只在单测构造验证，未实机跑——RR6。
 状态：已实施
+
+### D-332 · 2026-09-26 · RR4
+类型：问题与解法
+决定：检索范围沿授权链三段收敛——显式 `path`/`paths[]` 先经 router 授权并以其 workspace-relative `resourceId` 为准（顺带修正了 opDir 下相对 path 被当工作区根相对前缀的失配），无显式路径时用会话 `queryScope`，再退化到 `operationDir` 默认锚，最终与 `workspaceScope` 相交；前缀相交发生在 backendLimit/candidateBudget/top-k 之前，多项目查询不会先全工作区截断再过滤。`search.content` 接受 `paths[]` 表达单次多项目召回。E05：`searchedFiles` 改为可选并把 kernel `KernelComputeResult.scannedFiles` 贯通到结果（内容搜索与 fixed-branch 快照两条路径），未知即缺席；grep 零命中改为 "no matches in the requested scope"。E08：`lsp.diagnostics`/`diagnosticsSnapshot` 的 provider 调用改用授权的 `resourceId`，绝对路径与 opDir 相对路径归一为内部资源 id。E07：新增 `threadRegistry.resolveSessionOwner`——活跃绑定优先，Run settle/Host 重启后回退到 catalog Run 记录（sessionId 持久留在目录里），todo/knowledge 的 owning workspace 不再依赖内存 sessionSnapshots 兜底。
+原因：大工作区下默认全根检索会淹没目标项目候选（E01/E09 的检索面）；grep 把命中文件数冒充扫描文件数（E05）；diagnostics provider 以 workspace-relative resourceId 键控，绝对路径造成错位（E08）；`getSessionBinding` 只回答活跃 Run，settle 即抛 stale-binding，无快照的子会话/重启后的 todo 退化为 "No knowledge store"（E07）。
+考虑过的替代：为检索另起项目子索引（违反"共享存储、项目是查询视图"的方向）；给 grep 结果估算扫描数（伪数字是 E05 根因本身）；todo owner 任意 fallback 到当前 UI 工作区（计划明确禁止）或新建空 plan（伪装恢复）。
+影响：`protocol` 增 `HarnessActorContext.queryScope`、`SearchContentParams.paths`、`searchedFiles` 可选化；`router` 授权 `paths[]`；`search-service`/`content`/`working-branch-query` 贯通真实 scannedFiles 并收敛 scope；`explore`/`related` 默认范围收敛；`diagnostics-service` 归一 resourceId；`thread-registry` 增 `resolveSessionOwner`；`index.ts` owner 解析换用；`grep-tool` 支持 `paths` 并改零命中文案。边界：向量/关系索引的覆盖状态沿用 related 既有分态（unavailable/failed/stale），更深覆盖度量未新增。
+状态：已实施

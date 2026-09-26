@@ -352,11 +352,15 @@ export function createExploreQueryStartService(
         }
         const effectivePaths = params.paths?.length
           ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-            : ctx.actor.workspaceScope?.length
-              ? [...ctx.actor.workspaceScope]
-              : ctx.authorizedPaths.length > 0
-                ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-                : undefined;
+            : ctx.actor.queryScope?.length
+              ? [...ctx.actor.queryScope]
+              : ctx.actor.operationDir
+                ? [ctx.actor.operationDir]
+                : ctx.actor.workspaceScope?.length
+                  ? [...ctx.actor.workspaceScope]
+                  : ctx.authorizedPaths.length > 0
+                    ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
+                    : undefined;
         let rerankConfigured = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
         if (ctx.workspaceId) {

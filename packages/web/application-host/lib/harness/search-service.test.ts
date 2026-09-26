@@ -733,4 +733,103 @@ describe("harness search service", () => {
     expect(search).not.toHaveBeenCalled();
     expect(pinned.release).toHaveBeenCalledTimes(2);
   });
+
+  describe("RR4 retrieval scope and honest coverage", () => {
+    /** Records the requested scope and filters hits by path prefix. */
+    const scopedSearch = (hits: WorkspaceSearchHit[], seen: string[][]) => vi.fn(async (
+      request: Parameters<HarnessSearchDeps["search"]>[0],
+      options: WorkspaceContentSearchOptions,
+    ): Promise<WorkspaceContentSearchResult> => {
+      const paths = request.paths ?? [];
+      seen.push([...paths]);
+      const within = (file: string, prefix: string) => !prefix || file === prefix || file.startsWith(`${prefix}/`);
+      const scoped = paths.length === 0 ? hits : hits.filter((hit) => paths.some((prefix) => within(hit.resource.resourceId, prefix)));
+      return scoped.length
+        ? { status: "ready", generation: options.generation, hits: scoped, scannedFiles: 7 }
+        : { status: "empty", generation: options.generation, scannedFiles: 7 };
+    });
+    const rr4Actor = (extra: Partial<HarnessActorContext> = {}): HarnessActorContext => ({ ...actor, ...extra });
+    const rr4Ctx = (extra: Partial<HarnessActorContext> = {}, authorizedPaths?: ReadonlyArray<{ resourceId: string }>) => ({
+      actor: rr4Actor(extra),
+      workspaceId: "ws-1",
+      signal: new AbortController().signal,
+      ...(authorizedPaths ? { authorizedPaths } : {}),
+    });
+
+    it("defaults to the operation dir when no explicit path is given", async () => {
+      const seen: string[][] = [];
+      const service = createHarnessSearchService({
+        search: scopedSearch([makeHit("app/hit.ts", 1, "x"), makeHit("other/hit.ts", 1, "x")], seen),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const result = await service.search({ pattern: "x" }, rr4Ctx({ operationDir: "app" }));
+      expect(result.status).toBe("ready");
+      expect(seen).toEqual([["app"]]);
+      expect(result.files.map((file) => file.path)).toEqual(["app/hit.ts"]);
+    });
+
+    it("applies the session query scope when no explicit path is given", async () => {
+      const seen: string[][] = [];
+      const service = createHarnessSearchService({
+        search: scopedSearch([makeHit("a/hit.ts", 1, "x"), makeHit("b/hit.ts", 1, "x"), makeHit("c/hit.ts", 1, "x")], seen),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const result = await service.search({ pattern: "x" }, rr4Ctx({ operationDir: "a", queryScope: ["a", "b"] }));
+      expect(result.status).toBe("ready");
+      expect(seen).toEqual([["a", "b"]]);
+      expect(result.files.map((file) => file.path).sort()).toEqual(["a/hit.ts", "b/hit.ts"]);
+    });
+
+    it("uses authorized resource ids for explicit multi-path queries", async () => {
+      const seen: string[][] = [];
+      const service = createHarnessSearchService({
+        search: scopedSearch([makeHit("a/x.ts", 1, "x"), makeHit("b/x.ts", 1, "x"), makeHit("c/x.ts", 1, "x")], seen),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const result = await service.search(
+        { pattern: "x", paths: ["../a", "b"] },
+        rr4Ctx({ operationDir: "root/pkg" }, [{ resourceId: "a" }, { resourceId: "b" }]),
+      );
+      expect(result.status).toBe("ready");
+      expect(seen).toEqual([["a", "b"]]);
+      expect(result.files.map((file) => file.path).sort()).toEqual(["a/x.ts", "b/x.ts"]);
+    });
+
+    it("intersects the effective scope with a restricted workspaceScope", async () => {
+      const seen: string[][] = [];
+      const service = createHarnessSearchService({
+        search: scopedSearch([makeHit("allowed/x.ts", 1, "x"), makeHit("secret/x.ts", 1, "x")], seen),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const result = await service.search(
+        { pattern: "x" },
+        {
+          ...rr4Ctx({ operationDir: "" }),
+          workspaceScope: ["allowed"],
+        },
+      );
+      expect(result.status).toBe("ready");
+      expect(seen).toEqual([["allowed"]]);
+      expect(result.files.map((file) => file.path)).toEqual(["allowed/x.ts"]);
+    });
+
+    it("reports the backend's real scanned count and omits it when unknown", async () => {
+      const seen: string[][] = [];
+      const service = createHarnessSearchService({
+        search: scopedSearch([], seen),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const known = await service.search({ pattern: "x" }, rr4Ctx());
+      expect(known.status).toBe("empty");
+      expect(known.searchedFiles).toBe(7);
+
+      const unknown = createHarnessSearchService({
+        search: vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "empty", generation: 1 })),
+        resolveWorkspaceRoot: async () => "/workspace",
+      });
+      const missing = await unknown.search({ pattern: "x" }, rr4Ctx());
+      expect(missing.status).toBe("empty");
+      expect(missing.searchedFiles).toBeUndefined();
+    });
+  });
 });

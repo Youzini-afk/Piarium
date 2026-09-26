@@ -480,6 +480,7 @@ export function createSearchContentService(search: HarnessSearchService): Harnes
         workspaceId: ctx.workspaceId,
         ...(ctx.actor.workspaceScope ? { workspaceScope: ctx.actor.workspaceScope } : {}),
         actor: ctx.actor,
+        authorizedPaths: ctx.authorizedPaths,
         ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
       });
     },

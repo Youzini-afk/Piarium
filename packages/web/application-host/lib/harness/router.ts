@@ -116,6 +116,14 @@ const requestPaths = (
       : [];
   }
   if (method === "search.content") {
+    // RR4: `paths` authorizes a multi-scope query; it takes precedence over
+    // the singular `path`. Both resolve through the actor's operation dir.
+    if (record.paths !== undefined) {
+      return Array.isArray(record.paths) && record.paths.length > 0
+        && record.paths.every((path) => typeof path === "string" && path.trim())
+        ? record.paths.map((path) => ({ allowMissing: false, path: path as string }))
+        : "invalid";
+    }
     if (record.path === undefined) return [];
     return typeof record.path === "string" && record.path.trim()
       ? [{ allowMissing: false, path: record.path }]

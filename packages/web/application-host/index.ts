@@ -2516,8 +2516,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionId: string,
     fallback: string | null = null,
   ): Promise<string | null> {
-    const binding = await threadRegistry.getSessionBinding(sessionId);
-    if (binding) return binding.owningWorkspaceId;
+    // RR4/E07: durable owner resolution. The active-run binding only exists
+    // while the run is live; the catalog scan still answers after the run
+    // settled or the Host restarted, without guessing from UI snapshots.
+    const owner = await threadRegistry.resolveSessionOwner(sessionId).catch(() => null);
+    if (owner) return owner.owningWorkspaceId;
     return fallback ?? snapshotKnowledgeWorkspaceId(sessionId);
   }
 

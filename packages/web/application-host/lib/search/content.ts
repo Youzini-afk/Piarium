@@ -13,9 +13,9 @@ export interface WorkspaceSearchHit {
   resource: { resourceId: string; workspaceId: string };
 }
 export type WorkspaceContentSearchResult =
-  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: "ready"; incomplete?: true }
-  | { generation: number | undefined; status: "empty" | "cancelled" }
-  | { generation: number | undefined; message: string; status: "failure" };
+  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: "ready"; incomplete?: true; scannedFiles?: number }
+  | { generation: number | undefined; status: "empty" | "cancelled"; scannedFiles?: number }
+  | { generation: number | undefined; message: string; status: "failure"; scannedFiles?: number };
 export interface WorkspaceContentSearchRequest {
   glob?: string[];
   includeHidden?: boolean;
@@ -90,8 +90,8 @@ export function createWorkspaceContentSearch({ documents, compute, pathModule = 
         }},options.overlays);
         if(result.status==="cancelled")return {status:"cancelled",generation};
         if(result.status==="failed"||(result.status==="partial"&&count===0))return {status:"failure",generation,message:result.message??"Content search coverage is incomplete"};
-        if(count===0)return {status:"empty",generation};
-        return {status:"ready",generation,hits,...(result.status==="partial"?{incomplete:true as const}:{})};
+        if(count===0)return {status:"empty",generation,scannedFiles:result.scannedFiles};
+        return {status:"ready",generation,hits,scannedFiles:result.scannedFiles,...(result.status==="partial"?{incomplete:true as const}:{})};
       }catch(error){return options.signal?.aborted?{status:"cancelled",generation}:{status:"failure",generation,message:error instanceof Error?error.message:String(error)};}
     },
   };

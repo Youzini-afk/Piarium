@@ -167,6 +167,12 @@ export interface ShellReadResult extends OutputSlice {
 export interface SearchContentParams {
   pattern: string;
   path?: string;
+  /**
+   * RR4: multiple scope roots for a single query (multi-project recall).
+   * Each entry is authorized independently; the effective scope is the union
+   * applied before result budgeting. `paths` takes precedence over `path`.
+   */
+  paths?: string[];
   glob?: string[];
   ignoreCase?: boolean;
   fixedStrings?: boolean;
@@ -200,7 +206,12 @@ export interface SearchContentResult {
   files: SearchContentFile[];
   totalHits: number;
   totalFiles: number;
-  searchedFiles: number;
+  /**
+   * Files actually scanned, only when the backend reports an exact count.
+   * Absent means the count is unknown — consumers must not present a
+   * fabricated zero. `totalFiles` counts files with hits, not scanned files.
+   */
+  searchedFiles?: number;
   partial: boolean;
   handle?: string;
   /**
@@ -1644,6 +1655,12 @@ export interface HarnessActorContext extends HarnessActorIdentity {
   operationDir?: string | null;
   /** Work-context revision the actor resolution pinned. */
   contextRevision?: number;
+  /**
+   * RR4: workspace-relative query scope roots pinned at actor resolution.
+   * Retrieval services intersect it with explicit params and workspaceScope;
+   * `null`/absent means no additional scope restriction (defaults still apply).
+   */
+  queryScope?: readonly string[] | null;
   grantedCapabilities: readonly HarnessCapability[];
   /**
    * Internal auxiliary actors (e.g. a session's compaction worker) may carry

@@ -23,6 +23,12 @@ export interface HarnessSearchContext {
   workspaceScope?: readonly string[];
   signal: AbortSignal;
   actor?: HarnessActorContext;
+  /**
+   * Router-authorized scope roots (workspace-relative resource ids). When
+   * present these are the explicit path params — already anchored at the
+   * actor's operation dir — and take precedence over queryScope defaults.
+   */
+  authorizedPaths?: ReadonlyArray<{ resourceId: string }>;
   inputContext?: AgentInputContext;
   /**
    * Explore-only working hit budget. Absent for `search.content` / grep, which
@@ -166,7 +172,6 @@ const unavailableResult = (): SearchContentResult => ({
   files: [],
   totalHits: 0,
   totalFiles: 0,
-  searchedFiles: 0,
   partial: false,
 });
 
@@ -175,7 +180,6 @@ const emptyResult = (): SearchContentResult => ({
   files: [],
   totalHits: 0,
   totalFiles: 0,
-  searchedFiles: 0,
   partial: false,
 });
 
@@ -202,7 +206,21 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         if(process.platform==="win32"){file=file.toLowerCase();prefix=prefix.toLowerCase();}
         return !prefix||file===prefix||file.startsWith(prefix+"/");
       };
-      const allowed=toPrefixes(ctx.workspaceScope),requested=toPrefixes(params.path===undefined?undefined:[params.path]);
+      // RR4: explicit path params authorized by the router arrive as
+      // workspace-relative resource ids (relative inputs anchored at the
+      // operation dir, absolute inputs reduced to resource ids). Internal
+      // callers like explore pass workspace-relative `path`/`paths` directly
+      // without router authorization. With no explicit path the session
+      // query scope applies, then the operation dir as the default anchor.
+      // workspaceScope still intersects last.
+      const explicit=ctx.authorizedPaths?.length
+        ? ctx.authorizedPaths.map((entry)=>entry.resourceId)
+        : params.paths!==undefined?[...params.paths]
+          : params.path!==undefined?[params.path]:undefined;
+      const defaultScope=ctx.actor?.queryScope?.length
+        ? [...ctx.actor.queryScope]
+        : ctx.actor?.operationDir?[ctx.actor.operationDir]:undefined;
+      const allowed=toPrefixes(ctx.workspaceScope),requested=toPrefixes(explicit??defaultScope);
       const prefixes=[...new Set(allowed.flatMap(a=>requested.flatMap(r=>within(r,a)?[r]:within(a,r)?[a]:[])))];
       if(!prefixes.length)return emptyResult();
       const glob=compileGlobFilter(params.glob);if(!glob)return unavailableResult();
@@ -235,7 +253,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         const result=pinned?await pinned.search(request,{signal}):await deps.search(request,{signal,...(overlays.length?{overlays}:{})});
         if(result.status==="cancelled")return {...emptyResult(),partial:true};
         if(result.status==="failure")return unavailableResult();
-        if(result.status!=="ready")return emptyResult();
+        if(result.status!=="ready")return {...emptyResult(),...(result.scannedFiles===undefined?{}:{searchedFiles:result.scannedFiles})};
         const hits=result.hits.filter(hit=>inView(hit.resource.resourceId));
         const grouped=groupAndSort(hits,root,candidateMode?candidateBudget:limit,{
           ...(ctx.hitsPerFile===undefined?{}:{hitsPerFile:ctx.hitsPerFile}),useFileScore:!candidateMode,breadthFirst:candidateMode,
@@ -244,7 +262,7 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
         const backendCapped=result.incomplete===true||(backendLimit!==undefined&&result.hits.length>=backendLimit);
         const partial=backendCapped||shown<grouped.totalHits||grouped.perFileCapped||grouped.filesDropped>0||signal.aborted;
         return {status:grouped.totalHits?"ready":"empty",files:grouped.files,totalHits:grouped.totalHits,totalFiles:grouped.totalFiles,
-          searchedFiles:grouped.totalFiles,partial,
+          ...(result.scannedFiles===undefined?{}:{searchedFiles:result.scannedFiles}),partial,
           ...(candidateMode?{filesDropped:grouped.filesDropped,fileCoverage:uniqueFileCoverage({filesDropped:grouped.filesDropped,backendIncomplete:result.incomplete===true,backendCapped})}:{})};
       }catch{return ctx.signal.aborted||timeout.signal.aborted?{...emptyResult(),partial:true}:unavailableResult();}
       finally{clearTimeout(timer);await ownedPin?.release();}

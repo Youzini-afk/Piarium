@@ -129,6 +129,7 @@ describe("harness service host authorization", () => {
         // launch dir ("" = workspace root) with revision 0 until first select.
         operationDir: "",
         contextRevision: 0,
+        queryScope: null,
       });
       await expect(host.resolveActor({ ...ACTOR, workerId: "stale-worker" })).resolves.toBeNull();
       await expect(host.resolveActor({ ...ACTOR, workerGeneration: 2 })).resolves.toBeNull();

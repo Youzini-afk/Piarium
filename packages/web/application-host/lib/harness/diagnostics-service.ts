@@ -40,7 +40,11 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         return { status: "unavailable", diagnostics: [], reason: "no workspace" };
       }
       try {
-        const bound = await provider.bindDocument(ctx.workspaceId, params.path);
+        // The provider keys documents by workspace-relative resource id —
+        // authorizedPaths already reduced absolute/operation-dir-anchored
+        // inputs to that form (RR4/E08).
+        const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
+        const bound = await provider.bindDocument(ctx.workspaceId, resourcePath);
         if (bound.status === "unsupported") {
           return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
         }
@@ -50,9 +54,9 @@ export function createLspDiagnosticsService(provider: DiagnosticsProvider): Harn
         const waitMs = params.waitMs ?? 5000;
         const deadline = Date.now() + waitMs;
         for (;;) {
-          const diagnostics = await provider.getDiagnosticsForRevision(ctx.workspaceId, params.path, bound.revision);
+          const diagnostics = await provider.getDiagnosticsForRevision(ctx.workspaceId, resourcePath, bound.revision);
           if (diagnostics) {
-            const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
+            const snapshot = await provider.getSnapshot(ctx.workspaceId, resourcePath);
             return {
               status: "ready",
               ...(snapshot !== null ? { snapshot } : {}),
@@ -119,7 +123,9 @@ export function createLspDiagnosticsSnapshotService(
       }
       // Binding both starts the Host view on demand and reports the text the
       // observation describes; an incremental observer never waits for it.
-      const bound = await provider.bindDocument(ctx.workspaceId, params.path);
+      // The provider keys documents by workspace-relative resource id.
+      const resourcePath = ctx.authorizedPaths[0]?.resourceId ?? params.path;
+      const bound = await provider.bindDocument(ctx.workspaceId, resourcePath);
       if (bound.status === "unsupported") {
         return { status: "unavailable", diagnostics: [], reason: "no language server for this file type" };
       }
@@ -129,8 +135,8 @@ export function createLspDiagnosticsSnapshotService(
       const provenance = { revision: bound.revision, source: bound.source };
       try {
         if (params.full === true) {
-          const diagnostics = await provider.getDiagnostics(ctx.workspaceId, params.path);
-          const snapshot = await provider.getSnapshot(ctx.workspaceId, params.path);
+          const diagnostics = await provider.getDiagnostics(ctx.workspaceId, resourcePath);
+          const snapshot = await provider.getSnapshot(ctx.workspaceId, resourcePath);
           return {
             status: "ready",
             ...(snapshot !== null ? { snapshot } : {}),
@@ -145,8 +151,8 @@ export function createLspDiagnosticsSnapshotService(
           "diagnostics",
           objectId,
           async (previous) => {
-            const diagnostics = await provider.getDiagnostics(ctx.workspaceId!, params.path);
-            const snapshot = await provider.getSnapshot(ctx.workspaceId!, params.path);
+            const diagnostics = await provider.getDiagnostics(ctx.workspaceId!, resourcePath);
+            const snapshot = await provider.getSnapshot(ctx.workspaceId!, resourcePath);
             const added = previous === null
               ? diagnostics
               : subtractDiagnostics(diagnostics, previous.value.diagnostics);

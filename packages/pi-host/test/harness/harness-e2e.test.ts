@@ -202,15 +202,24 @@ describe("harness e2e integration", () => {
       });
       const stdinShell = waiting.match(/sh_\w+/)?.[0];
       assert.ok(stdinShell, `read should go background with an sh_ id: ${waiting}`);
-      await executeTool(writeTool, { shellId: stdinShell, text: "hello-stdin\n" });
-      let stdinObservation = "";
+      const wrote = await executeTool(writeTool, { shellId: stdinShell, text: "hello-stdin\n" });
+      assert.match(wrote, /wrote \d+ bytes/, `stdin write must be accepted: ${wrote}`);
+      const stdinReads: string[] = [];
       for (let i = 0; i < 40; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 150));
-        stdinObservation = await executeTool(getOutputTool, { handle: stdinShell });
-        if (/exited/.test(stdinObservation)) break;
+        const observation = await executeTool(getOutputTool, { handle: stdinShell, waitMs: 1000 });
+        stdinReads.push(observation);
+        if (/exited/.test(observation)) break;
       }
-      assert.match(stdinObservation, /got-hello-stdin/, `stdin reached the payload: ${stdinObservation}`);
-      assert.match(stdinObservation, /exited 0/, `read exits 0 after input: ${stdinObservation}`);
+      // Incremental reads consume output as it arrives — assert on the
+      // accumulated transcript, and fall back to an authoritative full read
+      // (offset 0) so a cursor nuance cannot masquerade as lost output.
+      const stdinTranscript = [waiting, ...stdinReads].join("\n");
+      if (!/got-hello-stdin/.test(stdinTranscript)) {
+        const full = await executeTool(getOutputTool, { handle: stdinShell, offset: 0, length: 65536 });
+        assert.match(full, /got-hello-stdin/, `stdin output absent even in a full read: ${stdinTranscript}\nFULL:${full}`);
+      }
+      assert.match(stdinTranscript, /exited 0/, `read exits 0 after input: ${stdinTranscript}`);
     } finally {
       await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
@@ -268,7 +277,7 @@ describe("harness e2e integration", () => {
       assert.ok(hitText.includes("hello"), `grep hit should find 'hello': got "${hitText}"`);
 
       const missText = await executeTool(grepTool, { pattern: "nonexistent_xyz123", path: workspaceRoot });
-      assert.ok(missText.includes("0 hits (searched"), `grep miss should say "0 hits (searched": got "${missText}"`);
+      assert.match(missText, /0 hits — no matches in the requested scope/, `grep miss should report an honest empty scope: got "${missText}"`);
     } finally {
       await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

@@ -1146,6 +1146,51 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     });
   };
 
+  /**
+   * RR4/E07: durable owner resolution. `getSessionBinding` only answers for
+   * an active Run; a settled child session or a restarted Host loses that
+   * binding even though the owning workspace is still a fact recorded in the
+   * catalog. Knowledge/todo ownership needs the durable answer: active
+   * binding first, then any catalog run record carrying this sessionId —
+   * never a UI-snapshot guess.
+   */
+  const resolveSessionOwner = async (
+    sessionId: string,
+  ): Promise<Pick<ThreadSessionBinding, "owningWorkspaceId" | "threadId" | "runId" | "owner"> | null> => {
+    await ensureSessionBindings();
+    const existing = sessionBindings.get(sessionId);
+    if (existing) {
+      const catalog = await readExistingCatalog(existing.owningWorkspaceId);
+      if (catalog && bindingMatchesCatalog(existing, catalog)) {
+        return {
+          owningWorkspaceId: existing.owningWorkspaceId,
+          threadId: existing.threadId,
+          runId: existing.runId,
+          owner: existing.owner,
+        };
+      }
+    }
+    // Refresh the catalog view so workspaces created after startup are seen.
+    await loadHostCatalogs();
+    let best: { workspaceId: string; run: ThreadRun } | null = null;
+    for (const catalog of cache.values()) {
+      for (const run of catalog.runs) {
+        if (run.sessionId !== sessionId) continue;
+        if (!best || run.startedAt.localeCompare(best.run.startedAt) > 0) {
+          best = { workspaceId: catalog.workspaceId, run };
+        }
+      }
+    }
+    return best
+      ? {
+        owningWorkspaceId: best.workspaceId,
+        threadId: best.run.threadId,
+        runId: best.run.id,
+        owner: best.run.sessionOwner === "attached-root" ? "attached-root" : "spawned-child",
+      }
+      : null;
+  };
+
   const getSessionBinding = async (sessionId: string): Promise<ThreadSessionBinding | null> => {
     await ensureSessionBindings();
     const existing = sessionBindings.get(sessionId);
@@ -2903,6 +2948,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     listRuns,
     getThreadForSession,
     getSessionBinding,
+    resolveSessionOwner,
     bindRunSession,
     unbindRunSession,
     countActiveInRoot,

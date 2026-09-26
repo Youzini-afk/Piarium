@@ -948,6 +948,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         workspaceId: entry.workspaceId,
         operationDir: entry.workContext.operationDir,
         contextRevision: entry.workContext.revision,
+        queryScope: entry.workContext.queryScope === null ? null : [...entry.workContext.queryScope],
         ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
         grantedCapabilities: [...COMPACTION_QUERY_CAPABILITIES],
       };
@@ -958,6 +959,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       workspaceId: entry.workspaceId,
       operationDir: entry.workContext.operationDir,
       contextRevision: entry.workContext.revision,
+      queryScope: entry.workContext.queryScope === null ? null : [...entry.workContext.queryScope],
       ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
       grantedCapabilities: await entry.grantedCapabilities,
     };

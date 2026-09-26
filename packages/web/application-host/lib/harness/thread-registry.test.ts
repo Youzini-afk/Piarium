@@ -876,4 +876,29 @@ describe("thread registry", () => {
     await registry.acknowledgeThreadMessages(WORKSPACE, thread.id, ["m-2"]);
     expect(await registry.listPendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
   });
+
+  it("RR4/E07: resolveSessionOwner answers for a settled run and after restart", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-9");
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, report());
+    // The run settled — the active-owner binding rejects by design…
+    await expect(registry.getSessionBinding("child-session-9")).rejects.toMatchObject({ code: "stale-binding" });
+    // …but durable ownership still resolves from the catalog record.
+    expect(await registry.resolveSessionOwner("child-session-9")).toEqual({
+      owningWorkspaceId: WORKSPACE,
+      threadId: thread.id,
+      runId: run.id,
+      owner: "spawned-child",
+    });
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect(await registry.resolveSessionOwner("child-session-9")).toEqual({
+      owningWorkspaceId: WORKSPACE,
+      threadId: thread.id,
+      runId: run.id,
+      owner: "spawned-child",
+    });
+    expect(await registry.resolveSessionOwner("never-seen")).toBeNull();
+  });
 });

@@ -82,7 +82,7 @@ export function createWorkingBranchQuery(store:WorkingStateRootStore,pin:Working
       }});
       if(result.status==="failed"||result.status==="partial"&&!count)return {status:"failure",generation,message:result.message??"Fixed-view search incomplete"};
       if(result.status==="cancelled")return {status:"cancelled",generation};
-      return count?{status:"ready",generation,hits,...(result.status==="partial"?{incomplete:true as const}:{})}:{status:"empty",generation};
+      return count?{status:"ready",generation,hits,scannedFiles:result.scannedFiles,...(result.status==="partial"?{incomplete:true as const}:{})}:{status:"empty",generation,scannedFiles:result.scannedFiles};
     },
   };
 }

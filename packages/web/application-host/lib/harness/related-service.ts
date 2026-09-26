@@ -61,7 +61,11 @@ export function createRelatedQueryService(
           {
             workspaceId,
             ...(host.relationCollector ? { collector: host.relationCollector } : {}),
-            ...(ctx.actor.workspaceScope ? { roots: ctx.actor.workspaceScope } : {}),
+            // RR4: the session query scope narrows relation answers too; it
+            // was already validated inside the authorized workspaceScope.
+            ...(ctx.actor.queryScope?.length
+              ? { roots: [...ctx.actor.queryScope] }
+              : ctx.actor.workspaceScope ? { roots: ctx.actor.workspaceScope } : {}),
             signal: ctx.signal,
           },
         );

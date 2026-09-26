@@ -6,6 +6,7 @@ import type { SearchContentResult } from "@varin/protocol";
 const GrepParams = Type.Object({
   pattern: Type.String(),
   path: Type.Optional(Type.String()),
+  paths: Type.Optional(Type.Array(Type.String())),
   glob: Type.Optional(Type.Array(Type.String())),
   ignoreCase: Type.Optional(Type.Boolean()),
   fixedStrings: Type.Optional(Type.Boolean()),
@@ -17,7 +18,10 @@ const GrepParams = Type.Object({
 
 function formatSearchResult(result: SearchContentResult, pattern: string): string {
   if (result.status === "empty") {
-    return `0 hits (searched ${result.searchedFiles} files)`;
+    // searchedFiles is the kernel's real scanned count when present; absent
+    // means the backend did not report one — never present a fabricated zero.
+    const scanned = result.searchedFiles !== undefined ? ` (searched ${result.searchedFiles} files)` : "";
+    return `0 hits — no matches in the requested scope${scanned}`;
   }
   if (result.status === "unavailable") {
     return `search unavailable`;
@@ -62,6 +66,7 @@ export function createGrepTool(bridge: HostServicesBridge, _sessionId: string): 
         const result = await bridge.request("search.content", {
           pattern: params.pattern,
           ...(params.path !== undefined ? { path: params.path } : {}),
+          ...(params.paths !== undefined ? { paths: params.paths } : {}),
           ...(params.glob !== undefined ? { glob: params.glob } : {}),
           ...(params.ignoreCase !== undefined ? { ignoreCase: params.ignoreCase } : {}),
           ...(params.fixedStrings !== undefined ? { fixedStrings: params.fixedStrings } : {}),

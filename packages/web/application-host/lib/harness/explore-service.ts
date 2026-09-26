@@ -114,11 +114,18 @@ export function createExploreSearchService(
       if (params.paths?.length && ctx.authorizedPaths.length !== params.paths.length) {
         throw new HarnessServiceError("forbidden", "Search paths were not authorized.");
       }
+      // RR4: default retrieval scope is the session query scope, then the
+      // operation dir — both already validated inside the actor's authorized
+      // scope. workspaceScope remains the fallback for unrestricted defaults.
       const effectivePaths = params.paths?.length
         ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-        : ctx.actor.workspaceScope?.length
-          ? [...ctx.actor.workspaceScope]
-          : undefined;
+        : ctx.actor.queryScope?.length
+          ? [...ctx.actor.queryScope]
+          : ctx.actor.operationDir
+            ? [ctx.actor.operationDir]
+            : ctx.actor.workspaceScope?.length
+              ? [...ctx.actor.workspaceScope]
+              : undefined;
       const effectiveParams: ExploreParams = effectivePaths ? { ...params, paths: effectivePaths } : params;
       const graph = host.graphRecall
         ? await host.graphRecall(ctx.sessionId, workspaceId).catch(() => null)

@@ -72,7 +72,7 @@ describe("workspace content search over native compute", () => {
         before: 2,
         after: 3,
       });
-      expect(scoped).toEqual({ status: "empty", generation: undefined });
+      expect(scoped).toEqual({ status: "empty", generation: undefined, scannedFiles: 0 });
       expect(directory).toHaveBeenCalledTimes(1);
       expect(directory.mock.calls[0]?.[0]).toBe(root);
       expect(directory.mock.calls[0]?.[1]).toMatchObject({
@@ -126,7 +126,7 @@ describe("workspace content search over native compute", () => {
       });
       mode = "empty";
       await expect(search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 }))
-        .resolves.toEqual({ status: "empty", generation: 3 });
+        .resolves.toEqual({ status: "empty", generation: 3, scannedFiles: 0 });
       mode = "failed";
       await expect(search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 }))
         .resolves.toEqual({ status: "failure", generation: 3, message: "native search failed" });
@@ -197,7 +197,7 @@ describe("workspace content search over native compute", () => {
         generation: 6,
         onBatch: (hits) => { batches.push(hits); },
       });
-      expect(result).toEqual({ status: "ready", generation: 6, hits: [] });
+      expect(result).toEqual({ status: "ready", generation: 6, hits: [], scannedFiles: 0 });
       expect(batches.flat().map((item) => item.preview)).toEqual(["first", "second"]);
     } finally {
       await harness.cleanup();
