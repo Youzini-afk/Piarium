@@ -303,7 +303,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // worker-resolved set is its own tools, which it already holds.
       const tools = researchDefinition?.tools ?? preset?.tools ?? params.tools ?? [];
       if (owner && !preset) {
-        const denied = tools.filter((tool) => !owner.execution.tools.includes(tool));
+        // context.session is an inherent, Host-scoped session capability. An
+        // older parent Run may predate the work_context tool, but granting its
+        // child the local context handle does not enlarge the frozen path scope.
+        const denied = tools.filter((tool) => tool !== "work_context" && !owner.execution.tools.includes(tool));
         if (denied.length > 0) {
           await captured.cleanup().catch(() => undefined);
           throw new HarnessServiceError(

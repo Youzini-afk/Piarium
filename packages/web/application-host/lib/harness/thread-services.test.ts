@@ -334,6 +334,7 @@ describe("thread services", () => {
         },
         model: { providerId: "research-provider", modelId: "design-model" },
       });
+      expect(branch?.manifest.tools).toContain("work_context");
       expect(spawn).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
