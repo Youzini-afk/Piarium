@@ -10,6 +10,7 @@ import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import type { LocalWorkingStateStorageContext as WorkspaceRecoveryStorageContext } from "./working-state/working-state-store.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createHarnessRouter } from "./router.js";
+import { createHarnessPathAuthority } from "./path-authority.js";
 import { createHarnessServiceHost } from "./service-host.js";
 import { registerHarnessServices } from "./harness-services.js";
 import { createThreadRegistry } from "./thread-registry.js";
@@ -196,6 +197,7 @@ describe("owning vs execution workspace identity", () => {
     };
     const host = createHarnessServiceHost({
       search: async () => ({ status: "empty", generation: undefined }),
+      pathAuthority: createHarnessPathAuthority({ authorityId: "host", documents }),
       resolveWorkspaceRoot: async (workspaceId) => {
         try {
           return (await documents.inspectWorkspace(workspaceId)).root;
@@ -207,6 +209,9 @@ describe("owning vs execution workspace identity", () => {
       threadSpawnSession: (spawnInput) => runtime.spawn(spawnInput),
       threadPrepareIsolatedBranch: (prepareInput) => runtime.prepareIsolatedBranch(prepareInput),
     });
+    host.registerSession({ actor, grantedCapabilities: ["control.thread", "context.session"],
+      workspaceId: execution.workspaceId, workspaceRoot: parentSession.cwd,
+      authorityWorkspaceRoot: parentSession.cwd });
     const router = createHarnessRouter({
       resolveActor: async () => actor,
       respond: async (_sessionId, _requestId, result) => { response = result; },
@@ -233,7 +238,7 @@ describe("owning vs execution workspace identity", () => {
 
     try {
       const dispatched = await request("thread.dispatch", { preset: "check", task: "Inspect the parent branch" });
-      expect(dispatched).toMatchObject({ ok: true, result: { queued: false } });
+      expect(dispatched, JSON.stringify(dispatched)).toMatchObject({ ok: true, result: { queued: false } });
       if (!dispatched.ok) throw new Error(dispatched.error.message);
       const grandchildId = dispatched.result.threadId;
       expect(await registry.getThread(owning.workspaceId, { kind: "thread", id: parentThread.id }, grandchildId)).toMatchObject({

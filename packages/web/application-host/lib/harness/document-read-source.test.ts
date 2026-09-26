@@ -330,10 +330,10 @@ describe("native read source through Host router and Documents", () => {
     let restored = false;
     let outsideBytesRead = false;
     const restore = async (): Promise<void> => {
-      if (restored) return;
-      restored = true;
+      if (restored || armed) return;
       await fs.rm(directory, { recursive: true, force: true });
       await fs.rename(backup, directory);
+      restored = true;
     };
     const readFsPromises = {
       open: async (target: string, flags: string | number) => {
@@ -341,8 +341,8 @@ describe("native read source through Host router and Documents", () => {
           ? target.toLowerCase() === canonicalFile.toLowerCase()
           : target === canonicalFile;
         if (!armed || !samePath) return fs.open(target, flags);
-        armed = false;
         await fs.rename(directory, backup);
+        armed = false;
         await fs.symlink(outside, directory, process.platform === "win32" ? "junction" : "dir");
         const handle = await fs.open(target, flags);
         return {
@@ -372,6 +372,9 @@ describe("native read source through Host router and Documents", () => {
     await fs.mkdir(outside);
     canonicalFile = path.join(directory, "note.txt");
     await fs.writeFile(canonicalFile, "authorized bytes\n");
+    // Windows temp paths can use an 8.3 alias while path authority opens the
+    // canonical long path. Match the actual authorized open target.
+    canonicalFile = await fs.realpath(canonicalFile);
     await fs.writeFile(path.join(outside, "note.txt"), "outside secret bytes\n");
     try {
       const response = await f.request("tree/note.txt", { source: "disk" });

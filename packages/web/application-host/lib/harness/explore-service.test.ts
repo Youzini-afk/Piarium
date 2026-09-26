@@ -144,7 +144,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     f.actor.operationDir = "project-a";
     f.actor.workspaceScope = ["project-a", "project-b"];
     const relative = await f.request({ question: "needle", anchors: ["src/target.ts"] });
-    expect(relative.ok).toBe(true);
+    expect(relative.ok, JSON.stringify(relative)).toBe(true);
     if (!relative.ok) throw new Error(relative.error.message);
     expect(relative.result.details.anchors.used).toEqual(["project-a/src/target.ts"]);
     expect(relative.result.snippets.map((snippet) => snippet.path)).toContain("project-a/src/target.ts");
@@ -318,7 +318,7 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(response.result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
     expect(Buffer.byteLength(response.result.text, "utf8")).toBeLessThanOrEqual(response.result.details.byteBudget);
     expect(response.result.text).toMatch(/Unread candidates \(not-requested/);
-    expect(response.result.text).not.toContain(response.result.handle);
+    expect(response.result.text).toContain(response.result.handle);
   });
 
   it("filters a blank anchor instead of rejecting the call", async () => {

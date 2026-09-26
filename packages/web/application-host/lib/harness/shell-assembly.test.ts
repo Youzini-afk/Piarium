@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -182,10 +182,10 @@ describe("production shell assembly", () => {
       .toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("heredoc-marker") });
     await host.workContextSelect((await host.resolveActor(actor("session-context")))!, { path: "second", expectedRevision: 0 });
     expect(await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd'))
-      .toMatchObject({ kind: "completed", exitCode: 0, cwd: second, stdout: expect.stringContaining("retained") });
+      .toMatchObject({ kind: "completed", exitCode: 0, cwd: realpathSync(second), stdout: expect.stringContaining("retained") });
     expect(await run("cd nested # tail comment"))
-      .toMatchObject({ kind: "completed", exitCode: 0, cwd: join(second, "nested") });
-    expect(await run("pwd")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
+      .toMatchObject({ kind: "completed", exitCode: 0, cwd: realpathSync(join(second, "nested")) });
+    expect(await run("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
     const syntax = await run("if then");
     expect(syntax.kind).toBe("completed");
     if (syntax.kind === "completed") expect(syntax.exitCode).not.toBe(0);
@@ -229,16 +229,16 @@ describe("production shell assembly", () => {
     await host.workContextSelect(oldActor, { path: "second", expectedRevision: 0 });
     releaseMaterialization();
 
-    expect(await acceptedBeforeSelect).toMatchObject({ kind: "completed", cwd: first });
+    expect(await acceptedBeforeSelect).toMatchObject({ kind: "completed", cwd: realpathSync(first) });
 
     const runAtCurrentContext = async (command: string) => {
       const ctx = serviceContext("session-anchor-admission", "ws-anchor-admission");
       ctx.actor = (await host.resolveActor(actor("session-anchor-admission")))!;
       return createShellExecService(host).handle({ command, waitMs: 15_000 }, ctx);
     };
-    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: second });
-    expect(await runAtCurrentContext("cd nested")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
-    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
+    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(second) });
+    expect(await runAtCurrentContext("cd nested")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
+    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: realpathSync(join(second, "nested")) });
   }, 45_000);
 
   nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
@@ -287,7 +287,7 @@ describe("production shell assembly", () => {
       .toMatchObject({ kind: "completed", exitCode: 1 });
     deleteSelectedCwd = true;
     expect(await supervisor.exec("Set-Content -LiteralPath marker.txt -Value wrong", { cwd: vanished, waitMs: 10_000 }))
-      .toMatchObject({ kind: "completed", exitCode: 1, cwd: workspace });
+      .toMatchObject({ kind: "completed", exitCode: 1, cwd: realpathSync(workspace) });
     expect(existsSync(join(workspace, "marker.txt"))).toBe(false);
     if (first.kind === "completed") expect(first.stdout).toContain("varin-powershell-one");
     if (second.kind === "completed") expect(second.stdout).toContain("varin-powershell-two");
