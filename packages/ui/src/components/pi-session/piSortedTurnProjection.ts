@@ -84,7 +84,7 @@ export const projectPiSortedTurn = (
           id: `${source.id}:thinking:${index}`,
           kind: 'thinking',
           sourceId: source.id,
-          streaming,
+          streaming: streaming && index === message.content.length - 1,
         });
         continue;
       }

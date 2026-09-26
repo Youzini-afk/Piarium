@@ -1,6 +1,5 @@
 import React from 'react';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { cn } from '@/lib/utils';
 import { loadMarkdownRendererModule } from './markdownRendererLoader';
 
@@ -25,8 +24,8 @@ const fallbackContentClassName = (variant: unknown): string => {
   return 'markdown-content leading-relaxed';
 };
 
-const MobileMarkdownFallback = (props: { content?: unknown; className?: unknown; variant?: unknown }) => {
-  if (!isMobileSurfaceRuntime() || typeof props.content !== 'string' || props.content.length === 0) {
+const MarkdownFallback = (props: { content?: unknown; className?: unknown; variant?: unknown }) => {
+  if (typeof props.content !== 'string' || props.content.length === 0) {
     return fallback;
   }
 
@@ -38,13 +37,13 @@ const MobileMarkdownFallback = (props: { content?: unknown; className?: unknown;
 };
 
 export const MarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof MarkdownRendererLazy>> = (props) => (
-  <React.Suspense fallback={<MobileMarkdownFallback {...props} />}>
+  <React.Suspense fallback={<MarkdownFallback {...props} />}>
     <MarkdownRendererLazy {...props} />
   </React.Suspense>
 );
 
 export const SimpleMarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof SimpleMarkdownRendererLazy>> = (props) => (
-  <React.Suspense fallback={<MobileMarkdownFallback {...props} />}>
+  <React.Suspense fallback={<MarkdownFallback {...props} />}>
     <SimpleMarkdownRendererLazy {...props} />
   </React.Suspense>
 );

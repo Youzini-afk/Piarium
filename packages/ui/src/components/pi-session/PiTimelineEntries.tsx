@@ -4,6 +4,7 @@ import type {
   PiAssistantMessage,
   PiSessionEntry,
   PiSessionMessageEntry,
+  PiThinkingContent,
   PiToolCall,
   PiToolResultMessage,
   PiUserContent,
@@ -595,6 +596,20 @@ const MetaEntry: React.FC<{
   </div>
 );
 
+const PiThinkingBody: React.FC<{
+  content: PiThinkingContent;
+  messageId: string;
+  streaming: boolean;
+}> = ({ content, messageId, streaming }) => {
+  if (content.redacted) return null;
+  // Show received reasoning immediately. The Markdown renderer's paced reveal
+  // can lag behind a busy stream and replay thinking after answer text starts.
+  if (streaming) {
+    return <div className="markdown-content markdown-reasoning whitespace-pre-wrap break-words">{content.thinking}</div>;
+  }
+  return <MarkdownRenderer content={content.thinking} messageId={messageId} variant="reasoning" />;
+};
+
 const AssistantMessage: React.FC<{
   cwd: string;
   entryId: string;
@@ -682,11 +697,10 @@ const AssistantMessage: React.FC<{
             </summary>
             {!content.redacted && (
               <div className="ml-2 border-l border-border/60 py-1 pl-3 text-muted-foreground">
-                <MarkdownRenderer
-                  content={content.thinking}
+                <PiThinkingBody
+                  content={content}
                   messageId={`${entryId}:thinking:${index}`}
-                  isStreaming={streaming}
-                  variant="reasoning"
+                  streaming={streaming && message.stopReason === 'pending' && index === message.content.length - 1}
                 />
               </div>
             )}
@@ -777,11 +791,10 @@ const PiSortedActivityGroup: React.FC<{
                     </div>
                     {!item.content.redacted ? (
                       <div className="ml-2 border-l border-border/60 pl-3 text-muted-foreground">
-                        <MarkdownRenderer
-                          content={item.content.thinking}
+                        <PiThinkingBody
+                          content={item.content}
                           messageId={item.id}
-                          isStreaming={item.streaming}
-                          variant="reasoning"
+                          streaming={item.streaming}
                         />
                       </div>
                     ) : null}

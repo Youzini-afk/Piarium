@@ -98,16 +98,21 @@ describe('Pi timeline chat render mode', () => {
 
     expect(markup).toContain('data-pi-sorted-activity="true"');
     expect(markup).toContain('data-pi-activity-kind="thinking"');
+    expect(markup).toContain('Inspecting the current implementation.');
     expect(markup).not.toContain('This unfinished answer must not appear yet.');
   });
 
   test('live mode preserves the natural streaming order without an activity group', () => {
     useUIStore.setState({ chatRenderMode: 'live' });
 
-    const markup = renderTimeline();
+    const markup = renderTimeline({
+      ...liveAssistant,
+      content: [{ thinking: 'Inspecting the current implementation.', type: 'thinking' }],
+    });
 
     expect(markup).not.toContain('data-pi-sorted-activity="true"');
     expect(markup).toContain('group/thinking');
+    expect(markup).toContain('Inspecting the current implementation.');
   });
 
   test('does not render an intentional abort as a red assistant error', () => {

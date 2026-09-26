@@ -42,7 +42,18 @@ describe('Pi sorted turn projection', () => {
 
     expect(projection.activityAnchorId).toBe(PI_SORTED_LIVE_ASSISTANT_ID);
     expect(projection.activity.map((item) => item.kind)).toEqual(['thinking']);
+    expect(projection.activity[0]?.streaming).toBe(false);
     expect(projection.answersBySourceId.size).toBe(0);
+  });
+
+  test('only the trailing thinking block remains live while reasoning arrives', () => {
+    const live = assistant([
+      { thinking: 'first thought', type: 'thinking' },
+      { thinking: 'second thought', type: 'thinking' },
+    ], 'pending', 2);
+    const projection = projectPiSortedTurn([], live);
+
+    expect(projection.activity.map((item) => item.streaming)).toEqual([false, true]);
   });
 
   test('classifies tool-use text as justification and preserves source order', () => {

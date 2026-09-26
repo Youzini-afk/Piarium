@@ -322,6 +322,41 @@ describe('Pi session event state', () => {
     expect(persisted.liveAssistant).toBeUndefined();
   });
 
+  test('applies thinking updates before answer text starts', () => {
+    const sessionId = 'session-a';
+    const initial = {
+      branchEntries: branch(sessionId),
+      extensionStates: {},
+      open: true,
+      sessionId,
+      snapshot: snapshot(sessionId),
+      toolExecutions: {},
+    };
+    const thinkingMessage = {
+      ...assistant(''),
+      content: [{ thinking: 'Checking the implementation', type: 'thinking' as const }],
+    };
+    const thinking = reducePiAgentEvent(initial, {
+      message: thinkingMessage,
+      type: 'message_update',
+      update: { contentIndex: 0, delta: ' implementation', type: 'thinking_delta' },
+    });
+    expect(thinking.liveAssistant?.content).toEqual(thinkingMessage.content);
+
+    const answering = reducePiAgentEvent(thinking, {
+      message: {
+        ...thinkingMessage,
+        content: [...thinkingMessage.content, { text: 'The fix is ready', type: 'text' as const }],
+      },
+      type: 'message_update',
+      update: { contentIndex: 1, delta: 'The fix is ready', type: 'text_delta' },
+    });
+    expect(answering.liveAssistant?.content).toEqual([
+      { thinking: 'Checking the implementation', type: 'thinking' },
+      { text: 'The fix is ready', type: 'text' },
+    ]);
+  });
+
   test('does not restore a persisted assistant when message_end arrives after entry_appended', () => {
     const sessionId = 'session-a';
     const message = assistant('done', 'stop');
