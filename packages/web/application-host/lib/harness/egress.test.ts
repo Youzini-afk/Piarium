@@ -6,9 +6,11 @@ import { checkSsrf, classifyHostname, classifyIp } from "./ssrf-policy.js";
 
 const PUBLIC_ADDR = { address: "93.184.216.34", family: 4 };
 
-/** Minimal CONNECT proxy stub: records the authority and replies `innerReply`. */
-const stubConnectProxy = async (innerReply: string | null) => {
+/** Minimal CONNECT proxy stub: records both proxy and tunneled HTTP headers. */
+const stubConnectProxy = async (innerReply: string | null | ((authority: string) => string)) => {
   const authorities: string[] = [];
+  const connectRequests: string[] = [];
+  const tunneledRequests: Array<{ authority: string; headers: string }> = [];
   const server = net.createServer((socket) => {
     let head = Buffer.alloc(0);
     const onData = (chunk: Buffer): void => {
@@ -23,21 +25,36 @@ const stubConnectProxy = async (innerReply: string | null) => {
         return;
       }
       authorities.push(authority);
+      connectRequests.push(head.subarray(0, end + 4).toString("latin1"));
       if (innerReply === null) {
         socket.end("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\n\r\n");
         return;
       }
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      socket.on("data", () => {
-        socket.end(innerReply);
-      });
+      let tunneledHead = Buffer.alloc(0);
+      const onTunnelData = (data: Buffer): void => {
+        // TLS tests only need to prove CONNECT routing; their tunnel payload
+        // is binary and cannot be inspected as target HTTP headers here.
+        if (tunneledHead.length === 0 && data[0] === 0x16) {
+          socket.off("data", onTunnelData);
+          socket.end(typeof innerReply === "function" ? innerReply(authority) : innerReply);
+          return;
+        }
+        tunneledHead = Buffer.concat([tunneledHead, data]);
+        const headerEnd = tunneledHead.indexOf("\r\n\r\n");
+        if (headerEnd === -1) return;
+        socket.off("data", onTunnelData);
+        tunneledRequests.push({ authority, headers: tunneledHead.subarray(0, headerEnd + 4).toString("latin1") });
+        socket.end(typeof innerReply === "function" ? innerReply(authority) : innerReply);
+      };
+      socket.on("data", onTunnelData);
     };
     socket.on("data", onData);
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const port = (server.address() as net.AddressInfo).port;
-  return { url: `http://127.0.0.1:${port}`, authorities, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { url: `http://127.0.0.1:${port}`, authorities, connectRequests, tunneledRequests, close: () => new Promise<void>((r) => server.close(() => r())) };
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -72,11 +89,51 @@ describe("egress policy", () => {
     expect(r.failure?.kind).toBe("proxy-config-invalid");
   });
 
+  it("requires an address in explicit proxy mode", async () => {
+    const rt = createEgressRuntime({ env: {} });
+    expect(rt.resolve("https://example.com/", { mode: "proxy" }).failure?.kind).toBe("proxy-config-invalid");
+    await expect(rt.fetch("https://example.com/", {}, { mode: "proxy" })).rejects.toMatchObject({ kind: "proxy-config-invalid" });
+    await rt.close();
+  });
+
+  it("selects HTTP_PROXY and HTTPS_PROXY for their respective targets", async () => {
+    const env = { HTTP_PROXY: "http://http-proxy.test:81", HTTPS_PROXY: "http://https-proxy.test:82" };
+    expect(resolveEgressPolicy(undefined, env, "http:").proxyOrigin).toBe("http://http-proxy.test:81");
+    expect(resolveEgressPolicy(undefined, env, "https:").proxyOrigin).toBe("http://https-proxy.test:82");
+    const rt = createEgressRuntime({ env });
+    expect(rt.resolve("http://target.example/").policy.proxyOrigin).toBe("http://http-proxy.test:81");
+    expect(rt.resolve("https://target.example/").policy.proxyOrigin).toBe("http://https-proxy.test:82");
+    expect(resolveEgressPolicy(undefined, { HTTPS_PROXY: env.HTTPS_PROXY }, "http:").mode).toBe("direct");
+    expect(resolveEgressPolicy(undefined, { ALL_PROXY: "http://fallback.test:83" }, "http:").proxyOrigin).toBe("http://fallback.test:83");
+    await rt.close();
+  });
+
+  it("matches NO_PROXY across IPv6 spellings and respects a bracketed port", async () => {
+    const rt = createEgressRuntime({ env: {
+      HTTP_PROXY: "http://127.0.0.1:3128",
+      HTTPS_PROXY: "http://127.0.0.1:3128",
+      NO_PROXY: "[2606:4700:0000:0000:0000:0000:0000:1111]:443,[::ffff:93.184.216.34]",
+    } });
+    expect(rt.resolve("https://[2606:4700::1111]/").bypassedProxy).toBe(true);
+    expect(rt.resolve("https://[2606:4700::1111]:444/").bypassedProxy).toBeUndefined();
+    expect(rt.resolve("http://[::ffff:5db8:d822]/").bypassedProxy).toBe(true);
+    await rt.close();
+  });
+
   it("sanitizes proxy credentials out of policy", () => {
     const p = resolveEgressPolicy({ mode: "proxy", proxyUrl: "http://user:s3cret@10.0.0.1:3128" });
     expect(p.proxyOrigin).toBe("http://10.0.0.1:3128");
     expect(p.proxyAuth).toBe("basic");
     expect(JSON.stringify(p)).not.toContain("s3cret");
+  });
+
+  it("classifies malformed proxy credentials before creating a dispatcher", async () => {
+    const rt = createEgressRuntime({ env: { HTTPS_PROXY: "http://user:%zz@127.0.0.1:3128" } });
+    expect(rt.resolve("https://example.com/").failure?.kind).toBe("proxy-config-invalid");
+    const d = await rt.diagnose("https://example.com/");
+    expect(d.decision).toBe("blocked");
+    expect(d.reason).toContain("proxy-config-invalid");
+    await rt.close();
   });
 });
 
@@ -93,6 +150,8 @@ describe("ssrf classification", () => {
     expect(classifyHostname("[fe80::1%eth0]")).toBe("private-network");
     const r = await checkSsrf("http://[::1]:8080/admin");
     expect(r).toEqual({ blocked: true, reason: "private-network" });
+    expect(await checkSsrf("http://0x7f.1/")).toEqual({ blocked: true, reason: "private-network" });
+    expect(await checkSsrf("http://localhost./")).toEqual({ blocked: true, reason: "private-network" });
   });
 
   it("classifies IPv4-embedded IPv6 by the embedded address", () => {
@@ -100,6 +159,18 @@ describe("ssrf classification", () => {
     expect(classifyIp("::ffff:93.184.216.34")).toBe("public");
     expect(classifyIp("64:ff9b::7f00:1")).toBe("private");
     expect(classifyIp("64:ff9b::5db8:d822")).toBe("public");
+    expect(classifyIp("0:0:0:0:0:ffff:7f00:1")).toBe("private");
+    expect(classifyIp("::ffff:0:7f00:1")).toBe("private");
+    expect(classifyIp("2002:7f00:1::")).toBe("private");
+    expect(classifyIp("fe90::1")).toBe("private");
+    expect(classifyIp("febf::1")).toBe("private");
+    expect(classifyIp("2001:db8::1")).toBe("special-purpose");
+    expect(classifyIp("64:ff9b:1::7f00:1")).toBe("special-purpose");
+    expect(classifyIp("2001:2::1")).toBe("special-purpose");
+    expect(classifyIp("3fff::1")).toBe("special-purpose");
+    expect(classifyIp("224.0.0.1")).toBe("special-purpose");
+    expect(classifyHostname("localhost.")).toBe("private-network");
+    expect(classifyHostname("service.local.")).toBe("private-network");
   });
 
   it("blocks ftp and non-URL input at the scheme check", async () => {
@@ -125,6 +196,12 @@ describe("connect-path enforcement", () => {
       resolveAll: async () => { throw Object.assign(new Error("getaddrinfo ENOTFOUND x"), { code: "ENOTFOUND" }); },
     });
     await expect(rt.fetch("http://missing.test/")).rejects.toMatchObject({ kind: "dns" });
+  });
+
+  it("rejects a link-local IPv6 DNS answer before any socket is dialed", async () => {
+    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "fe90::1", family: 6 }] });
+    await expect(rt.fetch("http://public-name.test/")).rejects.toMatchObject({ kind: "private-network" });
+    await rt.close();
   });
 });
 
@@ -169,6 +246,41 @@ describe("proxy data path", () => {
     expect(rt.resolve("http://192.168.0.1/").failure?.kind).toBe("private-network");
     expect(rt.resolve("http://198.18.2.2/").failure?.kind).toBe("special-purpose");
   });
+
+  it("screens the redirected target before opening a second proxy tunnel", async () => {
+    const proxy = await stubConnectProxy("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:8080/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    cleanups.push(proxy.close);
+    const rt = createEgressRuntime({ env: { HTTP_PROXY: proxy.url } });
+    await expect(rt.fetch("http://public.example/")).rejects.toMatchObject({ kind: "private-network" });
+    expect(proxy.authorities).toEqual(["public.example:80"]);
+    await rt.close();
+  });
+
+  it("screens an IPv4-mapped IPv6 redirect before opening a second tunnel", async () => {
+    const proxy = await stubConnectProxy("HTTP/1.1 302 Found\r\nLocation: http://[::ffff:7f00:1]:8080/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    cleanups.push(proxy.close);
+    const rt = createEgressRuntime({ env: { HTTP_PROXY: proxy.url } });
+    await expect(rt.fetch("http://public.example/")).rejects.toMatchObject({ kind: "private-network" });
+    expect(proxy.authorities).toEqual(["public.example:80"]);
+    await rt.close();
+  });
+
+  it("uses each hop's protocol proxy while retaining one policy snapshot", async () => {
+    const env: NodeJS.ProcessEnv = {};
+    const httpProxy = await stubConnectProxy(() => {
+      env.HTTPS_PROXY = "http://127.0.0.1:1";
+      return "HTTP/1.1 302 Found\r\nLocation: https://secure.example/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    });
+    const httpsProxy = await stubConnectProxy(null);
+    cleanups.push(httpProxy.close, httpsProxy.close);
+    env.HTTP_PROXY = httpProxy.url;
+    env.HTTPS_PROXY = httpsProxy.url;
+    const rt = createEgressRuntime({ env });
+    await expect(rt.fetch("http://public.example/")).rejects.toMatchObject({ kind: "proxy-auth" });
+    expect(httpProxy.authorities).toEqual(["public.example:80"]);
+    expect(httpsProxy.authorities).toEqual(["secure.example:443"]);
+    await rt.close();
+  });
 });
 
 describe("diagnose", () => {
@@ -179,6 +291,7 @@ describe("diagnose", () => {
     });
     const d = await rt.diagnose("https://example.com/x");
     expect(d.decision).toBe("allowed");
+    expect(d.addressCheck).toBe("public");
     expect(d.resolution).toBe("local");
     expect(d.addresses).toEqual([
       { address: "93.184.216.34", class: "public" },
@@ -190,15 +303,62 @@ describe("diagnose", () => {
     const rt = createEgressRuntime({ env: { HTTPS_PROXY: "http://127.0.0.1:3128" } });
     const d = await rt.diagnose("https://example.com/");
     expect(d.decision).toBe("allowed");
+    expect(d.addressCheck).toBe("proxy-side-unverified");
     expect(d.resolution).toBe("proxy-side");
     expect(d.policy.proxyOrigin).toBe("http://127.0.0.1:3128");
+  });
+
+  it("classifies a public target literal without claiming proxy-side DNS", async () => {
+    const rt = createEgressRuntime({ env: { HTTPS_PROXY: "http://127.0.0.1:3128" } });
+    const d = await rt.diagnose("https://93.184.216.34/");
+    expect(d.resolution).toBe("static-literal");
+    expect(d.addressCheck).toBe("public");
+    expect(d.addresses).toEqual([{ address: "93.184.216.34", class: "public" }]);
+    await rt.close();
   });
 
   it("reports a blocked literal decision with the reason", async () => {
     const rt = createEgressRuntime({ env: {} });
     const d = await rt.diagnose("http://127.0.0.1:9/");
     expect(d.decision).toBe("blocked");
+    expect(d.addressCheck).toBe("blocked");
     expect(d.reason).toContain("private-network");
+  });
+
+  it("does not claim an address check for a statically blocked hostname", async () => {
+    const rt = createEgressRuntime({ env: {} });
+    const d = await rt.diagnose("http://service.local/");
+    expect(d.decision).toBe("blocked");
+    expect(d.resolution).toBe("not-run");
+    expect(d.addressCheck).toBe("not-run");
+    await rt.close();
+  });
+
+  it("blocks a trailing-dot local hostname before a configured proxy can resolve it", async () => {
+    const proxy = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    cleanups.push(proxy.close);
+    const rt = createEgressRuntime({ env: { HTTP_PROXY: proxy.url } });
+    await expect(rt.fetch("http://service.local./")).rejects.toMatchObject({ kind: "private-network" });
+    expect(proxy.authorities).toEqual([]);
+    await rt.close();
+  });
+
+  it("separates a static allow from a DNS answer that would be blocked on connect", async () => {
+    const rt = createEgressRuntime({ env: {}, resolveAll: async () => [{ address: "fe90::1", family: 6 }] });
+    const d = await rt.diagnose("http://public-name.test/");
+    expect(d.decision).toBe("allowed");
+    expect(d.addressCheck).toBe("blocked");
+    expect(d.addresses).toEqual([{ address: "fe90::1", class: "private" }]);
+    await rt.close();
+  });
+
+  it("reports diagnostic DNS failures separately from policy blocks", async () => {
+    const rt = createEgressRuntime({ env: {}, resolveAll: async () => { throw Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" }); } });
+    const d = await rt.diagnose("http://missing.test/");
+    expect(d.decision).toBe("allowed");
+    expect(d.addressCheck).toBe("dns-error");
+    expect(d.lookupError).toContain("ENOTFOUND");
+    await rt.close();
   });
 });
 
@@ -207,5 +367,72 @@ describe("classifyEgressError", () => {
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("bad"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" }) })).kind).toBe("tls");
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("t"), { code: "UND_ERR_CONNECT_TIMEOUT" }) })).kind).toBe("connect");
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("t"), { code: "ECONNREFUSED" }) }), "proxy").kind).toBe("proxy-unavailable");
+  });
+});
+
+describe("dispatcher lifecycle", () => {
+  it("closes pooled dispatchers once and refuses new requests", async () => {
+    const rt = createEgressRuntime({ env: { HTTPS_PROXY: "http://127.0.0.1:3128" } });
+    rt.resolve("https://example.com/");
+    const closing = rt.close();
+    expect(rt.close()).toBe(closing);
+    await closing;
+    await expect(rt.fetch("https://example.com/")).rejects.toMatchObject({ kind: "connect" });
+  });
+
+  it("retires an old proxy route after env rotation without changing an in-flight snapshot", async () => {
+    const first = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+    const second = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnew");
+    cleanups.push(first.close, second.close);
+    const env = { HTTP_PROXY: first.url };
+    const rt = createEgressRuntime({ env });
+    expect(await (await rt.fetch("http://public.example/one")).text()).toBe("ok");
+    env.HTTP_PROXY = second.url;
+    expect(await (await rt.fetch("http://public.example/two")).text()).toBe("new");
+    expect(first.authorities).toEqual(["public.example:80"]);
+    expect(second.authorities).toEqual(["public.example:80"]);
+    await rt.close();
+  });
+
+  it("strips target Authorization across origins and keeps proxy auth out of tunneled requests", async () => {
+    const proxy = await stubConnectProxy((authority) => authority === "a.example:80"
+      ? "HTTP/1.1 302 Found\r\nLocation: http://b.example/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+      : "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+    cleanups.push(proxy.close);
+    const proxyUrl = proxy.url.replace("http://", "http://proxy-user:proxy-pass@");
+    const rt = createEgressRuntime({ env: { HTTP_PROXY: proxyUrl } });
+    const response = await rt.fetch("http://a.example/start", {
+      headers: { Authorization: "Bearer target-only" },
+    });
+    expect(await response.text()).toBe("ok");
+    expect(proxy.authorities).toEqual(["a.example:80", "b.example:80"]);
+    const basic = `Basic ${Buffer.from("proxy-user:proxy-pass").toString("base64")}`;
+    for (const connect of proxy.connectRequests) {
+      expect(connect).toMatch(new RegExp(`^Proxy-Authorization: ${basic}$`, "im"));
+      expect(connect).not.toContain("target-only");
+    }
+    expect(proxy.tunneledRequests).toHaveLength(2);
+    expect(proxy.tunneledRequests[0]!.headers).toMatch(/^authorization: Bearer target-only$/im);
+    expect(proxy.tunneledRequests[1]!.headers).not.toMatch(/^authorization:/im);
+    for (const tunneled of proxy.tunneledRequests) {
+      expect(tunneled.headers).not.toMatch(/^proxy-authorization:/im);
+      expect(tunneled.headers).not.toContain(basic);
+    }
+    await rt.close();
+  });
+
+  it("rejects caller-supplied Proxy-Authorization before direct or proxy transport", async () => {
+    const proxy = await stubConnectProxy("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    cleanups.push(proxy.close);
+    const rt = createEgressRuntime({ env: { HTTP_PROXY: proxy.url } });
+    await expect(rt.fetch("http://a.example/", {
+      headers: { "pRoXy-AuThOrIzAtIoN": "Basic caller-secret" },
+    })).rejects.toMatchObject({ kind: "proxy-config-invalid" });
+    await expect(rt.fetch("http://a.example/", {
+      headers: new Headers({ "Proxy-Authorization": "Basic caller-secret" }),
+    }, { mode: "direct" })).rejects.toMatchObject({ kind: "proxy-config-invalid" });
+    expect(proxy.connectRequests).toEqual([]);
+    expect(proxy.tunneledRequests).toEqual([]);
+    await rt.close();
   });
 });

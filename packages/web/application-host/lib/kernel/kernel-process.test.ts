@@ -323,15 +323,24 @@ it("native terminal and shell consumers expose authority loss without releasing 
   try {
     const command=process.platform==="win32"?"Start-Sleep -Seconds 60":"sleep 60";
     const background=await shell.exec(command,{waitMs:50});
-    assert.equal(background.kind,"background");
-    if(background.kind!=="background")throw new Error(JSON.stringify(background));
+    assert.ok(background.kind==="background"||background.kind==="preparing");
+    if(background.kind!=="background"&&background.kind!=="preparing")throw new Error(JSON.stringify(background));
+    const executionId=background.executionId!;
+    let shellId=background.kind==="background"?background.id:undefined;
+    const deadline=Date.now()+15_000;
+    while(!shellId){
+      const state=await shell.read(executionId);
+      shellId=state.shellId;
+      if(!shellId&&Date.now()>deadline)throw new Error("Native shell did not finish preparation");
+      if(!shellId)await pause();
+    }
     const handle=handles[0]!;
     let exit=false;handle.onExit(()=>{exit=true;});
     const waiting=assert.rejects(handle.waitForExit(),/unavailable|unconfirmed/i);
     f.kernelChild.kill("SIGKILL");
     await waiting;
     assert.equal(terminal.inspectSession(handle.id)?.status,"error");
-    await assert.rejects(shell.read(background.id),/unavailable|unconfirmed/i);
+    await assert.rejects(shell.read(shellId),/unavailable|unconfirmed/i);
     assert.equal(exit,false);assert.equal(completed,0);assert.equal(released,0);
     assert.equal(shell.hasActiveCommandAt(path.join(f.workspace,"child")),true);
     await assert.rejects(shell.dispose(),/kernel|epoch|unconfirmed|pipe/i);

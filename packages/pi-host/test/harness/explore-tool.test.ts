@@ -7,14 +7,14 @@ import { createExploreTool } from "../../src/harness/explore-tool.js";
 const finishResult = {
   text: "1 excerpt(s)",
   snippets: [],
-  issues: [],
-  notRequested: { count: 0, paths: [] },
-  omitted: [],
+  issueCount: 0,
+  notRequestedCount: 0,
+  omittedCount: 0,
   partial: false,
   searched: { patterns: 1, files: 1, ms: 1, incomplete: false },
   handle: "out_test",
   details: {
-    provenance: [],
+    provenance: { statusCounts: {} },
     anchors: { supplied: ["createMemoryAgentExtension"], used: ["createMemoryAgentExtension"], truncated: 0 },
     byteBudget: 24576,
   },
@@ -88,6 +88,61 @@ describe("Host-backed explore tool", () => {
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", ""] }), true);
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: ["foo", "  "] }), true);
     assert.equal(Value.Check(tool.parameters, { question: "needle", anchors: [7] }), false);
+  });
+
+  it("keeps large omitted and unread lists behind the output reference", async () => {
+    const calls: string[] = [];
+    const bridge = {
+      inputContext: () => ({ source: "disk" as const }),
+      cancel: () => undefined,
+      request: async (method: string) => {
+        calls.push(method);
+        if (method === "explore.query.start") return {
+          queryId: "eq_large",
+          question: "needle",
+          deadlineAt: Date.now() + 10_000,
+          parsed: { objects: [], relation: "unknown", domain: "unknown" },
+          vocab: {},
+          sources: [],
+          inputSource: "disk",
+        };
+        if (method === "explore.query.views") return {
+          queryId: "eq_large",
+          question: "needle",
+          views: [],
+          unevaluated: 0,
+          sources: [],
+          deadlineAt: Date.now() + 10_000,
+        };
+        if (method === "explore.query.finish") return {
+          ...finishResult,
+          text: 'partial result; get_output("out_large") for all details',
+          partial: true,
+          notRequestedCount: 700,
+          omittedCount: 600,
+          details: {
+            ...finishResult.details,
+            provenance: { statusCounts: { "not-requested": 900 } },
+          },
+          handle: "out_large",
+        };
+        if (method === "explore.query.release") return { released: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createExploreTool(bridge, "session");
+    const result = await tool.execute("call", { question: "needle" }, undefined, undefined, undefined as never);
+    const serialized = JSON.stringify(result);
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.handle, "out_large");
+    assert.equal(details.partial, true);
+    assert.equal(details.notRequestedCount, 700);
+    assert.equal(details.omittedCount, 600);
+    assert.equal((details.provenanceCounts as Record<string, number>)["not-requested"], 900);
+    const textContent = result.content.find((block) => block.type === "text");
+    assert.match(textContent?.text ?? "", /get_output\("out_large"\)/);
+    assert.doesNotMatch(serialized, /unread-0\.ts|omitted-0\.ts|provenance-0\.ts/);
+    assert.ok(calls.includes("explore.query.release"));
   });
 
   it("does not mark select as used when the Host rejects every chosen view", async () => {

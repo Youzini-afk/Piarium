@@ -2,14 +2,18 @@ import type {
   AgentInputContext,
   ExploreModelParticipation,
   ExploreQueryCancelParams,
+  ExploreQueryFinishDetails,
   ExploreQueryFinishParams,
+  ExploreQueryFinishResult,
   ExploreQueryFollowupParams,
   ExploreQueryPlanParams,
   ExploreQueryReleaseParams,
   ExploreQuerySelectParams,
   ExploreQueryStartParams,
   ExploreQueryViewsParams,
-  ExploreSearchResult,
+  ExploreSourceStatus,
+  ExploreQueryTaskFamily,
+  ExploreQueryTaskStatus,
   HarnessServiceMap,
 } from "@varin/protocol";
 import {
@@ -42,7 +46,7 @@ import {
 import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
 import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
-import { loadSnippetRelations } from "./explore-service.js";
+import { loadSnippetRelations, resolveExploreScopeAndAnchors } from "./explore-service.js";
 import {
   exploreFileFromSnapshot,
   type WorkingBranchQuerySnapshot,
@@ -243,7 +247,7 @@ export async function packExploreSearchResult(
   ctx: HarnessServiceContext,
   result: Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>,
   options?: { traceWindows?: boolean; searchPartial?: boolean },
-): Promise<ExploreSearchResult> {
+): Promise<ExploreQueryFinishResult> {
   const incomplete = (options?.searchPartial ?? false) || result.searched.incomplete;
   const relations = ctx.workspaceId && host.fileRelations
     ? await loadSnippetRelations({ fileRelations: host.fileRelations }, ctx.workspaceId, result.snippets, ctx.signal)
@@ -271,35 +275,148 @@ export async function packExploreSearchResult(
     ...(result.details.sources ? { sources: result.details.sources } : {}),
   };
   const preview = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET });
-  const stored = host.outputStore.store(ctx.sessionId, preview.storedBody, "explore");
-  const packed = formatExploreOutput(formatted, { byteBudget: DEFAULT_BYTE_BUDGET, handle: stored.ref.handle });
+  const fullDetails = {
+    notRequested: result.notRequested,
+    omitted: result.omitted,
+    packedOmitted: preview.omitted,
+    details: result.details,
+    ...(relations ? { relations } : {}),
+  };
+  const storedBody = `${preview.storedBody}\n\nExplore structured details (JSON):\n${JSON.stringify(fullDetails)}`;
+  const stored = host.outputStore.store(ctx.sessionId, storedBody, "explore");
+  const summaryFormatted = {
+    ...formatted,
+    notRequested: { count: result.notRequested.count, paths: [] },
+    omitted: [],
+    omittedCount: result.omitted.length,
+    summaryOnly: true,
+  };
+  const packed = formatExploreOutput(summaryFormatted, { byteBudget: DEFAULT_BYTE_BUDGET, handle: stored.ref.handle });
+  const provenanceCounts: Partial<Record<ExploreSourceStatus, number>> = {};
+  for (const entry of result.details.provenance) {
+    provenanceCounts[entry.status] = (provenanceCounts[entry.status] ?? 0) + 1;
+  }
+  const details: ExploreQueryFinishDetails = {
+    provenance: { statusCounts: provenanceCounts },
+    anchors: result.details.anchors,
+    byteBudget: DEFAULT_BYTE_BUDGET,
+    ...(result.details.structure ? { structure: summarizeStructure(result.details.structure.files) } : {}),
+    ...(result.details.graph ? { graph: result.details.graph } : {}),
+    ...(result.details.query ? {
+      query: {
+        objectCount: result.details.query.objects.length,
+        relation: result.details.query.relation,
+        domain: result.details.query.domain,
+      },
+    } : {}),
+    ...(result.details.skippedQueries ? {
+      skippedQueries: { reason: result.details.skippedQueries.reason, patternCount: result.details.skippedQueries.patterns.length },
+    } : {}),
+    ...(result.details.distinctiveness ? {
+      distinctiveness: {
+        scope: result.details.distinctiveness.scope,
+        poolFiles: result.details.distinctiveness.poolFiles,
+        termCount: result.details.distinctiveness.terms.length,
+      },
+    } : {}),
+    ...(relations ? { relations: summarizeRelations(relations) } : {}),
+    ...(result.details.semantic ? { semantic: summarizeSemantic(result.details.semantic) } : {}),
+    ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
+    ...(result.details.fastDecision ? { fastDecision: summarizeFastDecision(result.details.fastDecision) } : {}),
+    ...(result.details.model ? { model: result.details.model } : {}),
+    ...(result.details.sources ? { sources: summarizeSources(result.details.sources) } : {}),
+  };
   return {
     text: packed.visibleText,
     snippets: result.snippets,
-    issues: result.issues,
-    notRequested: result.notRequested,
-    omitted: packed.omitted,
+    issueCount: result.issues.length,
+    notRequestedCount: result.notRequested.count,
+    omittedCount: result.omitted.length + packed.omitted.length,
     partial: formatted.partial,
     searched: formatted.searched,
     handle: stored.ref.handle,
-    details: {
-      provenance: result.details.provenance,
-      anchors: result.details.anchors,
-      byteBudget: DEFAULT_BYTE_BUDGET,
-      ...(result.details.structure ? { structure: result.details.structure } : {}),
-      ...(result.details.graph ? { graph: result.details.graph } : {}),
-      ...(result.details.query ? { query: result.details.query } : {}),
-      ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
-      ...(result.details.distinctiveness ? { distinctiveness: result.details.distinctiveness } : {}),
-      ...(options?.traceWindows && result.details.windows ? { windows: result.details.windows } : {}),
-      ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
-      ...(result.details.model ? { model: result.details.model } : {}),
-      ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
-      ...(result.details.fastDecision ? { fastDecision: result.details.fastDecision } : {}),
-      ...(relations ? { relations } : {}),
-      ...(result.details.sources ? { sources: result.details.sources } : {}),
-    },
+    details,
   };
+}
+
+function summarizeStructure(files: NonNullable<Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>["details"]["structure"]>["files"]): NonNullable<ExploreQueryFinishDetails["structure"]> {
+  const providers: NonNullable<ExploreQueryFinishDetails["structure"]>["providers"] = {};
+  const statuses: NonNullable<ExploreQueryFinishDetails["structure"]>["statuses"] = {};
+  for (const file of files) {
+    const provider = file.provider ?? "none";
+    providers[provider] = (providers[provider] ?? 0) + 1;
+    statuses[file.status] = (statuses[file.status] ?? 0) + 1;
+  }
+  return { fileCount: files.length, providers, statuses };
+}
+
+function summarizeRelations(
+  relations: NonNullable<Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>["details"]["relations"]>,
+): NonNullable<ExploreQueryFinishDetails["relations"]> {
+  const summary: NonNullable<ExploreQueryFinishDetails["relations"]> = {
+    status: relations.status,
+    fileCount: relations.files.length,
+    staleFiles: relations.files.filter((file) => file.stale).length,
+    incompleteFiles: relations.files.filter((file) => file.incomplete).length,
+    edgeCounts: { imports: 0, connections: 0, associations: 0, references: 0, calls: 0 },
+  };
+  for (const file of relations.files) {
+    summary.edgeCounts.imports += file.imports.length;
+    summary.edgeCounts.connections += file.connections.length;
+    summary.edgeCounts.associations += file.associations.length;
+    summary.edgeCounts.references += file.references?.length ?? 0;
+    summary.edgeCounts.calls += file.calls?.length ?? 0;
+  }
+  return summary;
+}
+
+function summarizeSemantic(
+  semantic: NonNullable<Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>["details"]["semantic"]>,
+): NonNullable<ExploreQueryFinishDetails["semantic"]> {
+  return {
+    status: semantic.status,
+    coverage: semantic.coverage,
+    ...(semantic.generation ? { generation: semantic.generation } : {}),
+    ...(semantic.spaceId ? { spaceId: semantic.spaceId } : {}),
+    ...(semantic.scope ? { scope: semantic.scope } : {}),
+    index: semantic.index,
+    ...(semantic.blocks !== undefined ? { blocks: semantic.blocks } : {}),
+    ...(semantic.units !== undefined ? { units: semantic.units } : {}),
+    ...(semantic.primary !== undefined ? { primary: semantic.primary } : {}),
+    ...(semantic.gaps?.length ? { gapCount: semantic.gaps.length } : {}),
+  };
+}
+
+function summarizeFastDecision(
+  details: NonNullable<Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>["details"]["fastDecision"]>,
+): NonNullable<ExploreQueryFinishDetails["fastDecision"]> {
+  return {
+    status: details.status,
+    ...(details.providerId ? { providerId: details.providerId } : {}),
+    ...(details.modelId ? { modelId: details.modelId } : {}),
+    ...(details.servedModelId ? { servedModelId: details.servedModelId } : {}),
+    batches: details.batches,
+    rounds: details.rounds,
+    viewsJudged: details.viewsJudged,
+    actionsOffered: details.actionsOffered,
+    actionsExecuted: details.actionsExecuted,
+    missing: details.missing,
+    unevaluatedMaterials: details.unevaluatedMaterials,
+    ...(details.usage ? { usage: details.usage } : {}),
+    ...(details.note ? { note: details.note } : {}),
+  };
+}
+
+function summarizeSources(
+  sources: Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>["details"]["sources"],
+): NonNullable<ExploreQueryFinishDetails["sources"]> {
+  const families: Partial<Record<ExploreQueryTaskFamily, number>> = {};
+  const statuses: Partial<Record<ExploreQueryTaskStatus, number>> = {};
+  for (const source of sources ?? []) {
+    families[source.family] = (families[source.family] ?? 0) + 1;
+    statuses[source.status] = (statuses[source.status] ?? 0) + 1;
+  }
+  return { count: sources?.length ?? 0, families, statuses };
 }
 
 export function createExploreQueryStartService(
@@ -347,20 +464,9 @@ export function createExploreQueryStartService(
       if (ctx.signal.aborted) onStartAbort();
       else ctx.signal.addEventListener("abort", onStartAbort, { once: true });
       try {
-        if (params.paths?.length && ctx.authorizedPaths.length !== params.paths.length) {
-          throw new HarnessServiceError("forbidden", "Search paths were not authorized.");
-        }
-        const effectivePaths = params.paths?.length
-          ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-            : ctx.actor.queryScope?.length
-              ? [...ctx.actor.queryScope]
-              : ctx.actor.operationDir
-                ? [ctx.actor.operationDir]
-                : ctx.actor.workspaceScope?.length
-                  ? [...ctx.actor.workspaceScope]
-                  : ctx.authorizedPaths.length > 0
-                    ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-                    : undefined;
+        const resolvedRequest = resolveExploreScopeAndAnchors(params, ctx);
+        const effectivePaths = resolvedRequest.paths;
+        const effectiveAnchors = resolvedRequest.anchors;
         let rerankConfigured = false;
         let fastDecision: StoredExploreQuery["fastDecision"];
         if (ctx.workspaceId) {
@@ -399,7 +505,7 @@ export function createExploreQueryStartService(
           inputContext,
           input: {
             question: params.question,
-            ...(params.anchors ? { anchors: params.anchors } : {}),
+            ...(effectiveAnchors ? { anchors: effectiveAnchors } : {}),
             ...(effectivePaths ? { paths: effectivePaths } : {}),
             ...(params.limit ? { limit: params.limit } : {}),
           },

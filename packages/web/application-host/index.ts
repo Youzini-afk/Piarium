@@ -275,6 +275,50 @@ const recordOf = (value: unknown): Record<string, unknown> => (
     : {}
 );
 
+export function mergeSessionSnapshotForKnowledgeOwner(previousValue: unknown, nextValue: unknown): Record<string, unknown> {
+  const previous = recordOf(previousValue);
+  const next = recordOf(nextValue);
+  const previousWorkspace = recordOf(previous.workspace);
+  const nextWorkspace = recordOf(next.workspace);
+  const hasWorkspaceId = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+  const ownerId = (workspace: Record<string, unknown>): string | null => (
+    workspace.kind === 'workspace'
+      ? hasWorkspaceId(workspace.authorityId)
+        ? workspace.authorityId
+        : hasWorkspaceId(workspace.id) ? workspace.id : null
+      : null
+  );
+  const previousOwner = ownerId(previousWorkspace);
+  const nextOwner = ownerId(nextWorkspace);
+  const canKeepKnownOwner = previousOwner !== null
+    && (nextWorkspace.kind === undefined || nextWorkspace.kind === 'workspace')
+    && (nextOwner === null || nextOwner === previousOwner);
+  const merged = { ...previous, ...next };
+  if (canKeepKnownOwner) {
+    // Pi can publish partial root-session snapshots. Carry its already known
+    // workspace identity through missing fields, while letting a different
+    // explicit owner replace the old snapshot.
+    const workspace: Record<string, unknown> = { ...previousWorkspace, ...nextWorkspace, kind: 'workspace' };
+    if (!hasWorkspaceId(nextWorkspace.authorityId) && hasWorkspaceId(previousWorkspace.authorityId)) {
+      workspace.authorityId = previousWorkspace.authorityId;
+    }
+    if (!hasWorkspaceId(nextWorkspace.id) && hasWorkspaceId(previousWorkspace.id)) {
+      workspace.id = previousWorkspace.id;
+    }
+    merged.workspace = workspace;
+  }
+  return merged;
+}
+
+export async function resolveKnowledgeWorkspaceOwner(
+  resolveDurableOwner: () => Promise<{ owningWorkspaceId: string } | null>,
+  fallbackWorkspaceId: string | null,
+  snapshotWorkspaceId: string | null,
+): Promise<string | null> {
+  const owner = await resolveDurableOwner();
+  return owner?.owningWorkspaceId ?? fallbackWorkspaceId ?? snapshotWorkspaceId;
+}
+
 const isEnvFlagEnabled = (value: unknown): boolean => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
@@ -951,6 +995,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // model authority rather than creating a second model stack in the Host.
     harnessDocumentRead: true,
     harnessDocumentPathOverlay: true,
+    harnessWorkContext: true,
     harnessWebRead: true,
     // Provider identity is frozen per session from Pi settings. The Host
     // service itself is always present, so changing provider does not require
@@ -2517,8 +2562,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   function snapshotKnowledgeWorkspaceId(sessionId: string): string | null {
     const workspace = recordOf(sessionSnapshots.get(sessionId)?.workspace);
     if (workspace.kind !== 'workspace') return null;
-    if (typeof workspace.authorityId === 'string') return workspace.authorityId;
-    return typeof workspace.id === 'string' ? workspace.id : null;
+    if (typeof workspace.authorityId === 'string' && workspace.authorityId.trim()) return workspace.authorityId;
+    return typeof workspace.id === 'string' && workspace.id.trim() ? workspace.id : null;
   }
 
   async function owningKnowledgeWorkspaceIdForSession(
@@ -2528,9 +2573,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // RR4/E07: durable owner resolution. The active-run binding only exists
     // while the run is live; the catalog scan still answers after the run
     // settled or the Host restarted, without guessing from UI snapshots.
-    const owner = await threadRegistry.resolveSessionOwner(sessionId).catch(() => null);
-    if (owner) return owner.owningWorkspaceId;
-    return fallback ?? snapshotKnowledgeWorkspaceId(sessionId);
+    // A broken/unreadable catalog is an owner-resolution failure, not evidence
+    // that this session has no durable owner. Let it reach the caller instead
+    // of falling through to an execution workspace or a partial UI snapshot.
+    return resolveKnowledgeWorkspaceOwner(
+      () => threadRegistry.resolveSessionOwner(sessionId),
+      fallback,
+      snapshotKnowledgeWorkspaceId(sessionId),
+    );
   }
 
   async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
@@ -2779,6 +2829,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
+    workContextJournal: {
+      read: (actor) => piRuntimeBroker.requestForWorker(actor.workerId, 'session.workContext.read', { sessionId: actor.sessionId }),
+      commit: (actor, input) => piRuntimeBroker.requestForWorker(actor.workerId, 'session.workContext.commit', input),
+    },
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     experimentService,
@@ -3189,10 +3243,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Route by the requesting worker, not by session: a session's internal
     // compaction worker is pinned for identity but is not the session worker.
     respond: async (identity, requestId, outcome) => {
-      // Piggyback the work-context revision so the worker notices a context
-      // change without a dedicated push channel (RR2).
-      const revision = outcome.ok
-        ? harnessServiceHost.workContextRevision(identity.sessionId)
+      // Piggyback the branch-local context identity so the worker can detect
+      // navigation even when a sibling branch has the same numeric revision.
+      const workContextIdentity = outcome.ok
+        ? harnessServiceHost.workContextIdentity(identity.sessionId)
         : undefined;
       await piRuntimeBroker.requestForWorker(
         identity.workerId,
@@ -3201,11 +3255,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           identity.sessionId,
           requestId,
           outcome,
-          revision === undefined ? undefined : { workContextRevision: revision },
+          workContextIdentity === undefined ? undefined : {
+            workContextRevision: workContextIdentity.revision,
+            workContextEntryId: workContextIdentity.entryId,
+          },
         ),
       );
     },
-    resolveActor: (identity, signal) => harnessSessionRegistration.resolveActor(identity, signal),
+    resolveActor: (identity, signal, contextEntryId) => harnessSessionRegistration.resolveActor(identity, signal, contextEntryId),
     authorizeWorkspacePath: (actor, candidate, options) => harnessPathAuthority.resolve(actor, candidate, options),
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
   });
@@ -3308,14 +3365,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
     if (envelope.event === 'session.snapshot' && sessionId) {
       if (event.actor) kernelSessionActors.set(sessionId, event.actor);
-      sessionSnapshots.set(sessionId, envelopeData);
+      const snapshot = mergeSessionSnapshotForKnowledgeOwner(sessionSnapshots.get(sessionId), envelopeData);
+      sessionSnapshots.set(sessionId, snapshot);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
       // Register harness session when workspace is bound
-      const workspace = recordOf(envelopeData.workspace);
-      const harnessWorkspaceId = typeof workspace.authorityId === 'string'
+      const workspace = recordOf(snapshot.workspace);
+      const harnessWorkspaceId = typeof workspace.authorityId === 'string' && workspace.authorityId.trim()
         ? workspace.authorityId
-        : typeof workspace.id === 'string'
+        : typeof workspace.id === 'string' && workspace.id.trim()
           ? workspace.id
           : '';
       if (
@@ -3624,6 +3682,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
       harnessRouter.dispose();
       await harnessServiceHost.dispose();
+      try {
+        await egressRuntime.close();
+      } catch (error) {
+        processShutdownErrors.push(error);
+        console.error('[HarnessEgress] Shutdown incomplete:', errorMessage(error));
+      }
       await threadRegistry.dispose();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);

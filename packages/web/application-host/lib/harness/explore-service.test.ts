@@ -132,6 +132,47 @@ describe("explore through Host router, real ripgrep, and Documents", () => {
     expect(await f.request({ question: "needle", paths: [".", "../outside.ts"] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
   });
 
+  it("normalizes operation-dir and absolute path anchors to authorized workspace resource IDs", async () => {
+    const f = await fixture();
+    const projectA = path.join(f.workspace, "project-a");
+    const projectBSource = path.join(f.workspace, "project-b", "src");
+    await fs.mkdir(path.join(projectA, "src"), { recursive: true });
+    await fs.mkdir(projectBSource, { recursive: true });
+    await fs.writeFile(path.join(projectA, "src", "target.ts"), "needle in project a\n", "utf8");
+    await fs.writeFile(path.join(projectBSource, "target.ts"), "needle in project b\n", "utf8");
+
+    f.actor.operationDir = "project-a";
+    f.actor.workspaceScope = ["project-a", "project-b"];
+    const relative = await f.request({ question: "needle", anchors: ["src/target.ts"] });
+    expect(relative.ok).toBe(true);
+    if (!relative.ok) throw new Error(relative.error.message);
+    expect(relative.result.details.anchors.used).toEqual(["project-a/src/target.ts"]);
+    expect(relative.result.snippets.map((snippet) => snippet.path)).toContain("project-a/src/target.ts");
+
+    const absolute = await f.request({
+      question: "needle",
+      anchors: [path.join(projectBSource, "target.ts")],
+    });
+    expect(absolute.ok).toBe(true);
+    if (!absolute.ok) throw new Error(absolute.error.message);
+    expect(absolute.result.details.anchors.used).toEqual(["project-b/src/target.ts"]);
+    expect(absolute.result.snippets.map((snippet) => snippet.path)).toContain("project-b/src/target.ts");
+
+    const symbolic = await f.request({ question: "where is Target.method", anchors: ["Target.method"] });
+    expect(symbolic.ok).toBe(true);
+    if (!symbolic.ok) throw new Error(symbolic.error.message);
+    expect(symbolic.result.details.anchors.used).toEqual(["Target.method"]);
+  });
+
+  it("rejects path anchors outside the actor's authorized workspace scope", async () => {
+    const f = await fixture(["project-a"]);
+    const projectB = path.join(f.workspace, "project-b");
+    await fs.mkdir(projectB);
+    await fs.writeFile(path.join(projectB, "target.ts"), "needle\n", "utf8");
+    const response = await f.request({ question: "needle", anchors: [path.join(projectB, "target.ts")] });
+    expect(response).toMatchObject({ ok: false, error: { code: "forbidden" } });
+  });
+
   it("cannot read an out-of-scope derived hit", async () => {
     const f = await fixture(["allowed"]);
     await fs.mkdir(path.join(f.workspace, "allowed"));

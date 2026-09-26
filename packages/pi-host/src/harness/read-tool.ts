@@ -20,15 +20,14 @@ export function createSurfaceAwareReadTool(
   const wrapped: ReturnType<typeof createReadToolDefinition> = {
     ...native,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-      // RR2: the Host read source resolves the original (workspace-relative)
-      // path against the authoritative operation dir; local fallbacks resolve
-      // the same name against the pi-side mirror anchor.
+      // Pin one absolute path for authorization and native disk reads. A
+      // context refresh during this request must never switch the file read.
       const anchoredParams = params.path === undefined
         ? params
         : { ...params, path: path.resolve(options.operationDir?.() ?? cwd, params.path) };
       const source = await bridge.request(
         "document.readSource",
-        { path: params.path },
+        { path: anchoredParams.path },
         signal === undefined ? {} : { signal },
       );
       if (source.source === "disk") {

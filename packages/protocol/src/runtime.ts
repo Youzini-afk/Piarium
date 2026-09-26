@@ -21,7 +21,6 @@ import type {
 } from "./foundational-pi-packages.js";
 
 type DirectRuntimeMethod =
-  | "agent.abort"
   | "agent.compact"
   | "agent.followUp"
   | "agent.prompt"
@@ -49,6 +48,7 @@ type DirectRuntimeMethod =
   | "session.open"
   | "session.rename"
   | "session.snapshot"
+  | "session.reconcile"
   | "session.stats"
   | "session.summary"
   | "session.tree"
@@ -115,6 +115,11 @@ type SessionScopedMethodMap = {
  */
 export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "session.rename" | "session.open"> &
   SessionScopedMethodMap & {
+    /** Surface stop must name the observed run; internal Host callers can still cancel current work. */
+    "agent.abort": {
+      params: { expectedRunId: string; sessionId: string };
+      result: HostMethodMap["agent.abort"]["result"];
+    };
     "command.list": {
       params: RuntimeContextTarget;
       result: HostMethodMap["command.list"]["result"];
@@ -262,6 +267,7 @@ export const RUNTIME_METHODS = [
   "session.open",
   "session.rename",
   "session.snapshot",
+  "session.reconcile",
   "session.stats",
   "session.summary",
   "session.tree",
@@ -327,6 +333,9 @@ export type RuntimeEventEnvelope<E extends HostEvent = HostEvent> = E extends Ho
       data: HostEventData<E>;
       event: E;
       kind: "event";
+      /** Sequence of events delivered to this surface, after subscription filtering. */
+      surfaceSeq?: number;
+      /** Original worker-local sequence used with SessionSnapshot.eventWatermark. */
       seq: number;
       source: RuntimeEventSource;
       v: ProtocolVersion;
@@ -396,6 +405,8 @@ export function isRuntimeEventEnvelope(
   if (typeof source !== "object" || source === null || Array.isArray(source)) return false;
   const record = source as Record<string, unknown>;
   return (
+    (envelope.surfaceSeq === undefined ||
+      (Number.isSafeInteger(envelope.surfaceSeq) && Number(envelope.surfaceSeq) >= 0)) &&
     RUNTIME_WORKER_ROLES.includes(record.role as RuntimeWorkerRole) &&
     typeof record.workerId === "string" &&
     record.workerId.length > 0 &&

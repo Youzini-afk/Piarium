@@ -9,24 +9,28 @@ const NetworkDiagParams = Type.Object({
 
 const formatDiagnosis = (r: NetworkDiagnosisResult): string => {
   const lines: string[] = [];
-  lines.push(`decision: ${r.decision}${r.reason ? ` (${r.reason})` : ""}`);
+  lines.push(`static target check: ${r.decision}${r.reason ? ` (${r.reason})` : ""}`);
   const proxyBits = r.policy.mode === "proxy"
     ? `proxy ${r.policy.proxyOrigin ?? "?"}${r.policy.proxyAuth ? ` (${r.policy.proxyAuth} auth)` : ""}`
     : "direct";
   lines.push(`egress: ${proxyBits} [policy ${r.policy.source}]${r.policy.invalid ? ` INVALID: ${r.policy.invalid}` : ""}`);
   if (r.policy.noProxy.length > 0) lines.push(`no_proxy entries: ${r.policy.noProxy.join(", ")}`);
-  if (r.resolution === "proxy-side") {
-    lines.push("resolution: target name resolves inside the proxy — local DNS does not decide reachability");
-  } else if (r.addresses?.length) {
-    lines.push(`resolution: ${r.addresses.map((a) => `${a.address}(${a.class})`).join(", ")}`);
-  }
+  const addressExplanation = {
+    "not-run": "not run because the static target check stopped the request",
+    public: "public in this diagnostic sample; fetch checks again on its connection",
+    blocked: "blocked in this diagnostic sample; fetch checks again on its connection",
+    "dns-error": "local DNS failed in this diagnostic sample",
+    "proxy-side-unverified": "unverified: the proxy resolves the target, so Host cannot classify its final address",
+  }[r.addressCheck];
+  lines.push(`address check: ${addressExplanation}`);
+  if (r.addresses?.length) lines.push(`addresses: ${r.addresses.map((a) => `${a.address}(${a.class})`).join(", ")}`);
   if (r.lookupError) lines.push(`local lookup: ${r.lookupError}`);
   return lines.join("\n");
 };
 
 /**
  * Read-only outbound-network diagnostics: reports the effective egress
- * policy, the static allow/block decision, and how the target resolves
+ * policy, the static allow/block decision, and a diagnostic address sample
  * (local classes or proxy-side). It never performs the fetch and never
  * mutates proxy or credential settings.
  */
@@ -36,11 +40,11 @@ export function createNetworkDiagnosticsTool(bridge: HostServicesBridge): ToolDe
     label: "Network Diagnostics",
     description:
       "Probe how an outbound request would leave the host: effective egress policy (proxy/direct, " +
-      "NO_PROXY), the allow/block decision, and whether the target resolves locally or inside the " +
-      "proxy. Read-only — never fetches the URL and never changes system/proxy settings.",
+      "NO_PROXY), the static target check, and a separate diagnostic address check. " +
+      "Proxy-side target DNS cannot be verified here. Read-only — never fetches the URL or changes settings.",
     promptSnippet: "network_diag: inspect outbound network policy and resolution for a URL (read-only)",
     promptGuidelines: [
-      "Use network_diag before retrying a failed webfetch/websearch to learn whether the failure is DNS, proxy, TLS, or a policy block.",
+      "Use network_diag to inspect static blocks, local DNS, and proxy routing; it does not test TLS or connect to the target.",
       "Reported proxyOrigin is sanitized (no credentials); the tool cannot change proxy or credential settings.",
     ],
     parameters: NetworkDiagParams,
@@ -50,7 +54,7 @@ export function createNetworkDiagnosticsTool(bridge: HostServicesBridge): ToolDe
         const result = await bridge.request("network.diagnose", { url: params.url });
         return {
           content: [{ type: "text", text: formatDiagnosis(result) }],
-          details: { kind: "network_diag", status: result.decision },
+          details: { kind: "network_diag", staticDecision: result.decision, addressCheck: result.addressCheck },
         };
       } catch (error) {
         return {

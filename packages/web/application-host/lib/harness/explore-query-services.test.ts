@@ -5,9 +5,12 @@ import {
   createExploreQueryFinishService,
   createExploreQueryStartService,
   createExploreQueryViewsService,
+  packExploreSearchResult,
 } from "./explore-query-services.js";
 import { createExploreQueryStore } from "./explore-query-store.js";
 import { createOutputStore } from "./output-store.js";
+import type { ExploreResult } from "./explore.js";
+import { createExploreSearchService } from "./explore-service.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -39,6 +42,93 @@ function context(inputContext: AgentInputContext, signal = new AbortController()
 }
 
 describe("explore query services", () => {
+  it("keeps the direct explore.search contract full while query.finish uses summaries", async () => {
+    const outputStore = createOutputStore();
+    const paths = Array.from({ length: 9 }, (_, index) => `candidate-${index}.ts`);
+    const host = {
+      outputStore,
+      searchService: {
+        search: async () => ({
+          status: "ready",
+          files: paths.map((path) => ({ path, hits: [{ line: 1, text: "needle" }] })),
+          partial: false,
+        }),
+      },
+      readExploreFile: async (_actor: HarnessActorContext, _path: string) => ({
+        status: "ready" as const,
+        content: "needle",
+        revision: "rev-1",
+        source: "disk" as const,
+      }),
+    } as unknown as Pick<
+      HarnessServiceHost,
+      "outputStore" | "searchService" | "readExploreFile" | "agentInputDraftPaths" | "structureSource" | "fileRelations" | "graphRecall" | "semanticRecall"
+    >;
+    try {
+      const result = await createExploreSearchService(host).handle({ question: "needle", limit: 1 }, context({ source: "disk" }));
+      expect(result.notRequested.count).toBeGreaterThan(0);
+      expect(result.notRequested.paths.length).toBe(result.notRequested.count);
+      expect(result.omitted.length).toBeGreaterThan(0);
+      expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(true);
+    } finally {
+      outputStore.dispose();
+    }
+  });
+
+  it("keeps full omitted, unread, and provenance details in the session output handle", async () => {
+    const outputStore = createOutputStore();
+    const result: ExploreResult = {
+      snippets: [{
+        path: "read.ts",
+        startLine: 1,
+        endLine: 1,
+        text: "needle",
+        why: "matched needle",
+        revision: "rev-1",
+        source: "disk",
+      }],
+      issues: [],
+      notRequested: { count: 1, paths: ["unread-secret.ts"] },
+      omitted: [{ path: "omitted-secret.ts", startLine: 3, endLine: 4, reason: "not selected" }],
+      partial: true,
+      searchIncomplete: false,
+      searched: { patterns: 1, files: 2, ms: 1, incomplete: false },
+      details: {
+        provenance: [
+          { path: "read.ts", revision: "rev-1", source: "disk", status: "ready", matchedGroups: ["question:needle"] },
+          { path: "unread-secret.ts", revision: "", source: null, status: "not-requested", matchedGroups: [] },
+        ],
+        anchors: { supplied: [], used: [], truncated: 0 },
+        byteBudget: 24 * 1024,
+      },
+    };
+    try {
+      const packed = await packExploreSearchResult(
+        { outputStore },
+        context({ source: "disk" }),
+        result,
+      );
+      expect(packed.notRequestedCount).toBe(1);
+      expect(packed.omittedCount).toBe(1);
+      expect(packed.partial).toBe(true);
+      expect(packed.details.provenance.statusCounts).toEqual({ ready: 1, "not-requested": 1 });
+      expect(JSON.stringify(packed)).not.toMatch(/unread-secret|omitted-secret/);
+      expect(packed.text).toContain("listed in output store");
+      expect(packed.text).toContain(`get_output("${packed.handle}")`);
+
+      const full = outputStore.read(actor.sessionId, packed.handle, 0, 100_000);
+      expect(full.status).toBe("ready");
+      if (full.status !== "ready") throw new Error("expected full explore output");
+      expect(full.slice.text).toContain("unread-secret.ts");
+      expect(full.slice.text).toContain("omitted-secret.ts");
+      expect(full.slice.text).toContain('"path":"read.ts","revision":"rev-1","source":"disk","status":"ready","matchedGroups":["question:needle"]');
+      expect(full.slice.text).toContain('"path":"unread-secret.ts","revision":"","source":null,"status":"not-requested","matchedGroups":[]');
+      expect(full.slice.text).toContain('"status":"not-requested"');
+    } finally {
+      outputStore.dispose();
+    }
+  });
+
   it("pins explicit paths to Router-authorized workspace resource IDs", async () => {
     const store = createExploreQueryStore();
     const host = {
@@ -66,6 +156,62 @@ describe("explore query services", () => {
       paths: ["C:/workspace/src"],
     }, ctx);
     expect(store.get(actor.sessionId, started.queryId)?.paths).toEqual(["src"]);
+    store.dispose();
+  });
+
+  it("normalizes path anchors from Router authorization without changing symbol anchors", async () => {
+    const store = createExploreQueryStore();
+    const host = {
+      exploreQueryStore: store,
+      searchService: { search: async () => ({ status: "ready", files: [], partial: false }) },
+      readExploreFile: async () => ({ status: "ready" as const, content: "", revision: "rev-1", source: "disk" as const }),
+    } as unknown as Pick<
+      HarnessServiceHost,
+      "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore"
+    >;
+    const ctx: HarnessServiceContext = {
+      ...context({ source: "disk" }),
+      actor: { ...actor, queryScope: ["project-a"], operationDir: "project-b" },
+      authorizedPaths: [{
+        authorityId: "test-host",
+        workspaceId: "workspace-1",
+        canonicalResourceId: "C:/workspace/project-c/src/target.ts",
+        inputPath: "C:/workspace/project-c/src/target.ts",
+        resourceId: "project-c/src/target.ts",
+      }],
+    };
+    const started = await createExploreQueryStartService(host).handle({
+      question: "where is Target.method",
+      anchors: ["C:/workspace/project-c/src/target.ts", "Target.method"],
+    }, ctx);
+    const stored = store.get(actor.sessionId, started.queryId)!;
+    expect(stored.paths).toEqual(["project-a", "project-c/src/target.ts"]);
+    expect(stored.run.parsed.usedAnchors).toEqual(["project-c/src/target.ts", "Target.method"]);
+    store.dispose();
+  });
+
+  it("fails closed before graph recall when the default scope misses the child workspace scope", async () => {
+    const store = createExploreQueryStore();
+    let graphReads = 0;
+    const host = {
+      exploreQueryStore: store,
+      searchService: { search: async () => ({ status: "ready", files: [], partial: false }) },
+      readExploreFile: async () => ({ status: "ready" as const, content: "", revision: "rev-1", source: "disk" as const }),
+      graphRecall: async () => {
+        graphReads += 1;
+        return null;
+      },
+    } as unknown as Pick<
+      HarnessServiceHost,
+      "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore"
+    >;
+    const ctx: HarnessServiceContext = {
+      ...context({ source: "disk" }),
+      actor: { ...actor, operationDir: "parent/project", workspaceScope: ["child/project"] },
+    };
+    await expect(createExploreQueryStartService(host).handle({ question: "NeedleSymbol" }, ctx))
+      .rejects.toMatchObject({ harnessCode: "forbidden" });
+    expect(graphReads).toBe(0);
     store.dispose();
   });
 

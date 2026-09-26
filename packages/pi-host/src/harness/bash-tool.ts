@@ -12,7 +12,8 @@ const BashParams = Type.Object({
 });
 
 function formatShellResult(result: ShellExecResult): string {
-  const location = result.kind !== "spawn-failed" && result.target ? `[target ${result.target} · cwd ${result.cwd}]\n` : "";
+  const location = result.kind !== "spawn-failed" && result.kind !== "preparing" && result.target
+    ? `[target ${result.target} · cwd ${result.cwd}]\n` : "";
   switch (result.kind) {
     case "completed": {
       const lines: string[] = [];
@@ -35,6 +36,8 @@ function formatShellResult(result: ShellExecResult): string {
         : `[Command is still running. waited ${result.waitedMs}ms]`;
       return `${location}${observation}\n${body}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
     }
+    case "preparing":
+      return `[Command accepted; shell preparation is still in progress. waited ${result.waitedMs}ms — no runtime shell handle exists yet]\n[Continue: get_output("${result.id}")]`;
     case "spawn-failed": {
       return `[spawn failed: ${result.reason}]\n${result.hint ?? ""}`;
     }

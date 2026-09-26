@@ -194,11 +194,32 @@ export const withToolExecutionResources = <T extends ToolDefinition>(
   tool: T,
   cwd: string,
   getOperationDir?: () => string,
+  ensureOperationContext?: () => Promise<void>,
+  getContextRevision?: () => number | null,
 ): T => {
   if (!PLANNED_HARNESS_TOOLS.has(tool.name)) return tool;
   const anchorDir = () => getOperationDir?.() ?? cwd;
+  const preparedContexts = new WeakMap<object, { dir: string; revision: number | null }>();
   return {
     ...tool,
-    prepareExecution: async (args) => (await planForHarnessTool(tool.name, anchorDir(), args as ToolArguments)) ?? { barrier: true },
+    prepareExecution: async (args) => {
+      await ensureOperationContext?.();
+      const prepared = { dir: anchorDir(), revision: getContextRevision?.() ?? null };
+      const plan = (await planForHarnessTool(tool.name, prepared.dir, args as ToolArguments)) ?? { barrier: true };
+      if (typeof args === "object" && args !== null) preparedContexts.set(args, prepared);
+      return plan;
+    },
+    execute: async (...args: Parameters<T["execute"]>) => {
+      await ensureOperationContext?.();
+      const toolArgs = args[1];
+      const prepared = typeof toolArgs === "object" && toolArgs !== null
+        ? preparedContexts.get(toolArgs)
+        : undefined;
+      if (prepared && (prepared.dir !== anchorDir()
+        || (getContextRevision && prepared.revision !== getContextRevision()))) {
+        throw new Error("Work context changed after this tool call was prepared; retry the call in the current context");
+      }
+      return Reflect.apply(tool.execute, tool, args) as ReturnType<T["execute"]>;
+    },
   } as T;
 };

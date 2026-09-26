@@ -60,8 +60,8 @@ export async function captureInheritedInput(
         const ref = record(truncation?.ref);
         const handle = typeof ref?.handle === "string" ? ref.handle
           : typeof details?.handle === "string" ? details.handle
-          : details?.kind === "background" && typeof details.id === "string" ? details.id : undefined;
-        if (handle && /^(out_|sh_)/u.test(handle) && message.toolName !== "get_output") {
+          : (details?.kind === "background" || details?.kind === "preparing") && typeof details.id === "string" ? details.id : undefined;
+        if (handle && /^(out_|sh_|exec_)/u.test(handle) && message.toolName !== "get_output") {
           if (!readOutput) throw new Error(`Cannot inherit ${message.toolName}: source output transfer is unavailable`);
           if (!copiedOutputs.has(handle)) copiedOutputs.set(handle, await readOutput(handle));
         }

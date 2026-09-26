@@ -259,7 +259,7 @@ export function createWorkspaceMutationJournalTools(
   bridge: WorkspaceMutationJournalBridge,
   hostServicesBridge?: HostServicesBridge,
   _sessionId?: string,
-  options: { surfaceWrite?: boolean; getOperationDir?: () => string } = {},
+  options: { surfaceWrite?: boolean; getOperationDir?: () => string; ensureOperationContext?: () => Promise<void>; getContextRevision?: () => number | null } = {},
 ): ToolDefinition[] {
   const write = createWriteToolDefinition(cwd);
   const edit = createEditToolDefinition(cwd);
@@ -341,5 +341,7 @@ export function createWorkspaceMutationJournalTools(
     tool,
     cwd,
     options.getOperationDir,
+    options.ensureOperationContext,
+    options.getContextRevision,
   ));
 }

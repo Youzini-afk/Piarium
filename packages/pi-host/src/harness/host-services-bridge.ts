@@ -21,8 +21,9 @@ export interface HostServicesBridgeOptions {
   sessionId: string;
   defaultTimeoutMs?: number;
   getInputContext?: () => AgentInputContext;
+  getWorkContextEntryId?: () => string | null;
   /** Called with the work-context revision piggybacked on each successful respond. */
-  onWorkContextRevision?: (revision: number) => void;
+  onWorkContextRevision?: (revision: number, entryId?: string | null) => void;
 }
 
 export class HarnessRequestError extends Error {
@@ -42,7 +43,8 @@ export class HostServicesBridge {
   readonly #sessionId: string;
   readonly #defaultTimeoutMs: number;
   readonly #getInputContext: (() => AgentInputContext) | undefined;
-  readonly #onWorkContextRevision: ((revision: number) => void) | undefined;
+  readonly #getWorkContextEntryId: (() => string | null) | undefined;
+  readonly #onWorkContextRevision: ((revision: number, entryId?: string | null) => void) | undefined;
   #disposed = false;
 
   constructor(options: HostServicesBridgeOptions) {
@@ -50,6 +52,7 @@ export class HostServicesBridge {
     this.#sessionId = options.sessionId;
     this.#defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
     this.#getInputContext = options.getInputContext;
+    this.#getWorkContextEntryId = options.getWorkContextEntryId;
     this.#onWorkContextRevision = options.onWorkContextRevision;
   }
 
@@ -123,6 +126,7 @@ export class HostServicesBridge {
         method,
         params,
         requestId,
+        ...(this.#getWorkContextEntryId ? { contextEntryId: this.#getWorkContextEntryId() } : {}),
         ...(inputContext ? { inputContext: structuredClone(inputContext) } : {}),
         // Carry the bridge timeout to the router so the service handler
         // can run for the same duration (e.g. thread.wait blocks up to
@@ -139,7 +143,7 @@ export class HostServicesBridge {
     sessionId: string,
     requestId: string,
     outcome:
-      | { ok: true; result: unknown; harnessContext?: { workContextRevision: number } }
+      | { ok: true; result: unknown; harnessContext?: { workContextRevision: number; workContextEntryId?: string | null } }
       | { ok: false; error: HarnessError },
   ): boolean {
     const pending = this.#pending.get(requestId);
@@ -150,7 +154,7 @@ export class HostServicesBridge {
     if (outcome.ok) {
       if (outcome.harnessContext !== undefined) {
         try {
-          this.#onWorkContextRevision?.(outcome.harnessContext.workContextRevision);
+          this.#onWorkContextRevision?.(outcome.harnessContext.workContextRevision, outcome.harnessContext.workContextEntryId);
         } catch {
           // Mirror refresh is best-effort; never fail a settled response.
         }

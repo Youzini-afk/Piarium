@@ -17,7 +17,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import type {
   HarnessEmbedParams,
   HarnessRerankParams,
-  ExploreSearchResult,
+  ExploreQueryFinishResult,
   HostEvent,
   HostEventData,
 } from "@varin/protocol";
@@ -494,9 +494,9 @@ const lastToolMessage = (contexts: Context[]): string => {
   if (!context) throw new Error("Expected a provider context after the explore call");
   return serializedToolResult(context, "explore");
 };
-const exploreDetails = (session: SemanticSession): ExploreSearchResult["details"] => {
+const exploreDetails = (session: SemanticSession): ExploreQueryFinishResult["details"] => {
   const result = session.toolResults.findLast((tool) => tool.toolName === "explore")?.result as {
-    details?: { provenance?: ExploreSearchResult["details"] };
+    details?: { provenance?: ExploreQueryFinishResult["details"] };
   } | undefined;
   assert.ok(result?.details?.provenance, "public explore must provide structured provenance");
   return result.details.provenance;

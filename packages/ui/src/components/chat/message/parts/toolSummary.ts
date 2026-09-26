@@ -94,7 +94,10 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
       const exitStr = exitCode !== undefined ? ` · exit ${exitCode}` : "";
       const durStr = durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1)}s` : "";
       const shellId = asString(details?.shellId) ?? (details?.kind === "background" ? asString(details?.id) : undefined);
-      const bgStr = shellId !== undefined ? ` · running · shell ${shellId}` : "";
+      const preparing = details?.kind === "preparing";
+      const bgStr = preparing
+        ? ` · preparing · execution ${asString(details?.executionId) ?? asString(details?.id) ?? "unknown"}`
+        : shellId !== undefined ? ` · running · shell ${shellId}` : "";
       return {
         text: `${firstLine.slice(0, 80)}${exitStr}${durStr}${bgStr}`,
         readOnly: false,

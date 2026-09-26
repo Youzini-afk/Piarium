@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import { PassThrough } from 'node:stream';
 import {
@@ -8,7 +8,15 @@ import {
   encodeRuntimeEnvelope,
   VARIN_PROTOCOL_VERSION,
   type RuntimeWireEnvelope,
+  type SessionSnapshot,
+  type SessionStats,
 } from '@varin/protocol';
+import {
+  configureRuntimeUrlResolver,
+  getRuntimeUrlResolver,
+  setRuntimeUrlAuthToken,
+  setRuntimeUrlResolver,
+} from '@varin/application-client';
 import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
@@ -288,5 +296,240 @@ describe('Pi runtime gateway', () => {
     hangList = false;
     const second = await openClient();
     await expect(second.client.request('session.list', {})).resolves.toEqual([]);
+  });
+
+  it('reconnects the production supervisor and catches the Store up after a real socket loss', async () => {
+    type RecoveryRecord = {
+      branchEntries?: { entries: Array<{ id: string }> };
+      liveAssistant?: unknown;
+      snapshot?: SessionSnapshot;
+      stats?: SessionStats;
+      syncState?: string;
+      toolExecutions?: Record<string, { result?: unknown; status: string }>;
+    };
+    type RecoveryStore = { getState(): {
+      loadCatalog(): Promise<void>;
+      records: Record<string, RecoveryRecord>;
+      refreshEntries(sessionId: string): Promise<unknown>;
+    } };
+    const { createPiSessionStore } = await vi.importActual<{
+      createPiSessionStore(): RecoveryStore;
+    }>('@varin/ui/stores/usePiSessionStore');
+    const { disconnectPiRuntime } = await vi.importActual<{
+      disconnectPiRuntime(): Promise<void>;
+    }>('@varin/ui/lib/pi-runtime/client');
+    const { broker, server, url } = await setup();
+    const priorResolver = getRuntimeUrlResolver();
+    const acceptedSockets: Array<{ destroy(): void }> = [];
+    server.on('upgrade', (_request, socket) => { acceptedSockets.push(socket); });
+    await disconnectPiRuntime();
+    configureRuntimeUrlResolver({ apiBaseUrl: url.replace(/^ws:/, 'http:').replace(PI_RUNTIME_WS_PATH, '') });
+    setRuntimeUrlAuthToken('gateway-test-token', Date.now() + 60_000);
+    active.push(async () => {
+      await disconnectPiRuntime();
+      setRuntimeUrlAuthToken(null, null);
+      setRuntimeUrlResolver(priorResolver);
+    });
+
+    const sessionId = 'session-socket-recovery';
+    const workerId = 'worker-socket-recovery';
+    const snapshot = (busy: boolean): SessionSnapshot => ({
+      activeTools: [], busy, cwd: 'D:/work', eventWatermark: busy ? 5 : 9,
+      eventWorkerId: workerId, features: { revision: 0, schemaVersion: 1 },
+      followUp: [], followUpMode: 'all', isCompacting: false, isStreaming: busy,
+      leafId: busy ? null : 'entry-final', pendingMessageCount: 0,
+      pendingToolCallIds: busy ? ['call-1'] : [],
+      retryAttempt: 0, runId: 'run-one', sessionId, steering: [],
+      steeringMode: 'all', thinkingLevel: 'medium',
+    });
+    const finalMessage = {
+      api: 'messages' as const, content: [{ text: 'final answer', type: 'text' as const }],
+      model: 'model', provider: 'provider', role: 'assistant' as const,
+      stopReason: 'stop' as const, timestamp: 42,
+      usage: {
+        cacheRead: 0, cacheWrite: 0,
+        cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+        input: 2, output: 3, totalTokens: 5,
+      },
+    };
+    const stats: SessionStats = {
+      assistantMessages: 1, contextUsage: { contextWindow: 100, percent: 5, tokens: 5 },
+      cost: 0, sessionId,
+      tokens: { cacheRead: 0, cacheWrite: 0, input: 2, output: 3, total: 5 },
+      toolCalls: 1, toolResults: 1, totalMessages: 3, userMessages: 1,
+    };
+    let completed = false;
+    const methods: string[] = [];
+    broker.requestForSession = (async (_sessionId: string, method: string, params: {
+      scope?: string; scopes?: string[];
+    }) => {
+      methods.push(method);
+      if (method === 'session.snapshot') return snapshot(!completed);
+      const entries = {
+        entries: completed ? [{
+          id: 'entry-tool', parentId: null, timestamp: '2026-09-26T00:00:00.000Z',
+          type: 'message', message: {
+            content: [{ text: 'read output', type: 'text' }], details: { lines: 3 },
+            isError: false, role: 'toolResult', timestamp: 41,
+            toolCallId: 'call-1', toolName: 'read',
+          },
+        }, {
+          id: 'entry-final', parentId: 'entry-tool', timestamp: '2026-09-26T00:00:00.001Z',
+          type: 'message', message: finalMessage,
+        }] : [],
+        leafId: completed ? 'entry-final' : null,
+        scope: params.scope ?? 'branch', sessionId,
+      };
+      if (method === 'session.reconcile') return {
+        entries: params.scopes?.includes('branch') ? { branch: entries } : {},
+        snapshot: snapshot(!completed), stats,
+      };
+      if (method === 'session.entries') return entries;
+      if (method === 'session.stats') return stats;
+      throw new Error(`Unexpected ${method}`);
+    }) as typeof broker.requestForSession;
+    const store = createPiSessionStore();
+    await store.getState().loadCatalog();
+    broker.emitTest({
+      envelope: createEvent(3, 'session.snapshot', snapshot(true)),
+      kind: 'host', role: 'session', runtimeGeneration: 1, sessionId, workerId,
+    });
+    broker.emitTest({
+      envelope: createEvent(4, 'agent.event', {
+        event: {
+          message: { ...finalMessage, content: [{ text: 'half', type: 'text' }], stopReason: 'pending' },
+          runId: 'run-one', type: 'message_start',
+        }, sessionId,
+      }),
+      kind: 'host', role: 'session', runtimeGeneration: 1, sessionId, workerId,
+    });
+    broker.emitTest({
+      envelope: createEvent(5, 'agent.event', {
+        event: { args: { path: 'README.md' }, runId: 'run-one',
+          toolCallId: 'call-1', toolName: 'read', type: 'tool_execution_start' },
+        sessionId,
+      }),
+      kind: 'host', role: 'session', runtimeGeneration: 1, sessionId, workerId,
+    });
+    const until = async (check: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 8_000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error('Timed out waiting for socket recovery');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    await until(() => store.getState().records[sessionId]?.liveAssistant !== undefined);
+    await store.getState().refreshEntries(sessionId);
+    completed = true;
+    acceptedSockets[0]?.destroy();
+    await until(() => {
+      const record = store.getState().records[sessionId];
+      return record?.syncState === 'synced'
+        && record.snapshot?.busy === false
+        && record.branchEntries?.entries[1]?.id === 'entry-final'
+        && record.liveAssistant === undefined;
+    });
+    expect(store.getState().records[sessionId]?.stats?.tokens.total).toBe(5);
+    expect(store.getState().records[sessionId]?.branchEntries?.entries[0]?.id).toBe('entry-tool');
+    expect(store.getState().records[sessionId]?.toolExecutions?.['call-1']).toMatchObject({
+      result: { lines: 3 }, status: 'success',
+    });
+    expect(methods).toContain('session.reconcile');
+    expect(methods.filter((method) => method.startsWith('agent.'))).toEqual([]);
+  });
+
+  it('recovers a missed terminal event on a still-connected visible busy session', async () => {
+    type ProbeStore = {
+      getState(): {
+        connectionPhase: string;
+        loadCatalog(): Promise<void>;
+        records: Record<string, {
+          branchEntries?: { entries: Array<{ id: string }> };
+          snapshot?: SessionSnapshot;
+          syncState?: string;
+        }>;
+        refreshEntries(sessionId: string): Promise<unknown>;
+      };
+      setState(patch: { currentSessionId: string }): void;
+    };
+    const { createPiSessionStore } = await vi.importActual<{
+      createPiSessionStore(runtime?: undefined, options?: { healthProbeIntervalMs: number }): ProbeStore;
+    }>('@varin/ui/stores/usePiSessionStore');
+    const { disconnectPiRuntime } = await vi.importActual<{
+      disconnectPiRuntime(): Promise<void>;
+    }>('@varin/ui/lib/pi-runtime/client');
+    const { broker, url } = await setup();
+    const priorResolver = getRuntimeUrlResolver();
+    await disconnectPiRuntime();
+    configureRuntimeUrlResolver({ apiBaseUrl: url.replace(/^ws:/, 'http:').replace(PI_RUNTIME_WS_PATH, '') });
+    setRuntimeUrlAuthToken('gateway-probe-token', Date.now() + 60_000);
+    active.push(async () => {
+      await disconnectPiRuntime();
+      setRuntimeUrlAuthToken(null, null);
+      setRuntimeUrlResolver(priorResolver);
+    });
+    const sessionId = 'session-missed-terminal';
+    const workerId = 'worker-missed-terminal';
+    let authoritativeBusy = true;
+    let reconcileReads = 0;
+    const snapshot = (): SessionSnapshot => ({
+      activeTools: [], busy: authoritativeBusy, cwd: 'D:/work',
+      eventWatermark: authoritativeBusy ? 4 : 8, eventWorkerId: workerId,
+      features: { revision: 0, schemaVersion: 1 }, followUp: [], followUpMode: 'all',
+      isCompacting: false, isStreaming: authoritativeBusy,
+      leafId: authoritativeBusy ? null : 'entry-final', pendingMessageCount: 0,
+      pendingToolCallIds: [], retryAttempt: 0, runId: 'run-one', sessionId,
+      steering: [], steeringMode: 'all', thinkingLevel: 'medium',
+    });
+    broker.requestForSession = (async (_id: string, method: string, params: { scopes?: string[] }) => {
+      if (method === 'session.snapshot') return snapshot();
+      if (method === 'session.entries') return {
+        entries: [], leafId: null, scope: 'branch', sessionId,
+      };
+      if (method === 'session.reconcile') {
+        reconcileReads += 1;
+        return {
+          snapshot: snapshot(),
+          entries: params.scopes?.includes('branch') ? { branch: {
+            entries: authoritativeBusy ? [] : [{
+              id: 'entry-final', parentId: null, timestamp: '2026-09-26T00:00:00.000Z',
+              type: 'message', message: {
+                api: 'messages', content: [{ text: 'finished quietly', type: 'text' }],
+                model: 'model', provider: 'provider', role: 'assistant', stopReason: 'stop',
+                timestamp: 42, usage: { cacheRead: 0, cacheWrite: 0,
+                  cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+                  input: 0, output: 0, totalTokens: 0 },
+              },
+            }], leafId: authoritativeBusy ? null : 'entry-final', scope: 'branch', sessionId,
+          } } : {},
+          stats: { assistantMessages: 1, cost: 0, sessionId,
+            tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+            toolCalls: 0, toolResults: 0, totalMessages: 1, userMessages: 0 },
+        };
+      }
+      throw new Error(`Unexpected ${method}`);
+    }) as typeof broker.requestForSession;
+    const store = createPiSessionStore(undefined, { healthProbeIntervalMs: 30 });
+    await store.getState().loadCatalog();
+    broker.emitTest({
+      envelope: createEvent(3, 'session.snapshot', snapshot()),
+      kind: 'host', role: 'session', runtimeGeneration: 1, sessionId, workerId,
+    });
+    await store.getState().refreshEntries(sessionId);
+    store.setState({ currentSessionId: sessionId });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const baselineReads = reconcileReads;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(reconcileReads, 'a quiet but still-busy run needs no history reload').toBe(baselineReads);
+    authoritativeBusy = false; // terminal event is deliberately never delivered
+    const deadline = Date.now() + 3_000;
+    while (store.getState().records[sessionId]?.snapshot?.busy !== false) {
+      if (Date.now() > deadline) throw new Error('Busy probe did not recover the missed terminal state');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(store.getState().connectionPhase).toBe('connected');
+    expect(store.getState().records[sessionId]?.syncState).toBe('synced');
+    expect(store.getState().records[sessionId]?.branchEntries?.entries[0]?.id).toBe('entry-final');
+    expect(reconcileReads).toBe(baselineReads + 1);
   });
 });

@@ -1,4 +1,4 @@
-import type { JsonValue, ThinkingLevel } from "./types.js";
+import type { JsonValue, SessionSnapshot, SessionStats, ThinkingLevel } from "./types.js";
 
 export const VARIN_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION = 1 as const;
 export const VARIN_RECOVERY_NAVIGATION_MARKER_TYPE = "varin.recovery.navigation/v1";
@@ -233,6 +233,13 @@ export interface SessionEntriesResult {
   sessionId: string;
 }
 
+/** One Pi worker read of live state, requested transcript scopes, and usage. */
+export interface SessionReconcileResult {
+  entries: Partial<Record<"branch" | "all", SessionEntriesResult>>;
+  snapshot: SessionSnapshot;
+  stats: SessionStats;
+}
+
 export interface SessionTreeNode {
   children: SessionTreeNode[];
   entry: PiSessionEntry;
@@ -270,11 +277,12 @@ export interface PiCompactionResult {
 }
 
 export interface PiAgentEventPosition {
+  runId?: string;
   leafId: string | null;
   turnIndex: number;
 }
 
-export type PiAgentEvent =
+export type PiAgentEvent = (
   | ({ type: "agent_start" } & PiAgentEventPosition)
   | ({ messages: PiMessage[]; type: "agent_end"; willRetry: boolean } & PiAgentEventPosition)
   | ({ type: "agent_settled" } & PiAgentEventPosition)
@@ -332,4 +340,5 @@ export type PiAgentEvent =
       type: "summarization_retry_attempt_start";
     }
   | { type: "summarization_retry_finished" }
-  | { delta: string; id?: string; type: "bash_execution_update" };
+  | { delta: string; id?: string; type: "bash_execution_update" }
+) & { runId?: string };

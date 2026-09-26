@@ -52,38 +52,62 @@ const classifyIpv4 = (ip: string): EgressAddressClass => {
   // never route publicly. Reported separately so the failure surfaces the
   // real reason instead of a misleading "private network" label.
   if (a === 198 && (b === 18 || b === 19)) return "special-purpose";
-  if (a >= 240) return "special-purpose"; // 240.0.0.0/4 reserved + broadcast
+  if (a >= 224) return "special-purpose"; // multicast and reserved space
+  if (a === 192 && b === 0 && Number(v4[3]) === 2) return "special-purpose";
+  if (a === 198 && b === 51 && Number(v4[3]) === 100) return "special-purpose";
+  if (a === 203 && b === 0 && Number(v4[3]) === 113) return "special-purpose";
   return "public";
 };
 
+/** Expand a validated IPv6 literal to bytes so equivalent text forms share policy. */
+const ipv6Bytes = (ip: string): number[] => {
+  const v4Tail = ip.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)?.[1];
+  const expanded = v4Tail
+    ? ip.slice(0, -v4Tail.length) + (() => {
+      const octets = v4Tail.split(".").map(Number);
+      return `${((octets[0]! << 8) | octets[1]!).toString(16)}:${((octets[2]! << 8) | octets[3]!).toString(16)}`;
+    })()
+    : ip;
+  const [left, right] = expanded.split("::");
+  const head = left ? left.split(":") : [];
+  const tail = right ? right.split(":") : [];
+  const groups = right !== undefined
+    ? [...head, ...Array<string>(8 - head.length - tail.length).fill("0"), ...tail]
+    : head;
+  return groups.flatMap((group) => {
+    const n = parseInt(group, 16);
+    return [n >> 8, n & 0xff];
+  });
+};
+
+const embeddedIpv4Class = (bytes: number[], offset: number): EgressAddressClass =>
+  classifyIpv4(bytes.slice(offset, offset + 4).join("."));
+
 const classifyIpv6 = (ip: string): EgressAddressClass => {
-  const h = normalizeIpLiteral(ip);
-  if (h === "::1" || h === "::") return "private";
-  // IPv4-embedded forms reach whatever the embedded v4 address reaches —
-  // classify the embedded address so a mapped public host stays reachable
-  // while a mapped private one is still refused.
-  const mapped = h.match(/^::ffff:(?:0:)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped) return classifyIpv4(mapped[1]!);
-  if (h.includes("::ffff:")) return "private"; // hex-form mapped address
-  const nat64 = h.match(/^64:ff9b::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (nat64) return classifyIpv4(nat64[1]!);
-  // NAT64 hex form: 64:ff9b::HHHH:HHHH embeds the v4 in the last two groups.
-  const nat64Hex = h.match(/^64:ff9b::(?:0:)*([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (nat64Hex) {
-    const hi = parseInt(nat64Hex[1]!, 16);
-    const lo = parseInt(nat64Hex[2]!, 16);
-    return classifyIpv4(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+  const b = ipv6Bytes(normalizeIpLiteral(ip));
+  if (b.slice(0, 15).every((n) => n === 0) && (b[15] === 0 || b[15] === 1)) return "private";
+  if (b[0] === 0xfc || b[0] === 0xfd) return "private"; // fc00::/7 ULA
+  if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return "private"; // fe80::/10 link-local
+  if (b[0] === 0xff) return "special-purpose"; // ff00::/8 multicast
+  // Mapped, translated and compatible IPv4 forms retain the v4 destination.
+  if (b.slice(0, 10).every((n) => n === 0) && b[10] === 0xff && b[11] === 0xff) {
+    return embeddedIpv4Class(b, 12);
   }
-  if (h.startsWith("64:ff9b::")) return "special-purpose";
-  const to6 = h.match(/^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4})/);
-  if (to6) {
-    const a = parseInt(to6[1]!, 16);
-    const b = parseInt(to6[2]!, 16);
-    return classifyIpv4(`${a >> 8}.${a & 0xff}.${b >> 8}.${b & 0xff}`);
+  if (b.slice(0, 8).every((n) => n === 0) && b[8] === 0xff && b[9] === 0xff && b[10] === 0 && b[11] === 0) {
+    return embeddedIpv4Class(b, 12);
   }
-  if (h.startsWith("fe80")) return "private"; // fe80::/10 link-local
-  if (h.startsWith("fc") || h.startsWith("fd")) return "private"; // fc00::/7 ULA
-  if (h.startsWith("ff")) return "special-purpose"; // ff00::/8 multicast
+  if (b.slice(0, 12).every((n) => n === 0)) return embeddedIpv4Class(b, 12);
+  if (b[0] === 0 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b.slice(4, 12).every((n) => n === 0)) {
+    return embeddedIpv4Class(b, 12); // 64:ff9b::/96 NAT64
+  }
+  if (b[0] === 0 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b[4] === 0 && b[5] === 1) {
+    return "special-purpose"; // 64:ff9b:1::/48 local-use translation
+  }
+  if (b[0] === 0x20 && b[1] === 0x02) return embeddedIpv4Class(b, 2); // 2002::/16 6to4
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0 && b[3] === 2 && b[4] === 0 && b[5] === 0) return "special-purpose"; // 2001:2::/48 benchmarking
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return "special-purpose"; // documentation
+  if (b[0] === 0x3f && b[1] === 0xff && (b[2]! & 0xf0) === 0) return "special-purpose"; // 3fff::/20 documentation
+  if (b[0] === 0x01 && b.slice(1, 8).every((n) => n === 0)) return "special-purpose"; // 100::/64 discard
   return "public";
 };
 
@@ -101,7 +125,7 @@ export const classifyIp = (ip: string): EgressAddressClass => {
  * Returns the block reason when the hostname itself is forbidden.
  */
 export const classifyHostname = (hostname: string): SsrfBlockReason | null => {
-  const host = normalizeIpLiteral(hostname);
+  const host = normalizeIpLiteral(hostname).replace(/\.+$/, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
     return "private-network";
   }

@@ -315,22 +315,170 @@ describe("SessionHost prompt streaming", () => {
       const snapshot = await host.create(root);
       const session = host.session;
       const mutableAgent = session.agent as unknown as { abort: () => void };
-      const mutableSession = session as unknown as { waitForIdle: () => Promise<void> };
+      const mutableSession = session as unknown as {
+        _emit: (event: { reason: "manual"; type: "compaction_start" }) => void;
+        abortCompaction: () => void;
+        compact: () => Promise<unknown>;
+        waitForIdle: () => Promise<void>;
+      };
       const originalAgentAbort = mutableAgent.abort.bind(session.agent);
+      const originalAbortCompaction = mutableSession.abortCompaction.bind(session);
+      const originalCompact = mutableSession.compact.bind(session);
       const originalWaitForIdle = mutableSession.waitForIdle.bind(session);
       let abortSignals = 0;
+      let compactionAbortSignals = 0;
       mutableAgent.abort = () => { abortSignals += 1; };
+      mutableSession.abortCompaction = () => { compactionAbortSignals += 1; };
       mutableSession.waitForIdle = async () => {
         throw new Error("SessionHost.abort must not wait for idle");
       };
       try {
         assert.equal(await host.abort(snapshot.sessionId), false);
         assert.equal(abortSignals, 1);
+        let finishCompaction!: () => void;
+        mutableSession.compact = () => new Promise((resolve) => {
+          finishCompaction = () => {
+            // Pi emits this only after its compaction controller exists. A stop
+            // accepted during Pi's initial await must be signalled again here.
+            mutableSession._emit({ reason: "manual", type: "compaction_start" });
+            resolve({});
+          };
+        });
+        const compacting = host.compact(snapshot.sessionId);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const activityId = host.snapshot().runId;
+        assert.ok(activityId, "the first manual compaction has an observable stop identity");
+        assert.equal(host.snapshot().busy, true);
+        assert.equal(host.snapshot().isCompacting, true);
+        assert.equal(await host.abort(snapshot.sessionId, activityId), true);
+        assert.equal(abortSignals, 2);
+        assert.equal(compactionAbortSignals, 2);
+        finishCompaction();
+        await compacting;
+        assert.equal(compactionAbortSignals, 3);
+        assert.equal(host.snapshot().runId, activityId);
+        assert.equal(host.snapshot().busy, false);
       } finally {
         mutableAgent.abort = originalAgentAbort;
+        mutableSession.abortCompaction = originalAbortCompaction;
+        mutableSession.compact = originalCompact;
         mutableSession.waitForIdle = originalWaitForIdle;
       }
     } finally {
+      await host.dispose();
+      faux.unregister();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a delayed stop for a settled run while a newer run is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-abort-run-"));
+    const faux = registerFauxProvider();
+    let releaseSecond!: () => void;
+    const heldSecond = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    faux.setResponses([
+      () => fauxAssistantMessage("first complete"),
+      async () => { await heldSecond; return fauxAssistantMessage("second complete"); },
+    ]);
+    const model = faux.getModel();
+    const lifecycleEvents: PiAgentEvent[] = [];
+    const host = new SessionHost({
+      agentDir: join(root, "agent"),
+      configureServices: async (services) => {
+        services.modelRuntime.registerProvider(model.provider, {
+          api: model.api, baseUrl: model.baseUrl,
+          models: [{
+            api: model.api, baseUrl: model.baseUrl, contextWindow: model.contextWindow,
+            cost: model.cost, id: model.id, input: model.input, maxTokens: model.maxTokens,
+            name: model.name, reasoning: model.reasoning,
+          }],
+        });
+        await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
+        return { model };
+      },
+      emit: (event, data) => {
+        if (event === "agent.event") lifecycleEvents.push((data as { event: PiAgentEvent }).event);
+      },
+      projectTrustOverride: true,
+    });
+    try {
+      const { sessionId } = await host.create(root);
+      assert.deepEqual(await host.prompt(sessionId, "first"), { accepted: true });
+      await host.session.waitForIdle();
+      const firstRunId = host.snapshot().runId;
+      assert.ok(firstRunId);
+      assert.deepEqual(await host.prompt(sessionId, "second"), { accepted: true });
+      const secondRunId = host.snapshot().runId;
+      assert.ok(secondRunId);
+      assert.notEqual(secondRunId, firstRunId);
+      const mutableAgent = host.session.agent as unknown as { abort: () => void };
+      const originalAbort = mutableAgent.abort.bind(host.session.agent);
+      let abortSignals = 0;
+      mutableAgent.abort = () => { abortSignals += 1; originalAbort(); };
+      try {
+        assert.equal(await host.abort(sessionId, firstRunId), false);
+        assert.equal(abortSignals, 0);
+        assert.equal(host.snapshot().busy, true);
+        assert.equal(await host.abort(sessionId, secondRunId), true);
+        assert.equal(abortSignals, 1);
+      } finally {
+        mutableAgent.abort = originalAbort;
+      }
+      releaseSecond();
+      await host.session.waitForIdle();
+      const staleRunId = host.snapshot().runId;
+      assert.equal(staleRunId, secondRunId);
+      const session = host.session as unknown as {
+        compact: () => Promise<unknown>;
+        navigateTree: (targetId: string, options?: { summarize?: boolean }) => Promise<{ cancelled: boolean }>;
+      };
+      const originalCompact = session.compact.bind(host.session);
+      const originalNavigate = session.navigateTree.bind(host.session);
+      const agent = host.session.agent as unknown as { abort: () => void };
+      const originalAgentAbort = agent.abort.bind(host.session.agent);
+      let activityAbortSignals = 0;
+      agent.abort = () => { activityAbortSignals += 1; originalAgentAbort(); };
+      try {
+        let finishCompaction!: () => void;
+        session.compact = () => new Promise((resolve) => { finishCompaction = () => resolve({}); });
+        const compacting = host.compact(sessionId);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const compactionId = host.snapshot().runId;
+        assert.ok(compactionId);
+        assert.notEqual(compactionId, staleRunId);
+        (host.session as unknown as { _emit: (event: { type: "agent_settled" }) => void })
+          ._emit({ type: "agent_settled" });
+        assert.equal(lifecycleEvents.at(-1)?.runId, staleRunId);
+        assert.equal(host.snapshot().busy, true);
+        assert.equal(await host.abort(sessionId, staleRunId), false);
+        assert.equal(activityAbortSignals, 0);
+        assert.equal(await host.abort(sessionId, compactionId), true);
+        assert.equal(activityAbortSignals, 1);
+        finishCompaction();
+        await compacting;
+
+        let finishSummary!: () => void;
+        session.navigateTree = () => new Promise((resolve) => {
+          finishSummary = () => resolve({ cancelled: false });
+        });
+        const navigating = host.navigate(sessionId, "branch-target", true);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const summaryId = host.snapshot().runId;
+        assert.ok(summaryId);
+        assert.notEqual(summaryId, compactionId);
+        assert.equal(await host.abort(sessionId, compactionId), false);
+        assert.equal(activityAbortSignals, 1);
+        assert.equal(await host.abort(sessionId, summaryId), true);
+        assert.equal(activityAbortSignals, 2);
+        finishSummary();
+        await navigating;
+      } finally {
+        session.compact = originalCompact;
+        session.navigateTree = originalNavigate;
+        agent.abort = originalAgentAbort;
+      }
+    } finally {
+      releaseSecond();
       await host.dispose();
       faux.unregister();
       await rm(root, { force: true, recursive: true });

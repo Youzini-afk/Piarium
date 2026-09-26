@@ -113,6 +113,14 @@ const optionalPositiveInteger = (params: Record<string, unknown>, key: string): 
   return Number(value);
 };
 
+const readNonNegativeInteger = (params: Record<string, unknown>, key: string): number => {
+  const value = params[key];
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new HostError("invalid_params", `${key} must be a non-negative safe integer`);
+  }
+  return Number(value);
+};
+
 const HOST_CAPABILITIES: HostCapabilities = {
   agentProviders: true,
   extensionUi: true,
@@ -133,6 +141,8 @@ const OUT_OF_BAND_METHODS = new Set([
   "config.unwatch",
   "extension.ui.respond",
   "harness.respond",
+  "session.workContext.read",
+  "session.workContext.commit",
   "harness.inference.cancel",
   "provider.auth.cancel",
   "provider.auth.respond",
@@ -862,6 +872,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessDocumentRead", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessWorkContextEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessWorkContext", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessDocumentPathOverlayEnabled(
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessDocumentPathOverlay", { optional: true }) === true,
@@ -993,6 +1007,23 @@ export class HostController {
         // snapshot, letting clients reconcile a subscribe/snapshot race
         // without reapplying covered events.
         return { ...this.#sessionHost.snapshot(), eventWatermark: this.#sequence };
+      case "session.reconcile": {
+        const sessionId = readString(params, "sessionId");
+        this.#sessionHost.assertSession(sessionId);
+        const scopes = readStringList(params, "scopes");
+        if (scopes.some((scope) => scope !== "branch" && scope !== "all")) {
+          throw new HostError("invalid_params", "scopes must contain only 'branch' or 'all'");
+        }
+        // These reads are synchronous on the owning Pi worker. No event can
+        // interleave this cut; any reentrant event uses seq >= the watermark.
+        const eventWatermark = this.#sequence;
+        const snapshot = { ...this.#sessionHost.snapshot(), eventWatermark };
+        const entries: Partial<Record<"branch" | "all", ReturnType<SessionHost["entries"]>>> = {};
+        for (const scope of new Set(scopes as Array<"branch" | "all">)) {
+          entries[scope] = this.#sessionHost.entries(sessionId, scope);
+        }
+        return { entries, snapshot, stats: this.#sessionHost.stats(sessionId) };
+      }
       case "session.input.capture":
         return this.#sessionHost.captureInput(readString(params, "sessionId"));
       case "session.entries":
@@ -1023,6 +1054,15 @@ export class HostController {
           readString(params, "sessionId"),
           readSessionFeatureMutation(params.mutation),
         );
+      case "session.workContext.read":
+        return this.#sessionHost.workContextRead(readString(params, "sessionId"));
+      case "session.workContext.commit":
+        return this.#sessionHost.workContextCommit({
+          sessionId: readString(params, "sessionId"),
+          expectedLeafId: readNullableString(params, "expectedLeafId"),
+          expectedRevision: readNonNegativeInteger(params, "expectedRevision"),
+          context: expectRecord(params.context, "context") as unknown as import("@varin/protocol").PiWorkContextCommit["context"],
+        });
       case "session.entry":
         return this.#sessionHost.entry(
           readString(params, "sessionId"),
@@ -1130,7 +1170,10 @@ export class HostController {
           ),
         };
       case "agent.abort":
-        return { aborted: await this.#sessionHost.abort(readString(params, "sessionId")) };
+        return { aborted: await this.#sessionHost.abort(
+          readString(params, "sessionId"),
+          optionalString(params, "expectedRunId"),
+        ) };
       case "agent.queue.clear":
         return this.#sessionHost.clearQueue(readString(params, "sessionId"));
       case "agentProvider.list":

@@ -41,12 +41,59 @@ const harness = (root: string) => {
 };
 
 describe("harness work context", () => {
+  it("rejects a delayed selection that loses its revision during authorization", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-cas-"));
+    fs.mkdirSync(join(root, "first"));
+    fs.mkdirSync(join(root, "second"));
+    const deps = harness(root);
+    const state = seedWorkContext(root, root);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const delayed = {
+      ...deps,
+      authorize: async (candidate: string, options: { allowMissing: boolean }) => {
+        if (candidate === join(root, "first")) await gate;
+        return deps.authorize(candidate, options);
+      },
+    };
+    try {
+      const first = selectOperationDir(state, { path: "first", expectedRevision: 0 }, delayed);
+      await selectOperationDir(state, { path: "second", expectedRevision: 0 }, deps);
+      release();
+      await expect(first).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      expect(state).toMatchObject({ operationDir: "second", revision: 1 });
+    } finally { release(); rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("does not reset to a deleted launch directory or seed outside its authority", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-reset-missing-"));
+    const launch = join(root, "launch");
+    fs.mkdirSync(launch);
+    const state = seedWorkContext(root, launch);
+    const deps = { ...harness(root), sessionRoot: launch };
+    try {
+      await selectOperationDir(state, { path: "." }, deps);
+      rmSync(launch, { recursive: true });
+      await expect(Promise.resolve().then(() => resetWorkContext(state, {}, deps))).rejects.toThrow();
+      expect(state).toMatchObject({ operationDir: "", revision: 1 });
+      expect(() => seedWorkContext(root, resolve(root, "../outside"))).toThrow();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("authorizes discovery roots before enumerating them", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-discover-denied-"));
+    writeFileSync(join(root, "package.json"), "{}");
+    try {
+      const found = await discoverProjects({}, { ...harness(root), authorize: async () => null });
+      expect(found.candidates).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("seeds the operation dir from the session launch dir relative to the root", () => {
     const state = seedWorkContext("/ws", join("/ws", "packages", "web"));
     expect(state).toEqual({ operationDir: "packages/web", queryScope: null, revision: 0 });
     expect(operationDirAbsolute(state, "/ws")).toBe(resolve("/ws", "packages", "web"));
-    // A session launched outside the authority root falls back to the root.
-    expect(seedWorkContext("/ws", "/elsewhere").operationDir).toBe("");
+    expect(() => seedWorkContext("/ws", "/elsewhere")).toThrow();
   });
 
   it("selects a project dir, rejects non-directories, and enforces CAS", async () => {
@@ -129,7 +176,7 @@ describe("harness work context", () => {
     const state = seedWorkContext(root, sessionRoot);
     await selectOperationDir(state, { path: "." }, deps);
     expect(state.operationDir).toBe("");
-    const reset = resetWorkContext(state, {}, deps);
+    const reset = await resetWorkContext(state, {}, deps);
     expect(reset.context.operationDir).toBe("sub");
     expect(reset.context.revision).toBe(2);
     rmSync(root, { recursive: true, force: true });

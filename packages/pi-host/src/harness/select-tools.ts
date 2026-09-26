@@ -329,5 +329,11 @@ export function selectHarnessTools(
     result.push(createSubmitFactsTool(bridge));
   }
 
-  return result.map((tool) => withToolExecutionResources(tool, cwd, getOperationDir));
+  return result.map((tool) => withToolExecutionResources(
+    tool,
+    cwd,
+    getOperationDir,
+    workContext ? () => workContext.ensureCurrent() : undefined,
+    workContext ? () => workContext.mirror.revision : undefined,
+  ));
 }

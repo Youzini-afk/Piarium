@@ -14,6 +14,7 @@ import {
   type AgentInputContext,
 } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
+import { looksLikePathObject } from "./explore-query.js";
 
 export { buildHarnessRespondParams };
 
@@ -53,7 +54,7 @@ export interface HarnessRouterOptions {
    * the response must route by worker identity, not by session lookup.
    */
   respond: (identity: HarnessActorIdentity, requestId: string, outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError }) => Promise<void>;
-  resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal) => Promise<HarnessActorContext | null>;
+  resolveActor: (identity: HarnessActorIdentity, signal?: AbortSignal, contextEntryId?: string | null) => Promise<HarnessActorContext | null>;
   authorizeWorkspacePath?: (
     actor: HarnessActorContext,
     path: string,
@@ -93,10 +94,23 @@ const requestPaths = (
   }
   if (method === "permission.audit") return [];
   if (method === "explore.search" || method === "explore.query.start") {
-    if (record.paths === undefined) return [];
-    return Array.isArray(record.paths) && record.paths.every((path) => typeof path === "string" && path.trim())
+    if (record.paths !== undefined && (!Array.isArray(record.paths)
+      || !record.paths.every((path) => typeof path === "string" && path.trim()))) return "invalid";
+    if (record.anchors !== undefined && (!Array.isArray(record.anchors)
+      || !record.anchors.every((anchor) => typeof anchor === "string"))) return "invalid";
+    const paths = Array.isArray(record.paths)
       ? record.paths.map((path) => ({ allowMissing: false, path: path as string }))
-      : "invalid";
+      : [];
+    // Explore anchors remain hints. Path-shaped anchors are separately
+    // authorized here so the service can replace raw absolute/opDir paths with
+    // the Router's workspace-relative resource IDs without turning symbols
+    // into paths or silently broadening to the workspace after denial.
+    const anchors = Array.isArray(record.anchors)
+      ? record.anchors
+        .filter((anchor): anchor is string => typeof anchor === "string" && looksLikePathObject(anchor.trim()))
+        .map((anchor) => ({ allowMissing: true, path: anchor.trim() }))
+      : [];
+    return [...paths, ...anchors];
   }
   if (
     method === "explore.query.plan"
@@ -111,7 +125,7 @@ const requestPaths = (
   }
   if (method === "related.query") {
     if (typeof record.anchor !== "string" || !record.anchor.trim()) return "invalid";
-    return /[\\/]/.test(record.anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(record.anchor)
+    return looksLikePathObject(record.anchor.trim())
       ? [{ allowMissing: true, path: record.anchor.trim() }]
       : [];
   }
@@ -375,7 +389,7 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const timer = (data.method === "thread.wait" || data.method === "thread.send" || data.method === "experiment.wait" || data.method === "compaction.run" || data.method === "materials.read") && data.timeoutMs === 0
       ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      const actor = await options.resolveActor(identity, controller.signal);
+      const actor = await options.resolveActor(identity, controller.signal, data.contextEntryId);
       if (!actor) {
         await respond({
           ok: false,

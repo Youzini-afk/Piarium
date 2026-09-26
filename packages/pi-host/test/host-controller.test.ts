@@ -278,6 +278,22 @@ describe("HostController", () => {
       assert.ok(stats.kind === "response" && stats.ok);
       assert.equal((stats.result as { sessionId: string }).sessionId, snapshot.sessionId);
 
+      transport.receive(createRequest("reconcile", "session.reconcile", {
+        scopes: ["branch", "all"], sessionId: snapshot.sessionId,
+      }));
+      const reconciled = await transport.waitFor((entry) => isResponse(entry, "reconcile"));
+      assert.ok(reconciled.kind === "response" && reconciled.ok);
+      const cut = reconciled.result as {
+        entries: { all: { leafId: string | null }; branch: { leafId: string | null } };
+        snapshot: { eventWatermark: number; leafId: string | null; sessionId: string };
+        stats: { sessionId: string };
+      };
+      assert.equal(cut.snapshot.sessionId, snapshot.sessionId);
+      assert.equal(cut.stats.sessionId, snapshot.sessionId);
+      assert.equal(cut.entries.branch.leafId, cut.snapshot.leafId);
+      assert.equal(cut.entries.all.leafId, cut.snapshot.leafId);
+      assert.ok(Number.isSafeInteger(cut.snapshot.eventWatermark));
+
       transport.receive(
         createRequest("rename", "session.rename", {
           name: "Renamed from native Pi",
@@ -750,6 +766,11 @@ describe("HostController", () => {
         transport.sent.filter((entry) => isEvent(entry, "project.trust.request")).length,
         1,
       );
+      // Journal calls must bypass a queued lifecycle request: during an Agent
+      // tool call the queued prompt is likewise waiting for harness.respond.
+      transport.receive(createRequest("journal-oob", "session.workContext.read", { sessionId: "not-active" }));
+      const journal = await transport.waitFor((entry) => isResponse(entry, "journal-oob"));
+      assert.ok(journal.kind === "response" && !journal.ok);
       transport.receive(
         createRequest("trust-a", "project.trust.respond", {
           remember: false,

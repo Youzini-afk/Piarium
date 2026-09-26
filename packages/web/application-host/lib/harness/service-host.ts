@@ -26,6 +26,7 @@ import { createZone2DeliveryService } from "./zone2-threads.js";
 import { clearManagedShellCompletionWatches } from "./harness-services.js";
 import { HarnessServiceError } from "./service-error.js";
 import type { HarnessPathAuthority } from "./path-authority.js";
+import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
 import {
   discoverProjects,
   getWorkContext,
@@ -34,6 +35,7 @@ import {
   seedWorkContext,
   selectOperationDir,
   setQueryScope,
+  validateStoredWorkContext,
   type WorkContextDeps,
 } from "./work-context.js";
 import { readHistoryPage } from "@varin/protocol";
@@ -55,7 +57,14 @@ import type {
   HarnessCapability,
   HarnessWorkContextState,
   AgentInputContext,
+  PiWorkContextCommit,
+  PiWorkContextSnapshot,
 } from "@varin/protocol";
+
+export interface WorkContextJournal {
+  read(actor: HarnessActorIdentity): Promise<PiWorkContextSnapshot>;
+  commit(actor: HarnessActorIdentity, input: PiWorkContextCommit): Promise<PiWorkContextSnapshot>;
+}
 import type {
   SurfaceSnapshotOverlayResult,
   SurfaceSnapshotReadResult,
@@ -73,6 +82,8 @@ export interface HarnessSessionContext {
   shellResolution?: { invalid: { reason: string; hint: string } };
   /** Frozen credential-free web provider/policy identity for this worker generation. */
   webBinding?: HarnessWebBinding;
+  /** Prepared from Pi's active branch before actor publication. */
+  preparedWorkContext?: { state: HarnessWorkContextState; leafId: string | null; entryId: string | null; authorityRootIdentity: string; sessionRootIdentity: string };
 }
 
 interface SessionEntry {
@@ -84,8 +95,14 @@ interface SessionEntry {
   workspaceRoot: string;
   /** Absolute authorized workspace root (the base `operationDir` is relative to). */
   authorityRoot: string;
+  authorityRootIdentity: string;
+  sessionRootIdentity: string;
   workspaceScope?: readonly string[];
   workContext: HarnessWorkContextState;
+  workContextLeafId: string | null;
+  workContextEntryId: string | null;
+  workContextVerified: boolean;
+  workContextTail: Promise<void>;
   webBinding?: HarnessWebBinding;
 }
 
@@ -423,6 +440,7 @@ export interface HarnessServiceHost {
   threadTranscriptReader: ThreadTranscriptReader | null;
   threadHistoryEntries: ((sessionId: string) => Promise<import("@varin/protocol").SessionEntriesResult>) | null;
   registerSession(ctx: HarnessSessionContext): void;
+  prepareWorkContext(ctx: HarnessSessionContext): Promise<HarnessSessionContext>;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
   /**
    * D-314: register a broker-spawned compaction worker as an auxiliary actor
@@ -446,15 +464,16 @@ export interface HarnessServiceHost {
     signal: AbortSignal,
   ) => Promise<import("@varin/protocol").CompactionRunResult>) | null;
   hasActor(identity: HarnessActorIdentity): boolean;
-  resolveActor(identity: HarnessActorIdentity): Promise<HarnessActorContext | null>;
+  resolveActor(identity: HarnessActorIdentity, contextEntryId?: string | null): Promise<HarnessActorContext | null>;
   // RR2: session work context (operation dir + query scope, Host-owned, CAS-revised)
   workContextGet(actor: HarnessActorContext): ContextGetResult;
   workContextSelect(actor: HarnessActorContext, params: ContextSelectParams): Promise<ContextGetResult>;
   workContextScope(actor: HarnessActorContext, params: ContextScopeParams): Promise<ContextGetResult>;
-  workContextReset(actor: HarnessActorContext, params: ContextResetParams): ContextGetResult;
+  workContextReset(actor: HarnessActorContext, params: ContextResetParams): Promise<ContextGetResult>;
   workContextDiscover(actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult>;
   /** Current context revision for respond piggyback; undefined without a registered session. */
   workContextRevision(sessionId: string): number | undefined;
+  workContextIdentity(sessionId: string): { revision: number; entryId: string | null } | undefined;
   /** Absolute operation dir for shell anchoring; undefined without a registered session. */
   workContextOperationDir(sessionId: string): string | undefined;
   getShellSupervisor(sessionId: string): ShellSupervisor | null;
@@ -524,6 +543,8 @@ export interface HarnessServiceHostOptions {
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
   /** Path authority shared with the router; authorizes context mutations. */
   pathAuthority?: HarnessPathAuthority;
+  /** Pi SessionManager active-branch journal, accessed out-of-band during a tool call. */
+  workContextJournal?: WorkContextJournal;
   /** Production injects the Rust-kernel lease authority; tests may use the local helper. */
   pathLockService?: PathLockService;
   readExploreFile?: ExploreFileReader;
@@ -744,8 +765,58 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const discoveredShells = options.discoveredShells
     ?? (options.discoverShells ?? discoverShells)();
 
+  const validateJournalSnapshot = async (
+    ctx: HarnessSessionContext,
+    snapshot: PiWorkContextSnapshot,
+  ): Promise<NonNullable<HarnessSessionContext["preparedWorkContext"]>> => {
+    const authorityRoot = ctx.authorityWorkspaceRoot ?? ctx.workspaceRoot;
+    let authorityRootIdentity: string;
+    let sessionRootIdentity: string;
+    try {
+      [authorityRootIdentity, sessionRootIdentity] = await Promise.all([
+        canonicalizePathIdentity(authorityRoot),
+        canonicalizePathIdentity(ctx.workspaceRoot),
+      ]);
+    } catch {
+      throw new HarnessServiceError("unavailable", "Work-context workspace or launch directory is missing or inaccessible");
+    }
+    const state = snapshot.context ?? seedWorkContext(authorityRoot, ctx.workspaceRoot);
+    if (snapshot.context && (snapshot.context.workspaceId !== ctx.workspaceId
+      || normalizePathIdentity(snapshot.context.authorityRoot) !== normalizePathIdentity(authorityRootIdentity)
+      || normalizePathIdentity(snapshot.context.sessionRoot) !== normalizePathIdentity(sessionRootIdentity))) {
+      throw new HarnessServiceError("unavailable", "Stored work context belongs to a different workspace or session launch directory");
+    }
+    if (!options.pathAuthority || !ctx.workspaceId) {
+      throw new HarnessServiceError("unavailable", "Work-context path authority is unavailable");
+    }
+    const actor: HarnessActorContext = {
+      ...ctx.actor,
+      workspaceId: ctx.workspaceId,
+      grantedCapabilities: await ctx.grantedCapabilities,
+      ...(ctx.actor.workspaceScope?.length ? { workspaceScope: ctx.actor.workspaceScope } : {}),
+    };
+    const validated = await validateStoredWorkContext(state, {
+      workspaceRoot: authorityRoot,
+      sessionRoot: ctx.workspaceRoot,
+      authorize: (candidate, authorizeOptions) => options.pathAuthority!.resolve(actor, candidate, authorizeOptions),
+    });
+    return { state: validated, leafId: snapshot.leafId, entryId: snapshot.entryId, authorityRootIdentity, sessionRootIdentity };
+  };
+
+  const prepareWorkContext = async (ctx: HarnessSessionContext): Promise<HarnessSessionContext> => {
+    if (!options.workContextJournal) return ctx;
+    const snapshot = await options.workContextJournal.read(ctx.actor);
+    const preparedWorkContext = await validateJournalSnapshot(ctx, snapshot);
+    return { ...ctx, preparedWorkContext };
+  };
+
   const registerSession = (ctx: HarnessSessionContext): void => {
     const sessionId = ctx.actor.sessionId;
+    if (options.workContextJournal && !ctx.preparedWorkContext) {
+      throw new HarnessServiceError("unavailable", "Work context was not restored before session registration");
+    }
+    const seededContext = ctx.preparedWorkContext?.state
+      ?? seedWorkContext(ctx.authorityWorkspaceRoot, ctx.workspaceRoot);
     const previous = sessions.get(sessionId);
     if (previous) {
       retireShell(sessionId, previous.shellSupervisor);
@@ -818,7 +889,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       workspaceId: ctx.workspaceId,
       workspaceRoot: ctx.workspaceRoot,
       authorityRoot,
-      workContext: seedWorkContext(ctx.authorityWorkspaceRoot, ctx.workspaceRoot),
+      authorityRootIdentity: ctx.preparedWorkContext?.authorityRootIdentity ?? authorityRoot,
+      sessionRootIdentity: ctx.preparedWorkContext?.sessionRootIdentity ?? ctx.workspaceRoot,
+      workContext: seededContext,
+      workContextLeafId: ctx.preparedWorkContext?.leafId ?? null,
+      workContextEntryId: ctx.preparedWorkContext?.entryId ?? null,
+      workContextVerified: true,
+      workContextTail: Promise.resolve(),
       ...(ctx.actor.workspaceScope?.length ? { workspaceScope: [...ctx.actor.workspaceScope] } : {}),
       ...(ctx.webBinding ? { webBinding: ctx.webBinding } : {}),
     });
@@ -948,7 +1025,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     );
   };
 
-  const resolveActor = async (identity: HarnessActorIdentity): Promise<HarnessActorContext | null> => {
+  const resolveActor = async (identity: HarnessActorIdentity, contextEntryId?: string | null): Promise<HarnessActorContext | null> => {
     const entry = sessions.get(identity.sessionId);
     if (!entry) return null;
     if (auxiliaryActor(identity)) {
@@ -964,6 +1041,16 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       };
     }
     if (!hasActor(identity)) return null;
+    const grantedCapabilities = await entry.grantedCapabilities;
+    if (options.workContextJournal && (!entry.workContextVerified
+      || contextEntryId === undefined || contextEntryId !== entry.workContextEntryId)) {
+      await refreshWorkContext(entry, { ...identity, workspaceId: entry.workspaceId, grantedCapabilities,
+        ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}) });
+    }
+    if (sessions.get(identity.sessionId) !== entry || !hasActor(identity)) return null;
+    if (contextEntryId !== undefined && contextEntryId !== entry.workContextEntryId) {
+      throw new HarnessServiceError("invalid-params", "Conversation branch changed before this tool was admitted; retry with the current work context", true);
+    }
     return {
       ...identity,
       workspaceId: entry.workspaceId,
@@ -971,7 +1058,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       contextRevision: entry.workContext.revision,
       queryScope: entry.workContext.queryScope === null ? null : [...entry.workContext.queryScope],
       ...(entry.workspaceScope ? { workspaceScope: entry.workspaceScope } : {}),
-      grantedCapabilities: await entry.grantedCapabilities,
+      grantedCapabilities,
     };
   };
 
@@ -984,6 +1071,11 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return {
       workspaceRoot,
       sessionRoot: entry.workspaceRoot,
+      assertCurrent: () => {
+        if (sessions.get(actor.sessionId) !== entry || !hasActor(actor)) {
+          throw new HarnessServiceError("forbidden", "Work context owner was retired during the request");
+        }
+      },
       authorize: (candidate, authorizeOptions) => authority.resolve(actor, candidate, authorizeOptions),
       authorizeScopeRoots: actor.workspaceScope?.length
         ? actor.workspaceScope.map((scope) => (path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope)))
@@ -991,38 +1083,152 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     };
   };
 
+  const queueWorkContext = <T>(entry: SessionEntry, action: () => Promise<T>): Promise<T> => {
+    const operation = entry.workContextTail.then(action);
+    entry.workContextTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  };
+
+  const refreshWorkContext = (entry: SessionEntry, actor: HarnessActorContext): Promise<void> => {
+    if (!options.workContextJournal) return Promise.resolve();
+    return queueWorkContext(entry, async () => {
+      entry.workContextVerified = false;
+      const snapshot = await options.workContextJournal!.read(actor);
+      const prepared = await validateJournalSnapshot({
+        actor,
+        grantedCapabilities: actor.grantedCapabilities,
+        workspaceId: entry.workspaceId,
+        workspaceRoot: entry.workspaceRoot,
+        authorityWorkspaceRoot: entry.authorityRoot,
+      }, snapshot);
+      if (sessions.get(actor.sessionId) !== entry || !hasActor(actor)) {
+        throw new HarnessServiceError("forbidden", "Work context owner was retired during restoration");
+      }
+      entry.workContext = prepared!.state;
+      entry.workContextLeafId = prepared!.leafId;
+      entry.workContextEntryId = prepared!.entryId;
+      entry.workContextVerified = true;
+      entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, entry.authorityRoot));
+    });
+  };
+
   const workContextEntry = (actor: HarnessActorContext): { entry: SessionEntry; deps: WorkContextDeps & { authorizeScopeRoots: string[] } } => {
     const entry = sessions.get(actor.sessionId);
     const deps = entry ? workContextDeps(actor) : null;
-    if (!entry || !deps) {
+    if (!entry || !deps || !entry.workContextVerified) {
       throw new HarnessServiceError("unavailable", "Work context is unavailable for this session");
     }
+    deps.assertCurrent?.();
     return { entry, deps };
   };
 
   const workContextGet = (actor: HarnessActorContext): ContextGetResult => {
     const { entry, deps } = workContextEntry(actor);
-    return getWorkContext(entry.workContext, deps);
+    return { ...getWorkContext(entry.workContext, deps), contextEntryId: entry.workContextEntryId };
+  };
+
+  const mutateWorkContext = (
+    actor: HarnessActorContext,
+    mutate: (candidate: HarnessWorkContextState, deps: WorkContextDeps) => Promise<ContextGetResult>,
+  ): Promise<ContextGetResult> => {
+    const { entry, deps } = workContextEntry(actor);
+    return queueWorkContext(entry, async () => {
+      deps.assertCurrent?.();
+      if (!entry.workContextVerified) throw new HarnessServiceError("unavailable", "Work context requires restoration before mutation");
+      if (options.workContextJournal) {
+        // Ordinary Pi messages advance the leaf even when context is unchanged.
+        // Read it at this mutation's admission; a cached leaf is never a CAS token.
+        const snapshot = await options.workContextJournal.read(actor);
+        const restored = await validateJournalSnapshot({
+          actor,
+          grantedCapabilities: actor.grantedCapabilities,
+          workspaceId: entry.workspaceId,
+          workspaceRoot: entry.workspaceRoot,
+          authorityWorkspaceRoot: entry.authorityRoot,
+        }, snapshot);
+        deps.assertCurrent?.();
+        const changed = restored.entryId !== entry.workContextEntryId
+          || JSON.stringify(restored.state) !== JSON.stringify(entry.workContext);
+        entry.workContext = restored.state;
+        entry.workContextLeafId = restored.leafId;
+        entry.workContextEntryId = restored.entryId;
+        if (changed) {
+          entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, entry.authorityRoot));
+          throw new HarnessServiceError("invalid-params", "Work context changed before this mutation; re-read context and retry", true);
+        }
+      }
+      const previous = entry.workContext;
+      const candidate: HarnessWorkContextState = {
+        operationDir: previous.operationDir,
+        queryScope: previous.queryScope === null ? null : [...previous.queryScope],
+        revision: previous.revision,
+      };
+      await mutate(candidate, deps);
+      deps.assertCurrent?.();
+      if (options.workContextJournal) {
+        let committed: PiWorkContextSnapshot;
+        try {
+          committed = await options.workContextJournal.commit(actor, {
+            sessionId: actor.sessionId,
+            expectedLeafId: entry.workContextLeafId,
+            expectedRevision: previous.revision,
+            context: {
+              ...candidate,
+              workspaceId: entry.workspaceId ?? "",
+              authorityRoot: entry.authorityRootIdentity,
+              sessionRoot: entry.sessionRootIdentity,
+            },
+          });
+          if (!committed.context || committed.context.revision !== candidate.revision
+            || committed.context.operationDir !== candidate.operationDir
+            || JSON.stringify(committed.context.queryScope) !== JSON.stringify(candidate.queryScope)) {
+            throw new Error("Pi returned a different work-context commit");
+          }
+        } catch (error) {
+          // The append may have committed before its response was lost. Never
+          // publish the candidate on an uncertain acknowledgement; re-read Pi.
+          entry.workContextVerified = false;
+          try {
+            const snapshot = await options.workContextJournal.read(actor);
+            const restored = await validateJournalSnapshot({
+              actor,
+              grantedCapabilities: actor.grantedCapabilities,
+              workspaceId: entry.workspaceId,
+              workspaceRoot: entry.workspaceRoot,
+              authorityWorkspaceRoot: entry.authorityRoot,
+            }, snapshot);
+            deps.assertCurrent?.();
+            entry.workContext = restored!.state;
+            entry.workContextLeafId = restored!.leafId;
+            entry.workContextEntryId = restored!.entryId;
+            entry.workContextVerified = true;
+            entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, entry.authorityRoot));
+          } catch {
+            // resolveActor retries restoration before another request is admitted.
+          }
+          throw new HarnessServiceError("unavailable", `Work-context commit was not acknowledged; re-read context before retrying: ${error instanceof Error ? error.message : String(error)}`, true);
+        }
+        deps.assertCurrent?.();
+        entry.workContextLeafId = committed.leafId;
+        entry.workContextEntryId = committed.entryId;
+      }
+      entry.workContext = candidate;
+      entry.workContextVerified = true;
+      entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(candidate, deps.workspaceRoot));
+      return { ...getWorkContext(candidate, deps), contextEntryId: entry.workContextEntryId };
+    });
   };
 
   const workContextSelect = async (actor: HarnessActorContext, params: ContextSelectParams): Promise<ContextGetResult> => {
-    const { entry, deps } = workContextEntry(actor);
-    const next = await selectOperationDir(entry.workContext, params, deps);
-    // New shells land on the selected dir; a running shell keeps its own cwd.
-    entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, deps.workspaceRoot));
-    return next;
+    return mutateWorkContext(actor, (candidate, deps) => selectOperationDir(candidate, params, deps));
   };
 
   const workContextScope = async (actor: HarnessActorContext, params: ContextScopeParams): Promise<ContextGetResult> => {
-    const { entry, deps } = workContextEntry(actor);
-    return setQueryScope(entry.workContext, params, deps);
+    return mutateWorkContext(actor, (candidate, deps) => setQueryScope(candidate, params, deps));
   };
 
-  const workContextReset = (actor: HarnessActorContext, params: ContextResetParams): ContextGetResult => {
-    const { entry, deps } = workContextEntry(actor);
-    const next = resetWorkContext(entry.workContext, params, deps);
-    entry.shellSupervisor?.setAnchorCwd(operationDirAbsolute(entry.workContext, deps.workspaceRoot));
-    return next;
+  const workContextReset = async (actor: HarnessActorContext, params: ContextResetParams): Promise<ContextGetResult> => {
+    return mutateWorkContext(actor, (candidate, deps) => resetWorkContext(candidate, params, deps));
   };
 
   const workContextDiscover = async (actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult> => {
@@ -1031,12 +1237,19 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   };
 
   const workContextRevision = (sessionId: string): number | undefined => (
-    sessions.get(sessionId)?.workContext.revision
+    sessions.get(sessionId)?.workContextVerified ? sessions.get(sessionId)?.workContext.revision : undefined
   );
+
+  const workContextIdentity = (sessionId: string): { revision: number; entryId: string | null } | undefined => {
+    const entry = sessions.get(sessionId);
+    return entry?.workContextVerified
+      ? { revision: entry.workContext.revision, entryId: entry.workContextEntryId }
+      : undefined;
+  };
 
   const workContextOperationDir = (sessionId: string): string | undefined => {
     const entry = sessions.get(sessionId);
-    return entry ? operationDirAbsolute(entry.workContext, entry.authorityRoot) : undefined;
+    return entry?.workContextVerified ? operationDirAbsolute(entry.workContext, entry.authorityRoot) : undefined;
   };
 
   const compactionHistory = async (
@@ -1169,6 +1382,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     commitAgentInputContext,
     releaseAgentInputContext,
     registerSession,
+    prepareWorkContext,
     dropSession,
     hasActor,
     resolveActor,
@@ -1178,6 +1392,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     workContextReset,
     workContextDiscover,
     workContextRevision,
+    workContextIdentity,
     workContextOperationDir,
     getShellSupervisor,
     closeSessionShell,

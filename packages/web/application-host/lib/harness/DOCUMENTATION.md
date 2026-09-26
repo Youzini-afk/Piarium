@@ -226,9 +226,12 @@ process manager.
 - One login shell (git-bash / bash / wsl / powershell) per session
 - Commands separated by sentinel markers (`__VARIN_SENTINEL_`)
 - cwd/env/venv maintained between commands
-- A command that exceeds `wait_ms` keeps its current terminal session as the
-  public `sh_N` identity allocated by the global terminal runtime; the next
-  foreground command starts a new session shell
+- `wait_ms` starts when the Host accepts the call and includes shell setup and
+  the foreground observation. If it expires before a PTY is ready, `shell.exec`
+  returns `kind: "preparing"` with an `exec_…` identity for read-only
+  `get_output`; that identity is not a runtime shell and cannot be written to or
+  killed. Once a PTY exists, an active command returns `kind: "background"`
+  with its real `sh_N` identity; the next foreground command starts a new shell
 - User attach and agent `get_output` / `write_to_process` use that same session
 - Owner, creation source, cwd, shell/spawn, writer, and retain identity must all
   match before an existing running handle can be reused. HTTP cannot claim a
@@ -249,19 +252,26 @@ process manager.
   streamed output remains in the terminal/output owner and only compact match
   and cursor observations are persisted. A Host restart that cannot reattach a
   still-running local PTY marks that source unavailable.
-- `waitMs: 0` detaches only after the terminal runtime has accepted the command,
-  so the returned `sh_N` is the real runtime identity. The foreground wait has no
-  process-kill meaning. The default is the session-resolved 10-second soft setting,
-  chosen from focused-check versus package-typecheck timings observed during 7H and
-  still configurable per workspace.
+- `waitMs: 0` can return `preparing` before the terminal runtime accepts a
+  payload, or `background` with a real `sh_N` if startup completed first. The
+  stable `exec_…` reference is queryable during preparation; only a returned
+  runtime shell id supports stdin or termination. The foreground wait has no
+  process-kill meaning. The default is the session-resolved 10-second soft
+  setting, chosen from focused-check versus package-typecheck timings observed
+  during 7H and still configurable per workspace. Timing reports accepted,
+  sent, first output, detached, exited, and responded stages.
 - `shell.read(waitMs)` waits on output/exit events only when an incremental read
   has no unread bytes. Explicit byte slices and static outputs remain immediate.
   Request cancellation removes the observer without terminating the process;
   `shell.write` and `shell.kill` do not share the observation wait and remain usable.
-- `shell.exec.toolCallId` is an idempotent acceptance/recovery alias inside the
-  current Host session. Repeating the same identity and command returns the existing
-  promise/result, and `shell.read` can resolve that alias to the real `sh_N`. A command
-  mismatch is rejected. This in-memory map deliberately does not claim restart durability.
+- `shell.exec.toolCallId` and the generated `exec_…` reference resolve to one
+  idempotent acceptance record inside the current Host session. Repeating the
+  same tool call and command returns the existing foreground response; `shell.read`
+  can resolve its execution reference to the preparation state, real `sh_N`, or
+  completed output. A command mismatch is rejected. This in-memory map does not
+  claim restart durability: old `exec_…` / `sh_N` references report unavailable,
+  while paged `out_…` bodies remain Host-ephemeral and report expired after Host
+  replacement, session drop, or FIFO eviction.
 
 ### OutputStore (`output-store.ts`)
 

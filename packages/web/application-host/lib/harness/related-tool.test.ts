@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRelated } from "./related-tool.js";
+import { createRelatedQueryService } from "./related-service.js";
+import type { HarnessActorContext } from "@varin/protocol";
+import type { HarnessServiceContext } from "./router.js";
 
 const TEST_DIR = join(tmpdir(), "varin-related-tool");
 const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 };
@@ -226,6 +229,103 @@ describe("related tool", () => {
     expect(result.references.items).toEqual([]);
     expect(result.text).toContain("References: unavailable");
     expect(result.text).toContain("Calls: unavailable");
+  });
+
+  it("uses queryScope, then operationDir, then workspaceScope for duplicate symbol names", async () => {
+    for (const project of ["project-a", "project-b", "project-c"]) {
+      await store.replaceFileSymbols(`${project}/shared.ts`, "typescript", [
+        { name: "shared", kind: "function", range },
+      ], `revision-${project}`);
+    }
+    const service = createRelatedQueryService({
+      graphRecall: async () => ({ workspaceId: "ws", store, directFactsCompatible: true }),
+      relationCollector: null,
+    });
+    const contextFor = (actorFields: Partial<HarnessActorContext> = {}, resourceIds: string[] = []): HarnessServiceContext => {
+      const actor: HarnessActorContext = {
+        authorityInstanceId: "host",
+        sessionId: "session",
+        workerId: "worker",
+        workerGeneration: 1,
+        workspaceId: "ws",
+        grantedCapabilities: ["read.search"],
+        ...actorFields,
+      };
+      return {
+        actor,
+        authorizedPaths: resourceIds.map((resourceId) => ({
+          authorityId: "host",
+          workspaceId: "ws",
+          canonicalResourceId: resourceId,
+          inputPath: resourceId,
+          resourceId,
+        })),
+        sessionId: actor.sessionId,
+        workspaceId: actor.workspaceId,
+        signal: new AbortController().signal,
+      };
+    };
+
+    const scoped = await service.handle({ anchor: "shared" }, contextFor({
+      queryScope: ["project-a"],
+      operationDir: "project-b",
+      workspaceScope: ["project-a", "project-b", "project-c"],
+    }));
+    expect(scoped.definitions.map((item) => item.path)).toEqual(["project-a/shared.ts"]);
+
+    const operationDefault = await service.handle({ anchor: "shared" }, contextFor({
+      operationDir: "project-b",
+      workspaceScope: ["project-b", "project-c"],
+    }));
+    expect(operationDefault.definitions.map((item) => item.path)).toEqual(["project-b/shared.ts"]);
+
+    const workspaceDefault = await service.handle({ anchor: "shared" }, contextFor({
+      workspaceScope: ["project-c"],
+    }));
+    expect(workspaceDefault.definitions.map((item) => item.path)).toEqual(["project-c/shared.ts"]);
+
+    await expect(service.handle({ anchor: "shared" }, contextFor({
+      operationDir: "project-b",
+      workspaceScope: ["project-c"],
+    }))).rejects.toMatchObject({ harnessCode: "forbidden" });
+  });
+
+  it("uses the Router-authorized resource ID for a path anchor and keeps dotted symbols as names", async () => {
+    await store.replaceFileSymbols("project-a/src/repeated.ts", "typescript", [
+      { name: "repeated", kind: "function", range },
+    ], "disk-r1");
+    const service = createRelatedQueryService({
+      graphRecall: async () => ({ workspaceId: "ws", store, directFactsCompatible: true }),
+      relationCollector: null,
+    });
+    const actor: HarnessActorContext = {
+      authorityInstanceId: "host",
+      sessionId: "session",
+      workerId: "worker",
+      workerGeneration: 1,
+      workspaceId: "ws",
+      queryScope: ["project-a"],
+      grantedCapabilities: ["read.search"],
+    };
+    const ctx: HarnessServiceContext = {
+      actor,
+      authorizedPaths: [{
+        authorityId: "host",
+        workspaceId: "ws",
+        canonicalResourceId: "/workspace/project-a/src/repeated.ts",
+        inputPath: "C:/workspace/project-a/src/repeated.ts",
+        resourceId: "project-a/src/repeated.ts",
+      }],
+      sessionId: actor.sessionId,
+      workspaceId: actor.workspaceId,
+      signal: new AbortController().signal,
+    };
+    const pathResult = await service.handle({ anchor: "C:/workspace/project-a/src/repeated.ts" }, ctx);
+    expect(pathResult.anchor).toEqual({ kind: "path", value: "project-a/src/repeated.ts" });
+    expect(pathResult.definitions).toEqual([{ name: "repeated", kind: "function", path: "project-a/src/repeated.ts" }]);
+
+    const dotted = await service.handle({ anchor: "explore.search" }, { ...ctx, authorizedPaths: [] });
+    expect(dotted.anchor.kind).toBe("name");
   });
 
   it("collects resolved relations for a name anchor through the wired collector", async () => {

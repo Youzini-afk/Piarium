@@ -3150,6 +3150,9 @@ export type ExploreFormatInput = Pick<
   skippedQueries?: NonNullable<WireResult["details"]["skippedQueries"]>;
   model?: ExploreModelParticipation;
   sources?: ExploreQuerySourceState[];
+  /** Count/handle projection for staged model calls. Full paths stay in the output store. */
+  omittedCount?: number;
+  summaryOnly?: boolean;
 };
 
 /**
@@ -3237,7 +3240,9 @@ function packExploreVisible(
   const issueLines = result.issues.map((issue) => `${issue.path}: ${issue.status} — ${issue.message}`);
   const omittedLines = result.omitted.map((item) => `- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
   const unreadLine = result.notRequested.count > 0
-    ? `Unread candidates (not-requested, ${result.notRequested.count}): ${result.notRequested.paths.join(", ")}`
+    ? result.summaryOnly
+      ? `Unread candidates (not-requested, ${result.notRequested.count}): listed in output store`
+      : `Unread candidates (not-requested, ${result.notRequested.count}): ${result.notRequested.paths.join(", ")}`
     : "";
 
   const graphLines = relationLines(result.relations);
@@ -3273,10 +3278,15 @@ function packExploreVisible(
   const extraOmitted = omitted.filter((item) => (
     item.reason === "over byte budget" || item.reason === "required range exceeded output budget"
   ));
-  if (omitted.length > 0) {
-    pushIfFits("Omitted supports:");
-    for (const item of omitted) {
-      pushIfFits(`- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
+  if (omitted.length > 0 || (result.summaryOnly === true && (result.omittedCount ?? 0) > 0)) {
+    if (result.summaryOnly) {
+      const count = (result.omittedCount ?? result.omitted.length) + extraOmitted.length;
+      pushIfFits(`Omitted supports (${count}): full list in output store`);
+    } else {
+      pushIfFits("Omitted supports:");
+      for (const item of omitted) {
+        pushIfFits(`- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
+      }
     }
   }
   if (unreadLine && !pushIfFits(unreadLine) && result.notRequested.count > 0) {
@@ -3290,7 +3300,10 @@ function packExploreVisible(
     const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);
     visibleText = raw.toString("utf8").replace(/\uFFFD$/u, "");
   }
-  const showHandle = storedBody !== visibleText || extraOmitted.length > 0 || result.notRequested.count > 0 && !visibleText.includes(result.notRequested.paths[0] ?? "\0");
+  const showHandle = storedBody !== visibleText
+    || extraOmitted.length > 0
+    || (result.omittedCount ?? result.omitted.length) > 0
+    || result.notRequested.count > 0 && (result.summaryOnly === true || !visibleText.includes(result.notRequested.paths[0] ?? "\0"));
   return { visibleText, storedBody, showHandle, omitted };
 }
 

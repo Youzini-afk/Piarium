@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { FetchResult, HarnessServiceMap, ShellExecResultSpawnFailed, WebFetchRequest } from "@varin/protocol";
 import { createMaterialReadService } from "./material-read-service.js";
@@ -129,7 +130,7 @@ interface ManagedShellWatch {
   workspaceId: string;
   shellId: string;
   command: string;
-  cwd: string;
+  cwd?: string;
   toolCallId: string;
   executionId: string;
   startedAt: number;
@@ -177,14 +178,17 @@ export function watchManagedShellCompletion(host: HarnessServiceHost, watch: Man
         );
         if (activeWatches.get(key) !== watch) return;
         if (!result) return;
+        if (result.unavailable) return;
         if (result.text) preview += result.text;
         offset = result.nextOffset;
         if (!result.running) {
+          const cwd = result.cwd ?? watch.cwd;
+          if (!cwd) return;
           const event: ShellCommandCompletedEvent = {
             command: watch.command,
             commandRunId: watch.toolCallId,
             executionId: watch.executionId,
-            cwd: watch.cwd,
+            cwd,
             startedAt: watch.startedAt,
             endedAt: Date.now(),
             exitCode: result.exitCode ?? null,
@@ -254,6 +258,11 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const target = params.target?.trim();
+      // Router resolved this actor before entering the service. Keep the
+      // default shell anchor tied to that same request snapshot even if a
+      // concurrent context.select updates the Host's live shell anchor below.
+      const acceptedWorkspaceId = ctx.actor.workspaceId;
+      const acceptedOperationDir = ctx.actor.operationDir;
       const materializeError = target ? null : await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
       if (materializeError) {
         return {
@@ -285,13 +294,13 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
             outputPreview: stripControlSequences(`${remote.stdout}${remote.stderr ? `\n${remote.stderr}` : ""}`),
             toolCallId: params.toolCallId,
           });
-        } else if (remote.kind === "background" && remote.executionId) {
+        } else if ((remote.kind === "background" || remote.kind === "preparing") && remote.executionId) {
           watchManagedShellCompletion(host, {
             sessionId: ctx.sessionId,
             workspaceId: requiredWorkspaceId(ctx),
             shellId: remote.id,
             command: params.command,
-            cwd: remote.cwd,
+            ...(remote.kind === "background" ? { cwd: remote.cwd } : {}),
             toolCallId: params.toolCallId,
             executionId: remote.executionId,
             startedAt: Date.now() - remote.waitedMs,
@@ -306,12 +315,26 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
         const hint = interpreter && "unavailable" in interpreter ? interpreter.unavailable.hint : "Session not registered";
         return { kind: "spawn-failed", reason, interpreter: "", hint } as ShellExecResultSpawnFailed;
       }
+      let defaultAnchorCwd: string | undefined;
+      if (params.cwd === undefined && acceptedOperationDir !== undefined && acceptedWorkspaceId) {
+        const workspaceRoot = await host.resolveWorkspaceRoot?.(acceptedWorkspaceId) ?? null;
+        if (!workspaceRoot) {
+          return {
+            kind: "spawn-failed",
+            reason: "workspace-root-unavailable",
+            interpreter: "",
+            hint: "The request's workspace root could not be resolved for its pinned operation directory.",
+          } as ShellExecResultSpawnFailed;
+        }
+        defaultAnchorCwd = path.resolve(workspaceRoot, acceptedOperationDir ?? "");
+      }
       // The router authorized params.cwd against the actor's operation dir;
       // run against the resolved absolute, not the raw relative (which would
       // silently anchor at the Host process cwd).
       const authorizedCwd = params.cwd === undefined ? undefined : ctx.authorizedPaths[0]?.canonicalResourceId;
       const result = await supervisor.exec(params.command, {
         ...(params.cwd !== undefined ? { cwd: authorizedCwd ?? params.cwd } : {}),
+        ...(defaultAnchorCwd === undefined ? {} : { defaultAnchorCwd }),
         ...(params.toolCallId !== undefined ? { toolCallId: params.toolCallId } : {}),
         signal: ctx.signal,
         waitMs: params.waitMs ?? 60_000,

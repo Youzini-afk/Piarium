@@ -198,6 +198,69 @@ describe("harness router", () => {
     router.dispose();
   });
 
+  it("authorizes explore path anchors separately and leaves symbol anchors untouched", async () => {
+    const authorize = vi.fn(async (_actor: HarnessActorContext, candidate: string, options: { allowMissing: boolean }) => ({
+      authorityId: "host-1",
+      canonicalResourceId: `/workspace/${candidate}`,
+      inputPath: candidate,
+      resourceId: candidate.replace(/^C:\/workspace\//i, "").replaceAll("\\", "/"),
+      workspaceId: "workspace-1",
+      ...options,
+    }));
+    let authorizedPaths: readonly { resourceId: string }[] = [];
+    const router = createHarnessRouter({
+      respond: async () => undefined,
+      resolveActor: async () => resolvedActor(["read.search"]),
+      authorizeWorkspacePath: authorize,
+    });
+    router.register("explore.query.start", { handle: async (_params, ctx) => {
+      authorizedPaths = ctx.authorizedPaths;
+      return { queryId: "q1", question: "needle", deadlineAt: 1, parsed: { objects: [], relation: "unknown", domain: "unknown" }, vocab: { objects: [], anchors: [] }, sources: [], inputSource: "disk" };
+    } });
+    await router.processEvent(harnessEvent("explore.query.start", {
+      question: "needle",
+      paths: ["project-a"],
+      anchors: ["C:/workspace/project-b/src/target.ts", "Target.method"],
+    }));
+    expect(authorize.mock.calls.map(([, candidate, options]) => [candidate, options.allowMissing])).toEqual([
+      ["project-a", false],
+      ["C:/workspace/project-b/src/target.ts", true],
+    ]);
+    expect(authorizedPaths.map(({ resourceId }) => resourceId)).toEqual([
+      "project-a",
+      "project-b/src/target.ts",
+    ]);
+    router.dispose();
+  });
+
+  it("fails closed when a path-shaped explore anchor is outside authorization", async () => {
+    const handle = vi.fn(async () => ({
+      queryId: "q1",
+      question: "needle",
+      deadlineAt: 1,
+      parsed: { objects: [], relation: "unknown" as const, domain: "unknown" as const },
+      vocab: { objects: [], anchors: [] },
+      sources: [],
+      inputSource: "disk" as const,
+    }));
+    const responses: Array<{ ok: boolean; code?: string }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => {
+        responses.push({ ok: outcome.ok, ...(!outcome.ok ? { code: outcome.error.code } : {}) });
+      },
+      resolveActor: async () => resolvedActor(["read.search"]),
+      authorizeWorkspacePath: async () => null,
+    });
+    router.register("explore.query.start", { handle });
+    await router.processEvent(harnessEvent("explore.query.start", {
+      question: "needle",
+      anchors: ["../outside/target.ts"],
+    }));
+    expect(handle).not.toHaveBeenCalled();
+    expect(responses).toEqual([{ ok: false, code: "forbidden" }]);
+    router.dispose();
+  });
+
   it("validates every child scope path before creating a thread", async () => {
     const handle = vi.fn(async () => ({ text: "created", threadId: "thread-1", queued: false }));
     const responses: Array<{ ok: boolean; code?: string }> = [];

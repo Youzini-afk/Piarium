@@ -5,7 +5,7 @@ import type {
   HarnessActorContext,
   HarnessServiceMap,
 } from "@varin/protocol";
-import type { HarnessService } from "./router.js";
+import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
@@ -18,8 +18,89 @@ import {
   type ExploreIssue,
 } from "./explore.js";
 import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
+import { looksLikePathObject } from "./explore-query.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
+
+/** Workspace-scope intersection shared by explore and related retrieval. */
+export function intersectRetrievalScope(
+  requested: readonly string[] | undefined,
+  workspaceScope: readonly string[] | undefined,
+): { roots?: string[]; empty: boolean } {
+  const normalize = (value: string): string => {
+    const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/u, "");
+    return normalized === "." ? "" : normalized;
+  };
+  const allowedRoots = workspaceScope === undefined ? [""] : workspaceScope.map(normalize);
+  const requestedRoots = requested === undefined ? [""] : requested.map(normalize);
+  const rootsByKey = new Map<string, string>();
+  const add = (value: string): void => {
+    const key = process.platform === "win32" ? value.toLowerCase() : value;
+    rootsByKey.set(key, value);
+  };
+  for (const requestedRoot of requestedRoots) {
+    for (const allowedRoot of allowedRoots) {
+      if (pathInRoots(requestedRoot, [allowedRoot])) add(requestedRoot);
+      else if (pathInRoots(allowedRoot, [requestedRoot])) add(allowedRoot);
+    }
+  }
+  const roots = [...rootsByKey.values()];
+  if (roots.length === 0) return { roots: [], empty: true };
+  // Preserve the unrestricted representation expected by graph/vector callers;
+  // an empty list means "all workspace" in those APIs.
+  if (roots.includes("")) return { empty: false };
+  return { roots, empty: false };
+}
+
+/**
+ * Resolve the fixed query roots and replace path-shaped anchors with the
+ * workspace-relative resource IDs returned by Router authorization. Path
+ * anchors add their requested location to the candidate roots while staying
+ * hints; symbol anchors retain their original value and lookup behavior.
+ */
+export function resolveExploreScopeAndAnchors(
+  params: ExploreParams,
+  ctx: Pick<HarnessServiceContext, "actor" | "authorizedPaths">,
+): Pick<ExploreParams, "paths" | "anchors"> {
+  const explicitPathCount = params.paths?.length ?? 0;
+  const pathAnchorCount = (params.anchors ?? []).filter((anchor) => looksLikePathObject(anchor.trim())).length;
+  const expectedAuthorizedCount = explicitPathCount + pathAnchorCount;
+  if (ctx.authorizedPaths.length !== expectedAuthorizedCount) {
+    throw new HarnessServiceError("forbidden", "Search paths and path anchors were not authorized.");
+  }
+
+  const explicitPaths = ctx.authorizedPaths
+    .slice(0, explicitPathCount)
+    .map(({ resourceId }) => resourceId || ".");
+  const authorizedAnchorPaths = ctx.authorizedPaths.slice(explicitPathCount);
+  let anchorIndex = 0;
+  const anchors = params.anchors?.map((anchor) => {
+    if (!looksLikePathObject(anchor.trim())) return anchor;
+    const authorized = authorizedAnchorPaths[anchorIndex++];
+    if (!authorized) throw new HarnessServiceError("forbidden", "A search path anchor was not authorized.");
+    return authorized.resourceId || ".";
+  });
+
+  const defaultPaths = explicitPathCount > 0
+    ? explicitPaths
+    : ctx.actor.queryScope?.length
+      ? [...ctx.actor.queryScope]
+      : ctx.actor.operationDir
+        ? [ctx.actor.operationDir]
+        : undefined;
+  const requestedRoots = [
+    ...(defaultPaths ?? []),
+    ...authorizedAnchorPaths.map(({ resourceId }) => resourceId || "."),
+  ];
+  const scope = intersectRetrievalScope(requestedRoots.length > 0 ? requestedRoots : undefined, ctx.actor.workspaceScope);
+  if (scope.empty) {
+    throw new HarnessServiceError("forbidden", "Explore scope does not overlap the actor's authorized workspace scope.");
+  }
+  return {
+    ...(anchors !== undefined ? { anchors } : {}),
+    ...(scope.roots !== undefined ? { paths: scope.roots } : {}),
+  };
+}
 
 const ownedDirtyPathsFor = (
   inputContext: AgentInputContext,
@@ -111,22 +192,8 @@ export function createExploreSearchService(
       if (!workspaceId || !readFile) throw new HarnessServiceError("unavailable", "Workspace document reading is unavailable.");
       ctx.signal.throwIfAborted();
       const inputContext = ctx.inputContext ?? { source: "disk" as const };
-      if (params.paths?.length && ctx.authorizedPaths.length !== params.paths.length) {
-        throw new HarnessServiceError("forbidden", "Search paths were not authorized.");
-      }
-      // RR4: default retrieval scope is the session query scope, then the
-      // operation dir — both already validated inside the actor's authorized
-      // scope. workspaceScope remains the fallback for unrestricted defaults.
-      const effectivePaths = params.paths?.length
-        ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-        : ctx.actor.queryScope?.length
-          ? [...ctx.actor.queryScope]
-          : ctx.actor.operationDir
-            ? [ctx.actor.operationDir]
-            : ctx.actor.workspaceScope?.length
-              ? [...ctx.actor.workspaceScope]
-              : undefined;
-      const effectiveParams: ExploreParams = effectivePaths ? { ...params, paths: effectivePaths } : params;
+      const resolvedRequest = resolveExploreScopeAndAnchors(params, ctx);
+      const effectiveParams: ExploreParams = { ...params, ...resolvedRequest };
       const graph = host.graphRecall
         ? await host.graphRecall(ctx.sessionId, workspaceId).catch(() => null)
         : null;

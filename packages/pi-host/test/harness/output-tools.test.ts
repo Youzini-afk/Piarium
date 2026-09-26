@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createBashTool } from "../../src/harness/bash-tool.js";
 import {
   createGetOutputTool,
   createWriteToProcessTool,
@@ -20,6 +21,62 @@ async function executeTool(tool: ReturnType<typeof createGetOutputTool>, params:
 }
 
 describe("get_output tool", () => {
+  it("reads a preparing execution id and reports that no runtime shell exists yet", async () => {
+    let observed: { method?: string; params?: unknown } = {};
+    const bridge = {
+      request: async (method: string, params: unknown) => {
+        observed = { method, params };
+        return {
+          text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: false,
+          running: true, phase: "preparing", executionId: "exec_0123456789abcdef0123456789abcdef",
+          command: "npm test", observation: { mode: "incremental", first: true },
+        };
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createGetOutputTool(bridge, "s1");
+    const result = await tool.execute("call-1", { handle: "exec_0123456789abcdef0123456789abcdef" }, undefined, undefined, undefined as never);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    assert.deepEqual(observed, { method: "shell.read", params: { id: "exec_0123456789abcdef0123456789abcdef" } });
+    assert.match(text, /accepted; preparing \(payload not sent yet\)/);
+    assert.doesNotMatch(text, /still running/);
+  });
+
+  it("reports old shell and execution references as unavailable after Host replacement", async () => {
+    const bridge = createFakeBridge((method) => {
+      if (method === "shell.read") return {
+        text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: false,
+        running: false, executionId: "exec_0123456789abcdef0123456789abcdef",
+        unavailable: "This shell reference is unavailable in the current Host generation; live execution output was not retained.",
+      };
+      throw new Error(`unexpected: ${method}`);
+    });
+    const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
+    const text = await executeTool(tool, { handle: "exec_0123456789abcdef0123456789abcdef" });
+    assert.match(text, /unavailable: This shell reference is unavailable/);
+    assert.doesNotMatch(text, /not found/);
+  });
+
+  it("resolves the same preparing reference to completed output and exit status", async () => {
+    const body = "full restored output tail-marker";
+    let reads = 0;
+    const bridge = createFakeBridge((method) => {
+      if (method !== "shell.read") throw new Error(`unexpected: ${method}`);
+      reads += 1;
+      return reads === 1
+        ? { text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: false,
+            running: true, phase: "preparing", executionId: "exec_0123456789abcdef0123456789abcdef" }
+        : { text: body, offset: 0, length: body.length, nextOffset: body.length, total: body.length,
+            eof: true, running: false, exitCode: 7, executionId: "exec_0123456789abcdef0123456789abcdef" };
+    });
+    const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
+    const handle = "exec_0123456789abcdef0123456789abcdef";
+    assert.match(await executeTool(tool, { handle }), /preparing/);
+    const completed = await executeTool(tool, { handle });
+    assert.match(completed, /full restored output tail-marker/);
+    assert.match(completed, /exit 7/);
+    assert.equal(reads, 2);
+  });
+
   it("forwards an event wait and keeps it separate from historical slicing", async () => {
     let observed: { params?: unknown; options?: unknown } = {};
     const bridge = {
@@ -131,6 +188,28 @@ describe("get_output tool", () => {
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
     const text = await executeTool(tool, { handle: "out_missing" });
     assert.match(text, /get_output failed/);
+  });
+});
+
+describe("bash tool preparation result", () => {
+  it("offers only get_output while startup has no runtime shell identity", async () => {
+    const bridge = createFakeBridge((method) => {
+      if (method === "shell.exec") return {
+        kind: "preparing",
+        id: "exec_0123456789abcdef0123456789abcdef",
+        executionId: "exec_0123456789abcdef0123456789abcdef",
+        command: "npm test",
+        waitedMs: 25,
+        timing: { acceptedAt: 10, detachedAt: 35, respondedAt: 36 },
+      };
+      throw new Error(`unexpected: ${method}`);
+    });
+    const tool = createBashTool(bridge as HostServicesBridge, "s1", "", 10_000);
+    const result = await tool.execute("call-1", { command: "npm test", waitMs: 25 }, undefined, undefined, undefined as never);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    assert.match(text, /no runtime shell handle exists yet/);
+    assert.match(text, /get_output\("exec_0123456789abcdef0123456789abcdef"\)/);
+    assert.doesNotMatch(text, /write_to_process|kill_shell/);
   });
 });
 

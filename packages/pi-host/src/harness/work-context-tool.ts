@@ -47,6 +47,7 @@ export function createWorkContextTool(bridge: HostServicesBridge, sync: WorkCont
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal) => {
       const requestOptions = signal === undefined ? {} : { signal };
+      const expectedRevision = params.expectedRevision ?? sync.mirror.revision ?? undefined;
       switch (params.action) {
         case "get": {
           const result = await bridge.request("context.get", {}, requestOptions);
@@ -66,7 +67,7 @@ export function createWorkContextTool(bridge: HostServicesBridge, sync: WorkCont
           }
           const result = await bridge.request("context.select", {
             path: params.path,
-            ...(params.expectedRevision !== undefined ? { expectedRevision: params.expectedRevision } : {}),
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           }, requestOptions);
           sync.apply(result);
           return ok(result);
@@ -77,14 +78,14 @@ export function createWorkContextTool(bridge: HostServicesBridge, sync: WorkCont
           }
           const result = await bridge.request("context.scope", {
             paths: params.paths,
-            ...(params.expectedRevision !== undefined ? { expectedRevision: params.expectedRevision } : {}),
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           }, requestOptions);
           sync.apply(result);
           return ok(result);
         }
         case "reset": {
           const result = await bridge.request("context.reset", {
-            ...(params.expectedRevision !== undefined ? { expectedRevision: params.expectedRevision } : {}),
+            ...(expectedRevision !== undefined ? { expectedRevision } : {}),
           }, requestOptions);
           sync.apply(result);
           return ok(result);

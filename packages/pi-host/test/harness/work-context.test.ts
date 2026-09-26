@@ -11,6 +11,7 @@ import {
   WorkContextSync,
 } from "../../src/harness/work-context.js";
 import { withToolExecutionResources } from "../../src/harness/tool-execution-resources.js";
+import { createWorkContextTool } from "../../src/harness/work-context-tool.js";
 
 const getResult = (operationDir: string, revision: number): ContextGetResult => ({
   context: { operationDir, queryScope: null, revision },
@@ -114,4 +115,66 @@ test("unlisted tools keep their params untouched", async () => {
   const wrapped = withToolExecutionResources(tool, "/ws", () => "/ws/pkg");
   await wrapped.execute("call-1", { path: "relative/thread.ts" }, undefined, undefined, {} as never);
   assert.deepEqual(seen, [{ path: "relative/thread.ts" }]);
+});
+
+test("an older context read cannot overwrite a completed select", async () => {
+  const mirror = createWorkContextMirror("/ws");
+  let release!: (value: ContextGetResult) => void;
+  const gate = new Promise<ContextGetResult>((r) => { release = r; });
+  const sync = new WorkContextSync({ request: () => gate } as never, mirror);
+  const read = sync.refresh();
+  sync.apply(getResult("second", 2));
+  release(getResult("first", 1));
+  await read;
+  assert.equal(mirror.operationDir, "second");
+  assert.equal(mirror.revision, 2);
+});
+
+test("a branch navigation replaces the mirror even at the same or lower revision", async () => {
+  const mirror = createWorkContextMirror("/ws");
+  applyWorkContextResult(mirror, { ...getResult("first", 4), contextEntryId: "entry-first" });
+  applyWorkContextResult(mirror, { ...getResult("second", 1), contextEntryId: "entry-second" });
+  assert.equal(mirror.operationDir, "second");
+  assert.equal(mirror.revision, 1);
+  assert.equal(mirror.contextEntryId, "entry-second");
+  applyWorkContextResult(mirror, { ...getResult("", 0), contextEntryId: null });
+  assert.equal(mirror.operationDir, "");
+  assert.equal(mirror.revision, 0);
+});
+
+test("steady tools use the local branch marker and refresh only after navigation", async () => {
+  const mirror = createWorkContextMirror("/ws");
+  let entryId: string | null = "entry-one";
+  let calls = 0;
+  const bridge = { request: async () => {
+    calls += 1;
+    return { ...getResult(entryId === "entry-one" ? "one" : "two", 1), contextEntryId: entryId };
+  } };
+  const sync = new WorkContextSync(bridge as never, mirror, () => entryId);
+  await sync.ensureCurrent();
+  await sync.ensureCurrent();
+  await sync.ensureCurrent();
+  assert.equal(calls, 1);
+  entryId = "entry-two";
+  await sync.ensureCurrent();
+  assert.equal(calls, 2);
+  assert.equal(mirror.operationDir, "two");
+});
+
+test("work_context uses the known revision when the caller omits its CAS guard", async () => {
+  const mirror = createWorkContextMirror("/ws");
+  applyWorkContextResult(mirror, getResult("first", 4));
+  const seen: Array<{ method: string; params: unknown }> = [];
+  const bridge = {
+    request: async (method: string, params: unknown) => {
+      seen.push({ method, params });
+      return getResult("second", 5);
+    },
+  };
+  const sync = new WorkContextSync(bridge as never, mirror);
+  await createWorkContextTool(bridge as never, sync).execute(
+    "call-select", { action: "select", path: "second" }, undefined, undefined, {} as never,
+  );
+  assert.deepEqual(seen, [{ method: "context.select", params: { path: "second", expectedRevision: 4 } }]);
+  assert.equal(mirror.revision, 5);
 });

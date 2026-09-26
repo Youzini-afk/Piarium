@@ -24,19 +24,19 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
   return defineTool({
     name: "get_output",
     label: "Get Output",
-    description: "Retrieve stored output or new background shell output. Use offset/length for an explicit historical slice; waitMs waits for new shell output or exit without stopping the process.",
+    description: "Retrieve stored output or accepted shell output. Use offset/length for an explicit historical slice; waitMs waits for preparation, new output, or exit without stopping the process.",
     promptSnippet: "get_output: retrieve stored/shell output, optionally wait for new bytes/exit, paginate with offset/length",
     promptGuidelines: [
       "Use get_output to retrieve large outputs that were truncated or backgrounded.",
-      "The handle is shown in the original tool result as out_XXX (stored) or sh_N (background shell).",
-      "A shell ID without offset/length returns only output added since your last read. Do not poll it repeatedly; wait for useful work before checking again.",
+      "The handle is shown in the original tool result as out_XXX (stored), sh_N (background shell), or exec_… (accepted while the shell is preparing).",
+      "An execution id without offset/length returns only output added since your last read. Do not poll it repeatedly; wait for useful work before checking again.",
     ],
     parameters: GetOutputParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
-        // Try output.read first (for out_ handles), fall back to shell.read (for sh_ IDs)
-        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "cancelled" | "executionId" | "observation" | "display" | "organized" | "shellId" | "spawnFailed">>;
+        // Try output.read first (for out_ handles), fall back to shell.read for shell/execution identities.
+        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "cancelled" | "executionId" | "cwd" | "command" | "observation" | "display" | "organized" | "shellId" | "spawnFailed" | "unavailable" | "phase">>;
         if (params.handle.startsWith("out_")) {
           const slice = await bridge.request("output.read", {
             handle: params.handle,
@@ -64,7 +64,10 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
           ? { shellCompletion: { executionId: result.executionId } }
           : {};
         if (result.observation) {
-          const state = result.running
+          const state = result.unavailable ? `unavailable: ${result.unavailable}`
+            : result.spawnFailed ? `spawn failed: ${result.spawnFailed}`
+            : result.phase === "preparing" ? "accepted; preparing (payload not sent yet)"
+            : result.running
             ? "still running"
             : result.cancelled ? "cancelled"
               : result.exitCode === undefined ? "exited" : `exited ${result.exitCode}`;
@@ -100,13 +103,16 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
           };
         }
         const lines: string[] = [result.display ?? result.text];
+        if (result.unavailable) {
+          lines.unshift(`[shell ${params.handle} · unavailable: ${result.unavailable}]`);
+        }
         if (result.spawnFailed) {
           lines.unshift(`[shell ${params.handle} · spawn failed: ${result.spawnFailed}]`);
         }
         if (result.shellId && result.shellId !== params.handle) {
           lines.push(`\n[recovered runtime shell: ${result.shellId} — use this id for input or termination]`);
         }
-        if (result.running) lines.push("\n[still running]");
+        if (result.running) lines.push(result.phase === "preparing" ? "\n[accepted; preparing (payload not sent yet)]" : "\n[still running]");
         if (result.exitCode !== undefined) lines.push(`\n[exit ${result.exitCode}]`);
         const shown = `${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}`;
         lines.push(`\n[${shown}]`);
@@ -124,6 +130,10 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
             ...(result.executionId === undefined ? {} : { executionId: result.executionId }),
             ...(result.shellId === undefined ? {} : { shellId: result.shellId }),
+            ...(result.phase === undefined ? {} : { phase: result.phase }),
+            ...(result.command === undefined ? {} : { command: result.command }),
+            ...(result.spawnFailed === undefined ? {} : { spawnFailed: result.spawnFailed }),
+            ...(result.unavailable === undefined ? {} : { unavailable: result.unavailable }),
             ...shellCompletion,
           },
         };

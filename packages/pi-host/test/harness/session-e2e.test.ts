@@ -57,6 +57,7 @@ import { createTreeSitterStructureProvider } from "../../../web/application-host
 import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@varin/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
+import { VARIN_WORK_CONTEXT_ENTRY_TYPE } from "../../src/session-work-context.js";
 import { CompactionWorkerRuntime } from "../../src/compaction-worker.js";
 import { deserializeCompactionModel } from "../../src/harness/compaction-agent.js";
 import { serializedToolResult } from "./provider-context.js";
@@ -82,6 +83,7 @@ async function setupSession(options: {
   harnessDocumentPathOverlay?: boolean;
   harnessWebRead?: boolean;
   harnessWebSearch?: boolean;
+  harnessWorkContext?: boolean;
   serviceHostOptions?: Partial<HarnessServiceHostOptions>;
   authorizeWorkspacePath?: NonNullable<Parameters<typeof createHarnessRouter>[0]["authorizeWorkspacePath"]>;
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
@@ -198,6 +200,7 @@ async function setupSession(options: {
   });
   registerHarnessServices(router, harnessServiceHost);
 
+  let workContextRegistration: Promise<void> | null = null;
   const emit = (<E extends HostEvent>(event: E, data: HostEventData<E>): void => {
     options.observeHostEvent?.(event, data);
     if (event === "harness.cancel") {
@@ -228,8 +231,7 @@ async function setupSession(options: {
         workerId: "session-e2e-worker",
         workerGeneration: 1,
       } as const;
-      if (!harnessServiceHost.hasActor(actor)) {
-        harnessServiceHost.registerSession({
+      const registrationContext = {
           actor,
           grantedCapabilities: [
             "context.session", "process.shell", "read.lsp", "read.output", "read.search", "read.web", "write.document",
@@ -237,8 +239,22 @@ async function setupSession(options: {
           ],
           workspaceId,
           workspaceRoot: root,
+        } as const;
+      if (options.harnessWorkContext && !harnessServiceHost.hasActor(actor)) {
+        workContextRegistration ??= harnessServiceHost.prepareWorkContext(registrationContext)
+          .then((prepared) => { harnessServiceHost.registerSession(prepared); });
+        void workContextRegistration.then(() => router.processEvent({
+          actor,
+          kind: "host",
+          envelope: { kind: "event", event: "harness.request", data: payload },
+        })).catch((error) => {
+          host.respondHarness(actor.sessionId, payload.requestId, { ok: false, error: {
+            code: "unavailable", message: error instanceof Error ? error.message : String(error),
+          } });
         });
+        return;
       }
+      if (!harnessServiceHost.hasActor(actor)) harnessServiceHost.registerSession(registrationContext);
       void router.processEvent({
         actor,
         kind: "host",
@@ -297,6 +313,7 @@ async function setupSession(options: {
     projectTrustOverride: true,
     ...(options.inferenceFetch ? { inferenceFetch: options.inferenceFetch } : {}),
   });
+  if (options.harnessWorkContext) host.setHarnessWorkContextEnabled(true);
   if (options.harnessDocumentRead) {
     host.setHarnessDocumentReadEnabled(true);
     host.setWorkspaceMutationJournalEnabled(true);
@@ -338,6 +355,64 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
 };
+
+describe("session e2e — durable work context", () => {
+  it("commits inside an Agent tool call and preserves Pi tool-result pairing and continuation", async () => {
+    await withTempRoot("varin-work-context-e2e-", async (root) => {
+      await mkdir(join(root, "project"));
+      const faux = registerFauxProvider();
+      let firstRequest: Context | undefined;
+      let continuation: Context | undefined;
+      faux.setResponses([
+        (context) => { firstRequest = structuredClone(context); return fauxAssistantMessage([fauxToolCall("work_context", { action: "select", path: "project" })]); },
+        (context) => { continuation = structuredClone(context); return fauxAssistantMessage("selected"); },
+      ]);
+      let piHost!: SessionHost;
+      const serviceHostOptions: Partial<HarnessServiceHostOptions> = {
+        pathAuthority: createHarnessPathAuthority({ authorityId: "session-e2e-authority", documents: {
+          inspectWorkspace: async () => ({ root }),
+        } }),
+        workContextJournal: {
+          read: async (actor) => piHost.workContextRead(actor.sessionId),
+          commit: async (_actor, input) => piHost.workContextCommit(input),
+        },
+      };
+      const session = await setupSession({
+        root, faux, harnessWorkContext: true,
+        answerDialog: () => "Allow once",
+        serviceHostOptions,
+      });
+      piHost = session.host;
+      let sessionFile = "";
+      try {
+        const created = await session.host.create(root);
+        assert.ok(created.activeTools.includes("work_context"), `active tools: ${created.activeTools.join(", ")}`);
+        await session.host.prompt(created.sessionId, "Select the project");
+        await session.host.session.waitForIdle();
+        assert.match(JSON.stringify(firstRequest), /varin-work-context/);
+        assert.match(JSON.stringify(firstRequest), /operationDir/);
+        const journal = session.host.workContextRead(created.sessionId);
+        assert.equal(journal.context?.operationDir, "project", JSON.stringify(session.host.session.sessionManager.getBranch()));
+        const branch = session.host.session.sessionManager.getBranch();
+        const markerIndex = branch.findIndex((entry) => entry.type === "custom" && entry.customType === VARIN_WORK_CONTEXT_ENTRY_TYPE);
+        const toolResultIndex = branch.findIndex((entry) => entry.type === "message" && entry.message.role === "toolResult");
+        assert.ok(markerIndex > 0 && toolResultIndex > markerIndex, "journal append happened during the tool call");
+        const modelMessages = session.host.session.sessionManager.buildSessionContext().messages;
+        const toolResult = modelMessages.find((message) => message.role === "toolResult" && message.toolName === "work_context");
+        assert.ok(toolResult, "Pi retains the result paired with the tool call");
+        assert.match(JSON.stringify(continuation), /project/);
+        sessionFile = session.host.session.sessionFile!;
+      } finally { await session.dispose(); }
+      const reopened = await setupSession({ root, faux, harnessWorkContext: true, serviceHostOptions });
+      piHost = reopened.host;
+      try {
+        const opened = await reopened.host.open({ sessionFile, cwd: root });
+        assert.equal(opened.workContext?.operationDir, "project");
+        assert.equal(opened.workContext?.revision, 1);
+      } finally { await reopened.dispose(); }
+    });
+  });
+});
 
 describe("session e2e — work focus", () => {
   it("applies research only at run boundaries without retaining its prompt after code resumes", async () => {

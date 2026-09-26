@@ -914,6 +914,13 @@ export class PiRuntimeBroker {
       return worker.request("session.snapshot", params as HostMethodParams<"session.snapshot">)
         .then((snapshot) => this.#enrichSnapshot(worker, snapshot)) as Promise<HostMethodResult<M>>;
     }
+    if ((method as HostMethod) === "session.reconcile") {
+      return worker.request("session.reconcile", params as HostMethodParams<"session.reconcile">)
+        .then(async (result) => ({
+          ...result,
+          snapshot: await this.#enrichSnapshot(worker, result.snapshot),
+        })) as Promise<HostMethodResult<M>>;
+    }
     if (!requiresWorkspaceAdmission(method, params)) return worker.request(method, params);
     const cwd = this.#workerCwds.get(worker);
     if (!cwd) {
@@ -1789,12 +1796,12 @@ export class PiRuntimeBroker {
       ?? snapshot.workFocus
       ?? productDefaultWorkFocus();
     if (summary.workspace === undefined) {
-      const enriched = { ...snapshot, workFocus: structuredClone(workFocus) };
+      const enriched = { ...snapshot, eventWorkerId: worker.id, workFocus: structuredClone(workFocus) };
       delete enriched.workspace;
       delete enriched.workspacePersistence;
       return enriched;
     }
-    const enriched = { ...snapshot, workspace: summary.workspace, workFocus: structuredClone(workFocus) };
+    const enriched = { ...snapshot, eventWorkerId: worker.id, workspace: summary.workspace, workFocus: structuredClone(workFocus) };
     if (summary.workspacePersistence === "pending") enriched.workspacePersistence = "pending";
     else delete enriched.workspacePersistence;
     return enriched;
@@ -1870,7 +1877,7 @@ export class PiRuntimeBroker {
     return { ...summary, workspace, workspacePersistence: "pending" };
   }
 
-  #projectSessionEnvelope(envelope: EventEnvelope, sessionId: string): EventEnvelope {
+  #projectSessionEnvelope(envelope: EventEnvelope, sessionId: string, workerId: string): EventEnvelope {
     if (envelope.event !== "session.snapshot") return envelope;
     const workspace = this.#pendingWorkspaceBindings.get(sessionId)
       ?? this.#knownSummaries.get(sessionId)?.workspace;
@@ -1878,12 +1885,13 @@ export class PiRuntimeBroker {
       ?? (envelope.data as SessionSnapshot).workFocus
       ?? productDefaultWorkFocus();
     if (workspace === undefined) {
-      return { ...envelope, data: { ...envelope.data, workFocus } };
+      return { ...envelope, data: { ...envelope.data, eventWorkerId: workerId, workFocus } };
     }
     return {
       ...envelope,
       data: {
         ...envelope.data,
+        eventWorkerId: workerId,
         workspace,
         workFocus,
         ...(this.#pendingWorkspaceBindings.has(sessionId)
@@ -2050,7 +2058,7 @@ export class PiRuntimeBroker {
         this.#emit({
           envelope: client.sessionId === undefined
             ? envelope
-            : this.#projectSessionEnvelope(envelope, client.sessionId),
+            : this.#projectSessionEnvelope(envelope, client.sessionId, client.id),
           kind: "host",
           role,
           ...(client.sessionId === undefined ? {} : { sessionId: client.sessionId }),

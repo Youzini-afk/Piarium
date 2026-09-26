@@ -24,6 +24,7 @@ import type { RelationCollectOutcome } from "../knowledge/relations.js";
 import type { KnowledgeStore, SymbolGraphRelationRecord } from "../knowledge/store.js";
 import { classifyFileRoleDecision } from "./file-role.js";
 import { pathInRoots } from "./explore-graph.js";
+import { looksLikePathObject } from "./explore-query.js";
 
 export interface RelatedQueryInput {
   anchor: string;
@@ -74,9 +75,7 @@ function capped<T>(items: readonly T[], limit: number): { shown: readonly T[]; o
     : { shown: items.slice(0, limit), omitted: items.length - limit };
 }
 
-const looksLikePath = (anchor: string): boolean => (
-  /[\\/]/.test(anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(anchor)
-);
+const looksLikePath = looksLikePathObject;
 
 const compareText = (left: string, right: string): number => left.localeCompare(right);
 

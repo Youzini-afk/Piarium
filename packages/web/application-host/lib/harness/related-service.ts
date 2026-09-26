@@ -3,13 +3,15 @@ import type { HarnessService } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { executeRelated } from "./related-tool.js";
+import { looksLikePathObject } from "./explore-query.js";
+import { intersectRetrievalScope } from "./explore-service.js";
 
 type RelatedParams = HarnessServiceMap["related.query"]["params"];
 
 const unavailable = (anchor: string, message: string): RelatedQueryResult => ({
   text: message,
   status: "unavailable",
-  anchor: { kind: /[\\/]/.test(anchor) || /\.[a-zA-Z][a-zA-Z0-9]*$/.test(anchor) ? "path" : "name", value: anchor },
+  anchor: { kind: looksLikePathObject(anchor) ? "path" : "name", value: anchor },
   roles: [],
   definitions: [],
   imports: { items: [], unresolved: [], incomplete: false },
@@ -27,15 +29,41 @@ export function createRelatedQueryService(
       if (typeof params.anchor !== "string" || !params.anchor.trim()) {
         throw new HarnessServiceError("invalid-params", "Provide a path or symbol name.");
       }
+      const requestedAnchor = params.anchor.trim();
+      const pathAnchor = looksLikePathObject(requestedAnchor);
+      if (pathAnchor && ctx.authorizedPaths.length !== 1) {
+        throw new HarnessServiceError("forbidden", "The related path anchor was not authorized.");
+      }
+      const anchor = pathAnchor ? (ctx.authorizedPaths[0]!.resourceId || ".") : requestedAnchor;
+      const defaultRoots = ctx.actor.queryScope?.length
+        ? [...ctx.actor.queryScope]
+        : ctx.actor.operationDir ? [ctx.actor.operationDir] : undefined;
+      const requestedRoots = [
+        ...(defaultRoots ?? []),
+        ...(pathAnchor ? [anchor] : []),
+      ];
+      const scope = intersectRetrievalScope(requestedRoots.length > 0 ? requestedRoots : undefined, ctx.actor.workspaceScope);
+      if (scope.empty) {
+        throw new HarnessServiceError("forbidden", "Related scope does not overlap the actor's authorized workspace scope.");
+      }
       const workspaceId = ctx.actor.workspaceId;
       if (!workspaceId || !host.graphRecall) {
-        return unavailable(params.anchor.trim(), "related unavailable: the symbol graph is not wired.");
+        return unavailable(anchor, "related unavailable: the symbol graph is not wired.");
       }
       ctx.signal.throwIfAborted();
-      const graph = await host.graphRecall(ctx.sessionId, workspaceId).catch(() => null);
+      let graph: Awaited<ReturnType<NonNullable<typeof host.graphRecall>>> | null;
+      try {
+        graph = await host.graphRecall(ctx.sessionId, workspaceId);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        return {
+          ...unavailable(anchor, "related failed: the symbol catalog could not be read."),
+          status: "failed",
+        };
+      }
       if (!graph) {
         return unavailable(
-          params.anchor.trim(),
+          anchor,
           "related unavailable: the symbol graph is not open for this workspace. related does not open a database on the read path.",
         );
       }
@@ -43,7 +71,7 @@ export function createRelatedQueryService(
         && ctx.inputContext.dirtyPaths.length > 0;
       if (!graph.directFactsCompatible || hasUnsavedFixedView) {
         return unavailable(
-          params.anchor.trim(),
+          anchor,
           "related unavailable: stored graph positions belong to the owning workspace and are not pinned to this isolated execution view.",
         );
       }
@@ -56,23 +84,21 @@ export function createRelatedQueryService(
         // final body — out-of-scope content is neither returned nor written
         // (D-240 rework).
         return await executeRelated(
-          { anchor: params.anchor },
+          { anchor },
           graph.store,
           {
             workspaceId,
             ...(host.relationCollector ? { collector: host.relationCollector } : {}),
-            // RR4: the session query scope narrows relation answers too; it
-            // was already validated inside the authorized workspaceScope.
-            ...(ctx.actor.queryScope?.length
-              ? { roots: [...ctx.actor.queryScope] }
-              : ctx.actor.workspaceScope ? { roots: ctx.actor.workspaceScope } : {}),
+            // RR4: query scope and operation dir are defaults, then the pinned
+            // workspace scope intersects them before any graph reads.
+            ...(scope.roots !== undefined ? { roots: scope.roots } : {}),
             signal: ctx.signal,
           },
         );
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw error;
         return {
-          ...unavailable(params.anchor.trim(), "related failed: the symbol graph could not answer."),
+          ...unavailable(anchor, "related failed: the symbol graph could not answer."),
           status: "failed",
         };
       }

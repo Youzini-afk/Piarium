@@ -166,6 +166,7 @@ test("surface connection projects routed host events only after handshake", asyn
       event: "session.closed",
       kind: "event",
       seq: 7,
+      surfaceSeq: 0,
       source: {
         executionId: "execution-1",
         role: "session",
@@ -205,6 +206,7 @@ test("surface connection reports a session worker exit to every connected surfac
       event: "session.worker.exited",
       kind: "event",
       seq: 8,
+      surfaceSeq: 0,
       source: {
         role: "session",
         runtimeGeneration: 3,
@@ -258,6 +260,7 @@ test("surface connection projects and cancels only configuration watches owned b
     assert.equal(changed.kind, "event");
     if (changed.kind !== "event") assert.fail("expected config event");
     assert.equal(changed.event, "config.changed");
+    assert.equal(changed.surfaceSeq, 0, "an unowned watch must not consume a surface sequence");
     assert.equal((changed.data as { watchId: string }).watchId, watchId);
 
     harness.receive(createRuntimeRequest("unwatch", "config.unwatch", { watchId }));

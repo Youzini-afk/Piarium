@@ -228,17 +228,20 @@ export function createExploreTool(
         }
 
         const result = await request("explore.query.finish", { queryId, model: participation });
+        const provenanceCounts = result.details.provenance.statusCounts;
         return {
           content: [{ type: "text", text: result.text }],
           details: {
             snippets: result.snippets,
             searched: result.searched,
             handle: result.handle,
-            issues: result.issues,
+            snippetCount: result.snippets.length,
+            issueCount: result.issueCount,
             partial: result.partial,
-            notRequested: result.notRequested,
-            omitted: result.omitted,
+            notRequestedCount: result.notRequestedCount,
+            omittedCount: result.omittedCount,
             provenance: result.details,
+            provenanceCounts,
             model: result.details.model ?? participation,
           },
         };

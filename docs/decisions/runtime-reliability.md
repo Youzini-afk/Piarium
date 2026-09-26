@@ -59,3 +59,10 @@
 考虑过的替代：搭全 Host+Pi+UI 的端到端断线编排（投入远超剩余预算且与既有层级证据重复大半）；把 MemoryTransport 断开用例当跨层证据（不含真实 socket 语义）。
 影响：`packages/web` devDep 增 `@varin/runtime-client`（workspace）；`gateway.test.ts` 增 1 个真 socket 用例（7/7 绿）；status RR6 行与 plan Status 头更新为已实施+未测边界。
 状态：已实施
+
+### D-335 · 2026-09-26 · RR1–RR6 验收复核
+类型：验收纠正与解法
+决定：先前的“wired”记录只证明各层曾接线，不能作为 RR 合同全部完成的证据。断线追赶改由 Pi worker 在单次 `session.reconcile` 中读取快照、所需 entries 和 stats，携带实际 worker 身份与水位；UI 的同步任务按操作身份和 Store 代际提交。停止请求绑定具体 Run/活动身份，迟到回执不能修改下一轮。工作上下文的持久来源改为 Pi 当前分支的 custom entry，Host 只缓存经授权重新验证的投影；变更按 leaf 与 revision 提交，重开和分支导航重新读取。Shell 在受理时固定默认目录和可查询执行身份，准备期计入 `waitMs`；检索默认范围、来源详情和网络目标检查依实际消费者复核。未闭环合同继续记在 status，不把未验证的平台纵切或代理侧最终地址检查写成已通过。
+原因：复核直接复现了旧停止回执污染新 Run、分离读取的追赶竞态、Host 内存上下文在重开后丢失、已受理 shell 使用新目录、IPv6 等价地址漏拦和代理重定向绕过。原 D-328–D-334 的实施描述仍是历史事实，其中关于一致性切点、Host 独占上下文和 RR6 纵切充分性的推断已被本次证据修正。
+影响：`session.reconcile`、StopRequest/活动 ID、Pi 分支工作上下文 journal、shell `preparing`/默认 anchor、检索范围与摘要、egress 地址和重定向检查均有定向回归；最终验收仍取决于 [status RR 复核记录](../agent-harness-status.md) 所列子 Agent 继承、项目发现续查、链接替换边界、可信代理出口与平台 smoke。
+状态：已修补并完成定向验证；RR 整体尚未验收完成，修补仍在工作树。

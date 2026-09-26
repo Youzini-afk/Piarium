@@ -3,6 +3,7 @@ import type { HarnessServiceHost, HarnessSessionContext } from "./service-host.j
 import { HarnessShellSettingsError, resolveHarnessShellSetting } from "./harness-shell-settings.js";
 import { resolveHarnessWebBinding } from "./harness-web-settings.js";
 import { waitWithSignal } from "../knowledge/semantic/cancellation.js";
+import { HarnessServiceError } from "./service-error.js";
 
 const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boolean => (
   a.authorityInstanceId === b.authorityInstanceId && a.sessionId === b.sessionId
@@ -11,7 +12,7 @@ const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boole
 
 /** Shell discovery/settings may be asynchronous; actor admission must wait for that exact generation. */
 export function createHarnessSessionRegistration(options: {
-  host: Pick<HarnessServiceHost, "registerSession" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
+  host: Pick<HarnessServiceHost, "registerSession" | "prepareWorkContext" | "dropSession" | "hasActor" | "resolveActor" | "getInterpreter">;
   readSettings(context: HarnessSessionContext): Promise<PiSettingsSnapshot>;
   /** Resolve the authorized workspace root for seeding the work context (RR2). */
   resolveWorkspaceRoot?: (workspaceId: string) => Promise<string | null>;
@@ -49,16 +50,21 @@ export function createHarnessSessionRegistration(options: {
         } } };
       }
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
-      const authorityWorkspaceRoot = context.workspaceId
-        ? await options.resolveWorkspaceRoot?.(context.workspaceId).catch(() => null) ?? undefined
-        : undefined;
+      const authorityWorkspaceRoot = context.workspaceId && options.resolveWorkspaceRoot
+        ? await waitWithSignal(options.resolveWorkspaceRoot(context.workspaceId), entry.controller.signal)
+        : context.authorityWorkspaceRoot;
+      if (context.workspaceId && options.resolveWorkspaceRoot && !authorityWorkspaceRoot) {
+        throw new HarnessServiceError("unavailable", "Workspace authority root could not be resolved; session admission was not committed");
+      }
       if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
-      options.host.registerSession({
+      const prepared = await options.host.prepareWorkContext({
         ...context,
         actor: entry.actor,
         ...resolved,
-        ...(authorityWorkspaceRoot !== undefined ? { authorityWorkspaceRoot } : {}),
+        ...(authorityWorkspaceRoot ? { authorityWorkspaceRoot } : {}),
       });
+      if (disposed || entry.controller.signal.aborted || pending.get(context.actor.sessionId) !== entry) return;
+      options.host.registerSession(prepared);
     })().finally(() => {
       if (pending.get(context.actor.sessionId) === entry) pending.delete(context.actor.sessionId);
     });
@@ -70,7 +76,7 @@ export function createHarnessSessionRegistration(options: {
     return !disposed && (entry ? sameGeneration(entry.actor, identity) : options.host.hasActor(identity));
   };
 
-  const resolveActor = async (identity: HarnessActorIdentity, signal?: AbortSignal) => {
+  const resolveActor = async (identity: HarnessActorIdentity, signal?: AbortSignal, contextEntryId?: string | null) => {
     if (disposed) return null;
     const entry = pending.get(identity.sessionId);
     if (entry) {
@@ -78,7 +84,7 @@ export function createHarnessSessionRegistration(options: {
       await waitWithSignal(entry.promise, signal);
     }
     if (!hasActor(identity)) return null;
-    const actor = await options.host.resolveActor(identity);
+    const actor = await options.host.resolveActor(identity, contextEntryId);
     return hasActor(identity) ? actor : null;
   };
 

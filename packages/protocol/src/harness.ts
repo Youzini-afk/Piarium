@@ -72,18 +72,22 @@ export interface OutputRef {
 export type ShellOutputKind = "vitest" | "tsc" | "eslint" | "git" | "package-manager" | "generic";
 
 /**
- * Stage timestamps for one accepted shell command. `acceptedAt` is when the
- * Host admitted the execution; `sentAt` when the framed payload reached the
- * shell; `firstOutputAt` the first observed output byte; `endedAt` the real
- * terminal event or the moment the call detached into a background handle.
- * Consumers must treat `waitMs` as a post-accept observation budget: the gap
- * between `acceptedAt` and `sentAt` is spawn/queue time, not command runtime.
+ * Stage timestamps for one accepted shell command. `acceptedAt` starts the
+ * Host's `waitMs` observation budget; `sentAt` marks when the framed payload
+ * reached the shell; `firstOutputAt` is the first observed output byte.
+ * `detachedAt` ends the foreground response, while `endedAt` is the real
+ * command/process termination time.
  */
 export interface ShellExecTiming {
   acceptedAt: number;
   sentAt?: number;
   firstOutputAt?: number;
+  /** Foreground observation ended while the process remained alive. */
+  detachedAt?: number;
+  /** Actual process/command termination only; never the observation deadline. */
   endedAt?: number;
+  /** Time the Host returned its foreground shell.exec response. */
+  respondedAt?: number;
 }
 
 export interface ShellOutputOrganization {
@@ -126,6 +130,19 @@ export interface ShellExecResultBackground {
   timing?: ShellExecTiming;
 }
 
+/** Accepted execution whose shell/process preparation has not finished yet. */
+export interface ShellExecResultPreparing {
+  kind: "preparing";
+  /** Stable shell.read/get_output identity; this is not a runtime shell id. */
+  id: string;
+  command: string;
+  waitedMs: number;
+  toolCallId?: string;
+  executionId: string;
+  target?: string;
+  timing: ShellExecTiming;
+}
+
 export interface ShellExecResultSpawnFailed {
   kind: "spawn-failed";
   reason: string;
@@ -136,14 +153,18 @@ export interface ShellExecResultSpawnFailed {
 export type ShellExecResult =
   | ShellExecResultCompleted
   | ShellExecResultBackground
+  | ShellExecResultPreparing
   | ShellExecResultSpawnFailed;
 
 export interface ShellReadResult extends OutputSlice {
   running: boolean;
+  /** Accepted, but no payload has reached the shell yet. */
+  phase?: "preparing";
   exitCode?: number;
   /** True when the supervised process reached its terminal state through cancellation. */
   cancelled?: boolean;
   executionId?: string;
+  cwd?: string;
   command?: string;
   display?: string;
   organized?: ShellOutputOrganization;
@@ -156,6 +177,8 @@ export interface ShellReadResult extends OutputSlice {
    * output slice stays empty. Distinct from "not found" (unknown identity).
    */
   spawnFailed?: string;
+  /** The reference belonged to a prior Host/session generation whose live output is not retained. */
+  unavailable?: string;
   observation?: {
     mode: "incremental";
     first: boolean;
@@ -360,8 +383,11 @@ export interface NetworkDiagnoseParams {
 
 export interface NetworkDiagnosisResult {
   url: string;
+  /** Static URL/scheme/literal/configuration check; does not include DNS. */
   decision: "allowed" | "blocked";
   reason?: string;
+  /** Read-only address sample. A later fetch checks again at connection time. */
+  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified";
   policy: {
     version: number;
     mode: "direct" | "proxy";
@@ -372,8 +398,8 @@ export interface NetworkDiagnosisResult {
     source: "env" | "override" | "none";
     invalid?: string;
   };
-  /** Where the target name resolves for this request. */
-  resolution: "local" | "proxy-side" | "static-literal";
+  /** Where the target name would resolve. Proxy-side results are unverified here. */
+  resolution: "not-run" | "local" | "proxy-side" | "static-literal";
   addresses?: Array<{ address: string; class: "public" | "private" | "special-purpose" }>;
   lookupError?: string;
 }
@@ -583,6 +609,28 @@ export interface HarnessWorkContextState {
   revision: number;
 }
 
+/** Pi's current conversation branch is the durable journal for this state. */
+export interface PiWorkContextBinding {
+  workspaceId: string;
+  authorityRoot: string;
+  sessionRoot: string;
+}
+
+export interface PiWorkContextSnapshot {
+  /** Exact active Pi leaf. A commit must match it before appending a new entry. */
+  leafId: string | null;
+  /** Last work-context custom entry on this branch; stable across ordinary messages. */
+  entryId: string | null;
+  context: (HarnessWorkContextState & PiWorkContextBinding) | null;
+}
+
+export interface PiWorkContextCommit {
+  sessionId: string;
+  expectedLeafId: string | null;
+  expectedRevision: number;
+  context: HarnessWorkContextState & PiWorkContextBinding;
+}
+
 export interface ContextDiscoverParams {
   /** Maximum returned candidates; Host clamps to its scan budget. */
   maxResults?: number;
@@ -607,6 +655,8 @@ export interface ContextGetResult {
   context: HarnessWorkContextState;
   /** Absolute authorized workspace root for composing/displaying paths. */
   workspaceRoot: string;
+  /** Pi branch journal entry identity; null means launch context on this branch. */
+  contextEntryId?: string | null;
 }
 
 export interface ContextSelectParams {
@@ -1411,6 +1461,56 @@ export interface ExploreSearchResult {
   };
 }
 
+/**
+ * Model-facing result for the staged explore query. Large path-level omission
+ * and provenance lists remain in the session-authorized output handle; this
+ * projection carries counts and bounded summaries while direct
+ * `explore.search` keeps its full result contract.
+ */
+export interface ExploreQueryFinishResult {
+  text: string;
+  /** The selected current excerpts needed to answer the query. */
+  snippets: ExploreSearchSnippet[];
+  issueCount: number;
+  notRequestedCount: number;
+  omittedCount: number;
+  partial: boolean;
+  searched: ExploreSearchResult["searched"];
+  handle: string;
+  details: ExploreQueryFinishDetails;
+}
+
+export interface ExploreQueryFinishDetails {
+  provenance: { statusCounts: Partial<Record<ExploreSourceStatus, number>> };
+  anchors: ExploreSearchResult["details"]["anchors"];
+  byteBudget: number;
+  structure?: {
+    fileCount: number;
+    providers: Partial<Record<ExploreStructureProvider | "none", number>>;
+    statuses: Partial<Record<ExploreStructureStatus, number>>;
+  };
+  relations?: {
+    status: ExploreRelationStatus;
+    fileCount: number;
+    staleFiles: number;
+    incompleteFiles: number;
+    edgeCounts: { imports: number; connections: number; associations: number; references: number; calls: number };
+  };
+  graph?: ExploreGraphDetails;
+  query?: { objectCount: number; relation: ExploreQueryRelation; domain: ExploreQueryDomain };
+  skippedQueries?: { reason: "direct-verified"; patternCount: number };
+  distinctiveness?: { scope: "query-pool"; poolFiles: number; termCount: number };
+  semantic?: Omit<ExploreSemanticDetails, "gaps"> & { gapCount?: number };
+  rerank?: ExploreRerankDetails;
+  fastDecision?: Omit<ExploreFastDecisionDetails, "executed">;
+  model?: ExploreModelParticipation;
+  sources?: {
+    count: number;
+    families: Partial<Record<ExploreQueryTaskFamily, number>>;
+    statuses: Partial<Record<ExploreQueryTaskStatus, number>>;
+  };
+}
+
 export interface HarnessServiceMap {
   "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
   "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
@@ -1490,7 +1590,7 @@ export interface HarnessServiceMap {
   };
   "explore.query.finish": {
     params: ExploreQueryFinishParams;
-    result: ExploreSearchResult;
+    result: ExploreQueryFinishResult;
   };
   "explore.query.cancel": {
     params: ExploreQueryCancelParams;
@@ -1835,6 +1935,8 @@ export interface HarnessRequestData {
   params: unknown;
   /** Current immutable input source selected by SessionHost. */
   inputContext?: AgentInputContext;
+  /** Pi's current active-branch work-context entry, sampled at tool admission. */
+  contextEntryId?: string | null;
   /**
    * How long the worker is prepared to wait, in milliseconds. The router
    * uses it instead of its own default so a deliberately long call such as
@@ -1864,7 +1966,7 @@ export type HarnessRespondParams = {
        * context change without a dedicated push channel. Absent when the
        * session has no registered work context.
        */
-      harnessContext?: { workContextRevision: number };
+      harnessContext?: { workContextRevision: number; workContextEntryId?: string | null };
     }
   | { ok: false; error: HarnessError }
 );
@@ -1878,7 +1980,7 @@ export function buildHarnessRespondParams(
   sessionId: string,
   requestId: string,
   outcome: { ok: true; result: unknown } | { ok: false; error: HarnessError },
-  harnessContext?: { workContextRevision: number },
+  harnessContext?: { workContextRevision: number; workContextEntryId?: string | null },
 ): HarnessRespondParams {
   if (outcome.ok) {
     return harnessContext === undefined

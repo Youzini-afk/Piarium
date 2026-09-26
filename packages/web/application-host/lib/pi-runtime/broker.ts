@@ -38,6 +38,7 @@ export function createWebPiRuntimeBroker({
   hostEntry,
   harnessDocumentRead = false,
   harnessDocumentPathOverlay = false,
+  harnessWorkContext = false,
   harnessWebRead = false,
   harnessWebSearch = false,
   nodePath,
@@ -55,6 +56,7 @@ export function createWebPiRuntimeBroker({
   hostEntry?: string | undefined;
   harnessDocumentRead?: boolean | undefined;
   harnessDocumentPathOverlay?: boolean | undefined;
+  harnessWorkContext?: boolean | undefined;
   harnessWebRead?: boolean | undefined;
   harnessWebSearch?: boolean | undefined;
   nodePath?: string | undefined;
@@ -70,6 +72,7 @@ export function createWebPiRuntimeBroker({
       capabilities: {
         harnessDocumentRead,
         harnessDocumentPathOverlay,
+        harnessWorkContext,
         harnessExperiments: true,
         harnessSettings: true,
         harnessFollowUps: true,

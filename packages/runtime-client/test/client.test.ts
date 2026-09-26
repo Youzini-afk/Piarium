@@ -87,7 +87,7 @@ describe("PiRuntimeClient", () => {
     await client.close();
   });
 
-  it("tracks event sequences independently for every worker", async () => {
+  it("detects missing delivered frames without treating filtered worker sequences as gaps", async () => {
     const transport = new MemoryTransport();
     const gaps: Array<{ expected: number; received: number }> = [];
     const events: number[] = [];
@@ -106,17 +106,20 @@ describe("PiRuntimeClient", () => {
     };
     const sourceB = { role: "catalog" as const, runtimeGeneration: 1, workerId: "worker-b" };
     transport.receive(
-      encodeRuntimeEnvelope(createRuntimeEvent(sourceA, 5, "session.closed", { sessionId: "a" })),
+      encodeRuntimeEnvelope({ ...createRuntimeEvent(sourceA, 5, "session.closed", { sessionId: "a" }), surfaceSeq: 0 }),
     );
     transport.receive(
-      encodeRuntimeEnvelope(createRuntimeEvent(sourceB, 9, "session.closed", { sessionId: "b" })),
+      encodeRuntimeEnvelope({ ...createRuntimeEvent(sourceB, 9, "session.closed", { sessionId: "b" }), surfaceSeq: 1 }),
     );
     transport.receive(
-      encodeRuntimeEnvelope(createRuntimeEvent(sourceA, 7, "session.closed", { sessionId: "a" })),
+      encodeRuntimeEnvelope({ ...createRuntimeEvent(sourceA, 7, "session.closed", { sessionId: "a" }), surfaceSeq: 3 }),
+    );
+    transport.receive(
+      encodeRuntimeEnvelope({ ...createRuntimeEvent(sourceA, 7, "session.closed", { sessionId: "a" }), surfaceSeq: 3 }),
     );
 
     assert.deepEqual(events, [5, 9, 7]);
-    assert.deepEqual(gaps, [{ expected: 6, received: 7 }]);
+    assert.deepEqual(gaps, [{ expected: 2, received: 3 }]);
     await client.close();
   });
 

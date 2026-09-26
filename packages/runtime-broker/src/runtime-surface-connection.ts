@@ -6,6 +6,7 @@ import {
   encodeRuntimeEnvelope,
   ProtocolDecodeError,
   type JsonValue,
+  type RuntimeEventEnvelope,
   type RuntimeWireEnvelope,
 } from "@varin/protocol";
 import { PiHostRequestError } from "./host-client.js";
@@ -86,6 +87,7 @@ export class PiRuntimeSurfaceConnection {
   #closed = false;
   #handshake: HandshakeState = "required";
   #outbound: Promise<void> = Promise.resolve();
+  #surfaceSequence = 0;
 
   constructor(options: RuntimeSurfaceConnectionOptions) {
     if (!Number.isSafeInteger(options.maxPendingRequests ?? 0) || (options.maxPendingRequests ?? 0) < 0) {
@@ -99,7 +101,7 @@ export class PiRuntimeSurfaceConnection {
       if (this.#closed || this.#handshake !== "complete") return;
       if (event.kind === "worker.exit") {
         if (event.role !== "session" || event.sessionId === undefined) return;
-        this.#send(createRuntimeEvent(
+        this.#sendEvent(createRuntimeEvent(
           {
             ...(event.executionId === undefined ? {} : { executionId: event.executionId }),
             role: event.role,
@@ -128,7 +130,7 @@ export class PiRuntimeSurfaceConnection {
       ) {
         return;
       }
-      this.#send(createRuntimeEvent(
+      this.#sendEvent(createRuntimeEvent(
         {
           ...(event.executionId === undefined ? {} : { executionId: event.executionId }),
           role: event.role,
@@ -257,5 +259,9 @@ export class PiRuntimeSurfaceConnection {
     }).catch(() => {
       this.#close("runtime transport failed");
     });
+  }
+
+  #sendEvent(envelope: RuntimeEventEnvelope): void {
+    this.#send({ ...envelope, surfaceSeq: this.#surfaceSequence++ });
   }
 }

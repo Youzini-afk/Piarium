@@ -114,6 +114,7 @@ let connectionPhase: PiRuntimeConnectionPhase = 'disconnected';
 const phaseListeners = new Set<(phase: PiRuntimeConnectionPhase) => void>();
 const reconnectedListeners = new Set<(connection: PiRuntimeConnection) => void>();
 const sequenceGapListeners = new Set<(gap: RuntimeSequenceGap) => void>();
+const protocolErrorListeners = new Set<(error: Error) => void>();
 
 const setConnectionPhase = (phase: PiRuntimeConnectionPhase): void => {
   if (connectionPhase === phase) return;
@@ -155,6 +156,11 @@ export const subscribePiRuntimeSequenceGap = (
   return () => {
     sequenceGapListeners.delete(listener);
   };
+};
+
+export const subscribePiRuntimeProtocolError = (listener: (error: Error) => void): (() => void) => {
+  protocolErrorListeners.add(listener);
+  return () => { protocolErrorListeners.delete(listener); };
 };
 
 const notifyReconnected = (connection: PiRuntimeConnection): void => {
@@ -219,6 +225,12 @@ const handleSequenceGap = (gap: RuntimeSequenceGap): void => {
   }
 };
 
+const handleProtocolError = (error: Error): void => {
+  for (const listener of protocolErrorListeners) {
+    try { listener(error); } catch { /* Diagnostics must not break connection supervision. */ }
+  }
+};
+
 export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
   const runtimeKey = currentRuntimeKey();
   if (activeConnection?.runtimeKey === runtimeKey && activeConnection.client.connected) {
@@ -230,6 +242,7 @@ export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
   setConnectionPhase(hadConnection ? 'reconnecting' : 'connecting');
   const promise = createPiRuntimeConnection({
     onConnectionLost: handleConnectionLost,
+    onProtocolError: handleProtocolError,
     onSequenceGap: handleSequenceGap,
     runtimeKey,
   }).then(async (connection) => {

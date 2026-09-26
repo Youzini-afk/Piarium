@@ -467,6 +467,14 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "session.snapshot", { sessionId });
     }
+    case "session.reconcile": {
+      const sessionId = requireString(input, "sessionId");
+      const scopes = input.scopes;
+      if (!Array.isArray(scopes) || scopes.some((scope) => scope !== "branch" && scope !== "all")) {
+        throw new RuntimeDispatchError("invalid_params", "scopes must contain only branch or all");
+      }
+      return broker.requestForSession(sessionId, "session.reconcile", { sessionId, scopes });
+    }
     case "session.entries": {
       const sessionId = requireString(input, "sessionId");
       const scope =
@@ -574,7 +582,11 @@ async function dispatchRuntimeRequestUnchecked(
     }
     case "agent.abort": {
       const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "agent.abort", { sessionId });
+      const expectedRunId = requireString(input, "expectedRunId");
+      return broker.requestForSession(sessionId, "agent.abort", {
+        sessionId,
+        expectedRunId,
+      });
     }
     case "agent.queue.clear": {
       const sessionId = requireString(input, "sessionId");

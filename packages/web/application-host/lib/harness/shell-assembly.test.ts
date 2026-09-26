@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessActorIdentity } from "@varin/protocol";
+import { createHarnessPathAuthority } from "./path-authority.js";
 import { createShellExecService } from "./harness-services.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
@@ -163,15 +164,98 @@ describe("production shell assembly", () => {
     }
   }, 30_000);
 
+  nativeAuthorityIt("executes real heredocs and switches a persistent shell with the work context", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shell-context-")); dirs.push(root);
+    const first = join(root, "first"), second = join(root, "second");
+    mkdirSync(first); mkdirSync(second); mkdirSync(join(second, "nested"));
+    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents: { inspectWorkspace: async () => ({ root }) } });
+    const host = createHost({ search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => root, pathAuthority });
+    host.registerSession({ actor: actor("session-context"), grantedCapabilities: ["process.shell", "context.session"],
+      workspaceId: "ws-context", workspaceRoot: first, authorityWorkspaceRoot: root, shellSetting: "auto" });
+    const run = async (command: string) => {
+      const ctx = serviceContext("session-context", "ws-context");
+      ctx.actor = (await host.resolveActor(actor("session-context")))!;
+      return createShellExecService(host).handle({ command, waitMs: 10_000 }, ctx);
+    };
+    expect(await run("export VARIN_TEST_KEEP=retained; cat <<'EOF'\nheredoc-marker\nEOF"))
+      .toMatchObject({ kind: "completed", exitCode: 0, stdout: expect.stringContaining("heredoc-marker") });
+    await host.workContextSelect((await host.resolveActor(actor("session-context")))!, { path: "second", expectedRevision: 0 });
+    expect(await run('printf "%s\\n" "$VARIN_TEST_KEEP"; pwd'))
+      .toMatchObject({ kind: "completed", exitCode: 0, cwd: second, stdout: expect.stringContaining("retained") });
+    expect(await run("cd nested # tail comment"))
+      .toMatchObject({ kind: "completed", exitCode: 0, cwd: join(second, "nested") });
+    expect(await run("pwd")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
+    const syntax = await run("if then");
+    expect(syntax.kind).toBe("completed");
+    if (syntax.kind === "completed") expect(syntax.exitCode).not.toBe(0);
+    expect(await run("echo after-syntax")).toMatchObject({ kind: "completed", exitCode: 0,
+      stdout: expect.stringContaining("after-syntax") });
+  }, 45_000);
+
+  nativeAuthorityIt("pins the accepted default anchor across context selection without resetting persistent cd", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shell-anchor-admission-")); dirs.push(root);
+    const first = join(root, "first"), second = join(root, "second");
+    mkdirSync(first); mkdirSync(second); mkdirSync(join(second, "nested"));
+    const pathAuthority = createHarnessPathAuthority({ authorityId: "host", documents: { inspectWorkspace: async () => ({ root }) } });
+    let releaseMaterialization!: () => void;
+    let announceMaterialization!: () => void;
+    const materializationEntered = new Promise<void>((resolve) => { announceMaterialization = resolve; });
+    const materializationGate = new Promise<void>((resolve) => { releaseMaterialization = resolve; });
+    let holdMaterialization = true;
+    const host = createHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => root,
+      pathAuthority,
+      workingBranchEnsureMaterialized: async () => {
+        if (holdMaterialization) {
+          announceMaterialization();
+          await materializationGate;
+          holdMaterialization = false;
+        }
+        return { status: "materialized", path: root };
+      },
+    });
+    host.registerSession({ actor: actor("session-anchor-admission"), grantedCapabilities: ["process.shell", "context.session"],
+      workspaceId: "ws-anchor-admission", workspaceRoot: first, authorityWorkspaceRoot: root, shellSetting: "auto" });
+
+    const oldActor = (await host.resolveActor(actor("session-anchor-admission")))!;
+    expect(oldActor.operationDir).toBe("first");
+    const oldContext = serviceContext("session-anchor-admission", "ws-anchor-admission");
+    oldContext.actor = oldActor;
+    const acceptedBeforeSelect = createShellExecService(host).handle({ command: "pwd", waitMs: 15_000 }, oldContext);
+
+    await materializationEntered;
+    await host.workContextSelect(oldActor, { path: "second", expectedRevision: 0 });
+    releaseMaterialization();
+
+    expect(await acceptedBeforeSelect).toMatchObject({ kind: "completed", cwd: first });
+
+    const runAtCurrentContext = async (command: string) => {
+      const ctx = serviceContext("session-anchor-admission", "ws-anchor-admission");
+      ctx.actor = (await host.resolveActor(actor("session-anchor-admission")))!;
+      return createShellExecService(host).handle({ command, waitMs: 15_000 }, ctx);
+    };
+    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: second });
+    expect(await runAtCurrentContext("cd nested")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
+    expect(await runAtCurrentContext("pwd")).toMatchObject({ kind: "completed", cwd: join(second, "nested") });
+  }, 45_000);
+
   nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
     if (process.platform !== "win32") return;
     const discovered = discoverShells();
     expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
     const workspace = mkdtempSync(join(tmpdir(), "shell-powershell-"));
+    const vanished = join(workspace, "vanished"); mkdirSync(vanished);
+    let deleteSelectedCwd = false;
     dirs.push(workspace);
     const host = createHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => workspace,
+      registerWriter: async () => {
+        if (deleteSelectedCwd) { deleteSelectedCwd = false; rmSync(vanished, { recursive: true }); }
+        return { close: async () => undefined };
+      },
     });
     host.registerSession({
       actor: actor("session-powershell"),
@@ -196,6 +280,15 @@ describe("production shell assembly", () => {
     expect(first).toMatchObject({ kind: "completed", exitCode: 0 });
     expect(second).toMatchObject({ kind: "completed", exitCode: 0 });
     expect(failed).toMatchObject({ kind: "completed", exitCode: 7 });
+    const supervisor = host.getShellSupervisor("session-powershell")!;
+    expect(await supervisor.exec("Write-Output after-native-error", { waitMs: 10_000 }))
+      .toMatchObject({ kind: "completed", exitCode: 0 });
+    expect(await supervisor.exec("if (", { waitMs: 10_000 }))
+      .toMatchObject({ kind: "completed", exitCode: 1 });
+    deleteSelectedCwd = true;
+    expect(await supervisor.exec("Set-Content -LiteralPath marker.txt -Value wrong", { cwd: vanished, waitMs: 10_000 }))
+      .toMatchObject({ kind: "completed", exitCode: 1, cwd: workspace });
+    expect(existsSync(join(workspace, "marker.txt"))).toBe(false);
     if (first.kind === "completed") expect(first.stdout).toContain("varin-powershell-one");
     if (second.kind === "completed") expect(second.stdout).toContain("varin-powershell-two");
   }, 45_000);
@@ -229,7 +322,7 @@ describe("production shell assembly", () => {
       { command: "sleep 0.2; printf 'done\\n'", cwd: workspace, waitMs: 20 },
       serviceContext("session-verification", "ws-verification"),
     );
-    expect(result.kind).toBe("background");
+    expect(["background", "preparing"]).toContain(result.kind);
     await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(1), { timeout: 10_000 });
 
     let child: ResultVerificationBundle | null = null;

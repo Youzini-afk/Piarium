@@ -1,6 +1,6 @@
 # Agent 运行时可靠性与多项目工作区实施计划
 
-Status: accepted implementation plan; RR0–RR6 已全部实施（wired），真实平台/打包纵切边界在 status 表 RR6 行如实记录；交付事实以 docs/agent-harness-status.md 为准
+Status: accepted implementation plan; RR0–RR6 已提交的接线正在复核，尚不能认定全项验收完成。原报告之外的正确性修补和未闭环合同见 docs/agent-harness-status.md 的 RR 验收复核记录。
 
 Last updated: 2026-09-26
 

@@ -278,9 +278,12 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     });
     if (result.kind === "spawn-failed") return result;
     const executionId = result.executionId ? routedShellId(machineId, result.executionId) : undefined;
-    return result.kind === "background"
-      ? { ...result, id: routedShellId(machineId, result.id), ...(executionId ? { executionId } : {}) }
-      : { ...result, ...(executionId ? { executionId } : {}) };
+    const id = "id" in result ? routedShellId(machineId, result.id) : undefined;
+    return {
+      ...result,
+      ...(id ? { id } : {}),
+      ...(executionId ? { executionId } : {}),
+    };
   };
 
   const shellRead = async (workspaceId: string, id: string, offset?: number, length?: number, waitMs?: number) => {

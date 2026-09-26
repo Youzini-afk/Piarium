@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import type {
   ContextDiscoverCandidate,
@@ -67,8 +67,10 @@ export interface WorkContextDeps {
   workspaceRoot: string;
   /** Absolute session launch directory (the initial operation dir). */
   sessionRoot: string;
-  fs?: Pick<typeof fs, "readdir" | "stat">;
+  fs?: Pick<typeof fs, "access" | "readdir" | "stat">;
   now?: () => number;
+  /** Reject work whose registered actor/session generation has been retired. */
+  assertCurrent?: () => void;
 }
 
 const toRelativeRoot = (root: string, absolute: string): string => {
@@ -81,13 +83,13 @@ const resolveRelativeToRoot = (root: string, candidate: string): string => (
 );
 
 export function seedWorkContext(authorityRoot: string | undefined, sessionRoot: string): HarnessWorkContextState {
-  // The session's own launch dir is the initial operation dir. Fall back to
-  // the authority root when it cannot be expressed relative to it.
+  // An invalid launch binding is an admission failure, never permission to
+  // silently redirect relative writes to the workspace root.
   let operationDir = "";
   if (authorityRoot) {
     const rel = path.relative(authorityRoot, sessionRoot);
-    if (rel !== "" && (rel.startsWith("..") || path.isAbsolute(rel))) {
-      operationDir = "";
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+      throw new HarnessServiceError("forbidden", "Session operation directory is outside its workspace authority");
     } else {
       operationDir = rel.split(path.sep).join("/");
     }
@@ -97,6 +99,9 @@ export function seedWorkContext(authorityRoot: string | undefined, sessionRoot: 
 
 function assertExpectedRevision(state: HarnessWorkContextState, expected: number | undefined): void {
   if (expected === undefined) return;
+  if (!Number.isSafeInteger(expected) || expected < 0) {
+    throw new HarnessServiceError("invalid-params", "expectedRevision must be a non-negative safe integer");
+  }
   if (expected !== state.revision) {
     throw new HarnessServiceError(
       "invalid-params",
@@ -125,6 +130,52 @@ export function operationDirAbsolute(state: HarnessWorkContextState, workspaceRo
   return state.operationDir === "" ? workspaceRoot : path.resolve(workspaceRoot, state.operationDir);
 }
 
+/** Reauthorize journal state before activating an actor or accepting another tool request. */
+export async function validateStoredWorkContext(
+  state: HarnessWorkContextState,
+  deps: WorkContextDeps,
+): Promise<HarnessWorkContextState> {
+  if (!Number.isSafeInteger(state.revision) || state.revision < 0
+    || typeof state.operationDir !== "string"
+    || (state.queryScope !== null && (!Array.isArray(state.queryScope)
+      || !state.queryScope.every((item) => typeof item === "string")))) {
+    throw new HarnessServiceError("unavailable", "Stored work context is malformed");
+  }
+  const operation = operationDirAbsolute(state, deps.workspaceRoot);
+  let authorized: HarnessAuthorizedPath | null;
+  try {
+    authorized = await deps.authorize(operation, { allowMissing: false });
+  } catch {
+    throw new HarnessServiceError("unavailable", "Stored operation directory is missing or inaccessible");
+  }
+  if (!authorized || authorized.resourceId !== state.operationDir) {
+    throw new HarnessServiceError("unavailable", "Stored operation directory is no longer authorized");
+  }
+  const fsx = deps.fs ?? fs;
+  try {
+    const stat = await fsx.stat(authorized.canonicalResourceId);
+    if (!stat.isDirectory()) throw new Error("not a directory");
+    await fsx.access(authorized.canonicalResourceId, constants.R_OK | constants.X_OK);
+  } catch {
+    throw new HarnessServiceError("unavailable", "Stored operation directory is missing or inaccessible");
+  }
+  if (state.queryScope !== null) {
+    for (const item of state.queryScope) {
+      let scope: HarnessAuthorizedPath | null;
+      try {
+        scope = await deps.authorize(path.resolve(deps.workspaceRoot, item), { allowMissing: true });
+      } catch {
+        throw new HarnessServiceError("unavailable", `Stored query scope is inaccessible: ${item}`);
+      }
+      if (!scope || scope.resourceId !== item) {
+        throw new HarnessServiceError("unavailable", `Stored query scope is no longer authorized: ${item}`);
+      }
+    }
+  }
+  deps.assertCurrent?.();
+  return { operationDir: state.operationDir, queryScope: state.queryScope === null ? null : [...state.queryScope], revision: state.revision };
+}
+
 export async function selectOperationDir(
   state: HarnessWorkContextState,
   params: ContextSelectParams,
@@ -134,16 +185,24 @@ export async function selectOperationDir(
     throw new HarnessServiceError("invalid-params", "context.select requires a non-empty path");
   }
   assertExpectedRevision(state, params.expectedRevision);
+  const revision = state.revision;
+  deps.assertCurrent?.();
   const absolute = resolveRelativeToRoot(deps.workspaceRoot, params.path);
   const authorized = await deps.authorize(absolute, { allowMissing: false });
   if (!authorized) {
     throw new HarnessServiceError("forbidden", `path is outside the authorized workspace scope: ${params.path}`);
   }
-  const stat = await (deps.fs ?? fs).stat(absolute).catch(() => null);
+  const stat = await (deps.fs ?? fs).stat(authorized.canonicalResourceId).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  });
   if (!stat?.isDirectory()) {
     throw new HarnessServiceError("invalid-params", `not a directory: ${params.path}`);
   }
-  state.operationDir = toRelativeRoot(deps.workspaceRoot, absolute);
+  deps.assertCurrent?.();
+  assertExpectedRevision(state, revision);
+  state.operationDir = authorized.resourceId;
   state.revision += 1;
   return result(state, deps.workspaceRoot);
 }
@@ -157,6 +216,8 @@ export async function setQueryScope(
     throw new HarnessServiceError("invalid-params", "context.scope requires a paths array");
   }
   assertExpectedRevision(state, params.expectedRevision);
+  const revision = state.revision;
+  deps.assertCurrent?.();
   if (params.paths.length === 0) {
     state.queryScope = null;
     state.revision += 1;
@@ -174,22 +235,28 @@ export async function setQueryScope(
     if (!authorized) {
       throw new HarnessServiceError("forbidden", `path is outside the authorized workspace scope: ${candidate}`);
     }
-    resolved.push(toRelativeRoot(deps.workspaceRoot, absolute));
+    resolved.push(authorized.resourceId);
   }
-  state.queryScope = resolved;
+  deps.assertCurrent?.();
+  assertExpectedRevision(state, revision);
+  state.queryScope = [...new Set(resolved)];
   state.revision += 1;
   return result(state, deps.workspaceRoot);
 }
 
-export function resetWorkContext(
+export async function resetWorkContext(
   state: HarnessWorkContextState,
   params: ContextResetParams,
   deps: WorkContextDeps,
-): ContextGetResult {
+): Promise<ContextGetResult> {
   assertExpectedRevision(state, params.expectedRevision);
-  state.operationDir = toRelativeRoot(deps.workspaceRoot, deps.sessionRoot);
-  state.queryScope = null;
-  state.revision += 1;
+  const revision = state.revision;
+  const candidate = { ...state, queryScope: null };
+  // Revalidate a launch directory that may have been deleted, replaced or revoked.
+  await selectOperationDir(candidate, { path: deps.sessionRoot, expectedRevision: revision }, deps);
+  deps.assertCurrent?.();
+  assertExpectedRevision(state, revision);
+  Object.assign(state, candidate);
   return result(state, deps.workspaceRoot);
 }
 
@@ -199,6 +266,11 @@ export async function discoverProjects(
 ): Promise<ContextDiscoverResult> {
   const fsx = deps.fs ?? fs;
   const now = deps.now ?? Date.now;
+  for (const [name, value] of [["depth", params.depth], ["maxResults", params.maxResults]] as const) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
+      throw new HarnessServiceError("invalid-params", `${name} must be a positive safe integer`);
+    }
+  }
   const depth = Math.max(1, Math.min(DISCOVER_MAX_DEPTH, Math.trunc(params.depth ?? DISCOVER_MAX_DEPTH)));
   const maxResults = Math.max(1, Math.min(DISCOVER_MAX_CANDIDATES, Math.trunc(params.maxResults ?? 50)));
   const started = now();
@@ -219,10 +291,15 @@ export async function discoverProjects(
       break;
     }
     const { dir, rel, depth: level } = queue.shift()!;
+    deps.assertCurrent?.();
+    const authorized = await deps.authorize(dir, { allowMissing: false });
+    if (!authorized) continue;
+    deps.assertCurrent?.();
     let dirents;
     try {
-      dirents = await fsx.readdir(dir, { withFileTypes: true });
+      dirents = await fsx.readdir(authorized.canonicalResourceId, { withFileTypes: true });
     } catch {
+      truncated = true;
       continue;
     }
     const names = new Set(dirents.map((entry) => entry.name));

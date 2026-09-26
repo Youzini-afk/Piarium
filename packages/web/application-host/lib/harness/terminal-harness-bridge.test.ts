@@ -86,40 +86,49 @@ describe("harness terminal runtime bridge", () => {
     });
     try {
       const started = await supervisor.exec("read line", { waitMs: 5 });
-      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
+      expect(started.kind === "background" || started.kind === "preparing").toBe(true);
+      if (started.kind !== "background" && started.kind !== "preparing") throw new Error("expected a pending shell command");
+      let shellId = started.kind === "background" ? started.id : undefined;
+      const deadline = Date.now() + 5_000;
+      while (!shellId) {
+        shellId = (await supervisor.read(started.id)).shellId;
+        if (!shellId && Date.now() > deadline) throw new Error("shell did not finish preparation");
+        if (!shellId) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(shellId).toBe("sh_1");
       expect(processes).toHaveLength(1);
-      expect(runtime.inspectSession("sh_1")).toMatchObject({
+      expect(runtime.inspectSession(shellId)).toMatchObject({
         owner: "harness",
         retainWhenDetached: true,
         status: "running",
       });
 
-      const attached = runtime.attachTerminalSession("sh_1");
-      expect(attached?.id).toBe("sh_1");
+      const attached = runtime.attachTerminalSession(shellId);
+      expect(attached?.id).toBe(shellId);
       const view: string[] = [];
       attached?.onData((data) => { view.push(data); });
 
       const later = "user typed this\n";
       attached?.write(later);
       expect(processes[0]?.writes).toContain(later);
-      expect(await supervisor.write("sh_1", "agent-input")).toBe(true);
+      expect(await supervisor.write(shellId, "agent-input")).toBe(true);
       expect(processes[0]?.writes).toContain("agent-input");
 
       processes[0]?.emitData("user typed this\n");
       await new Promise((resolve) => setTimeout(resolve, 10));
-      const observed = await supervisor.read("sh_1");
+      const observed = await supervisor.read(shellId);
       expect(observed.text).toContain("user typed this");
       expect(observed.running).toBe(true);
       expect(view.join("")).toContain("user typed this");
 
       const next = await supervisor.exec("echo later", { waitMs: 50 });
       expect(processes).toHaveLength(2);
-      expect(runtime.inspectSession("sh_1")?.status).toBe("running");
-      expect(next.kind === "completed" || next.kind === "background").toBe(true);
+      expect(runtime.inspectSession(shellId)?.status).toBe("running");
+      expect(next.kind === "completed" || next.kind === "background" || next.kind === "preparing").toBe(true);
 
       processes[0]?.emitExit(0);
       await new Promise((resolve) => setTimeout(resolve, 10));
-      await expect(supervisor.read("sh_1")).resolves.toMatchObject({ running: false, exitCode: 0 });
+      await expect(supervisor.read(shellId)).resolves.toMatchObject({ running: false, exitCode: 0 });
     } finally {
       await supervisor.dispose();
       outputStore.dispose();

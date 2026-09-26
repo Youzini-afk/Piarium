@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +15,17 @@ import {
 import { createOutputStore } from "./output-store.js";
 
 const EMPTY_DISCOVERED: DiscoveredShells = {};
+type TestSupervisor = ReturnType<typeof createShellSupervisor>;
+
+const waitForRuntimeShellId = async (supervisor: TestSupervisor, id: string): Promise<string> => {
+  if (id.startsWith("sh_")) return id;
+  let shellId: string | undefined;
+  await vi.waitFor(async () => {
+    shellId = (await supervisor.read(id)).shellId;
+    expect(shellId).toMatch(/^sh_/);
+  });
+  return shellId!;
+};
 
 describe("selectInterpreter", () => {
   it("returns remote on remote=true regardless of platform", () => {
@@ -211,6 +222,7 @@ describe("background shell output", () => {
   it("keeps collecting output and observes the exit sentinel after a command backgrounds", async () => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const largeChunk = "x".repeat(40_000);
     const process: PtyProcess = {
       kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
       onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
@@ -224,9 +236,9 @@ describe("background shell output", () => {
         }
         const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
         if (!token) return;
-        queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\nfirst`); });
+        queueMicrotask(() => { for (const handler of dataHandlers) handler(`__VARIN_SENTINEL_${token}:B\n${largeChunk}`); });
         setTimeout(() => {
-          for (const handler of dataHandlers) handler(` second\n__VARIN_SENTINEL_${token}:C:/workspace\n__VARIN_SENTINEL_${token}:E:0\n`);
+          for (const handler of dataHandlers) handler(` tail-marker\n__VARIN_SENTINEL_${token}:C:/workspace\n__VARIN_SENTINEL_${token}:E:0\n`);
         }, 30);
       },
     };
@@ -246,16 +258,22 @@ describe("background shell output", () => {
     });
     try {
       const result = await supervisor.exec("slow command", { waitMs: 5 });
-      expect(result).toMatchObject({ kind: "background", id: "sh_1", outputSoFar: expect.stringContaining("first") });
-      expect(startedEvents).toHaveLength(1);
+      expect(["preparing", "background"]).toContain(result.kind);
+      if (result.kind !== "preparing" && result.kind !== "background") throw new Error("expected a pending shell execution");
+      const shellId = await waitForRuntimeShellId(supervisor, result.id);
+      await vi.waitFor(() => expect(startedEvents).toHaveLength(1));
       expect(startedEvents[0]).toMatchObject({ command: "slow command", commandRunId: "sh_1", executionId: expect.any(String) });
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(completedEvents).toHaveLength(1);
       expect(completedEvents[0]).toMatchObject({ command: "slow command", commandRunId: "sh_1", exitCode: 0, cancelled: false });
-      const read = await supervisor.read("sh_1");
-      expect(read.text).toContain("first second");
+      expect(completedEvents[0]?.outputHandle).toMatch(/^out_/);
+      const read = await supervisor.read(shellId, 0, 100_000);
+      expect(read.text).toContain(largeChunk);
+      expect(read.text).toContain("tail-marker");
       expect(read).toMatchObject({ running: false, exitCode: 0 });
       expect(read.text).not.toContain("VARIN_SENTINEL");
+      const byHandle = await supervisor.read(completedEvents[0]!.outputHandle!, 0, 100_000);
+      expect(byHandle.text).toBe(read.text);
     } finally {
       await supervisor.dispose();
       outputStore.dispose();
@@ -287,7 +305,7 @@ describe("background shell output", () => {
     });
     try {
       const started = await supervisor.exec("never completes", { waitMs: 5 });
-      expect(started).toMatchObject({ kind: "background", id: "sh_1" });
+      expect(["preparing", "background"]).toContain(started.kind);
       expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
       expect(supervisor.hasActiveCommandAt(join(workspace, "nested-worktree"))).toBe(true);
       expect(supervisor.hasActiveCommandAt(join(workspace, "..", "unrelated-worktree"))).toBe(false);
@@ -415,6 +433,73 @@ describe("shell respawn working directory", () => {
     }
   });
 
+  it("does not mark a new work-context anchor applied until the shell confirms the directory switch", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "shell-anchor-confirm-"));
+    const selected = join(workspace, "selected");
+    mkdirSync(selected);
+    const dataHandlers = new Set<(data: string) => void>();
+    const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+    const writes: string[] = [];
+    let selectedCwdFailures = 0;
+    const process: PtyProcess = {
+      kill: () => { for (const handler of exitHandlers) handler({ exitCode: 0, signal: 0 }); },
+      onData: (handler) => { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+      onExit: (handler) => { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+      resize: () => undefined,
+      write: (data) => {
+        writes.push(data);
+        const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
+        if (ready) {
+          queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
+          return;
+        }
+        const token = data.match(/__VARIN_SENTINEL_([0-9a-f]+):B/)?.[1];
+        if (!token) return;
+        const failedSwitch = data.includes(`cd -- '${selected}' &&`) && selectedCwdFailures++ === 0;
+        const reportedCwd = failedSwitch ? workspace : data.includes(`cd -- '${selected}' &&`) ? selected : workspace;
+        queueMicrotask(() => {
+          for (const handler of dataHandlers) {
+            handler([
+              ...(failedSwitch ? [] : [`__VARIN_SENTINEL_${token}:B`]),
+              ...(failedSwitch ? [] : ["payload-ran"]),
+              `__VARIN_SENTINEL_${token}:C:${reportedCwd}`,
+              `__VARIN_SENTINEL_${token}:E:${failedSwitch ? 1 : 0}`,
+              "",
+            ].join("\n"));
+          }
+        });
+      },
+    };
+    const outputStore = createOutputStore();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "anchor-confirmation",
+      cwd: workspace,
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      supervisor.setAnchorCwd(workspace);
+      await expect(supervisor.exec("initial", { waitMs: 1000 })).resolves.toMatchObject({
+        kind: "completed", exitCode: 0, cwd: workspace,
+      });
+
+      supervisor.setAnchorCwd(selected);
+      const rejectedSwitch = await supervisor.exec("must-not-run", { waitMs: 1000 });
+      expect(rejectedSwitch).toMatchObject({ kind: "completed", exitCode: 1, cwd: workspace });
+      if (rejectedSwitch.kind === "completed") expect(rejectedSwitch.stdout.trim()).toBe("");
+
+      const retriedSwitch = await supervisor.exec("after-retry", { waitMs: 1000 });
+      expect(retriedSwitch).toMatchObject({ kind: "completed", exitCode: 0, cwd: selected });
+      if (retriedSwitch.kind === "completed") expect(retriedSwitch.stdout.trim()).toBe("payload-ran");
+      expect(writes.filter((write) => write.includes(`cd -- '${selected}' &&`))).toHaveLength(2);
+    } finally {
+      await supervisor.dispose();
+      outputStore.dispose();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes git-bash cwd state and recovers after killing the background shell", async () => {
     if (process.platform !== "win32") return;
     const workspace = mkdtempSync(join(tmpdir(), "shell-cwd-"));
@@ -434,10 +519,11 @@ describe("shell respawn working directory", () => {
       expect(first).toMatchObject({ kind: "completed", exitCode: 0, cwd: workspace });
 
       const background = await supervisor.exec("grep forever", { waitMs: 5 });
-      expect(background).toMatchObject({ kind: "background", cwd: workspace });
+      expect(["preparing", "background"]).toContain(background.kind);
       expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
-      if (background.kind !== "background") throw new Error("expected background shell");
-      await expect(supervisor.kill(background.id)).resolves.toBe(true);
+      if (background.kind !== "background" && background.kind !== "preparing") throw new Error("expected pending shell execution");
+      const backgroundShellId = await waitForRuntimeShellId(supervisor, background.id);
+      await expect(supervisor.kill(backgroundShellId)).resolves.toBe(true);
 
       const recovered = await supervisor.exec("echo ok", { waitMs: 1000 });
       expect(recovered).toMatchObject({ kind: "completed", exitCode: 0, cwd: workspace });
@@ -646,6 +732,7 @@ describe("shell-supervisor disposal protection", () => {
     failSecondExitRegistration?: boolean;
     killThrows?: boolean;
     killEmitsExit?: boolean;
+    readyDelayMs?: number;
   } = {}): PtyProcess & { emitData: (data: string) => void; emitExit: () => void } => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
@@ -669,14 +756,18 @@ describe("shell-supervisor disposal protection", () => {
       resize: () => undefined,
       write: (data) => {
         const ready = data.match(/(__VARIN_READY_[0-9a-f]+__)/)?.[1];
-        if (ready) queueMicrotask(() => { for (const handler of dataHandlers) handler(`${ready}\n`); });
+        if (ready) {
+          const emitReady = () => { for (const handler of dataHandlers) handler(`${ready}\n`); };
+          if (options.readyDelayMs) setTimeout(emitReady, options.readyDelayMs);
+          else queueMicrotask(emitReady);
+        }
       },
     };
   };
 
-  it("returns a real identity for waitMs zero and waits for output without locking controls", async () => {
+  it("returns a queryable identity for waitMs zero and waits for output without locking controls", async () => {
     const outputStore = createOutputStore();
-    const process = controlledProcess();
+    const process = controlledProcess({ readyDelayMs: 10 });
     let starts = 0;
     const supervisor = createShellSupervisor({
       interpreter: { kind: "bash", command: "bash", args: [], env: {} },
@@ -687,30 +778,38 @@ describe("shell-supervisor disposal protection", () => {
     });
     try {
       const started = await supervisor.exec("long command", { waitMs: 0, toolCallId: "call-1" });
-      expect(started).toMatchObject({ kind: "background", id: "sh_1", waitedMs: expect.any(Number), toolCallId: "call-1" });
-      if (started.kind !== "background") throw new Error("expected background shell");
+      expect(started).toMatchObject({ kind: "preparing", id: expect.stringMatching(/^exec_[0-9a-f]{32}$/u), waitedMs: expect.any(Number), toolCallId: "call-1" });
+      if (started.kind !== "preparing") throw new Error("expected accepted execution identity");
+      await expect(supervisor.write(started.id, "too early\n")).resolves.toBe(false);
+      await expect(supervisor.kill(started.id)).resolves.toBe(false);
       await expect(supervisor.exec("long command", { waitMs: 0, toolCallId: "call-1" })).resolves.toEqual(started);
-      expect(starts).toBe(1);
+      const shellId = await waitForRuntimeShellId(supervisor, started.id);
+      expect(shellId).toBe("sh_1");
+      await vi.waitFor(() => expect(starts).toBe(1));
+      await expect(supervisor.read(started.id)).resolves.toMatchObject({ running: true, shellId });
 
-      const newOutput = supervisor.waitForOutput(started.id, 0, 1_000);
-      await expect(supervisor.write(started.id, "input\n")).resolves.toBe(true);
-      process.emitData("new output\n");
+      const newOutput = supervisor.waitForOutput(shellId, 0, 1_000);
+      await expect(supervisor.write(shellId, "input\n")).resolves.toBe(true);
+      process.emitData("new output\nsecond line\n");
       await expect(newOutput).resolves.toBeUndefined();
-      const first = await supervisor.read(started.id);
+      const first = await supervisor.read(shellId);
       expect(first).toMatchObject({ running: true });
-      expect(first.text).toContain("new output");
-      await expect(supervisor.read("call-1")).resolves.toMatchObject({ shellId: "sh_1", text: expect.stringContaining("new output") });
+      expect(first.text).toBe("new output\nsecond line\n");
+      await expect(supervisor.read("call-1")).resolves.toMatchObject({ shellId, text: first.text });
+      await expect(supervisor.read(started.id)).resolves.toMatchObject({ shellId, text: first.text });
 
       const controller = new AbortController();
-      const cancelledWait = supervisor.waitForOutput(started.id, first.nextOffset, 1_000, controller.signal);
+      const cancelledWait = supervisor.waitForOutput(shellId, first.nextOffset, 1_000, controller.signal);
       controller.abort();
       await expect(cancelledWait).rejects.toThrow("Shell output wait aborted");
-      await expect(supervisor.read(started.id)).resolves.toMatchObject({ running: true });
+      await expect(supervisor.read(shellId)).resolves.toMatchObject({ running: true });
 
-      const exited = supervisor.waitForOutput(started.id, first.nextOffset, 1_000);
+      const exited = supervisor.waitForOutput(shellId, first.nextOffset, 1_000);
       process.emitExit();
       await expect(exited).resolves.toBeUndefined();
-      await expect(supervisor.read(started.id)).resolves.toMatchObject({ running: false, exitCode: 0 });
+      await expect(supervisor.read(started.id)).resolves.toMatchObject({
+        running: false, exitCode: 0, shellId, text: first.text, eof: true,
+      });
     } finally {
       await supervisor.dispose().catch(() => undefined);
       outputStore.dispose();
@@ -764,6 +863,39 @@ describe("shell-supervisor disposal protection", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return { command, outputStore, process, supervisor, workspace, get writerClosed() { return writerClosed; } };
   };
+
+  it("reports an accepted execution unavailable after its session supervisor is replaced", async () => {
+    const outputStore = createOutputStore();
+    const firstProcess = controlledProcess({ killEmitsExit: true });
+    const first = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "replaced-supervisor",
+      ptyProvider: { backend: "fake", spawn: () => firstProcess },
+    });
+    let executionId: string;
+    try {
+      const accepted = await first.exec("long command", { waitMs: 0, toolCallId: "call-old-host" });
+      if (accepted.kind !== "preparing" && accepted.kind !== "background") throw new Error("expected a pending execution");
+      executionId = accepted.executionId!;
+      await first.dispose();
+      const replacement = createShellSupervisor({
+        interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+        outputStore,
+        sessionId: "replaced-supervisor",
+        ptyProvider: { backend: "fake", spawn: () => controlledProcess() },
+      });
+      try {
+        await expect(replacement.read(executionId)).resolves.toMatchObject({
+          running: false,
+          unavailable: expect.stringContaining("not retained"),
+        });
+      } finally { await replacement.dispose(); }
+    } finally {
+      await first.dispose().catch(() => undefined);
+      outputStore.dispose();
+    }
+  });
 
   it("keeps the writer and active directory protected when exit confirmation fails", async () => {
     const state = await setup({ failSecondExitRegistration: true });
@@ -1007,6 +1139,95 @@ describe("RR3 command payload framing and execution identity", () => {
       await supervisor.dispose();
       outputStore.dispose();
     }
+  });
+
+  it("recovers full output by call and execution ids, including before lifecycle acknowledgement", async () => {
+    const body = "x".repeat(70_000) + "tail-marker";
+    const { process } = fakeShell(() => [body, "0"]);
+    const outputStore = createOutputStore();
+    let finish!: () => void;
+    const finished = new Promise<void>((r) => { finish = r; });
+    let completion!: ShellCommandCompletedEvent;
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore, sessionId: "recover-full", ptyProvider: { backend: "fake", spawn: () => process },
+      commandLifecycle: { completed: (event) => { completion = event; return finished; } },
+    });
+    try {
+      const pending = supervisor.exec("produce output", { toolCallId: "call-full", waitMs: 1000 });
+      void pending.catch(() => undefined);
+      await vi.waitFor(() => expect(completion).toBeDefined());
+      const byCall = await supervisor.read("call-full", 0, 100_000);
+      expect(byCall.running).toBe(false);
+      expect(byCall.text).toContain(body);
+      const byExecution = await supervisor.read(completion.executionId, 0, 100_000);
+      expect(byExecution.text).toBe(byCall.text);
+      const completed = await pending;
+      if (completed.kind !== "completed" || !completed.handle) throw new Error("expected a paged output handle");
+      expect(completed.handle).toMatch(/^out_/);
+      let offset = 0;
+      let restored = "";
+      while (offset < Buffer.byteLength(body, "utf8")) {
+        const page = await supervisor.read(completed.handle, offset, 32_768);
+        restored += page.text;
+        offset = page.nextOffset;
+      }
+      expect(restored).toBe(byCall.text);
+      finish();
+      await expect(pending).resolves.toMatchObject({ kind: "completed", exitCode: 0, handle: completed.handle });
+      outputStore.dropSession("recover-full");
+      await expect(supervisor.read(completed.handle)).rejects.toThrow(/Output expired/);
+      await expect(supervisor.read("call-full")).rejects.toThrow(/Output expired/);
+    } finally { finish(); await supervisor.dispose(); outputStore.dispose(); }
+  });
+
+  it("returns an independent preparing identity when the accepted wait budget expires during startup", async () => {
+    const largeOutput = `payload-output\n${"z".repeat(40_000)}tail-marker`;
+    const { process } = fakeShell(() => [largeOutput, "0"]);
+    const outputStore = createOutputStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} }, outputStore,
+      sessionId: "recover-startup", ptyProvider: { backend: "fake", spawn: () => process },
+      registerWriter: async () => { await gate; return { close: async () => undefined }; },
+    });
+    try {
+      const observedAt = Date.now();
+      const pending = supervisor.exec("echo later", { toolCallId: "call-startup", waitMs: 20 });
+      const preparation = await pending;
+      expect(preparation).toMatchObject({
+        kind: "preparing",
+        id: expect.stringMatching(/^exec_[0-9a-f]{32}$/),
+        executionId: expect.stringMatching(/^exec_[0-9a-f]{32}$/),
+        toolCallId: "call-startup",
+      });
+      if (preparation.kind !== "preparing") throw new Error("expected a preparation identity");
+      const responseElapsedMs = Date.now() - observedAt;
+      expect(preparation.id).toBe(preparation.executionId);
+      expect(preparation.waitedMs).toBeGreaterThanOrEqual(20);
+      expect(preparation.waitedMs).toBe(preparation.timing.detachedAt! - preparation.timing.acceptedAt);
+      expect(responseElapsedMs).toBeLessThan(1000);
+      expect(preparation.timing.acceptedAt).toBeLessThanOrEqual(preparation.timing.detachedAt!);
+      expect(preparation.timing.detachedAt).toBeLessThanOrEqual(preparation.timing.respondedAt!);
+      expect(await supervisor.read("call-startup")).toMatchObject({ running: true, phase: "preparing", eof: false });
+      expect(await supervisor.read(preparation.id)).toMatchObject({ running: true, phase: "preparing", executionId: preparation.id });
+      await expect(supervisor.write(preparation.id, "input\n")).resolves.toBe(false);
+      await expect(supervisor.kill(preparation.id)).resolves.toBe(false);
+      await expect(supervisor.exec("echo later", { toolCallId: "call-startup", waitMs: 20 })).resolves.toEqual(preparation);
+      release();
+      await vi.waitFor(async () => {
+        await expect(supervisor.read(preparation.id)).resolves.toMatchObject({ running: false, exitCode: 0 });
+      });
+      const restored = await supervisor.read(preparation.id, 0, 100_000);
+      expect(restored.text).toContain(largeOutput);
+      expect(restored.text).toContain("tail-marker");
+      expect(await supervisor.read("call-startup", 0, 100_000)).toMatchObject({
+        running: false,
+        exitCode: 0,
+        text: restored.text,
+      });
+    } finally { release(); await supervisor.dispose(); outputStore.dispose(); }
   });
 
   it("reports an unsettled accepted execution as running, not 'not found'", async () => {

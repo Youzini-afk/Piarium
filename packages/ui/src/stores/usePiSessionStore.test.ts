@@ -42,6 +42,7 @@ const snapshot = (sessionId: string, cwd = 'D:/work'): SessionSnapshot => ({
   leafId: null,
   pendingMessageCount: 0,
   retryAttempt: 0,
+  runId: `${sessionId}-run`,
   sessionId,
   steering: [],
   steeringMode: 'all',
@@ -126,6 +127,16 @@ const stats = (sessionId: string, tokens = 1200): SessionStats => ({
   userMessages: 1,
 });
 
+const reconciled = (
+  sessionId: string,
+  current: SessionSnapshot,
+  entries?: SessionEntriesResult,
+) => ({
+  entries: entries === undefined ? {} : { [entries.scope]: entries },
+  snapshot: current,
+  stats: stats(sessionId),
+});
+
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -151,6 +162,7 @@ class FakeRuntime implements PiSessionStoreRuntime {
   readonly #eventListeners = new Set<(event: RuntimeEventEnvelope) => void>();
   readonly #reconnectedListeners = new Set<(connection: PiRuntimeConnection) => void>();
   readonly #gapListeners = new Set<(gap: RuntimeSequenceGap) => void>();
+  readonly #protocolErrorListeners = new Set<(error: Error) => void>();
   #nextSeq = 0;
   handler: (method: RuntimeMethod, params: unknown) => unknown | Promise<unknown> = () => {
     throw new Error('Unhandled fake runtime request');
@@ -185,11 +197,12 @@ class FakeRuntime implements PiSessionStoreRuntime {
     sessionId?: string,
     seq?: number,
   ) {
+    this.#nextSeq = Math.max(this.#nextSeq, seq ?? this.#nextSeq + 1);
     this.emit({
       data,
       event,
       kind: 'event',
-      seq: seq ?? ++this.#nextSeq,
+      seq: seq ?? this.#nextSeq,
       source: {
         role: sessionId === undefined ? 'catalog' : 'session',
         runtimeGeneration: 1,
@@ -207,19 +220,28 @@ class FakeRuntime implements PiSessionStoreRuntime {
     }
   }
 
-  sequenceGap(sessionId: string) {
+  sequenceGap(sessionId?: string) {
     for (const listener of this.#gapListeners) {
       listener({
         expected: 5,
         received: 9,
         source: {
-          role: 'session',
+          role: sessionId === undefined ? 'catalog' : 'session',
           runtimeGeneration: 1,
-          sessionId,
-          workerId: sessionId,
+          ...(sessionId === undefined ? {} : { sessionId }),
+          workerId: sessionId ?? 'catalog',
         },
       });
     }
+  }
+
+  protocolError() {
+    for (const listener of this.#protocolErrorListeners) listener(new Error('bad event frame'));
+  }
+
+  subscribeProtocolError(listener: (error: Error) => void) {
+    this.#protocolErrorListeners.add(listener);
+    return () => this.#protocolErrorListeners.delete(listener);
   }
 
   subscribeChanged(listener: () => void) {
@@ -1032,8 +1054,9 @@ describe('Pi session store', () => {
     runtime.handler = (method) => {
       if (method === 'session.list') return [];
       if (method === 'agent.abort') throw new DOMException('This operation was aborted', 'AbortError');
-      if (method === 'session.snapshot') return { ...snapshot('session-abort-error'), busy: false };
-      if (method === 'session.stats') return stats('session-abort-error');
+      if (method === 'session.reconcile') return reconciled(
+        'session-abort-error', { ...snapshot('session-abort-error'), busy: false },
+      );
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
@@ -1059,6 +1082,129 @@ describe('Pi session store', () => {
     expect(record?.snapshot?.busy).toBe(false);
     expect(record?.liveAssistant).toBeUndefined();
     expect(record?.syncState).toBe('synced');
+  });
+
+  test('a late stop acknowledgement cannot resurrect stopping after settlement or a new run', async () => {
+    const runtime = new FakeRuntime();
+    const gate = deferred<{ aborted: boolean }>();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return gate.promise;
+      throw new Error('Unexpected ' + method);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-stop-late';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, isStreaming: true }, sessionId);
+    const stopping = store.getState().abort(sessionId);
+    await flushAsync();
+    runtime.event('agent.event', { event: positionedAgentEvent({ type: 'agent_settled' }), sessionId }, sessionId);
+    runtime.event('agent.event', { event: positionedAgentEvent({ type: 'agent_start' }), sessionId }, sessionId);
+    runtime.event('agent.event', { event: { type: 'message_start', message: assistant('new run', 'pending') }, sessionId }, sessionId);
+    gate.resolve({ aborted: true });
+    await stopping;
+    expect(store.getState().records[sessionId]?.stopState).toBeUndefined();
+    expect(store.getState().records[sessionId]?.stoppedAssistant).toBeUndefined();
+    expect(store.getState().records[sessionId]?.liveAssistant?.content).toEqual([{ text: 'new run', type: 'text' }]);
+  });
+
+  test('a late stop failure after reset cannot erase a new stop request', async () => {
+    const runtime = new FakeRuntime();
+    const oldGate = deferred<{ aborted: boolean }>();
+    const newGate = deferred<{ aborted: boolean }>();
+    let calls = 0;
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return ++calls === 1 ? oldGate.promise : newGate.promise;
+      throw new Error('Unexpected ' + method);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-stop-reset-reply';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    const oldStop = store.getState().abort(sessionId).catch(() => false);
+    await flushAsync();
+    store.getState().reset();
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    const newStop = store.getState().abort(sessionId);
+    await flushAsync();
+    oldGate.reject(new Error('old transport failure'));
+    await oldStop;
+    expect(store.getState().records[sessionId]?.stopState).toBe('requested');
+    expect(store.getState().lastError).toBeNull();
+    newGate.resolve({ aborted: true }); await newStop;
+  });
+
+  test('a stop request carries the observed run identity to the host', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return { aborted: false };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-targeted-stop';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, runId: 'run-one' }, sessionId);
+    expect(await store.getState().abort(sessionId)).toBe(false);
+    expect(runtime.calls.find((call) => call.method === 'agent.abort')?.params).toEqual({
+      expectedRunId: 'run-one', sessionId,
+    });
+    expect(store.getState().records[sessionId]?.stopState).toBeUndefined();
+  });
+
+  test('stop waits for a known run identity instead of cancelling whichever run is current', async () => {
+    const runtime = new FakeRuntime();
+    const snapshotGate = deferred<SessionSnapshot>();
+    const sessionId = 'session-stop-unidentified';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return snapshotGate.promise.then((value) => reconciled(sessionId, value));
+      if (method === 'agent.abort') return { aborted: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', {
+      ...snapshot(sessionId), busy: true, runId: undefined,
+    }, sessionId);
+    expect(await store.getState().abort(sessionId)).toBe(false);
+    await flushAsync();
+    expect(runtime.calls.filter((call) => call.method === 'agent.abort')).toHaveLength(0);
+    expect(store.getState().records[sessionId]?.syncState).toBe('catchingUp');
+    snapshotGate.resolve({ ...snapshot(sessionId), busy: true, runId: 'run-confirmed' });
+    await flushAsync();
+    await flushAsync();
+    expect(store.getState().records[sessionId]?.snapshot?.runId).toBe('run-confirmed');
+    expect(await store.getState().abort(sessionId)).toBe(true);
+    expect(runtime.calls.find((call) => call.method === 'agent.abort')?.params).toEqual({
+      expectedRunId: 'run-confirmed', sessionId,
+    });
+  });
+
+  test('a late settled event from the prior run cannot idle the current run', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-stale-settle';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, runId: 'run-old' }, sessionId);
+    runtime.event('agent.event', {
+      event: { ...positionedAgentEvent({ type: 'agent_start' }), runId: 'run-new' }, sessionId,
+    }, sessionId);
+    runtime.event('agent.event', {
+      event: { message: assistant('new run'), runId: 'run-new', type: 'message_start' }, sessionId,
+    }, sessionId);
+    runtime.event('agent.event', {
+      event: { ...positionedAgentEvent({ type: 'agent_settled' }), runId: 'run-old' }, sessionId,
+    }, sessionId);
+    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(true);
+    expect(store.getState().records[sessionId]?.snapshot?.runId).toBe('run-new');
+    expect(store.getState().records[sessionId]?.liveAssistant?.content).toEqual([{ text: 'new run', type: 'text' }]);
   });
 
   test('a stale stop marker never leaks into the next run', async () => {
@@ -1128,8 +1274,7 @@ describe('Pi session store', () => {
     const snapshotGate = deferred<SessionSnapshot>();
     runtime.handler = (method) => {
       if (method === 'session.list') return [];
-      if (method === 'session.snapshot') return snapshotGate.promise;
-      if (method === 'session.stats') return stats(sessionId);
+      if (method === 'session.reconcile') return snapshotGate.promise.then((value) => reconciled(sessionId, value));
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
@@ -1144,7 +1289,7 @@ describe('Pi session store', () => {
 
     runtime.reconnect();
     await flushAsync();
-    expect(runtime.calls.map((call) => call.method)).toContain('session.snapshot');
+    expect(runtime.calls.map((call) => call.method)).toContain('session.reconcile');
     expect(store.getState().records[sessionId]?.syncState).toBe('catchingUp');
 
     // While the snapshot RPC is in flight the socket already replays events:
@@ -1166,6 +1311,7 @@ describe('Pi session store', () => {
       ...snapshot(sessionId),
       busy: true,
       eventWatermark: 6,
+      eventWorkerId: sessionId,
       isStreaming: true,
       liveAssistant: assistant('at snapshot', 'pending'),
     });
@@ -1190,9 +1336,14 @@ describe('Pi session store', () => {
     let snapshotReads = 0;
     runtime.handler = (method, params) => {
       if (method === 'session.list') return [];
-      if (method === 'session.snapshot') {
+      if (method === 'session.reconcile') {
         snapshotReads += 1;
-        return { ...snapshot(sessionId), busy: false, isStreaming: false, eventWatermark: 9 };
+        return reconciled(sessionId,
+          { ...snapshot(sessionId), busy: false, isStreaming: false, eventWatermark: 9 },
+          branch(sessionId, [{
+            id: 'entry-final', parentId: null, timestamp: '2026-09-26T00:00:00.000Z',
+            type: 'message', message: { ...assistant('final answer', 'stop'), timestamp: 42 },
+          }]));
       }
       if (method === 'session.entries') {
         const scope = (params as { scope?: string }).scope ?? 'branch';
@@ -1209,7 +1360,6 @@ describe('Pi session store', () => {
           sessionId,
         };
       }
-      if (method === 'session.stats') return stats(sessionId);
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
@@ -1240,13 +1390,43 @@ describe('Pi session store', () => {
     expect(record?.syncState).toBe('synced');
   });
 
+  test('entries read after a busy snapshot suppress an assistant already persisted', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-persisted-during-sync';
+    const finalMessage = { ...assistant('complete answer', 'stop'), timestamp: 42 };
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return reconciled(sessionId, {
+        ...snapshot(sessionId), busy: true, eventWatermark: 5, eventWorkerId: sessionId,
+        liveAssistant: { ...assistant('partial'), timestamp: 42 },
+      }, branch(sessionId, [{
+        id: 'entry-final', parentId: null, timestamp: '2026-09-26T00:00:00.000Z',
+        type: 'message', message: finalMessage,
+      }]));
+      if (method === 'session.entries') return branch(sessionId, [{
+        id: 'entry-final', parentId: null, timestamp: '2026-09-26T00:00:00.000Z',
+        type: 'message', message: finalMessage,
+      }]);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    await store.getState().refreshEntries(sessionId);
+    await store.getState().resyncSessions();
+    const record = store.getState().records[sessionId];
+    expect(record?.branchEntries?.entries.map((entry) => entry.id)).toEqual(['entry-final']);
+    expect(record?.liveAssistant).toBeUndefined();
+  });
+
   test('a detected sequence gap triggers the same authoritative resync', async () => {
     const runtime = new FakeRuntime();
     const sessionId = 'session-gap';
     runtime.handler = (method) => {
       if (method === 'session.list') return [];
-      if (method === 'session.snapshot') return { ...snapshot(sessionId), busy: false, eventWatermark: 12 };
-      if (method === 'session.stats') return stats(sessionId);
+      if (method === 'session.reconcile') return reconciled(
+        sessionId, { ...snapshot(sessionId), busy: false, eventWatermark: 12 },
+      );
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
@@ -1261,7 +1441,134 @@ describe('Pi session store', () => {
     const record = store.getState().records[sessionId];
     expect(record?.snapshot?.busy).toBe(false);
     expect(record?.syncState).toBe('synced');
-    expect(runtime.calls.map((call) => call.method)).toContain('session.snapshot');
+    expect(runtime.calls.map((call) => call.method)).toContain('session.reconcile');
+  });
+
+  test('a gap detected during a resync schedules another authoritative read', async () => {
+    const runtime = new FakeRuntime();
+    const firstSnapshot = deferred<SessionSnapshot>();
+    const sessionId = 'session-gap-during-sync';
+    let reads = 0;
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return ++reads === 1
+        ? firstSnapshot.promise.then((value) => reconciled(sessionId, value))
+        : reconciled(sessionId,
+          { ...snapshot(sessionId), busy: false, eventWatermark: 12, eventWorkerId: sessionId });
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    const first = store.getState().resyncSessions();
+    await flushAsync();
+    // The frame exposing a surface gap can come from the catalog; the missing
+    // frame's session is unknown, so every tracked session must be re-read.
+    runtime.sequenceGap();
+    await flushAsync();
+    firstSnapshot.resolve({ ...snapshot(sessionId), busy: true, eventWatermark: 8, eventWorkerId: sessionId });
+    await first;
+    await flushAsync();
+    expect(reads).toBe(2);
+    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(false);
+    expect(store.getState().records[sessionId]?.syncState).toBe('synced');
+  });
+
+  test('protocol anomalies trigger one bounded authoritative recovery while connected', async () => {
+    const runtime = new FakeRuntime();
+    const cut = deferred<SessionSnapshot>();
+    const sessionId = 'session-protocol-error';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return cut.promise.then((value) => reconciled(sessionId, value));
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    runtime.protocolError();
+    runtime.protocolError();
+    await flushAsync();
+    expect(runtime.calls.filter((call) => call.method === 'session.reconcile')).toHaveLength(1);
+    expect(store.getState().records[sessionId]?.syncState).toBe('catchingUp');
+    cut.resolve({ ...snapshot(sessionId), busy: false, eventWatermark: 5, eventWorkerId: sessionId });
+    await flushAsync();
+    expect(store.getState().records[sessionId]?.syncState).toBe('synced');
+    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(false);
+  });
+
+  test('a superseded resync cannot flush or mark the next resync stale after reset', async () => {
+    const runtime = new FakeRuntime();
+    const oldSnapshot = deferred<SessionSnapshot>();
+    const newSnapshot = deferred<SessionSnapshot>();
+    let reads = 0;
+    const sessionId = 'session-resync-reset';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return (++reads === 1 ? oldSnapshot.promise : newSnapshot.promise)
+        .then((value) => reconciled(sessionId, value));
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    const first = store.getState().resyncSessions();
+    await flushAsync();
+    store.getState().reset();
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    const second = store.getState().resyncSessions();
+    await flushAsync();
+    runtime.event('agent.event', {
+      event: { message: assistant('new stream'), type: 'message_start' }, sessionId,
+    }, sessionId, 8);
+    oldSnapshot.resolve({ ...snapshot(sessionId), busy: false, eventWatermark: 9, eventWorkerId: sessionId });
+    await first;
+    expect(store.getState().records[sessionId]?.syncState).toBe('catchingUp');
+    expect(store.getState().records[sessionId]?.liveAssistant).toBeUndefined();
+    newSnapshot.resolve({ ...snapshot(sessionId), busy: true, eventWatermark: 7, eventWorkerId: sessionId });
+    await second;
+    expect(store.getState().records[sessionId]?.syncState).toBe('synced');
+    expect(store.getState().records[sessionId]?.liveAssistant?.content).toEqual([{ text: 'new stream', type: 'text' }]);
+  });
+
+  test('a snapshot watermark never discards a newer worker stream with lower sequence numbers', async () => {
+    const runtime = new FakeRuntime();
+    const snapshotGate = deferred<SessionSnapshot>();
+    const sessionId = 'session-worker-swap';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.reconcile') return snapshotGate.promise.then((value) => reconciled(sessionId, value));
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', {
+      ...snapshot(sessionId), busy: true, runId: 'run-old',
+    }, sessionId, 4);
+    const syncing = store.getState().resyncSessions();
+    await flushAsync();
+    const emitNewWorker = (event: RuntimeEventEnvelope['event'], data: RuntimeEventEnvelope['data'], seq: number) => {
+      runtime.emit({
+        data, event, kind: 'event', seq,
+        source: { role: 'session', runtimeGeneration: 1, sessionId, workerId: 'worker-new' },
+        v: VARIN_PROTOCOL_VERSION,
+      } as RuntimeEventEnvelope);
+    };
+    emitNewWorker('session.snapshot', {
+      ...snapshot(sessionId), busy: true, runId: 'run-new',
+    }, 1);
+    emitNewWorker('agent.event', {
+      event: { message: assistant('new worker'), runId: 'run-new', type: 'message_start' }, sessionId,
+    }, 2);
+    snapshotGate.resolve({
+      ...snapshot(sessionId), busy: true, eventWatermark: 9,
+      eventWorkerId: sessionId, runId: 'run-old',
+    });
+    await syncing;
+    const record = store.getState().records[sessionId];
+    expect(record?.snapshot?.runId).toBe('run-new');
+    expect(record?.liveAssistant?.content).toEqual([{ text: 'new worker', type: 'text' }]);
   });
 
   test('executes extension commands through the active Pi session', async () => {

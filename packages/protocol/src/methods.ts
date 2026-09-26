@@ -49,9 +49,9 @@ import type {
   ProviderConfigScope,
   ProviderModelDiscoveryResult,
 } from "./provider.js";
-import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
+import type { PiSessionEntry, SessionEntriesResult, SessionReconcileResult, SessionTreeResult } from "./session.js";
 import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
-import type { HarnessRespondParams } from "./harness.js";
+import type { HarnessRespondParams, PiWorkContextCommit, PiWorkContextSnapshot } from "./harness.js";
 import type {
   HarnessEmbedParams,
   HarnessEmbedResult,
@@ -130,7 +130,7 @@ export interface HostMethodMap {
     result: SessionSnapshot;
   };
   "agent.abort": {
-    params: { sessionId: string };
+    params: { sessionId: string; expectedRunId?: string };
     result: { aborted: boolean };
   };
   /** Run an explicit Pi context compaction through the owning session. */
@@ -411,6 +411,15 @@ export interface HostMethodMap {
     params: { mutation: PiSessionFeatureMutation; sessionId: string };
     result: PiSessionFeatureState;
   };
+  /** Host-only, out-of-band journal access while an Agent tool awaits harness.respond. */
+  "session.workContext.read": {
+    params: { sessionId: string };
+    result: PiWorkContextSnapshot;
+  };
+  "session.workContext.commit": {
+    params: PiWorkContextCommit;
+    result: PiWorkContextSnapshot;
+  };
   "session.navigate": {
     params: { sessionId: string; summarize?: boolean; targetId: string };
     result: { cancelled: boolean; editorText?: string; snapshot: SessionSnapshot };
@@ -496,6 +505,10 @@ export interface HostMethodMap {
   "session.snapshot": {
     params: { sessionId: string };
     result: SessionSnapshot;
+  };
+  "session.reconcile": {
+    params: { scopes: Array<"branch" | "all">; sessionId: string };
+    result: SessionReconcileResult;
   };
   "session.stats": {
     params: { sessionId: string };

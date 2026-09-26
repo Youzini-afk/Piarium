@@ -544,6 +544,8 @@ export interface HostHandshakeParams {
     harnessDocumentRead?: boolean;
     /** The application Host can resolve native Pi find/ls paths against editor drafts. */
     harnessDocumentPathOverlay?: boolean;
+    /** Host-owned operation-directory and query-scope services. */
+    harnessWorkContext?: boolean;
     /** The application Host permits session-local reader models over its guarded web.fetch service. */
     harnessWebRead?: boolean;
     /** The application Host provides web search, including its keyless default. */
@@ -640,12 +642,16 @@ export interface SessionSnapshot extends SessionRuntimeState {
    * this state; events at or above it are not. Absent on older hosts.
    */
   eventWatermark?: number;
+  /** Broker worker that owns eventWatermark; sequence numbers are worker-local. */
+  eventWorkerId?: string;
   features: PiSessionFeatureState;
   /** Present for harness-capable runtimes; absent on older/non-harness hosts. */
   harness?: HarnessRuntimeState;
   leafId: string | null;
   /** Authoritative in-flight assistant message while the session is streaming. */
   liveAssistant?: PiAssistantMessage;
+  /** Host-assigned identity of the active or most recently settled agent run. */
+  runId?: string;
   model?: ModelDescriptor;
   name?: string;
   /** Tool call identifiers still executing on the session worker. */

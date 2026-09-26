@@ -20,6 +20,7 @@ interface PendingRequest {
 }
 
 export interface RuntimeSequenceGap {
+  /** Sequence numbers of the filtered stream delivered to this surface. */
   expected: number;
   received: number;
   source: RuntimeEventEnvelope["source"];
@@ -90,7 +91,7 @@ const createFallbackId = (): string => {
 export class PiRuntimeClient {
   readonly #createId: () => string;
   readonly #listeners = new Set<(event: RuntimeEventEnvelope) => void>();
-  readonly #lastSequences = new Map<string, number>();
+  #lastSurfaceSequence: number | undefined;
   readonly #options: PiRuntimeClientOptions;
   readonly #pending = new Map<string, PendingRequest>();
   #closed = false;
@@ -172,7 +173,7 @@ export class PiRuntimeClient {
     this.#connected = false;
     this.#failPending(new Error("Pi runtime client is closed"));
     this.#listeners.clear();
-    this.#lastSequences.clear();
+    this.#lastSurfaceSequence = undefined;
     await this.#options.transport.close();
   }
 
@@ -200,19 +201,25 @@ export class PiRuntimeClient {
       this.#reportProtocolError(new Error("Runtime server sent a request to the client"));
       return;
     }
-    const previous = this.#lastSequences.get(envelope.source.workerId);
-    if (previous !== undefined && envelope.seq !== previous + 1) {
+    // Raw worker sequences can skip legitimately when the surface filters an
+    // unowned config watch or a privileged worker event. Only this delivered
+    // surface stream has a contiguous sequence to check for missing frames.
+    const previous = this.#lastSurfaceSequence;
+    if (envelope.surfaceSeq !== undefined && previous !== undefined
+      && envelope.surfaceSeq <= previous) return;
+    if (envelope.surfaceSeq !== undefined && previous !== undefined
+      && envelope.surfaceSeq !== previous + 1) {
       try {
         this.#options.onSequenceGap?.({
           expected: previous + 1,
-          received: envelope.seq,
+          received: envelope.surfaceSeq,
           source: envelope.source,
         });
       } catch (error) {
         this.#reportProtocolError(asError(error));
       }
     }
-    this.#lastSequences.set(envelope.source.workerId, envelope.seq);
+    if (envelope.surfaceSeq !== undefined) this.#lastSurfaceSequence = envelope.surfaceSeq;
     for (const listener of this.#listeners) {
       try {
         listener(envelope);

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -155,6 +155,7 @@ import {
   HostServicesBridge,
 } from "./harness/host-services-bridge.js";
 import { createWorkContextMirror, WorkContextSync, type WorkContextMirror } from "./harness/work-context.js";
+import { commitSessionWorkContext, readSessionWorkContext } from "./session-work-context.js";
 import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
@@ -632,6 +633,13 @@ async function copyResourceDirectory(source: string, target: string): Promise<vo
   await copyFile(source, target);
 }
 
+type StoppableActivity = {
+  cancelRequested: boolean;
+  id: string;
+  kind: "manualCompaction" | "branchSummary";
+  session: AgentSession;
+};
+
 export class SessionHost {
   readonly #agentDir: string;
   readonly #configureServices: SessionHostOptions["configureServices"];
@@ -650,6 +658,9 @@ export class SessionHost {
   #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #turnIndex = 0;
+  #agentRunId: string | undefined;
+  #runId: string | undefined;
+  #pendingActivity: StoppableActivity | undefined;
   #unsubscribe: (() => void) | undefined;
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
@@ -662,6 +673,7 @@ export class SessionHost {
   #harnessLspNavigationEnabled = false;
   #harnessDocumentReadEnabled = false;
   #harnessDocumentPathOverlayEnabled = false;
+  #harnessWorkContextEnabled = false;
   #harnessWebReadEnabled = false;
   #harnessWebSearchEnabled = false;
   #hostServicesBridge: HostServicesBridge | undefined;
@@ -759,6 +771,10 @@ export class SessionHost {
 
   setHarnessDocumentReadEnabled(enabled: boolean): void {
     this.#harnessDocumentReadEnabled = enabled;
+  }
+
+  setHarnessWorkContextEnabled(enabled: boolean): void {
+    this.#harnessWorkContextEnabled = enabled;
   }
 
   setHarnessDocumentPathOverlayEnabled(enabled: boolean): void {
@@ -869,6 +885,10 @@ export class SessionHost {
     }
     const manager = SessionManager.open(sessionFile, undefined, input.cwd);
     await this.#replaceWith(manager);
+    // The first reopened snapshot must reflect Host-revalidated branch state.
+    // #bindSession emitted the registration event; context.get waits for its
+    // exact worker generation before this open request returns.
+    if (this.#harnessWorkContextEnabled) await this.#workContextSync?.ensureCurrent();
     return this.snapshot();
   }
 
@@ -911,6 +931,8 @@ export class SessionHost {
 
   snapshot(): SessionSnapshot {
     const session = this.session;
+    const pendingActivity = this.#pendingActivity?.session === session
+      ? this.#pendingActivity : undefined;
     const selectedModel = session.model;
     const availableModels = this.runtime.services.modelRuntime.getAvailableSnapshot();
     const model = toModelDescriptor(
@@ -929,16 +951,18 @@ export class SessionHost {
       : undefined;
     return {
       activeTools: session.getActiveToolNames(),
-      busy: !session.isIdle,
+      busy: !session.isIdle || pendingActivity !== undefined,
       cwd: this.runtime.cwd,
       features: readSessionFeatures(session.sessionManager),
       followUp: [...session.getFollowUpMessages()],
       followUpMode: session.followUpMode,
       harness: { context: this.#contextRuntimeState() },
-      isCompacting: session.isCompacting || this.#contextPreparation?.isCommitting() === true,
+      isCompacting: session.isCompacting || pendingActivity?.kind === "manualCompaction"
+        || this.#contextPreparation?.isCommitting() === true,
       isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
       ...(liveAssistant?.role === "assistant" ? { liveAssistant } : {}),
+      ...(this.#runId === undefined ? {} : { runId: this.#runId }),
       ...(model === undefined ? {} : { model }),
       ...(name === undefined ? {} : { name }),
       pendingMessageCount: session.pendingMessageCount,
@@ -1011,6 +1035,9 @@ export class SessionHost {
         const slice = handle.startsWith("out_")
           ? await bridge.request("output.read", { handle, offset, length }, { ...(signal ? { signal } : {}) })
           : await bridge.request("shell.read", { id: handle, offset, length }, { ...(signal ? { signal } : {}) });
+        if ("unavailable" in slice && slice.unavailable) {
+          throw new HostError("unavailable", `Source output transfer is unavailable: ${slice.unavailable}`);
+        }
         total ??= slice.total;
         if (slice.offset !== offset || slice.nextOffset < offset || slice.nextOffset > total
           || (slice.nextOffset === offset && offset < total)) {
@@ -1177,6 +1204,7 @@ export class SessionHost {
   ): Promise<{ cancelled: boolean; editorText?: string; snapshot: SessionSnapshot }> {
     this.assertSession(sessionId);
     const result = await this.runtime.fork(entryId, { position });
+    if (!result.cancelled && this.sessionId === sessionId) await this.#workContextSync?.refresh(true);
     return {
       cancelled: result.cancelled,
       ...(result.selectedText === undefined ? {} : { editorText: result.selectedText }),
@@ -1190,7 +1218,7 @@ export class SessionHost {
     summarize: boolean = false,
   ): Promise<{ cancelled: boolean; editorText?: string; snapshot: SessionSnapshot }> {
     this.assertSession(sessionId);
-    const result = await this.session.navigateTree(targetId, { summarize });
+    const result = await this.#navigateTreeWithActivity(this.session, targetId, { summarize });
     return {
       cancelled: result.cancelled,
       ...(result.editorText === undefined ? {} : { editorText: result.editorText }),
@@ -1610,9 +1638,15 @@ export class SessionHost {
     return { accepted: true, alreadyDelivered: false };
   }
 
-  async abort(sessionId: string): Promise<boolean> {
+  async abort(sessionId: string, expectedRunId?: string): Promise<boolean> {
     this.assertSession(sessionId);
-    const wasBusy = !this.session.isIdle;
+    // The RPC is out of band. A delayed stop for an earlier run must not
+    // cancel the run that happened to become current before this arrived.
+    if (expectedRunId !== undefined && expectedRunId !== this.#runId) return false;
+    const pendingActivity = this.#pendingActivity?.session === this.session
+      ? this.#pendingActivity : undefined;
+    const wasBusy = !this.session.isIdle || pendingActivity !== undefined;
+    if (pendingActivity && pendingActivity.id === this.#runId) pendingActivity.cancelRequested = true;
     // AgentSession.abort() deliberately waits for waitForIdle() after signalling
     // cancellation. That makes sense for local callers that need a settled
     // session, but a remote "stop" action must acknowledge as soon as the
@@ -1637,7 +1671,49 @@ export class SessionHost {
   async compact(sessionId: string, customInstructions?: string) {
     this.assertSession(sessionId);
     await this.#applyPendingSettingsReload();
-    return this.session.compact(customInstructions);
+    this.assertSession(sessionId);
+    const session = this.session;
+    const activity = this.#beginStoppableActivity(session, "manualCompaction");
+    try {
+      if (activity.cancelRequested) throw new HostError("aborted", "Pi compaction was cancelled before start");
+      return await session.compact(customInstructions);
+    } finally {
+      this.#finishStoppableActivity(activity);
+    }
+  }
+
+  #beginStoppableActivity(session: AgentSession, kind: StoppableActivity["kind"]): StoppableActivity {
+    const activity: StoppableActivity = { cancelRequested: false, id: randomUUID(), kind, session };
+    this.#pendingActivity = activity;
+    this.#runId = activity.id;
+    this.#emit("session.snapshot", this.snapshot());
+    return activity;
+  }
+
+  #finishStoppableActivity(activity: StoppableActivity): void {
+    if (this.#pendingActivity !== activity) return;
+    this.#pendingActivity = undefined;
+    if (this.#runtime?.session === activity.session) this.#emit("session.snapshot", this.snapshot());
+  }
+
+  async #navigateTreeWithActivity(
+    session: AgentSession,
+    targetId: string,
+    options: Parameters<AgentSession["navigateTree"]>[1],
+  ) {
+    if (options?.summarize !== true) {
+      const result = await session.navigateTree(targetId, options);
+      if (!result.cancelled && this.#runtime?.session === session) await this.#workContextSync?.refresh(true);
+      return result;
+    }
+    const activity = this.#beginStoppableActivity(session, "branchSummary");
+    try {
+      const result = await session.navigateTree(targetId, options);
+      if (!result.cancelled && this.#runtime?.session === session) await this.#workContextSync?.refresh(true);
+      return result;
+    } finally {
+      this.#finishStoppableActivity(activity);
+    }
   }
 
   clearQueue(sessionId: string): { cleared: boolean; followUp: string[]; steering: string[] } {
@@ -1653,6 +1729,18 @@ export class SessionHost {
   features(sessionId: string): PiSessionFeatureState {
     this.assertSession(sessionId);
     return readSessionFeatures(this.session.sessionManager);
+  }
+
+  workContextRead(sessionId: string): import("@varin/protocol").PiWorkContextSnapshot {
+    this.assertSession(sessionId);
+    return readSessionWorkContext(this.session.sessionManager);
+  }
+
+  workContextCommit(input: import("@varin/protocol").PiWorkContextCommit): import("@varin/protocol").PiWorkContextSnapshot {
+    this.assertSession(input.sessionId);
+    const snapshot = commitSessionWorkContext(this.session.sessionManager, input);
+    this.#emit("session.snapshot", this.snapshot());
+    return snapshot;
   }
 
   mutateFeatures(
@@ -3356,18 +3444,30 @@ export class SessionHost {
           })
         : undefined;
       this.#workspaceMutationJournal = workspaceMutationJournal;
-      this.#workContext = createWorkContextMirror(cwd);
+      const workContext = this.#harnessWorkContextEnabled ? createWorkContextMirror(cwd) : undefined;
+      let cachedWorkContextLeafId: string | null | undefined;
+      let cachedWorkContextEntryId: string | null = null;
+      const currentWorkContextEntryId = (): string | null => {
+        const leafId = sessionManager.getLeafId();
+        if (cachedWorkContextLeafId !== leafId) {
+          cachedWorkContextEntryId = readSessionWorkContext(sessionManager).entryId;
+          cachedWorkContextLeafId = leafId;
+        }
+        return cachedWorkContextEntryId;
+      };
+      this.#workContext = workContext;
       const hostServicesBridge = new HostServicesBridge({
         emit: (event, data) => this.#emit(event, data),
         getInputContext: () => this.#inputContext,
         sessionId: sessionManager.getSessionId(),
-        onWorkContextRevision: (revision) => this.#workContextSync?.noteRevision(revision),
+        ...(workContext ? { getWorkContextEntryId: currentWorkContextEntryId } : {}),
+        onWorkContextRevision: (revision, entryId) => workContextSync?.noteRevision(revision, entryId),
       });
       this.#hostServicesBridge = hostServicesBridge;
-      this.#workContextSync = new WorkContextSync(hostServicesBridge, this.#workContext);
-      // Seed the mirror eagerly so relative-path tools anchor at the Host
-      // operation dir from the first call, not only after a stale piggyback.
-      void this.#workContextSync.refresh();
+      const workContextSync = workContext ? new WorkContextSync(hostServicesBridge, workContext, currentWorkContextEntryId) : undefined;
+      this.#workContextSync = workContextSync;
+      // Tool admission awaits the first read after the worker has been bound.
+      // Issuing it while creating an unbound worker races Host registration.
       const harnessCounters = createHarnessCounterTracker();
       this.#harnessCounters = harnessCounters;
       const requiresTrust = hasVarinTrustRequiringProjectResources(cwd);
@@ -3481,7 +3581,7 @@ export class SessionHost {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
                   getProjectTrusted: () => settingsManager.isProjectTrusted(),
-                  inject: createRequestContextInjector(hostServicesBridge),
+                  inject: createRequestContextInjector(hostServicesBridge, workContextSync),
                   runCompactionTask: (spec, signal) =>
                     hostServicesBridge.request<"compaction.run">("compaction.run", spec, {
                       signal,
@@ -3740,7 +3840,9 @@ export class SessionHost {
           // of one source contract, so they are gated together (D-225).
           {
             surfaceWrite: this.#harnessDocumentReadEnabled,
-            getOperationDir: () => this.#workContext?.operationDirAbs ?? cwd,
+            getOperationDir: () => workContext?.operationDirAbs ?? cwd,
+            ...(workContextSync ? { ensureOperationContext: () => workContextSync!.ensureCurrent() } : {}),
+            ...(workContext ? { getContextRevision: () => workContext.revision } : {}),
           },
         ));
       }
@@ -3777,7 +3879,7 @@ export class SessionHost {
         scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
-        ...(this.#workContextSync !== undefined ? { workContext: this.#workContextSync } : {}),
+        ...(workContextSync !== undefined ? { workContext: workContextSync } : {}),
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
@@ -3804,10 +3906,11 @@ export class SessionHost {
       }
       this.#contextPreparation?.attach(created.session, (event) => {
         this.#emit("agent.event", {
-          event: projectAgentEvent(event, {
+          event: { ...projectAgentEvent(event, {
             leafId: created.session.sessionManager.getLeafId(),
+            ...(this.#runId === undefined ? {} : { runId: this.#runId }),
             turnIndex: this.#turnIndex,
-          }),
+          }) },
           sessionId: created.session.sessionId,
         });
       });
@@ -3826,6 +3929,9 @@ export class SessionHost {
     const runtime = this.runtime;
     const session = runtime.session;
     this.#turnIndex = 0;
+    this.#agentRunId = undefined;
+    this.#runId = undefined;
+    this.#pendingActivity = undefined;
     this.#unsubscribe?.();
     this.ui.cancelAll();
     await session.bindExtensions({
@@ -3837,7 +3943,7 @@ export class SessionHost {
           return { cancelled: result.cancelled };
         },
         navigateTree: async (targetId, options) => {
-          const result = await session.navigateTree(targetId, options);
+          const result = await this.#navigateTreeWithActivity(session, targetId, options);
           return { cancelled: result.cancelled };
         },
         switchSession: (sessionPath, options) => runtime.switchSession(sessionPath, options),
@@ -3861,14 +3967,40 @@ export class SessionHost {
       // cancelled post-turn probe must not lock input or flash a false boundary.
       if (this.#contextPreparation?.isBound() && event.type.startsWith("compaction_")
         && "reason" in event && event.reason !== "manual") return;
-      if (event.type === "agent_start") this.#turnIndex = 0;
+      if (event.type === "agent_start") {
+        this.#turnIndex = 0;
+        this.#agentRunId = randomUUID();
+        this.#runId = this.#agentRunId;
+      }
+      if (event.type === "compaction_start" && event.reason === "manual") {
+        const pending = this.#pendingActivity;
+        if (pending?.kind === "manualCompaction" && pending.session === session) {
+          if (pending.cancelRequested) session.abortCompaction();
+        } else {
+          // Manual compaction started from a Pi extension rather than the Host
+          // RPC still needs an identity distinct from the prior agent run.
+          this.#runId = randomUUID();
+        }
+      }
       if (event.type === "turn_start") this.#turnIndex += 1;
+      // A manual compaction can be accepted while Pi is still settling the
+      // prior agent run. Its new stop identity must not relabel old chunks or
+      // agent_settled as belonging to the compaction.
+      const agentRunEvent = event.type === "agent_start" || event.type === "agent_end"
+        || event.type === "agent_settled" || event.type === "turn_start" || event.type === "turn_end"
+        || event.type === "message_start" || event.type === "message_update" || event.type === "message_end"
+        || event.type === "tool_execution_start" || event.type === "tool_execution_update"
+        || event.type === "tool_execution_end" || event.type === "auto_retry_start"
+        || event.type === "auto_retry_end"
+        || (event.type === "entry_appended" && event.entry.type === "message");
+      const eventRunId = agentRunEvent ? this.#agentRunId : this.#runId;
       const position = {
         leafId: session.sessionManager.getLeafId(),
+        ...(eventRunId === undefined ? {} : { runId: eventRunId }),
         turnIndex: this.#turnIndex,
       };
       this.#emit("agent.event", {
-        event: projectAgentEvent(event, position),
+        event: { ...projectAgentEvent(event, position), ...(position.runId === undefined ? {} : { runId: position.runId }) },
         sessionId: session.sessionId,
       });
       if (event.type === "message_end") {
@@ -3882,7 +4014,7 @@ export class SessionHost {
           this.#emit("agent.event", {
             event: projectAgentEvent(
               { entry, type: "entry_appended" },
-              { leafId, turnIndex: this.#turnIndex },
+              { leafId, ...(position.runId === undefined ? {} : { runId: position.runId }), turnIndex: this.#turnIndex },
             ),
             sessionId: session.sessionId,
           });
@@ -3900,6 +4032,7 @@ export class SessionHost {
       }
       if (
         event.type === "agent_start" ||
+        (event.type === "compaction_start" && event.reason === "manual") ||
         event.type === "agent_end" ||
         event.type === "agent_settled" ||
         event.type === "queue_update" ||

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
@@ -10,6 +10,24 @@ import { createSurfaceAwareReadTool } from "../../src/harness/read-tool.js";
 const context = undefined as never;
 
 describe("surface-aware native read", () => {
+  it("reads precisely the file authorized before a concurrent operation-dir change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-read-admission-"));
+    const first = join(root, "first"), second = join(root, "second");
+    await mkdir(first); await mkdir(second);
+    await writeFile(join(first, "same.txt"), "first");
+    await writeFile(join(second, "same.txt"), "second");
+    let operationDir = first;
+    const bridge = { request: async (_method: string, params: { path: string }) => {
+      assert.equal(params.path, join(first, "same.txt"));
+      operationDir = second;
+      return { source: "disk" as const };
+    } } as unknown as HostServicesBridge;
+    try {
+      const result = await createSurfaceAwareReadTool(bridge, root, { operationDir: () => operationDir })
+        .execute("call-frozen", { path: "same.txt" }, undefined, undefined, context);
+      assert.equal((result.content[0] as { text: string }).text, "first");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("reads the fixed surface bytes and preserves native offset/limit handling", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-read-tool-"));
     const file = join(root, "draft.ts");
