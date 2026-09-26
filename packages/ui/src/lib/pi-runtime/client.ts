@@ -1,6 +1,7 @@
 import {
   PiRuntimeClient,
   WebSocketRuntimeTransport,
+  type RuntimeSequenceGap,
   type RuntimeTransport,
   type RuntimeWebSocket,
 } from '@varin/runtime-client';
@@ -24,10 +25,17 @@ export interface PiRuntimeConnection {
   runtimeKey: string;
 }
 
+export type PiRuntimeConnectionPhase =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'reconnecting';
+
 export interface CreatePiRuntimeConnectionOptions {
   clientName?: string;
   clientVersion?: string;
   mode?: HostMode;
+  onConnectionLost?(connection: PiRuntimeConnection, error: Error | undefined): void;
   onProtocolError?(error: Error): void;
   onSequenceGap?: ConstructorParameters<typeof PiRuntimeClient>[0]['onSequenceGap'];
   openSocket?: (url: string, protocols?: string[]) => RuntimeWebSocket;
@@ -60,7 +68,11 @@ export const createPiRuntimeConnection = async (
         openRuntimeWebSocket(socketUrl, protocols) as unknown as RuntimeWebSocket),
     });
   }
+  let connection: PiRuntimeConnection | null = null;
   const client = new PiRuntimeClient({
+    onConnectionLost: (error) => {
+      if (connection) options.onConnectionLost?.(connection, error);
+    },
     ...(options.onProtocolError ? { onProtocolError: options.onProtocolError } : {}),
     ...(options.onSequenceGap ? { onSequenceGap: options.onSequenceGap } : {}),
     transport,
@@ -73,22 +85,139 @@ export const createPiRuntimeConnection = async (
       mode: options.mode ?? defaultMode(),
       protocolVersions: [VARIN_PROTOCOL_VERSION],
     });
-    return {
+    connection = {
       client,
       handshake,
       runtimeKey: options.runtimeKey ?? getRuntimeKey(),
     };
+    return connection;
   } catch (error) {
     await client.close();
     throw error;
   }
 };
 
+const RECONNECT_BASE_DELAY_MS = 500;
+const RECONNECT_MAX_DELAY_MS = 15_000;
+
 let activeConnection: PiRuntimeConnection | null = null;
 let activeConnectionPromise: Promise<PiRuntimeConnection> | null = null;
 let connectionGeneration = 0;
+/** True once a connection has been established; a new connect after that is a reconnect. */
+let connectionEstablishedOnce = false;
+/** Auto-reconnect stays armed until disconnectPiRuntime or an endpoint change. */
+let reconnectArmed = false;
+let retryCount = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let connectionPhase: PiRuntimeConnectionPhase = 'disconnected';
+
+const phaseListeners = new Set<(phase: PiRuntimeConnectionPhase) => void>();
+const reconnectedListeners = new Set<(connection: PiRuntimeConnection) => void>();
+const sequenceGapListeners = new Set<(gap: RuntimeSequenceGap) => void>();
+
+const setConnectionPhase = (phase: PiRuntimeConnectionPhase): void => {
+  if (connectionPhase === phase) return;
+  connectionPhase = phase;
+  for (const listener of phaseListeners) {
+    try {
+      listener(phase);
+    } catch {
+      // Listener failures must not destabilize connection supervision.
+    }
+  }
+};
+
+export const getPiRuntimeConnectionPhase = (): PiRuntimeConnectionPhase => connectionPhase;
+
+export const subscribePiRuntimeConnectionPhase = (
+  listener: (phase: PiRuntimeConnectionPhase) => void,
+): (() => void) => {
+  phaseListeners.add(listener);
+  return () => {
+    phaseListeners.delete(listener);
+  };
+};
+
+/** Fires after a reconnect completes with the new live connection. */
+export const subscribePiRuntimeReconnected = (
+  listener: (connection: PiRuntimeConnection) => void,
+): (() => void) => {
+  reconnectedListeners.add(listener);
+  return () => {
+    reconnectedListeners.delete(listener);
+  };
+};
+
+export const subscribePiRuntimeSequenceGap = (
+  listener: (gap: RuntimeSequenceGap) => void,
+): (() => void) => {
+  sequenceGapListeners.add(listener);
+  return () => {
+    sequenceGapListeners.delete(listener);
+  };
+};
+
+const notifyReconnected = (connection: PiRuntimeConnection): void => {
+  for (const listener of reconnectedListeners) {
+    try {
+      listener(connection);
+    } catch {
+      // Resync consumers handle their own failures.
+    }
+  }
+};
 
 const currentRuntimeKey = (): string => getRuntimeKey();
+
+const reconnectDelayMs = (attempt: number): number => {
+  const backoff = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
+  return Math.round(backoff * (0.5 + Math.random() * 0.5));
+};
+
+const cancelRetry = (): void => {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+};
+
+const scheduleReconnect = (runtimeKey: string): void => {
+  if (!reconnectArmed || retryTimer !== null) return;
+  const generation = connectionGeneration;
+  setConnectionPhase('reconnecting');
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (!reconnectArmed || generation !== connectionGeneration) return;
+    void getPiRuntimeConnection().then(
+      () => undefined,
+      () => {
+        if (!reconnectArmed || generation !== connectionGeneration) return;
+        retryCount += 1;
+        scheduleReconnect(runtimeKey);
+      },
+    );
+  }, reconnectDelayMs(retryCount));
+};
+
+const handleConnectionLost = (connection: PiRuntimeConnection, _error: Error | undefined): void => {
+  if (activeConnection?.client !== connection.client) return;
+  activeConnection = null;
+  if (!reconnectArmed || connection.runtimeKey !== currentRuntimeKey()) {
+    setConnectionPhase('disconnected');
+    return;
+  }
+  scheduleReconnect(connection.runtimeKey);
+};
+
+const handleSequenceGap = (gap: RuntimeSequenceGap): void => {
+  for (const listener of sequenceGapListeners) {
+    try {
+      listener(gap);
+    } catch {
+      // Gap consumers handle their own failures.
+    }
+  }
+};
 
 export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
   const runtimeKey = currentRuntimeKey();
@@ -97,12 +226,23 @@ export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
   }
   if (activeConnectionPromise) return activeConnectionPromise;
   const generation = connectionGeneration;
-  const promise = createPiRuntimeConnection({ runtimeKey }).then(async (connection) => {
+  const hadConnection = connectionEstablishedOnce;
+  setConnectionPhase(hadConnection ? 'reconnecting' : 'connecting');
+  const promise = createPiRuntimeConnection({
+    onConnectionLost: handleConnectionLost,
+    onSequenceGap: handleSequenceGap,
+    runtimeKey,
+  }).then(async (connection) => {
     if (generation !== connectionGeneration || connection.runtimeKey !== currentRuntimeKey()) {
       await connection.client.close();
       throw new Error('Pi runtime changed while connecting');
     }
     activeConnection = connection;
+    connectionEstablishedOnce = true;
+    reconnectArmed = true;
+    retryCount = 0;
+    setConnectionPhase('connected');
+    if (hadConnection) notifyReconnected(connection);
     return connection;
   }).finally(() => {
     if (activeConnectionPromise === promise) activeConnectionPromise = null;
@@ -113,12 +253,36 @@ export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
 
 export const disconnectPiRuntime = async (): Promise<void> => {
   connectionGeneration += 1;
+  reconnectArmed = false;
+  retryCount = 0;
+  cancelRetry();
   const connection = activeConnection;
   activeConnection = null;
   activeConnectionPromise = null;
+  setConnectionPhase('disconnected');
   if (connection) await connection.client.close();
 };
 
 subscribeRuntimeEndpointWillChange(() => {
+  connectionEstablishedOnce = false;
   void disconnectPiRuntime();
 });
+
+// A flaky transport may only be noticed when the OS reports connectivity back
+// or the page becomes visible again; both are cheap immediate-retry triggers.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!reconnectArmed || activeConnection?.client.connected) return;
+    retryCount = 0;
+    cancelRetry();
+    scheduleReconnect(currentRuntimeKey());
+  });
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!reconnectArmed || activeConnection?.client.connected) return;
+    cancelRetry();
+    scheduleReconnect(currentRuntimeKey());
+  });
+}

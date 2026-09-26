@@ -37,6 +37,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 | [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301/D-303–D-304 科研集群、工作台与侧重、能力路由、实验执行、通用协作、请求上下文、验收及受管远程/运维。 | 8 |
+| [runtime-reliability](decisions/runtime-reliability.md) | RR 专项：断连追赶与权威重同步、可靠停止状态机、工作上下文、shell 边界、检索范围、出站联网。 | 2 |
 
 ## 决策索引
 
@@ -360,3 +361,5 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-325 | 2026-09-24 | 会话下一步选择：单次短请求、默认关闭的独立模型槽位、零或多方向、移除自动回顾 | implemented / wired | 输入框建议与知识建议分工；不采用历史工具循环或通用小模型隐式回退 | plan 阶段 N；实施时同步 harness/status/模块文档 | [context-knowledge](decisions/context-knowledge.md) |
 | D-326 | 2026-09-24 | 独立 PDF 阅读：原件先固化、文字/视觉/结构按需、统一位置与阅读器 | implemented / focused acceptance | document_read/materials.read 共用本地/网络/实验来源；PDF.js+Canvas 基础渲染；可选受管 Docling/Tesseract，真实结构及解析版本复用 | web-research-search-design；plan L3；status；architecture；Host/Pi docs | [retrieval](decisions/retrieval.md) |
 | D-327 | 2026-09-24 | 办公与日常工作连续性：以材料到成果到行动到后续为主线，Matter 只作轻量连续性投影 | accepted design / not implemented | 不新增办公 runtime、权限、定时器或文件权威；先做 O0 任务研究与 O1 文件成果闭环，再做 O2 日常连续性和 O3 单一外部生态 | office-work-continuity-design；agent-harness 10.4；architecture；roadmap；development | [office-work-continuity-design](office-work-continuity-design.md) |
+| D-328 | 2026-09-26 | RR1：断连后传输自动重连 + 只读权威重同步（eventWatermark/liveAssistant/pendingToolCallIds） | implemented / wired | 替代事件回放与无水位全量重读；快照水位利用 HostController/SessionHost 同线程切点 | runtime-client/pi-host/protocol/ui store；status RR1 | [runtime-reliability](decisions/runtime-reliability.md) |
+| D-329 | 2026-09-26 | RR1：纠正 3044800b——停止状态机 requested/accepted/unknown + 冻结视图，AbortError 不冒充成功 | implemented / wired | 取代 permanentlyAbortingSessionIds 事件屏蔽；丢失回执经权威重同步结算 | usePiSessionStore；PiChatView；status RR1 | [runtime-reliability](decisions/runtime-reliability.md) |

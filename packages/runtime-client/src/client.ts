@@ -27,6 +27,12 @@ export interface RuntimeSequenceGap {
 
 export interface PiRuntimeClientOptions {
   createId?: () => string;
+  /**
+   * Fired when the transport closes without an explicit close() call. The
+   * client is single-shot; supervision layers use this to schedule a new
+   * connection and resynchronize authoritative state.
+   */
+  onConnectionLost?(error: Error | undefined): void;
   onProtocolError?(error: Error): void;
   onSequenceGap?(gap: RuntimeSequenceGap): void;
   requestTimeoutMs?: number | null;
@@ -56,6 +62,17 @@ export class PiRuntimeAmbiguousRequestError extends Error {
     super(`Pi runtime connection was lost after ${method} was sent; the result is unknown`);
     this.name = "PiRuntimeAmbiguousRequestError";
     this.cause = cause;
+    this.method = method;
+  }
+}
+
+/** The request deadline elapsed without a response; the remote outcome is unknown. */
+export class PiRuntimeRequestTimeoutError extends Error {
+  readonly method: RuntimeMethod;
+
+  constructor(method: RuntimeMethod) {
+    super(`Pi runtime request timed out: ${method}`);
+    this.name = "PiRuntimeRequestTimeoutError";
     this.method = method;
   }
 }
@@ -124,7 +141,7 @@ export class PiRuntimeClient {
         ? undefined
         : setTimeout(() => {
             this.#pending.delete(id);
-            reject(new Error(`Pi runtime request timed out: ${method}`));
+            reject(new PiRuntimeRequestTimeoutError(method));
           }, timeoutMs);
       this.#pending.set(id, {
         method,
@@ -211,6 +228,11 @@ export class PiRuntimeClient {
     this.#connected = false;
     this.#failPending(error ?? new Error("Pi runtime transport closed"), true);
     this.#listeners.clear();
+    try {
+      this.#options.onConnectionLost?.(error);
+    } catch (callbackError) {
+      this.#reportProtocolError(asError(callbackError));
+    }
   }
 
   #rejectPending(id: string, error: unknown): void {

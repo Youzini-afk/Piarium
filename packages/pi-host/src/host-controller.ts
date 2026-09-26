@@ -988,7 +988,11 @@ export class HostController {
         return this.#sessionHost.list(optionalString(params, "cwd"));
       case "session.snapshot":
         this.#sessionHost.assertSession(readString(params, "sessionId"));
-        return this.#sessionHost.snapshot();
+        // The watermark is this worker's next event sequence at read time:
+        // emitted events with seq below it are already reflected in the
+        // snapshot, letting clients reconcile a subscribe/snapshot race
+        // without reapplying covered events.
+        return { ...this.#sessionHost.snapshot(), eventWatermark: this.#sequence };
       case "session.input.capture":
         return this.#sessionHost.captureInput(readString(params, "sessionId"));
       case "session.entries":

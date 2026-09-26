@@ -11,6 +11,7 @@ import {
   PiRuntimeAmbiguousRequestError,
   PiRuntimeClient,
   PiRuntimeRequestError,
+  PiRuntimeRequestTimeoutError,
 } from "../src/index.js";
 import type { RuntimeTransport, RuntimeTransportHandlers } from "../src/index.js";
 
@@ -133,6 +134,45 @@ describe("PiRuntimeClient", () => {
       assert.match(error.cause.message, /offline/);
       return true;
     });
+  });
+
+  it("reports a lost connection to the supervision callback but not an explicit close", async () => {
+    const transport = new MemoryTransport();
+    const lost: Array<Error | undefined> = [];
+    const client = new PiRuntimeClient({
+      onConnectionLost: (error) => lost.push(error),
+      transport,
+    });
+    await client.connect();
+    transport.disconnect(new Error("offline"));
+    assert.equal(lost.length, 1);
+    assert.match(lost[0]?.message ?? "", /offline/);
+
+    const second = new PiRuntimeClient({
+      onConnectionLost: (error) => lost.push(error),
+      transport: new MemoryTransport(),
+    });
+    await second.connect();
+    await second.close();
+    assert.equal(lost.length, 1);
+  });
+
+  it("rejects with a typed timeout whose remote outcome stays unknown", async () => {
+    const transport = new MemoryTransport();
+    const client = new PiRuntimeClient({ createId: () => "timed", transport });
+    await client.connect();
+    const request = client.request("session.list", {}, 20);
+
+    await assert.rejects(request, (error: unknown) => {
+      assert.ok(error instanceof PiRuntimeRequestTimeoutError);
+      assert.equal(error.method, "session.list");
+      return true;
+    });
+    // The request is forgotten: a late response is ignored, not delivered.
+    transport.receive(
+      encodeRuntimeEnvelope(createRuntimeSuccessResponse<"session.list">("timed", [])),
+    );
+    await client.close();
   });
 
   it("does not impose a client-side request timeout by default", async () => {

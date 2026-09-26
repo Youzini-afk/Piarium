@@ -18,16 +18,16 @@ Last updated: 2026-09-26
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**运行时可靠性专项 RR（2026-09-26：计划已接受，尚未实施）。**
+**运行时可靠性专项 RR（2026-09-26：计划已接受，RR0 已完成、RR1 已实施并接线）。**
 
 实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](agent-runtime-reliability-plan.md)。
-本次仅完成基于 `0135144f` 的源码核查与计划编写，未运行新的故障复现、未修改实现，不能将既有局部修复视为本专项完成。
+RR0 完成源码级故障分层（E01 路径权限、E11 断连丢事件、E12 `3044800b` 停止语义），建立版本基线（host 0.9.19 / Node 24.18 / Varin 1.3.14）。
 执行者在下表记录生产接线、行为证据、提交及明确未测项；不通过增加单测数量自动提升状态。
 
 | 阶段 | 待交付内容 | 当前事实 / 验证 |
 | --- | --- | --- |
-| RR0 | 隔离夹具、故障分层及必要诊断 | 源码线索已入计划；新的运行时复现待执行 |
-| RR1 | 聊天自动追赶、可靠停止与权威状态收敛 | 待实施；重点复审 `3044800b` 的事件屏蔽与停止 RPC 错误处理 |
+| RR0 | 隔离夹具、故障分层及必要诊断 | 完成：E01/E11/E12 根因定位到源码；确认 `HostController.#sequence` 与 `session.agent.state` 可提供一致性切点（`eventWatermark`+`liveAssistant`+`pendingToolCallIds`）；多项目临时夹具随 RR2 测试就地创建 |
+| RR1 | 聊天自动追赶、可靠停止与权威状态收敛 | 已实施并接线（wired）：传输丢失后 `getPiRuntimeConnection` 按退避自动重建连接并触发只读权威重同步（catalog + `session.snapshot` + 已加载 `session.entries` + `session.stats`）；`session.snapshot` 响应携带 `eventWatermark`/`liveAssistant`/`pendingToolCallIds`，重同步期间会话事件缓冲、回放时丢弃水位内旧事件；序号缺口同样进入重同步。停止语义重写：本地立即可视冻结（`stoppedAssistant`），`stopState` 区分 `requested`/`accepted`/`unknown`；AbortError/`PiRuntimeAmbiguousRequestError`/`PiRuntimeRequestTimeoutError` 不再冒充成功取消，转而触发权威重同步；`agent_start`/`agent_settled`/空闲快照/`session.closed`/`worker.exited`/`reset` 均清算停止态，下一 Run 不受影响。验证：`usePiSessionStore.test.ts` 54/54（含水位丢弃、重连补齐、lost-reply unknown→settle、跨 Run 不泄漏）；runtime-client 9/9（新增 onConnectionLost 与 typed timeout）；pi-host typecheck + 聚焦测试 11/11；runtime-broker 86/86 真 worker 纵切；ui typecheck + eslint。未测：真实桌面安装包断网纵切、长流式中的实际恢复延迟——列入 RR6 |
 | RR2 | Agent 自主操作上下文、统一路径及并发修订 | 待实施；大工作区与授权内跨项目导航必须保留 |
 | RR3 | shell 命令边界、输出恢复、waitMs 预算 | 待实施；已有 cwd 恢复行为列为非回归项 |
 | RR4 | 多项目检索范围、索引覆盖、todo 与工具反馈 | 待实施；共享存储不等于可以混用状态/覆盖语义 |

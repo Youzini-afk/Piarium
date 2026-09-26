@@ -24,10 +24,18 @@ import type {
   AgentInputContext,
   WorkFocusId,
 } from '@varin/protocol';
-import type { PiRuntimeClient } from '@varin/runtime-client';
+import type { PiRuntimeClient, RuntimeSequenceGap } from '@varin/runtime-client';
+import { PiRuntimeAmbiguousRequestError, PiRuntimeRequestTimeoutError } from '@varin/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
+import {
+  getPiRuntimeConnection,
+  subscribePiRuntimeConnectionPhase,
+  subscribePiRuntimeReconnected,
+  subscribePiRuntimeSequenceGap,
+  type PiRuntimeConnection,
+  type PiRuntimeConnectionPhase,
+} from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
@@ -99,7 +107,21 @@ export interface PiSessionViewState {
   settledActivityDurationMs?: number;
   snapshot?: SessionSnapshot;
   stats?: SessionStats;
+  /**
+   * Frozen copy of the live assistant at the moment a stop was requested.
+   * Authoritative events keep updating liveAssistant underneath; the frozen
+   * copy is what the timeline renders until the stop settles, so late provider
+   * chunks are preserved in state without appearing to continue streaming.
+   */
+  stoppedAssistant?: PiAssistantMessage;
+  /**
+   * A pending stop request whose transport outcome is unknown, or that has
+   * been accepted by the host but not yet observed to settle.
+   */
+  stopState?: 'requested' | 'accepted' | 'unknown';
   submission?: PiSessionSubmissionState;
+  /** Last authoritative resync outcome for this record. */
+  syncState?: 'synced' | 'catchingUp' | 'stale';
   toolExecutions: Record<string, PiToolExecutionState>;
   view?: PiTimelineViewState;
 }
@@ -122,6 +144,12 @@ export interface PiSessionStoreRuntime {
   connect(): Promise<PiSessionRuntimeConnection>;
   currentKey(): string;
   subscribeChanged(listener: () => void): () => void;
+  /** Connection lifecycle notifications for connection-state presentation. */
+  subscribeConnectionPhase?(listener: (phase: PiRuntimeConnectionPhase) => void): () => void;
+  /** Fires after a lost connection is replaced by a live one; triggers resync. */
+  subscribeReconnected?(listener: (connection: PiRuntimeConnection) => void): () => void;
+  /** Per-worker event sequence gaps detected by the client. */
+  subscribeSequenceGap?(listener: (gap: RuntimeSequenceGap) => void): () => void;
 }
 
 export interface PiSessionStoreState {
@@ -129,6 +157,8 @@ export interface PiSessionStoreState {
   catalogCwd: string | null;
   catalogLoaded: boolean;
   catalogLoading: boolean;
+  /** Transport lifecycle; distinct from per-record syncState (catch-up progress). */
+  connectionPhase: PiRuntimeConnectionPhase;
   currentSessionId: string | null;
   lastError: string | null;
   openingSessionId: string | null;
@@ -207,6 +237,12 @@ export interface PiSessionStoreState {
     scope?: 'branch' | 'all',
   ): Promise<SessionEntriesResult>;
   refreshStats(sessionId: string): Promise<SessionStats>;
+  /**
+   * Read-only authoritative catch-up: re-reads the catalog plus per-session
+   * snapshots and entries after a reconnect or detected event gap. Never
+   * resubmits prompts, tools, or other side-effecting operations.
+   */
+  resyncSessions(): Promise<void>;
   requestTimelineReturn(sessionId: string): number;
   renameSession(sessionId: string, name: string): Promise<void>;
   reset(): void;
@@ -242,6 +278,9 @@ const DEFAULT_RUNTIME: PiSessionStoreRuntime = {
   connect: getPiRuntimeConnection,
   currentKey: getRuntimeKey,
   subscribeChanged: subscribeRuntimeEndpointChanged,
+  subscribeConnectionPhase: subscribePiRuntimeConnectionPhase,
+  subscribeReconnected: subscribePiRuntimeReconnected,
+  subscribeSequenceGap: subscribePiRuntimeSequenceGap,
 };
 
 const canonicalWorkspaceBinding = async (
@@ -702,6 +741,7 @@ const initialFields = (runtimeKey: string): Pick<
   | 'catalogCwd'
   | 'catalogLoaded'
   | 'catalogLoading'
+  | 'connectionPhase'
   | 'currentSessionId'
   | 'lastError'
   | 'openingSessionId'
@@ -713,6 +753,7 @@ const initialFields = (runtimeKey: string): Pick<
   catalogCwd: null,
   catalogLoaded: false,
   catalogLoading: false,
+  connectionPhase: 'disconnected',
   currentSessionId: null,
   lastError: null,
   openingSessionId: null,
@@ -735,7 +776,13 @@ export const createPiSessionStore = (
   const previewRequests = new Map<string, Promise<SessionEntriesResult>>();
   const deletingSessionIds = new Set<string>();
   const deletedSessionIds = new Set<string>();
-  const manuallyAbortingSessionIds = new Set<string>();
+  /** sessionId → stop request lifecycle (requested → accepted → settles, or unknown after a lost reply). */
+  const stopRequests = new Map<string, { requestedAt: number; state: 'requested' | 'accepted' | 'unknown' }>();
+  /** sessionId → session-scoped envelopes buffered while a resync snapshot is in flight. */
+  const catchUpBuffers = new Map<string, RuntimeEventEnvelope[]>();
+  /** sessionId → workerId that emitted the last observed envelope for that session. */
+  const lastEventWorkerIds = new Map<string, string>();
+  const resyncingSessions = new Set<string>();
   const statsGeneration = new Map<string, number>();
 
   const store = create<PiSessionStoreState>((set, get) => {
@@ -829,12 +876,36 @@ export const createPiSessionStore = (
       });
     };
 
-    const handleRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
+    /** Session a runtime event belongs to, when it is session-scoped. */
+    const envelopeSessionId = (envelope: RuntimeEventEnvelope): string | undefined => {
+      if (envelope.source.sessionId !== undefined) return envelope.source.sessionId;
+      const data = envelope.data as { sessionId?: unknown };
+      return typeof data.sessionId === 'string' ? data.sessionId : undefined;
+    };
+
+    const settleStopRequest = (sessionId: string): void => {
+      if (!stopRequests.delete(sessionId)) return;
+      set((state) => ({
+        records: upsertRecord(state.records, sessionId, (current) => {
+          if (current.stoppedAssistant === undefined && current.stopState === undefined) return current;
+          const next = { ...current };
+          delete next.stoppedAssistant;
+          delete next.stopState;
+          return next;
+        }),
+      }));
+    };
+
+    const applyRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
       if (!contextIsCurrent(runtimeKey)) return;
       // Catalog workers open short-lived workspace contexts for provider/model
       // operations. Their snapshots are not user sessions and must never enter
       // the session catalog or current-session state.
       if (envelope.source.role !== 'session') return;
+      const scopedSessionId = envelopeSessionId(envelope);
+      if (scopedSessionId !== undefined) {
+        lastEventWorkerIds.set(scopedSessionId, envelope.source.workerId);
+      }
 
       switch (envelope.event) {
         case 'session.snapshot': {
@@ -854,11 +925,14 @@ export const createPiSessionStore = (
               };
             }),
           }));
+          // An authoritative idle snapshot settles a pending stop even when the
+          // agent_settled event itself was lost.
+          if (!snapshot.busy) settleStopRequest(snapshot.sessionId);
           return;
         }
         case 'session.closed': {
           const { sessionId } = envelope.data;
-          manuallyAbortingSessionIds.delete(sessionId);
+          settleStopRequest(sessionId);
           if (get().currentSessionId === sessionId) beginSelectionIntent();
           set((state) => ({
             attentionBySession: clearAttention(state.attentionBySession, sessionId),
@@ -872,7 +946,7 @@ export const createPiSessionStore = (
         }
         case 'session.worker.exited': {
           const { expected, sessionId } = envelope.data;
-          manuallyAbortingSessionIds.delete(sessionId);
+          settleStopRequest(sessionId);
           set((state) => ({
             attentionBySession: expected || isPiSessionActivelyVisible(sessionId, state.currentSessionId)
               ? state.attentionBySession
@@ -887,20 +961,11 @@ export const createPiSessionStore = (
         }
         case 'agent.event': {
           const { sessionId, event } = envelope.data;
-          if (event.type === 'agent_start') manuallyAbortingSessionIds.delete(sessionId);
-          const manuallyAborting = manuallyAbortingSessionIds.has(sessionId);
-          if (
-            manuallyAborting
-            && (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')
-            && event.message.role === 'assistant'
-          ) {
-            // The abort signal has already been accepted locally. Ignore late
-            // provider chunks while Pi is unwinding so the UI stops at the
-            // exact point where the user pressed Stop instead of visibly
-            // continuing until agent_settled arrives.
-            return;
+          // agent_start belongs to a new run; a stale stop request must never
+          // mark or cancel it. agent_settled is the authoritative stop outcome.
+          if (event.type === 'agent_start' || event.type === 'agent_settled') {
+            settleStopRequest(sessionId);
           }
-          if (event.type === 'agent_settled') manuallyAbortingSessionIds.delete(sessionId);
           const attentionKind = piAgentEventAttentionKind(event);
           if (event.type === 'entry_appended') {
             entriesAppendedDuringRequest.get(entriesRequestKey(sessionId, 'branch'))?.add(event.entry.id);
@@ -981,6 +1046,199 @@ export const createPiSessionStore = (
       }
     };
 
+    /**
+     * Runtime events for a session are buffered while its authoritative
+     * snapshot/entries resync is in flight, then replayed through the normal
+     * path once the snapshot lands. This keeps the snapshot and the live
+     * stream on one ordering instead of letting a stale read overwrite newer
+     * events.
+     */
+    const handleRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
+      const sessionId = envelopeSessionId(envelope);
+      const buffer = sessionId === undefined ? undefined : catchUpBuffers.get(sessionId);
+      if (buffer !== undefined && envelope.source.role === 'session') {
+        buffer.push(envelope);
+        return;
+      }
+      applyRuntimeEvent(runtimeKey, envelope);
+    };
+
+    const flushCatchUpBuffer = (
+      runtimeKey: string,
+      sessionId: string,
+      watermark: number | undefined,
+      workerIdAtStart: string | undefined,
+    ): void => {
+      const buffered = catchUpBuffers.get(sessionId) ?? [];
+      catchUpBuffers.delete(sessionId);
+      for (const bufferedEnvelope of buffered) {
+        if (
+          watermark !== undefined
+          && bufferedEnvelope.seq < watermark
+          && (workerIdAtStart === undefined || bufferedEnvelope.source.workerId === workerIdAtStart)
+        ) {
+          // Already reflected in the authoritative snapshot read.
+          continue;
+        }
+        applyRuntimeEvent(runtimeKey, bufferedEnvelope);
+      }
+    };
+
+    const collectToolResults = (
+      results: Iterable<SessionEntriesResult>,
+    ): Map<string, { isError: boolean; result: JsonValue | undefined }> => {
+      const toolResults = new Map<string, { isError: boolean; result: JsonValue | undefined }>();
+      for (const entries of results) {
+        for (const entry of entries.entries) {
+          if (entry.type !== 'message' || entry.message.role !== 'toolResult') continue;
+          const message = entry.message;
+          toolResults.set(message.toolCallId, {
+            isError: message.isError,
+            result: (message.details ?? message.content) as JsonValue | undefined,
+          });
+        }
+      }
+      return toolResults;
+    };
+
+    /** Apply an authoritative snapshot + entries read and settle stale in-flight UI state. */
+    const applyResyncSnapshot = (
+      runtimeKey: string,
+      sessionId: string,
+      snapshot: SessionSnapshot,
+      entriesByScope: ReadonlyMap<'branch' | 'all', SessionEntriesResult>,
+    ): void => {
+      const persistedToolResults = collectToolResults(entriesByScope.values());
+      set((state) => ({
+        records: upsertRecord(state.records, sessionId, (current) => {
+          const next: PiSessionViewState = {
+            ...current,
+            open: true,
+            snapshot: preserveSnapshotWorkspace(snapshot, current.snapshot),
+            syncState: 'synced',
+          };
+          for (const [scope, result] of entriesByScope) {
+            if (scope === 'all') next.allEntries = result;
+            else {
+              next.branchEntries = result;
+              next.branchEntriesSource = 'live';
+              next.previewLoading = false;
+              delete next.previewError;
+            }
+          }
+          if (snapshot.liveAssistant !== undefined) {
+            next.liveAssistant = snapshot.liveAssistant;
+          } else if (!snapshot.busy) {
+            // Settled sessions keep no ghost overlay; persisted truth lives in entries.
+            delete next.liveAssistant;
+          }
+          const pendingToolCallIds = new Set(snapshot.pendingToolCallIds ?? []);
+          next.toolExecutions = Object.fromEntries(Object.entries(current.toolExecutions).flatMap(
+            ([toolCallId, execution]) => {
+              if (pendingToolCallIds.has(toolCallId)) return [[toolCallId, execution]];
+              const persisted = persistedToolResults.get(toolCallId);
+              if (persisted !== undefined) {
+                return [[toolCallId, {
+                  ...execution,
+                  isError: persisted.isError,
+                  ...(persisted.result === undefined ? {} : { result: persisted.result }),
+                  status: persisted.isError ? 'error' as const : 'success' as const,
+                }]];
+              }
+              // Once the run is idle, tool chips resolve from entries; a
+              // still-busy session keeps chips whose end event may arrive next.
+              if (!snapshot.busy) return [];
+              return [[toolCallId, execution]];
+            },
+          ));
+          const persistedMessages = [...entriesByScope.values()].flatMap((result) => result.entries);
+          const messagePersisted = (timestamp: number, provider?: string, model?: string) => (
+            persistedMessages.some((entry) => (
+              entry.type === 'message'
+              && entry.message.timestamp === timestamp
+              && (provider === undefined || ('provider' in entry.message && entry.message.provider === provider))
+              && (model === undefined || ('model' in entry.message && entry.message.model === model))
+            ))
+          );
+          if (current.liveUser !== undefined && messagePersisted(current.liveUser.timestamp)) {
+            delete next.liveUser;
+          }
+          if (current.submission !== undefined) {
+            if (messagePersisted(current.submission.message.timestamp)) delete next.submission;
+            else if (snapshot.busy && current.submission.status !== 'accepted') {
+              next.submission = { ...current.submission, status: 'accepted' };
+            }
+          }
+          return next;
+        }),
+      }));
+      const watermark = snapshot.eventWatermark;
+      flushCatchUpBuffer(runtimeKey, sessionId, watermark, lastEventWorkerIds.get(sessionId));
+      if (!snapshot.busy) settleStopRequest(sessionId);
+      void get().refreshStats(sessionId).catch(() => undefined);
+    };
+
+    const syncSessionRecord = async (sessionId: string): Promise<void> => {
+      if (resyncingSessions.has(sessionId)) return;
+      resyncingSessions.add(sessionId);
+      const runtimeKey = runtime.currentKey();
+      catchUpBuffers.set(sessionId, []);
+      set((state) => ({
+        records: upsertRecord(state.records, sessionId, (current) => ({
+          ...current,
+          syncState: 'catchingUp' as const,
+        })),
+      }));
+      try {
+        const { result: snapshot } = await request('session.snapshot', { sessionId }, undefined, false);
+        const record = get().records[sessionId];
+        const scopes: Array<'branch' | 'all'> = [];
+        if (record?.branchEntries !== undefined || record?.branchEntriesSource === 'live') scopes.push('branch');
+        if (record?.allEntries !== undefined) scopes.push('all');
+        const entriesByScope = new Map<'branch' | 'all', SessionEntriesResult>();
+        for (const scope of scopes) {
+          const { result } = await request('session.entries', { scope, sessionId }, undefined, false);
+          if (contextIsCurrent(runtimeKey)) entriesByScope.set(scope, result);
+        }
+        if (!contextIsCurrent(runtimeKey)) return;
+        applyResyncSnapshot(runtimeKey, sessionId, snapshot, entriesByScope);
+      } catch {
+        // A failed resync must not discard real events that arrived meanwhile;
+        // flush them live and mark the record stale rather than guessing state.
+        flushCatchUpBuffer(runtimeKey, sessionId, undefined, lastEventWorkerIds.get(sessionId));
+        if (contextIsCurrent(runtimeKey)) {
+          set((state) => ({
+            records: upsertRecord(state.records, sessionId, (current) => ({
+              ...current,
+              syncState: 'stale' as const,
+            })),
+          }));
+        }
+      } finally {
+        resyncingSessions.delete(sessionId);
+      }
+    };
+
+    const resyncSessionsNow = async (): Promise<void> => {
+      const runtimeKey = runtime.currentKey();
+      try {
+        await connect();
+      } catch {
+        return;
+      }
+      if (!contextIsCurrent(runtimeKey)) return;
+      void get().loadCatalog(get().catalogCwd ?? undefined).catch(() => undefined);
+      const sessionIds = Object.keys(get().records).filter((sessionId) => {
+        const record = get().records[sessionId];
+        return record !== undefined && (
+          record.open
+          || record.snapshot !== undefined
+          || sessionId === get().currentSessionId
+        );
+      });
+      await Promise.allSettled(sessionIds.map((sessionId) => syncSessionRecord(sessionId)));
+    };
+
     const connect = async (): Promise<PiSessionRuntimeConnection> => {
       const expectedRuntimeKey = runtime.currentKey();
       const connection = await runtime.connect();
@@ -991,11 +1249,18 @@ export const createPiSessionStore = (
         throw new Error('Pi runtime changed while connecting');
       }
       if (activeClient !== connection.client) {
+        const replacedClient = activeClient !== null;
         unsubscribeEvents?.();
         activeClient = connection.client;
         unsubscribeEvents = connection.client.subscribe((envelope) => {
           handleRuntimeEvent(connection.runtimeKey, envelope);
         });
+        if (replacedClient) {
+          // A swapped client means events may have been missed between the old
+          // transport's death and this subscription; reconcile every tracked
+          // session from authoritative snapshots before trusting live deltas.
+          void resyncSessionsNow();
+        }
       }
       return connection;
     };
@@ -1005,6 +1270,7 @@ export const createPiSessionStore = (
       params: RuntimeMethodParams<M>,
       requestedRuntimeKey?: string,
       reportError = true,
+      timeoutMs?: number,
     ): Promise<{ result: RuntimeMethodResult<M>; runtimeKey: string }> => {
       const expectedRuntimeKey = requestedRuntimeKey ?? runtime.currentKey();
       try {
@@ -1018,7 +1284,7 @@ export const createPiSessionStore = (
         ) {
           throw new Error(`Pi runtime changed before ${method}`);
         }
-        const result = await connection.client.request(method, params);
+        const result = await connection.client.request(method, params, timeoutMs);
         if (!contextIsCurrent(connection.runtimeKey)) {
           throw new Error(`Pi runtime changed during ${method}`);
         }
@@ -1057,14 +1323,15 @@ export const createPiSessionStore = (
       ...initialFields(runtime.currentKey()),
 
       abort: async (sessionId) => {
-        manuallyAbortingSessionIds.add(sessionId);
+        stopRequests.set(sessionId, { requestedAt: Date.now(), state: 'requested' });
         set((state) => ({
           lastError: null,
           records: upsertRecord(state.records, sessionId, (current) => ({
             ...current,
             ...(current.liveAssistant
-              ? { liveAssistant: markAssistantAborted(current.liveAssistant) }
+              ? { stoppedAssistant: markAssistantAborted(current.liveAssistant) }
               : {}),
+            stopState: 'requested' as const,
             snapshot: updateSnapshot(current.snapshot, {
               isCompacting: false,
               isStreaming: false,
@@ -1073,12 +1340,42 @@ export const createPiSessionStore = (
           })),
         }));
         try {
-          const { result } = await request('agent.abort', { sessionId }, undefined, false);
-          if (!result.aborted) manuallyAbortingSessionIds.delete(sessionId);
-          return result.aborted;
+          const { result } = await request('agent.abort', { sessionId }, undefined, false, 10_000);
+          if (!result.aborted) {
+            // The host saw no in-flight run; nothing was cancelled.
+            settleStopRequest(sessionId);
+            return false;
+          }
+          const pending = stopRequests.get(sessionId);
+          if (pending?.state === 'requested') pending.state = 'accepted';
+          set((state) => ({
+            records: upsertRecord(state.records, sessionId, (current) => ({
+              ...current,
+              stopState: 'accepted' as const,
+            })),
+          }));
+          return true;
         } catch (error) {
-          if (isPiAbortError(error)) return true;
-          manuallyAbortingSessionIds.delete(sessionId);
+          // A transport-level AbortError/timeout/lost connection only proves the
+          // reply never arrived, not that the host declined the stop. Keep the
+          // request marked and resolve it through the authoritative snapshot.
+          if (
+            isPiAbortError(error)
+            || error instanceof PiRuntimeAmbiguousRequestError
+            || error instanceof PiRuntimeRequestTimeoutError
+          ) {
+            const pending = stopRequests.get(sessionId);
+            if (pending) pending.state = 'unknown';
+            set((state) => ({
+              records: upsertRecord(state.records, sessionId, (current) => ({
+                ...current,
+                stopState: 'unknown' as const,
+              })),
+            }));
+            void syncSessionRecord(sessionId);
+            return false;
+          }
+          settleStopRequest(sessionId);
           commitError(runtime.currentKey(), error);
           throw error;
         }
@@ -1733,12 +2030,18 @@ export const createPiSessionStore = (
         previewRequests.clear();
         deletingSessionIds.clear();
         deletedSessionIds.clear();
+        stopRequests.clear();
+        catchUpBuffers.clear();
+        lastEventWorkerIds.clear();
+        resyncingSessions.clear();
         statsGeneration.clear();
         unsubscribeEvents?.();
         unsubscribeEvents = null;
         activeClient = null;
         set(initialFields(runtime.currentKey()));
       },
+
+      resyncSessions: resyncSessionsNow,
 
       selectModel: async (sessionId, model) => {
         const { result } = await request('model.select', {
@@ -1924,6 +2227,22 @@ export const createPiSessionStore = (
 
   runtime.subscribeChanged(() => {
     store.getState().reset();
+  });
+
+  runtime.subscribeConnectionPhase?.((phase) => {
+    store.setState({ connectionPhase: phase });
+  });
+
+  runtime.subscribeReconnected?.(() => {
+    void store.getState().resyncSessions().catch(() => undefined);
+  });
+
+  runtime.subscribeSequenceGap?.((gap) => {
+    // A gap proves events were missed; catch up through the authoritative
+    // snapshot path instead of guessing which events were lost.
+    if (gap.source.sessionId !== undefined) {
+      void store.getState().resyncSessions().catch(() => undefined);
+    }
   });
 
   return store;

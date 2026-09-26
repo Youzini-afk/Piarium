@@ -203,6 +203,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   ));
   const openingSessionId = usePiSessionStore((state) => state.openingSessionId);
   const lastError = usePiSessionStore((state) => state.lastError);
+  const connectionPhase = usePiSessionStore((state) => state.connectionPhase);
+  const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const createSession = usePiSessionStore((state) => state.createSession);
   const openSession = usePiSessionStore((state) => state.openSession);
@@ -945,7 +947,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
                   leafId={currentRecord.branchEntries.leafId}
-                  liveAssistant={currentRecord.liveAssistant}
+                  liveAssistant={currentRecord.stoppedAssistant ?? currentRecord.liveAssistant}
                   liveUser={transientUser}
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
                   forkBusyEntryId={forkBusyEntryId}
@@ -984,6 +986,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         {!previewOnly ? (
           <div className="chat-input-column">
             <AutoReviewBanner />
+          </div>
+        ) : null}
+
+        {!previewOnly && connectionPhase !== 'connected' && catalogLoaded ? (
+          <div className="chat-input-column px-3 pb-2 sm:px-5" role="status">
+            <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+              <span className={connectionPhase === 'reconnecting' ? 'animate-pulse' : undefined}>
+                {connectionPhase === 'reconnecting'
+                  ? t('chat.connection.reconnecting')
+                  : connectionPhase === 'connecting'
+                    ? t('chat.connection.connecting')
+                    : t('chat.connection.disconnected')}
+              </span>
+            </div>
           </div>
         ) : null}
 

@@ -1,3 +1,4 @@
+import type { PiAssistantMessage } from "./session.js";
 import type { PiSessionFeatureState } from "./session-features.js";
 import type { SessionWorkFocusSnapshot } from "./work-focus.js";
 
@@ -633,12 +634,22 @@ export interface HarnessRuntimeState {
 
 export interface SessionSnapshot extends SessionRuntimeState {
   cwd: string;
+  /**
+   * Per-worker event sequence observed when this snapshot was read. Events from
+   * the session worker with seq below the watermark are already reflected in
+   * this state; events at or above it are not. Absent on older hosts.
+   */
+  eventWatermark?: number;
   features: PiSessionFeatureState;
   /** Present for harness-capable runtimes; absent on older/non-harness hosts. */
   harness?: HarnessRuntimeState;
   leafId: string | null;
+  /** Authoritative in-flight assistant message while the session is streaming. */
+  liveAssistant?: PiAssistantMessage;
   model?: ModelDescriptor;
   name?: string;
+  /** Tool call identifiers still executing on the session worker. */
+  pendingToolCallIds?: string[];
   sessionFile?: string;
   sessionId: string;
   thinkingLevel: ThinkingLevel;

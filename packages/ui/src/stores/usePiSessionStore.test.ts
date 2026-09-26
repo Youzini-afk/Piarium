@@ -18,6 +18,8 @@ import {
   type SessionStats,
   type SessionSummary,
 } from '@varin/protocol';
+import type { RuntimeSequenceGap } from '@varin/runtime-client';
+import type { PiRuntimeConnection } from '@/lib/pi-runtime/client';
 import {
   createPiSessionStore,
   isPiSessionWorkerReady,
@@ -147,6 +149,9 @@ class FakeRuntime implements PiSessionStoreRuntime {
   readonly calls: Array<{ method: RuntimeMethod; params: unknown }> = [];
   readonly #changedListeners = new Set<() => void>();
   readonly #eventListeners = new Set<(event: RuntimeEventEnvelope) => void>();
+  readonly #reconnectedListeners = new Set<(connection: PiRuntimeConnection) => void>();
+  readonly #gapListeners = new Set<(gap: RuntimeSequenceGap) => void>();
+  #nextSeq = 0;
   handler: (method: RuntimeMethod, params: unknown) => unknown | Promise<unknown> = () => {
     throw new Error('Unhandled fake runtime request');
   };
@@ -174,12 +179,17 @@ class FakeRuntime implements PiSessionStoreRuntime {
     for (const listener of this.#eventListeners) listener(event);
   }
 
-  event(event: RuntimeEventEnvelope['event'], data: RuntimeEventEnvelope['data'], sessionId?: string) {
+  event(
+    event: RuntimeEventEnvelope['event'],
+    data: RuntimeEventEnvelope['data'],
+    sessionId?: string,
+    seq?: number,
+  ) {
     this.emit({
       data,
       event,
       kind: 'event',
-      seq: 1,
+      seq: seq ?? ++this.#nextSeq,
       source: {
         role: sessionId === undefined ? 'catalog' : 'session',
         runtimeGeneration: 1,
@@ -190,9 +200,41 @@ class FakeRuntime implements PiSessionStoreRuntime {
     } as RuntimeEventEnvelope);
   }
 
+  /** Simulate a lost connection being replaced; fires the store's resync path. */
+  reconnect() {
+    for (const listener of this.#reconnectedListeners) {
+      listener({ client: this.client, runtimeKey: this.key } as PiRuntimeConnection);
+    }
+  }
+
+  sequenceGap(sessionId: string) {
+    for (const listener of this.#gapListeners) {
+      listener({
+        expected: 5,
+        received: 9,
+        source: {
+          role: 'session',
+          runtimeGeneration: 1,
+          sessionId,
+          workerId: sessionId,
+        },
+      });
+    }
+  }
+
   subscribeChanged(listener: () => void) {
     this.#changedListeners.add(listener);
     return () => this.#changedListeners.delete(listener);
+  }
+
+  subscribeReconnected(listener: (connection: PiRuntimeConnection) => void) {
+    this.#reconnectedListeners.add(listener);
+    return () => this.#reconnectedListeners.delete(listener);
+  }
+
+  subscribeSequenceGap(listener: (gap: RuntimeSequenceGap) => void) {
+    this.#gapListeners.add(listener);
+    return () => this.#gapListeners.delete(listener);
   }
 
   switchTo(key: string) {
@@ -914,7 +956,7 @@ describe('Pi session store', () => {
     expect(store.getState().attentionBySession).toEqual({});
   });
 
-  test('manual abort freezes visible assistant output before the remote abort request settles', async () => {
+  test('manual abort freezes the rendered assistant while the fact stream keeps updating state', async () => {
     const runtime = new FakeRuntime();
     const abortGate = deferred<{ aborted: boolean }>();
     runtime.handler = (method) => {
@@ -943,41 +985,55 @@ describe('Pi session store', () => {
     await flushAsync();
 
     const immediatelyStopped = store.getState().records[sessionId];
+    // The rendered copy freezes at the stop point...
+    expect(immediatelyStopped?.stoppedAssistant?.content).toEqual([{ text: 'visible before stop', type: 'text' }]);
+    expect(immediatelyStopped?.stoppedAssistant?.stopReason).toBe('aborted');
+    expect(immediatelyStopped?.stoppedAssistant?.errorMessage).toBeUndefined();
+    expect(immediatelyStopped?.stopState).toBe('requested');
+    // ...but authoritative events keep updating the record underneath, so the
+    // real provider stream is never lost or rewritten.
     expect(immediatelyStopped?.liveAssistant?.content).toEqual([{ text: 'visible before stop', type: 'text' }]);
-    expect(immediatelyStopped?.liveAssistant?.stopReason).toBe('aborted');
-    expect(immediatelyStopped?.liveAssistant?.errorMessage).toBeUndefined();
-    // Keep the session busy until Pi really settles so a second prompt cannot
-    // race the run that is still unwinding, but stop its visible streaming now.
     expect(immediatelyStopped?.snapshot?.busy).toBe(true);
     expect(immediatelyStopped?.snapshot?.isStreaming).toBe(false);
 
     runtime.event('agent.event', {
       event: {
-        message: assistant('late provider chunk', 'pending'),
+        message: {
+          ...assistant('visible before stop', 'pending'),
+          content: [{ text: 'visible before stop, late chunk', type: 'text' }],
+        },
         type: 'message_update',
-        update: { contentIndex: 0, delta: ' late provider chunk', type: 'text_delta' },
+        update: { contentIndex: 0, delta: ', late chunk', type: 'text_delta' },
       },
       sessionId,
     }, sessionId);
-    expect(store.getState().records[sessionId]?.liveAssistant?.content).toEqual([
-      { text: 'visible before stop', type: 'text' },
+    const lateState = store.getState().records[sessionId];
+    expect(lateState?.liveAssistant?.content).toEqual([
+      { text: 'visible before stop, late chunk', type: 'text' },
     ]);
+    expect(lateState?.stoppedAssistant?.content).toEqual([{ text: 'visible before stop', type: 'text' }]);
 
     abortGate.resolve({ aborted: true });
     expect(await pendingAbort).toBe(true);
+    expect(store.getState().records[sessionId]?.stopState).toBe('accepted');
 
     runtime.event('agent.event', {
       event: positionedAgentEvent({ type: 'agent_settled' }),
       sessionId,
     }, sessionId);
-    expect(store.getState().records[sessionId]?.snapshot?.busy).toBe(false);
+    const settled = store.getState().records[sessionId];
+    expect(settled?.snapshot?.busy).toBe(false);
+    expect(settled?.stopState).toBeUndefined();
+    expect(settled?.stoppedAssistant).toBeUndefined();
   });
 
-  test('treats an AbortError from the stop request as cancellation rather than a user-visible failure', async () => {
+  test('a lost abort reply is reported as unknown, then settles through the authoritative snapshot', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {
       if (method === 'session.list') return [];
       if (method === 'agent.abort') throw new DOMException('This operation was aborted', 'AbortError');
+      if (method === 'session.snapshot') return { ...snapshot('session-abort-error'), busy: false };
+      if (method === 'session.stats') return stats('session-abort-error');
       throw new Error(`Unexpected ${method}`);
     };
     const store = createPiSessionStore(runtime);
@@ -989,9 +1045,223 @@ describe('Pi session store', () => {
       sessionId,
     }, sessionId);
 
+    // The transport AbortError does not prove the host cancelled anything.
+    expect(await store.getState().abort(sessionId)).toBe(false);
+    expect(store.getState().records[sessionId]?.stopState).toBe('unknown');
+    expect(store.getState().records[sessionId]?.stoppedAssistant?.stopReason).toBe('aborted');
+
+    // The triggered resync observes the settled run and clears the stop marker.
+    await flushAsync();
+    await flushAsync();
+    const record = store.getState().records[sessionId];
+    expect(record?.stopState).toBeUndefined();
+    expect(record?.stoppedAssistant).toBeUndefined();
+    expect(record?.snapshot?.busy).toBe(false);
+    expect(record?.liveAssistant).toBeUndefined();
+    expect(record?.syncState).toBe('synced');
+  });
+
+  test('a stale stop marker never leaks into the next run', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return { aborted: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-stop-run';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, isStreaming: true }, sessionId);
+    runtime.event('agent.event', {
+      event: { message: assistant('run one', 'pending'), type: 'message_start' },
+      sessionId,
+    }, sessionId);
+
     expect(await store.getState().abort(sessionId)).toBe(true);
-    expect(store.getState().lastError).toBeNull();
-    expect(store.getState().records[sessionId]?.liveAssistant?.stopReason).toBe('aborted');
+    expect(store.getState().records[sessionId]?.stopState).toBe('accepted');
+
+    // A new run starts before the old settle event: the stop request is gone
+    // and its frozen display copy must not shadow the new run's output.
+    runtime.event('agent.event', {
+      event: positionedAgentEvent({ type: 'agent_start' }),
+      sessionId,
+    }, sessionId);
+    runtime.event('agent.event', {
+      event: { message: assistant('run two live', 'pending'), type: 'message_start' },
+      sessionId,
+    }, sessionId);
+    const record = store.getState().records[sessionId];
+    expect(record?.stopState).toBeUndefined();
+    expect(record?.stoppedAssistant).toBeUndefined();
+    expect(record?.liveAssistant?.content).toEqual([{ text: 'run two live', type: 'text' }]);
+  });
+
+  test('reset clears pending stop state', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'agent.abort') return new Promise(() => undefined);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    const sessionId = 'session-stop-reset';
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId);
+    void store.getState().abort(sessionId);
+    await flushAsync();
+    expect(store.getState().records[sessionId]?.stopState).toBe('requested');
+
+    store.getState().reset();
+    expect(store.getState().records[sessionId]).toBeUndefined();
+
+    runtime.switchTo('runtime-a');
+    runtime.event('agent.event', {
+      event: { message: assistant('fresh', 'pending'), type: 'message_start' },
+      sessionId,
+    }, sessionId);
+    expect(store.getState().records[sessionId]?.stoppedAssistant).toBeUndefined();
+  });
+
+  test('reconnect resync replaces state from the authoritative snapshot and replays only post-watermark events', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-resync';
+    const snapshotGate = deferred<SessionSnapshot>();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.snapshot') return snapshotGate.promise;
+      if (method === 'session.stats') return stats(sessionId);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+
+    // Live state before the transport died.
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, isStreaming: true }, sessionId, 3);
+    runtime.event('agent.event', {
+      event: { message: assistant('half', 'pending'), type: 'message_start' },
+      sessionId,
+    }, sessionId, 4);
+
+    runtime.reconnect();
+    await flushAsync();
+    expect(runtime.calls.map((call) => call.method)).toContain('session.snapshot');
+    expect(store.getState().records[sessionId]?.syncState).toBe('catchingUp');
+
+    // While the snapshot RPC is in flight the socket already replays events:
+    // seq 5 predates the read (must not regress it), seq 7 is genuinely newer.
+    runtime.event('agent.event', {
+      event: {
+        message: assistant('stale delayed chunk', 'pending'),
+        type: 'message_update',
+        update: { contentIndex: 0, delta: ' delayed', type: 'text_delta' },
+      },
+      sessionId,
+    }, sessionId, 5);
+    runtime.event('agent.event', {
+      event: positionedAgentEvent({ type: 'agent_settled' }),
+      sessionId,
+    }, sessionId, 7);
+
+    snapshotGate.resolve({
+      ...snapshot(sessionId),
+      busy: true,
+      eventWatermark: 6,
+      isStreaming: true,
+      liveAssistant: assistant('at snapshot', 'pending'),
+    });
+    await flushAsync();
+    await flushAsync();
+    await flushAsync();
+
+    const record = store.getState().records[sessionId];
+    // The pre-watermark event must not clobber the newer snapshot content;
+    // the post-watermark settle applies on top.
+    expect(record?.liveAssistant?.content).toEqual([{ text: 'at snapshot', type: 'text' }]);
+    expect(record?.snapshot?.busy).toBe(false);
+    expect(record?.snapshot?.isStreaming).toBe(false);
+    expect(record?.syncState).toBe('synced');
+    // Resync is read-only: nothing resubmits prompts or tools.
+    expect(runtime.calls.every((call) => call.method !== 'agent.prompt')).toBe(true);
+  });
+
+  test('resync folds a missed persisted answer into entries and clears the stale overlay', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-completed-offline';
+    let snapshotReads = 0;
+    runtime.handler = (method, params) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.snapshot') {
+        snapshotReads += 1;
+        return { ...snapshot(sessionId), busy: false, isStreaming: false, eventWatermark: 9 };
+      }
+      if (method === 'session.entries') {
+        const scope = (params as { scope?: string }).scope ?? 'branch';
+        return {
+          entries: [{
+            id: 'entry-final',
+            parentId: null,
+            timestamp: '2026-09-26T00:00:00.000Z',
+            type: 'message',
+            message: { ...assistant('final answer', 'stop'), timestamp: 42 },
+          }],
+          leafId: 'entry-final',
+          scope,
+          sessionId,
+        };
+      }
+      if (method === 'session.stats') return stats(sessionId);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true, isStreaming: true }, sessionId, 3);
+    runtime.event('agent.event', {
+      event: {
+        message: { ...assistant('half of an answer', 'pending'), timestamp: 42 },
+        type: 'message_start',
+      },
+      sessionId,
+    }, sessionId, 4);
+    // Load the branch scope so resync refreshes it.
+    await store.getState().refreshEntries(sessionId);
+    expect(store.getState().records[sessionId]?.branchEntries?.entries).toHaveLength(1);
+
+    // The run finished while disconnected: final entry appended, settle missed.
+    runtime.reconnect();
+    await flushAsync();
+    await flushAsync();
+    await flushAsync();
+
+    const record = store.getState().records[sessionId];
+    expect(snapshotReads).toBeGreaterThan(0);
+    expect(record?.snapshot?.busy).toBe(false);
+    expect(record?.liveAssistant).toBeUndefined();
+    expect(record?.branchEntries?.entries.map((entry) => entry.id)).toEqual(['entry-final']);
+    expect(record?.syncState).toBe('synced');
+  });
+
+  test('a detected sequence gap triggers the same authoritative resync', async () => {
+    const runtime = new FakeRuntime();
+    const sessionId = 'session-gap';
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      if (method === 'session.snapshot') return { ...snapshot(sessionId), busy: false, eventWatermark: 12 };
+      if (method === 'session.stats') return stats(sessionId);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    runtime.event('session.snapshot', { ...snapshot(sessionId), busy: true }, sessionId, 10);
+
+    runtime.sequenceGap(sessionId);
+    await flushAsync();
+    await flushAsync();
+    await flushAsync();
+
+    const record = store.getState().records[sessionId];
+    expect(record?.snapshot?.busy).toBe(false);
+    expect(record?.syncState).toBe('synced');
+    expect(runtime.calls.map((call) => call.method)).toContain('session.snapshot');
   });
 
   test('executes extension commands through the active Pi session', async () => {

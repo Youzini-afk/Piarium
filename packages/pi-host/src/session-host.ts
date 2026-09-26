@@ -137,6 +137,7 @@ import { discoverProviderModels } from "./provider-model-discovery.js";
 import { createBackgroundInferenceRuntime, type BackgroundInferenceRuntime } from "./harness/background-inference.js";
 import {
   projectAgentEvent,
+  projectMessage,
   projectProviderAuthEvent,
   projectSessionEntry,
 } from "./protocol-projector.js";
@@ -910,6 +911,10 @@ export class SessionHost {
           ),
     );
     const name = session.sessionManager.getSessionName();
+    const streaming = session.agent.state.streamingMessage;
+    const liveAssistant = streaming?.role === "assistant"
+      ? projectMessage(streaming)
+      : undefined;
     return {
       activeTools: session.getActiveToolNames(),
       busy: !session.isIdle,
@@ -921,9 +926,11 @@ export class SessionHost {
       isCompacting: session.isCompacting || this.#contextPreparation?.isCommitting() === true,
       isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
+      ...(liveAssistant?.role === "assistant" ? { liveAssistant } : {}),
       ...(model === undefined ? {} : { model }),
       ...(name === undefined ? {} : { name }),
       pendingMessageCount: session.pendingMessageCount,
+      pendingToolCallIds: [...session.agent.state.pendingToolCalls],
       retryAttempt: session.retryAttempt,
       ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
       sessionId: session.sessionId,
