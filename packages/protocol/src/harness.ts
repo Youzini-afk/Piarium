@@ -367,6 +367,7 @@ export type FetchErrorClass =
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"
+  | "proxy-policy-unverified"
   | "tls"
   | "connect"
   | "http"
@@ -387,7 +388,7 @@ export interface NetworkDiagnosisResult {
   decision: "allowed" | "blocked";
   reason?: string;
   /** Read-only address sample. A later fetch checks again at connection time. */
-  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified";
+  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "proxy-policy-incompatible";
   policy: {
     version: number;
     mode: "direct" | "proxy";
@@ -395,7 +396,9 @@ export interface NetworkDiagnosisResult {
     proxyOrigin?: string;
     proxyAuth?: "basic";
     noProxy: string[];
-    source: "env" | "override" | "none";
+    source: "app" | "env" | "override" | "none";
+    /** Proxy-side target policy is only delegated by explicit Host configuration. */
+    trust: "direct" | "unverified-proxy" | "delegated-proxy";
     invalid?: string;
   };
   /** Where the target name would resolve. Proxy-side results are unverified here. */
@@ -427,7 +430,7 @@ export interface WorkingBranchReadProvenance {
 }
 
 export type DocumentReadSourceResult =
-  | { source: "disk" }
+  | { source: "disk"; base64: string }
   | { base64: string; revision: string; source: "surface-draft" }
   | {
     source: "working-branch";
@@ -632,9 +635,13 @@ export interface PiWorkContextCommit {
 }
 
 export interface ContextDiscoverParams {
-  /** Maximum returned candidates; Host clamps to its scan budget. */
+  /** Directory to inspect, relative to the authorized workspace root or absolute. Omit for authorized roots. */
+  path?: string;
+  /** Opaque continuation of a previous discovery; cannot be combined with path. */
+  cursor?: string;
+  /** Preferred number of candidates in this response; further candidates use nextCursor. */
   maxResults?: number;
-  /** Directory depth below the workspace root to scan; default 3. */
+  /** Optional maximum depth below the selected start directory; omitted scans descendants. */
   depth?: number;
 }
 
@@ -648,7 +655,11 @@ export interface ContextDiscoverCandidate {
 
 export interface ContextDiscoverResult {
   candidates: ContextDiscoverCandidate[];
+  /** Authorized directories whose contents could not be read in this page. */
+  unreadablePaths?: string[];
   truncated: boolean;
+  /** Present when discovery can continue without restarting the scan. */
+  nextCursor?: string;
 }
 
 export interface ContextGetResult {

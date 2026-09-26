@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,7 +34,12 @@ function createFakeBridge(root?: string, lockBatches?: string[][]): Pick<HostSer
           results: changes.map((change) => ({ path: change.path, target: "disk", status: "applied" })),
         };
       }
-      if (method === "document.readSource") return { source: "disk" };
+      if (method === "document.readSource") {
+        const inputPath = String(params.path);
+        const filePath = root && !inputPath.startsWith(root) ? join(root, inputPath) : inputPath;
+        if (!existsSync(filePath)) throw new Error("file not found");
+        return { source: "disk", base64: readFileSync(filePath).toString("base64") };
+      }
       throw new Error(`unexpected method: ${method}`);
     },
   } as unknown as Pick<HostServicesBridge, "request">;
@@ -70,6 +76,40 @@ describe("apply_patch (Codex syntax)", () => {
     assert.match(text, /applied successfully/);
     const content = readFileSync(join(tmpDir, "test.txt"), "utf8");
     assert.equal(content, "line1\nline2 modified\nline3\n");
+  });
+
+  it("uses the Host disk snapshot for patch context and its conditional hash", async () => {
+    const file = join(tmpDir, "remote.txt");
+    writeFileSync(file, "local decoy\n");
+    const hostText = "host original\n";
+    const expectedHash = `sha256-${createHash("sha256").update(hostText, "utf8").digest("hex")}`;
+    let surfaceContent = "";
+    const bridge = {
+      request: async (method: string, params: Record<string, unknown>) => {
+        if (method === "document.branchWrite") return { status: "disk" };
+        if (method === "document.readSource") {
+          return { source: "disk", base64: Buffer.from(hostText).toString("base64") };
+        }
+        if (method === "document.surfaceWrite") {
+          const change = (params.changes as Array<{ content?: string; expectedHash?: string }>)[0];
+          assert.equal(change?.expectedHash, expectedHash);
+          surfaceContent = change?.content ?? "";
+          return { status: "applied", results: [{ path: "remote.txt", target: "disk", status: "applied" }] };
+        }
+        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createApplyPatchTool(bridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const result = await executePatch(tool, `*** Begin Patch
+*** Update File: remote.txt
+@@
+-host original
++host updated
+*** End Patch`);
+    assert.match(result, /applied successfully/);
+    assert.equal(surfaceContent, "host updated\n");
+    assert.equal(readFileSync(file, "utf8"), "local decoy\n");
   });
 
   it("adds a new file", async () => {
@@ -221,7 +261,7 @@ ccc
               base64: Buffer.from("B\n").toString("base64"),
             };
           }
-          return { source: "disk" };
+          return { source: "disk", base64: Buffer.from("disk\n").toString("base64") };
         }
         if (method === "document.surfaceWrite") {
           return {
@@ -296,7 +336,7 @@ ccc
             : { held: false, released: true };
         }
         if (method === "document.readSource") {
-          return { source: "disk" };
+          return { source: "disk", base64: Buffer.from("before\n").toString("base64") };
         }
         if (method === "document.branchWrite") {
           // The patch is computed from `before`; a concurrent writer wins

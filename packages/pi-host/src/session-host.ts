@@ -155,7 +155,7 @@ import {
   HostServicesBridge,
 } from "./harness/host-services-bridge.js";
 import { createWorkContextMirror, WorkContextSync, type WorkContextMirror } from "./harness/work-context.js";
-import { commitSessionWorkContext, readSessionWorkContext } from "./session-work-context.js";
+import { commitSessionWorkContext, initializeSessionWorkContext, readSessionWorkContext } from "./session-work-context.js";
 import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
@@ -833,6 +833,7 @@ export class SessionHost {
     workFocus: WorkFocusSelection = { id: "code", source: "product-default" },
     workFocusGeneration = 1,
     workFocusRole: WorkFocusExecutionRole = "principal",
+    initialWorkContext?: NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>,
   ): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
     this.#sessionModelSelection = model === undefined ? undefined : { ...model };
@@ -842,11 +843,13 @@ export class SessionHost {
     this.#workFocus = structuredClone(workFocus);
     this.#workFocusGeneration = workFocusGeneration;
     this.#workFocusRole = workFocusRole;
-    await this.#replaceWith(SessionManager.create(
+    const manager = SessionManager.create(
       cwd,
       getSessionDir(cwd, this.#agentDir),
       parentSession === undefined ? undefined : { parentSession },
-    ));
+    );
+    if (initialWorkContext) initializeSessionWorkContext(manager, initialWorkContext);
+    await this.#replaceWith(manager);
     if (name) this.session.setSessionName(name);
     return this.snapshot();
   }

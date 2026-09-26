@@ -28,9 +28,60 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
   ...(inputContext ? { inputContext } : {}),
 });
 
+const dispatchService = (host: object) => createThreadDispatchService(Object.assign({
+  workContextGet: () => ({
+    workspaceRoot: process.cwd(),
+    context: { operationDir: "", queryScope: null, revision: 0 },
+    contextEntryId: null,
+  }),
+}, host) as never);
+
 describe("thread services", () => {
   beforeEach(() => {
     prepareIsolatedBranch.mockClear();
+  });
+
+  it("freezes the confirmed parent directory and query scope before a queued child starts", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-context-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const parentContext = { operationDir: "project-a", queryScope: ["project-a/src"], revision: 4 };
+    const spawn = vi.fn(async () => new Promise<{ sessionId: string }>(() => {}));
+    const service = dispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+      workContextGet: () => ({ workspaceRoot: process.cwd(), context: parentContext }),
+    });
+    try {
+      await service.handle({ task: "Hold the only slot", concurrency: 1,
+        model: { providerId: "openai", modelId: "gpt-test" }, tools: ["read"] }, serviceContext());
+      let entered!: () => void;
+      let resume!: () => void;
+      const atRegistry = new Promise<void>((resolve) => { entered = resolve; });
+      const resumeRegistry = new Promise<void>((resolve) => { resume = resolve; });
+      vi.spyOn(registry, "getSessionBinding").mockImplementationOnce(async () => {
+        entered();
+        await resumeRegistry;
+        return null;
+      });
+      const pending = service.handle({ task: "Use the selected project", concurrency: 1,
+        model: { providerId: "openai", modelId: "gpt-test" }, tools: ["read"] }, serviceContext());
+      await atRegistry;
+      parentContext.operationDir = "project-b";
+      parentContext.queryScope = ["project-b/src"];
+      parentContext.revision = 5;
+      resume();
+      const queued = await pending;
+      expect(queued.queued).toBe(true);
+      const child = await registry.getThreadById("workspace-1", queued.threadId);
+      expect(child?.manifest.initialWorkContext).toEqual({
+        authorityRoot: process.cwd(), operationDir: "project-a",
+        queryScope: ["project-a/src"], revision: 4,
+      });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("persists a starting Run and returns before child-session setup finishes", async () => {
@@ -43,7 +94,7 @@ describe("thread services", () => {
       markSpawnStarted();
       return neverFinishes;
     });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -111,7 +162,7 @@ describe("thread services", () => {
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
     const capture = vi.fn(async () => ({ draftBaselineId: "draft-fixed", cleanup: async () => undefined }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadCaptureDraftBaseline: capture,
@@ -143,7 +194,7 @@ describe("thread services", () => {
   it("records a failed Run when draft baseline materialization rejects", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-draft-spawn-failure-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => { throw new Error("draft materialization failed"); }),
       threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: "draft-fixed", cleanup: async () => undefined })),
@@ -172,7 +223,7 @@ describe("thread services", () => {
   it("does not create a thread when a dirty surface snapshot is unavailable", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-draft-unavailable-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(),
       threadCaptureDraftBaseline: vi.fn(async () => { throw new Error("snapshot expired"); }),
@@ -196,7 +247,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-empty-surface-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const capture = vi.fn(async () => ({ draftBaselineId: null, cleanup: async () => undefined }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
       threadCaptureDraftBaseline: capture,
@@ -230,7 +281,7 @@ describe("thread services", () => {
   });
 
   it("refuses retrieval dispatch when the preset slot is not configured", async () => {
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: {
         maxConcurrency: 12,
         countActiveInRoot: vi.fn(async () => 0),
@@ -248,7 +299,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-research-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "research-child" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
     } as never);
@@ -294,7 +345,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-plain-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -333,7 +384,7 @@ describe("thread services", () => {
   it("honors an explicit shared worktree only when asked", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-shared-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -355,7 +406,7 @@ describe("thread services", () => {
   });
 
   it("rejects a preset-less dispatch without a resolved model and an unknown preset", async () => {
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: {
         maxConcurrency: 12,
         countActiveInRoot: vi.fn(async () => 0),
@@ -375,7 +426,7 @@ describe("thread services", () => {
   it("denies a nested preset-less dispatch claiming tools outside the owning Run", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-tools-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -419,7 +470,7 @@ describe("thread services", () => {
 
   it("cleans a captured draft baseline when Thread creation fails", async () => {
     const cleanup = vi.fn(async () => undefined);
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: {
         maxConcurrency: 12,
         countActiveInRoot: vi.fn(async () => 0),
@@ -442,7 +493,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "grandchild" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -512,7 +563,7 @@ describe("thread services", () => {
   it("rejects nested scope expansion and unauthorized thread tools", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-deny-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -571,7 +622,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-baseline-fail-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: vi.fn(async () => {
@@ -596,7 +647,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-baseline-changed-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: vi.fn(async () => {
@@ -697,7 +748,7 @@ describe("thread services", () => {
   it("accepts relative scope names that contain consecutive dots through dispatch", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-scope-dots-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "dotted-session" })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -749,7 +800,7 @@ describe("thread services", () => {
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const cleanup = vi.fn(async () => undefined);
     const capture = vi.fn(async () => ({ draftBaselineId: "draft-1", cleanup }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -929,7 +980,7 @@ describe("thread services", () => {
       text: `[committed summary]\nPARENT SUMMARY for ${sessionId}`,
       anchors: ["anchor-1"],
     }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -962,7 +1013,7 @@ describe("thread services", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-dispatch-inherit-off-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child-9" }));
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
@@ -982,7 +1033,7 @@ describe("thread services", () => {
   });
 
   it("rejects thread tools when a session binding has no matching catalog owner", async () => {
-    const service = createThreadDispatchService({
+    const service = dispatchService({
       threadRegistry: {
         getSessionBinding: async () => ({
           sessionId: "orphan-session",

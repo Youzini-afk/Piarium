@@ -13,6 +13,8 @@ export interface HarnessPathAuthorityOptions {
   authorityId: string;
   documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
   fsPromises?: PathSafetyFsPromises;
+  /** Test seam for interleaving a filesystem change with an authorized read. */
+  readFsPromises?: Pick<typeof fs.promises, "open" | "stat">;
   pathModule?: typeof path;
   platform?: string;
 }
@@ -21,15 +23,15 @@ export function createHarnessPathAuthority({
   authorityId,
   documents,
   fsPromises = fs.promises,
+  readFsPromises = fs.promises,
   pathModule = path,
   platform = process.platform,
 }: HarnessPathAuthorityOptions) {
-  return {
-    async resolve(
+  const resolve = async (
       actor: HarnessActorContext,
       inputPath: string,
       options: { allowMissing: boolean },
-    ): Promise<HarnessAuthorizedPath | null> {
+    ): Promise<HarnessAuthorizedPath | null> => {
       if (!actor.workspaceId) return null;
       const workspace = await documents.inspectWorkspace(actor.workspaceId);
       // Relative paths anchor at the session's operation dir (RR2 work
@@ -78,6 +80,7 @@ export function createHarnessPathAuthority({
           authorityId,
           workspaceId: actor.workspaceId,
           canonicalResourceId: normalizePathIdentity(resolved.realPath, { pathModule, platform }),
+          resolvedPath: resolved.realPath,
           inputPath,
           resourceId: resolved.relativePath.split(pathModule.sep).join("/"),
         };
@@ -85,7 +88,57 @@ export function createHarnessPathAuthority({
         if (error instanceof WorkspacePathError) return null;
         throw error;
       }
-    },
+    };
+
+  const readAuthorizedFile = async (
+    actor: HarnessActorContext,
+    authorized: HarnessAuthorizedPath,
+    signal?: AbortSignal,
+  ): Promise<Buffer> => {
+    if (authorized.authorityId !== authorityId || authorized.workspaceId !== actor.workspaceId) {
+      throw new Error("Document read authorization changed");
+    }
+    if (!authorized.resolvedPath) throw new Error("Authorized disk target has no resolved filesystem path");
+    signal?.throwIfAborted();
+    const before = await resolve(actor, authorized.inputPath, { allowMissing: false });
+    if (!before || before.canonicalResourceId !== authorized.canonicalResourceId
+      || before.resourceId !== authorized.resourceId || before.resolvedPath !== authorized.resolvedPath) {
+      throw new Error("Document path changed before reading");
+    }
+
+    // Open the canonical target selected during router authorization, never
+    // the original alias. O_NOFOLLOW protects the final component on systems
+    // that support it; handle identity checks below cover systems that do not.
+    const noFollow = fs.constants.O_NOFOLLOW ?? 0;
+    const handle = await readFsPromises.open(
+      authorized.resolvedPath,
+      fs.constants.O_RDONLY | noFollow,
+    );
+    try {
+      const opened = await handle.stat({ bigint: true });
+      if (!opened.isFile() || opened.ino === 0n) throw new Error("Document path is not a readable regular file");
+      signal?.throwIfAborted();
+      const bytes = await handle.readFile(signal ? { signal } : undefined);
+      signal?.throwIfAborted();
+
+      const after = await resolve(actor, authorized.inputPath, { allowMissing: false });
+      if (!after || after.canonicalResourceId !== authorized.canonicalResourceId
+        || after.resourceId !== authorized.resourceId || after.resolvedPath !== authorized.resolvedPath) {
+        throw new Error("Document path changed while reading");
+      }
+      const current = await readFsPromises.stat(after.resolvedPath, { bigint: true });
+      if (!current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) {
+        throw new Error("Document path changed while reading");
+      }
+      return bytes;
+    } finally {
+      await handle.close();
+    }
+  };
+
+  return {
+    resolve,
+    readAuthorizedFile,
   };
 }
 

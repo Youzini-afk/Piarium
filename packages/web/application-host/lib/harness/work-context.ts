@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -12,6 +13,7 @@ import type {
 } from "@varin/protocol";
 import type { HarnessAuthorizedPath } from "./router.js";
 import { HarnessServiceError } from "./service-error.js";
+import { isPathWithinRoot } from "../workspace/path-safety.js";
 
 /**
  * RR2/D-328+: Host-owned per-session work context. The state lives on the
@@ -56,13 +58,14 @@ const SCAN_SKIP_DIRS = new Set([
   "vendor",
 ]);
 
-const DISCOVER_MAX_DEPTH = 3;
-const DISCOVER_MAX_CANDIDATES = 200;
 const DISCOVER_TIME_BUDGET_MS = 800;
 
 export interface WorkContextDeps {
   /** Resolve a candidate against the actor's authorized scope (Host path authority). */
   authorize: (candidate: string, options: { allowMissing: boolean }) => Promise<HarnessAuthorizedPath | null>;
+  /** Restore-only check for a relative-path anchor above a narrowed actor scope. */
+  authorizeAnchor?: (candidate: string, options: { allowMissing: boolean }) => Promise<HarnessAuthorizedPath | null>;
+  anchorScopeRoots?: readonly string[];
   /** Absolute authorized workspace root for the actor. */
   workspaceRoot: string;
   /** Absolute session launch directory (the initial operation dir). */
@@ -71,6 +74,75 @@ export interface WorkContextDeps {
   now?: () => number;
   /** Reject work whose registered actor/session generation has been retired. */
   assertCurrent?: () => void;
+  /** Binds continuation tokens to the actor/session generation that issued them. */
+  cursorBinding?: string;
+}
+
+type DiscoverFrame = { path: string; depth: number; phase: "enter" | "children"; afterName: string | null };
+type DiscoverCursor = {
+  version: 1;
+  binding: string;
+  workspaceRoot: string;
+  scopeRoots: string[];
+  startPath: string | null;
+  depth: number | null;
+  stack: DiscoverFrame[];
+};
+
+// Continuations survive the caller's round-trip but are valid only for this
+// Host process. A restart or a different actor generation must start a fresh scan.
+const DISCOVER_CURSOR_KEY = randomBytes(32);
+
+function encodeDiscoverCursor(cursor: DiscoverCursor): string {
+  const payload = Buffer.from(JSON.stringify(cursor)).toString("base64url");
+  const signature = createHmac("sha256", DISCOVER_CURSOR_KEY).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function decodeDiscoverCursor(token: string): DiscoverCursor {
+  const [payload, signature, extra] = token.split(".");
+  if (!payload || !signature || extra !== undefined) {
+    throw new HarnessServiceError("invalid-params", "Invalid or expired project discovery cursor; restart discovery with path");
+  }
+  const expected = createHmac("sha256", DISCOVER_CURSOR_KEY).update(payload).digest();
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(signature, "base64url");
+  } catch {
+    throw new HarnessServiceError("invalid-params", "Invalid or expired project discovery cursor; restart discovery with path");
+  }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new HarnessServiceError("invalid-params", "Invalid or expired project discovery cursor; restart discovery with path");
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as DiscoverCursor;
+    if (parsed?.version !== 1 || typeof parsed.binding !== "string"
+      || typeof parsed.workspaceRoot !== "string" || !Array.isArray(parsed.scopeRoots)
+      || !parsed.scopeRoots.every((root) => typeof root === "string")
+      || !(parsed.startPath === null || typeof parsed.startPath === "string")
+      || !(parsed.depth === null || (Number.isSafeInteger(parsed.depth) && parsed.depth >= 0))
+      || !Array.isArray(parsed.stack)
+      || !parsed.stack.every((frame) => frame && typeof frame.path === "string"
+        && Number.isSafeInteger(frame.depth) && frame.depth >= 0
+        && (frame.phase === "enter" || frame.phase === "children")
+        && (frame.afterName === null || typeof frame.afterName === "string"))) {
+      throw new Error("malformed cursor");
+    }
+    return parsed;
+  } catch {
+    throw new HarnessServiceError("invalid-params", "Invalid or expired project discovery cursor; restart discovery with path");
+  }
+}
+
+const comparePath = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
+
+function isWithinRelativeRoot(root: string, candidate: string): boolean {
+  if (root === "") {
+    const normalized = candidate.replaceAll("\\", "/");
+    return candidate === "" || (!path.isAbsolute(candidate) && !/^[A-Za-z]:\//.test(normalized)
+      && !normalized.startsWith("../") && normalized !== "..");
+  }
+  return candidate === root || candidate.startsWith(`${root}/`);
 }
 
 const toRelativeRoot = (root: string, absolute: string): string => {
@@ -145,6 +217,18 @@ export async function validateStoredWorkContext(
   let authorized: HarnessAuthorizedPath | null;
   try {
     authorized = await deps.authorize(operation, { allowMissing: false });
+    if (!authorized && deps.authorizeAnchor && deps.anchorScopeRoots?.length) {
+      const anchor = await deps.authorizeAnchor(operation, { allowMissing: false });
+      if (anchor) {
+        for (const scopeRoot of deps.anchorScopeRoots) {
+          const scope = await deps.authorizeAnchor(scopeRoot, { allowMissing: true });
+          if (scope && isPathWithinRoot(scope.canonicalResourceId, anchor.canonicalResourceId)) {
+            authorized = anchor;
+            break;
+          }
+        }
+      }
+    }
   } catch {
     throw new HarnessServiceError("unavailable", "Stored operation directory is missing or inaccessible");
   }
@@ -153,9 +237,10 @@ export async function validateStoredWorkContext(
   }
   const fsx = deps.fs ?? fs;
   try {
-    const stat = await fsx.stat(authorized.canonicalResourceId);
+    if (!authorized.resolvedPath) throw new Error("missing resolved path");
+    const stat = await fsx.stat(authorized.resolvedPath);
     if (!stat.isDirectory()) throw new Error("not a directory");
-    await fsx.access(authorized.canonicalResourceId, constants.R_OK | constants.X_OK);
+    await fsx.access(authorized.resolvedPath, constants.R_OK | constants.X_OK);
   } catch {
     throw new HarnessServiceError("unavailable", "Stored operation directory is missing or inaccessible");
   }
@@ -192,7 +277,8 @@ export async function selectOperationDir(
   if (!authorized) {
     throw new HarnessServiceError("forbidden", `path is outside the authorized workspace scope: ${params.path}`);
   }
-  const stat = await (deps.fs ?? fs).stat(authorized.canonicalResourceId).catch((error: unknown) => {
+  if (!authorized.resolvedPath) throw new HarnessServiceError("unavailable", "Authorized operation directory has no resolved path");
+  const stat = await (deps.fs ?? fs).stat(authorized.resolvedPath).catch((error: unknown) => {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return null;
     throw error;
@@ -262,62 +348,212 @@ export async function resetWorkContext(
 
 export async function discoverProjects(
   params: ContextDiscoverParams,
-  deps: WorkContextDeps & { authorizeScopeRoots: string[] },
+  deps: WorkContextDeps & { authorizeScopeRoots: string[]; signal?: AbortSignal },
 ): Promise<ContextDiscoverResult> {
   const fsx = deps.fs ?? fs;
   const now = deps.now ?? Date.now;
-  for (const [name, value] of [["depth", params.depth], ["maxResults", params.maxResults]] as const) {
-    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
-      throw new HarnessServiceError("invalid-params", `${name} must be a positive safe integer`);
-    }
+  if (params.path !== undefined && typeof params.path !== "string") {
+    throw new HarnessServiceError("invalid-params", "path must be a string");
   }
-  const depth = Math.max(1, Math.min(DISCOVER_MAX_DEPTH, Math.trunc(params.depth ?? DISCOVER_MAX_DEPTH)));
-  const maxResults = Math.max(1, Math.min(DISCOVER_MAX_CANDIDATES, Math.trunc(params.maxResults ?? 50)));
+  if (params.cursor !== undefined && typeof params.cursor !== "string") {
+    throw new HarnessServiceError("invalid-params", "cursor must be a string");
+  }
+  if (params.path !== undefined && params.cursor !== undefined) {
+    throw new HarnessServiceError("invalid-params", "path cannot be combined with a project discovery cursor");
+  }
+  if (params.depth !== undefined && (!Number.isSafeInteger(params.depth) || params.depth < 0)) {
+    throw new HarnessServiceError("invalid-params", "depth must be a non-negative safe integer");
+  }
+  const maxResults = params.maxResults ?? 50;
+  if (!Number.isSafeInteger(maxResults) || maxResults < 1) {
+    throw new HarnessServiceError("invalid-params", "maxResults must be a positive safe integer");
+  }
+  const workspaceRoot = path.resolve(deps.workspaceRoot);
+  const binding = deps.cursorBinding ?? "";
+  const scopeRoots = [...new Set(deps.authorizeScopeRoots.map((root) => path.resolve(root)))].sort(comparePath);
+  const scopeRootRels = scopeRoots.map((root) => toRelativeRoot(workspaceRoot, root));
+  if (scopeRootRels.some((root) => !isWithinRelativeRoot("", root)
+    || toRelativeRoot(workspaceRoot, path.resolve(workspaceRoot, root)) !== root)) {
+    throw new HarnessServiceError("forbidden", "A project discovery scope is outside the authorized workspace");
+  }
+
+  const assertActive = (): void => {
+    deps.signal?.throwIfAborted();
+    deps.assertCurrent?.();
+  };
+  const authorizeDirectory = async (relative: string): Promise<HarnessAuthorizedPath | null> => {
+    assertActive();
+    const absolute = relative === "" ? workspaceRoot : path.resolve(workspaceRoot, relative);
+    if (toRelativeRoot(workspaceRoot, absolute) !== relative) {
+      throw new HarnessServiceError("invalid-params", "Invalid project discovery cursor; restart discovery with path");
+    }
+    const authorized = await deps.authorize(absolute, { allowMissing: false });
+    assertActive();
+    if (!authorized || authorized.resourceId !== relative) {
+      return null;
+    }
+    return authorized;
+  };
+
+  let startPath: string | null = null;
+  let depth: number | null = params.depth ?? null;
+  let stack: DiscoverFrame[];
+  if (params.cursor !== undefined) {
+    const cursor = decodeDiscoverCursor(params.cursor);
+    if (cursor.binding !== binding || cursor.workspaceRoot !== workspaceRoot
+      || JSON.stringify(cursor.scopeRoots) !== JSON.stringify(scopeRoots)) {
+      throw new HarnessServiceError("invalid-params", "Project discovery cursor expired after an authority or session change; restart discovery with path");
+    }
+    if (params.depth !== undefined && params.depth !== cursor.depth) {
+      throw new HarnessServiceError("invalid-params", "depth cannot change while continuing project discovery");
+    }
+    startPath = cursor.startPath;
+    depth = cursor.depth;
+    stack = cursor.stack.map((frame) => ({ ...frame }));
+    if (stack.some((frame) => !isWithinRelativeRoot("", frame.path)
+      || (depth !== null && frame.depth > depth))) {
+      throw new HarnessServiceError("invalid-params", "Invalid project discovery cursor; restart discovery with path");
+    }
+  } else if (params.path !== undefined) {
+    if (params.path.length === 0) throw new HarnessServiceError("invalid-params", "path must not be empty");
+    const requested = resolveRelativeToRoot(workspaceRoot, params.path);
+    const authorized = await deps.authorize(requested, { allowMissing: false });
+    assertActive();
+    if (!authorized) throw new HarnessServiceError("forbidden", `path is outside the authorized workspace scope: ${params.path}`);
+    const relative = authorized.resourceId;
+    if (!isWithinRelativeRoot("", relative)) {
+      throw new HarnessServiceError("forbidden", `path is outside the authorized workspace: ${params.path}`);
+    }
+    const stat = await fsx.stat(authorized.canonicalResourceId);
+    assertActive();
+    if (!stat.isDirectory()) throw new HarnessServiceError("invalid-params", `not a directory: ${params.path}`);
+    startPath = relative;
+    stack = [{ path: relative, depth: 0, phase: "enter", afterName: null }];
+  } else {
+    // Remove nested roots already covered by an authorized parent. The cursor
+    // still binds the original root set so a scope change invalidates it.
+    const roots = scopeRootRels.filter((candidate, index) =>
+      !scopeRootRels.some((other, otherIndex) => otherIndex !== index
+        && other.length < candidate.length && isWithinRelativeRoot(other, candidate)));
+    stack = roots.reverse().map((relative) => ({ path: relative, depth: 0, phase: "enter", afterName: null }));
+  }
+
   const started = now();
   const candidates: ContextDiscoverCandidate[] = [];
-  let truncated = false;
+  const unreadablePaths = new Set<string>();
+  const loaded = new Map<string, Array<{ name: string; isDirectory(): boolean; isSymbolicLink(): boolean }>>();
+  let stoppedForBudget = false;
+  const eligibleDirectory = (entry: { name: string; isDirectory(): boolean; isSymbolicLink(): boolean }): boolean => (
+    entry.isDirectory() && !entry.isSymbolicLink()
+    && !entry.name.startsWith(".") && !SCAN_SKIP_DIRS.has(entry.name)
+  );
+  const nextEligibleDirectory = (
+    entries: Array<{ name: string; isDirectory(): boolean; isSymbolicLink(): boolean }>,
+    afterName: string | null,
+  ) => {
+    let low = 0;
+    let high = entries.length;
+    if (afterName !== null) {
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (comparePath(entries[middle]!.name, afterName) <= 0) low = middle + 1;
+        else high = middle;
+      }
+    }
+    for (let index = low; index < entries.length; index++) {
+      if (eligibleDirectory(entries[index]!)) return entries[index]!;
+    }
+    return undefined;
+  };
+  const hasPending = (): boolean => stack.some((frame) => {
+    if (frame.phase === "enter") return true;
+    if (depth !== null && frame.depth >= depth) return false;
+    const entries = loaded.get(frame.path);
+    return entries ? nextEligibleDirectory(entries, frame.afterName) !== undefined : true;
+  });
 
-  // Scan the authorized scope roots (or the workspace root when unrestricted).
-  const queue: Array<{ dir: string; rel: string; depth: number }> =
-    deps.authorizeScopeRoots.map((root) => ({
-      dir: root,
-      rel: toRelativeRoot(deps.workspaceRoot, root),
-      depth: 0,
-    }));
-
-  while (queue.length > 0 && candidates.length < maxResults) {
+  while (stack.length > 0) {
     if (now() - started > DISCOVER_TIME_BUDGET_MS) {
-      truncated = true;
+      stoppedForBudget = true;
       break;
     }
-    const { dir, rel, depth: level } = queue.shift()!;
-    deps.assertCurrent?.();
-    const authorized = await deps.authorize(dir, { allowMissing: false });
-    if (!authorized) continue;
-    deps.assertCurrent?.();
-    let dirents;
-    try {
-      dirents = await fsx.readdir(authorized.canonicalResourceId, { withFileTypes: true });
-    } catch {
-      truncated = true;
+    assertActive();
+    const frame = stack[stack.length - 1]!;
+    const authorized = await authorizeDirectory(frame.path);
+    if (!authorized) {
+      if (params.cursor !== undefined) {
+        throw new HarnessServiceError("invalid-params", "Project discovery authorization changed; restart discovery with path");
+      }
+      if (startPath !== null) {
+        throw new HarnessServiceError("forbidden", "Project discovery path is no longer authorized");
+      }
+      // A restricted root that no longer resolves is not scanned or disclosed.
+      stack.pop();
+      loaded.delete(frame.path);
       continue;
     }
-    const names = new Set(dirents.map((entry) => entry.name));
-    const markers = PROJECT_MARKERS.filter((marker) => names.has(marker));
-    if (markers.length > 0) {
-      candidates.push({
-        path: rel,
-        label: rel === "" ? deps.workspaceRoot : rel,
-        markers: [...markers],
-      });
+    let entries = loaded.get(frame.path);
+    if (!entries) {
+      try {
+        const dirents = await fsx.readdir(authorized.canonicalResourceId, { withFileTypes: true });
+        assertActive();
+        entries = [...dirents].sort((a, b) => comparePath(a.name, b.name));
+        loaded.set(frame.path, entries);
+      } catch {
+        if (deps.signal?.aborted) deps.signal.throwIfAborted();
+        deps.assertCurrent?.();
+        unreadablePaths.add(frame.path);
+        stack.pop();
+        continue;
+      }
     }
-    if (level >= depth) continue;
-    for (const dirent of dirents) {
-      if (!dirent.isDirectory() || dirent.isSymbolicLink()) continue;
-      if (dirent.name.startsWith(".") || SCAN_SKIP_DIRS.has(dirent.name)) continue;
-      queue.push({ dir: path.join(dir, dirent.name), rel: rel === "" ? dirent.name : `${rel}/${dirent.name}`, depth: level + 1 });
+
+    if (frame.phase === "enter") {
+      frame.phase = "children";
+      const names = new Set(entries.map((entry) => entry.name));
+      const markers = PROJECT_MARKERS.filter((marker) => names.has(marker));
+      if (markers.length > 0) {
+        candidates.push({
+          path: frame.path,
+          label: frame.path === "" ? workspaceRoot : frame.path,
+          markers: [...markers],
+        });
+        if (candidates.length >= maxResults && hasPending()) break;
+      }
     }
+
+    if (depth !== null && frame.depth >= depth) {
+      stack.pop();
+      loaded.delete(frame.path);
+      continue;
+    }
+    const next = nextEligibleDirectory(entries, frame.afterName);
+    if (!next) {
+      stack.pop();
+      loaded.delete(frame.path);
+      continue;
+    }
+    frame.afterName = next.name;
+    const childPath = frame.path === "" ? next.name : `${frame.path}/${next.name}`;
+    stack.push({ path: childPath, depth: frame.depth + 1, phase: "enter", afterName: null });
   }
-  if (queue.length > 0) truncated = true;
-  return { candidates, truncated };
+
+  const truncated = stack.length > 0 && (stoppedForBudget || candidates.length >= maxResults);
+  const nextCursor = truncated
+    ? encodeDiscoverCursor({
+      version: 1,
+      binding,
+      workspaceRoot,
+      scopeRoots,
+      startPath,
+      depth,
+      stack,
+    })
+    : undefined;
+  return {
+    candidates,
+    truncated,
+    ...(nextCursor ? { nextCursor } : {}),
+    ...(unreadablePaths.size > 0 ? { unreadablePaths: [...unreadablePaths].sort(comparePath) } : {}),
+  };
 }

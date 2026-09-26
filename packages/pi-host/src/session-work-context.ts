@@ -62,3 +62,14 @@ export function commitSessionWorkContext(manager: JournalManager, input: PiWorkC
   const leafId = manager.appendCustomEntry(VARIN_WORK_CONTEXT_ENTRY_TYPE, context);
   return { leafId, entryId: leafId, context };
 }
+
+/** Install a child's fixed launch context before the session is registered. */
+export function initializeSessionWorkContext(
+  manager: JournalManager,
+  context: NonNullable<PiWorkContextSnapshot["context"]>,
+): void {
+  if (manager.getLeafId() !== null || context.revision !== 1) {
+    throw new HostError("session_work_context_conflict", "Initial work context requires a fresh session and revision 1");
+  }
+  manager.appendCustomEntry(VARIN_WORK_CONTEXT_ENTRY_TYPE, parseContext(context));
+}

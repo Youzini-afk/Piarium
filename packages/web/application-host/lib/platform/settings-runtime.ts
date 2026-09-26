@@ -4,6 +4,7 @@ import {
   type SettingsFileStore,
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
+import { randomUUID } from 'node:crypto';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
@@ -103,6 +104,16 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     // client tokens, tunnel tokens) that must never reach the log file.
     console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
     const sanitized = sanitizeSettingsUpdate(changes);
+    if (sanitized.outboundNetwork && typeof sanitized.outboundNetwork === 'object' && !Array.isArray(sanitized.outboundNetwork)) {
+      const incoming = sanitized.outboundNetwork as Record<string, unknown>;
+      const previous = current.outboundNetwork && typeof current.outboundNetwork === 'object' && !Array.isArray(current.outboundNetwork)
+        ? current.outboundNetwork as Record<string, unknown> : null;
+      sanitized.outboundNetwork = {
+        ...incoming,
+        credentialRef: previous && previous.proxyUrl === incoming.proxyUrl && typeof previous.credentialRef === 'string'
+          ? previous.credentialRef : randomUUID(),
+      };
+    }
     const removed = new Set(removals);
     let next = mergePersistedSettings(current, sanitized);
     for (const field of removals) {

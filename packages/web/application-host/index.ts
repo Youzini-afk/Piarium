@@ -146,7 +146,9 @@ import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-rout
 import { registerPdfMaterialRoutes } from './lib/harness/pdf-material-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
 import { createEgressRuntime } from './lib/harness/egress.js';
-import { readPiAuthFile, resolvePiAgentDir } from './lib/pi-config/storage.js';
+import { readEgressHostConfiguration } from './lib/harness/egress-settings.js';
+import { registerEgressRoutes } from './lib/harness/egress-routes.js';
+import { readPiAuthFile, removePiProviderAuth, resolvePiAgentDir, savePiProviderAuth } from './lib/pi-config/storage.js';
 import { seedProductSkills } from './lib/pi-runtime/product-skills.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
@@ -1567,7 +1569,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
   // Single outbound egress authority: proxy/NO_PROXY policy + connect-path
   // SSRF classification shared by web.fetch and web.search providers.
-  const egressRuntime = createEgressRuntime();
+  const egressRuntime = createEgressRuntime({
+    getHostConfiguration: async () => {
+      const document = await readSettingsFromDisk();
+      const network = document.outboundNetwork as { mode?: unknown } | undefined;
+      return readEgressHostConfiguration(document, network?.mode === 'proxy' ? readPiAuthFile() : {});
+    },
+  });
+  registerEgressRoutes(app, {
+    requireAuth: uiAuthController.requireAuth,
+    readSettings: readSettingsFromDisk,
+    readAuth: readPiAuthFile,
+    saveAuth: savePiProviderAuth,
+    removeAuth: removePiProviderAuth,
+    egress: egressRuntime,
+  });
   const retrievalEvidenceAccess: {
     persistReceipt?: (
       workspaceId: string,
@@ -2123,6 +2139,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           tools: input.tools,
           workFocus: input.workFocus,
           workFocusRole: 'branch',
+          ...(input.initialWorkContext ? { initialWorkContext: input.initialWorkContext } : {}),
         },
       ),
       open: (input) => piRuntimeBroker.openSession({
@@ -3048,6 +3065,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const domains = resolveHarnessWebBinding(snapshot).settings?.domains;
       return { ...(domains?.allow === undefined ? {} : { allow: domains.allow }), block: domains?.block ?? [] };
     },
+    readAuthorizedDiskFile: (ctx, authorized) => harnessPathAuthority.readAuthorizedFile(
+      ctx.actor,
+      authorized,
+      ctx.signal,
+    ),
     readMaterialFile: async (ctx, authorized) => {
       ctx.signal.throwIfAborted();
       const before = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
@@ -3062,7 +3084,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       } else if (source.status === 'unavailable') {
         throw new Error(source.message);
       } else {
-        bytes = await fsPromises.readFile(authorized.canonicalResourceId, { signal: ctx.signal });
+        bytes = await harnessPathAuthority.readAuthorizedFile(ctx.actor, authorized, ctx.signal);
       }
       const after = await harnessPathAuthority.resolve(ctx.actor, authorized.inputPath, { allowMissing: true });
       ctx.signal.throwIfAborted();

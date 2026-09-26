@@ -18,7 +18,7 @@ Last updated: 2026-09-26
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**运行时可靠性专项 RR（2026-09-26：计划已接受，RR0 已完成；RR1–RR6 已提交的接线尚未通过整体验收）。**
+**运行时可靠性专项 RR（2026-09-26：RR0–RR5 的代码路径与定向行为已复核；RR6 的真实安装包/外部代理平台纵切仍待验证）。**
 
 实施合同和 E01–E12 证据台账见 [Agent 运行时可靠性与多项目工作区计划](agent-runtime-reliability-plan.md)。
 RR0 完成源码级故障分层（E01 路径权限、E11 断连丢事件、E12 `3044800b` 停止语义），建立版本基线（host 0.9.19 / Node 24.18 / Varin 1.3.14）。
@@ -34,7 +34,11 @@ RR0 完成源码级故障分层（E01 路径权限、E11 断连丢事件、E12 `
 | RR5 | Host 出站配置、代理兼容与 SSRF 错误分型 | 已实施并接线（wired）：新增 `lib/harness/egress.ts` 统一出站权威——策略 `auto`(HTTP(S)_PROXY/ALL_PROXY/NO_PROXY，含小写）/`direct`/显式 proxy，每请求冻结独立 `version`；非法代理配置记入 `invalid` 并以 `proxy-config-invalid` 拒绝而非静默直连；`NO_PROXY` 支持 `*`/后缀/`host:port`。SSRF 从"先查后连"改为连接路径强制：`secureLookup` 在 undici connect.lookup 内对实际将拨号的地址分级，私网与特殊用途(198.18.0.0/15 fake-IP、240/4、ff00::/8、IPv4-mapped/NAT64/6to4 内嵌 v4 递归分级）一律拒绝；IPv6 括号/zone-id 归一修复 `[::1]` 旁路；DNS 失败分型 `dns` 不再冒充 private-network。代理模式走 `ProxyAgent` CONNECT（真实 stub 验证 `CONNECT target:443`），端点凭据做 Basic token 且永不进错误/日志；CONNECT 407→`proxy-auth`、拨号失败→`proxy-unavailable`、TLS 证书码→`tls`、20s 哨兵→`timeout` 与取消区分；HTTP 层错误带 `errorClass:"http"`(407→`proxy-auth`)。`web.fetch`/`web.search`(全部 provider 注入式 fetch)/`research.search` 共用该 runtime；缓存键含 `mode|proxyOrigin` 指纹防串路复用。新增 `network.diagnose` 服务（read.web 能力、无需路径授权）与 Pi `network_diag` 只读工具：报告策略、代理是否生效、目标在本地还是 proxy-side 解析及地址分级，不发请求、不改系统设置。验证：egress.test.ts 20/20（真 CONNECT stub、假 DNS 注入分类、env 矩阵、407/unreachable/bypass）；web-fetch 28/28；harness+search 112 文件 1202/1203；pi-host 493/494；三端 typecheck + eslint。未测：真实 Clash/v2ray fake-IP 环境的端到端放行、Electron 打包内 env 可见性、TLS 实链失败分型（仅错误码映射）——列入 RR6 |
 | RR6 | 跨层故障注入、真实平台 smoke 与收口 | 部分闭环：跨层故障注入在真实 socket 上通过——`gateway.test.ts` 新用例以真 `ws` 服务器 + 真 `WebSocketRuntimeTransport`/`PiRuntimeClient` 跑 handshake 与 `session.list`，在请求在飞时 `socket.terminate()` 杀线：pending 请求以 `PiRuntimeAmbiguousRequestError` 拒绝（不冒充成功/干净失败）、`onConnectionLost` 触发、死 client 拒绝后续请求、同网关新 client 立即恢复应答（即 UI 监督器驱动的重连路径在真实线缆上可用）。配合既有层级：RR1 在 FakeRuntime 上覆盖断线补齐/水位丢弃/停止交错；RR3 在真 shell 覆盖 heredoc/语法错误/输出恢复；RR5 在真 TCP CONNECT stub 覆盖代理路径与错误分型；RR4 在真 kernel 搜索路径覆盖范围与扫描计数。验收表复核：自主选项目后各工具路径一致（RR2 work-context+e2e）、停止回执丢失不误判（RR1 store+RR3 e2e）、断线后台完成自动补齐（RR1 store + 本纵切）、exit0 输出可原样引用（RR3 e2e toolCallId 恢复）、覆盖/降级/未配置分态呈现（RR4）、代理/DNS/TLS/策略拒绝可区分（RR5）。仍**未验证**的平台边界：真实桌面安装包断网纵切（无打包环境）、Electron 进程内 env 代理可见性、真实 fake-IP 代理端到端放行、远端 CI/付费代理环境、长流式恢复的实际延迟数字（性能数据在 RR3 `sentAt/firstOutputAt/durationMs` 埋点可用，但没有可复现基线前不报数）。新代码运行方式：`bun run --cwd packages/protocol build`（pi-host 与 web 经 dist 消费新协议类型），其余包按各自 `package.json` 脚本；开发实例需重启 Host 进程加载 egress/服务改动 |
 
-**2026-09-26 验收复核更正：**上表 RR1–RR6 的“wired”和测试数量是执行时的记录，不能推出计划全部完成。本次复核已复现并在工作树修补旧停止回执污染新 Run、重同步的跨代竞态与分离读取、工作上下文重开丢失、shell 准备期超出 `waitMs`、检索范围/来源摘要、IPv6 地址分类及代理重定向等缺陷；这些修补仍待作为整体提交。新增的真实 socket + 生产连接监督器 + UI Store 测试能证明断线自动追赶，但不代替安装包实测。尚未闭环的计划合同包括子 Agent 派发时继承操作上下文、截断项目发现的续查、Pi 本地磁盘路径的链接替换边界，以及代理侧最终目标约束和用户可配置的可信出口；真实 Electron 代理环境、fake-IP 代理与跨平台安装包仍未测。验收状态以这些具体行为及后续验证为准，不以原表的“wired”字样推定完成。
+**2026-09-26 验收复核更正：**上表 RR1–RR6 的“wired”和测试数量是执行时的记录，不能推出计划全部完成。本次复核已复现并在工作树修补旧停止回执污染新 Run、重同步的跨代竞态与分离读取、工作上下文重开丢失、shell 准备期超出 `waitMs`、检索范围/来源摘要、IPv6 地址分类及代理重定向等缺陷；首批修补已于 `ed869865` 提交并推送。新增的真实 socket + 生产连接监督器 + UI Store 测试能证明断线自动追赶，但不代替安装包实测。该次复核时尚未闭环的计划合同包括子 Agent 派发时继承操作上下文、截断项目发现的续查、Pi 本地磁盘路径的链接替换边界，以及代理侧最终目标约束和用户可配置的可信出口；真实 Electron 代理环境、fake-IP 代理与跨平台安装包仍未测。验收状态以这些具体行为及后续验证为准，不以原表的“wired”字样推定完成。
+
+**后续四项收口：**子 Agent 的 `thread.dispatch` 在首个异步步骤前冻结父分支操作目录与 `queryScope`，写进 Thread manifest；子 Pi 会话在首次模型/工具请求前建立独立 journal。隔离子工作区只在来源和目录可证明映射时继承，受限 scope 不兼容时明确失败。项目发现支持已授权显式起点、签名续页游标和不受默认深度 3/候选 200 限制的逐页扫描；每页重检授权，读失败目录以 `unreadablePaths` 明示。出站网络设置落在执行 Host：环境代理不自动成为可信代理，显式代理可由部署者委托代理侧最终地址策略；凭据在 Host 的 Pi auth owner 中单独保存、绑定代理端点，配置/认证失败和诊断不静默直连或泄露秘密。`document.readSource` 的 disk 分支现在由 Host 对授权 canonical target 打开句柄并返回实际 bytes；Pi `read`/`apply_patch` 不再按原路径二次读取。验证包括真 Pi 子线程首轮纵切、五层项目分页、受控 HTTP/HTTPS 代理与认证交错、Windows junction 换链后读取外部 fd 再拒绝返回的测试。
+
+**边界：**可信代理委托的依据是部署者确认代理侧会限制最终目标；Host 无法独立观察其远端 DNS 结果。Node 当前路径读取没有跨平台的目录句柄相对打开，已验证的原路径/父 junction 交换可被拒绝，但不能宣称抵御攻击者精确操纵的所有父目录 ABA 交错。真实 Electron 安装包断网恢复、远程 Host、真实代理策略与 fake-IP、跨平台行为仍未实测；RR6 不因此标为 proven。
 
 下文既有阶段的历史交付记录保留；它们不覆盖上表新发现的缺陷与修复目标。
 

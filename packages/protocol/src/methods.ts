@@ -369,6 +369,8 @@ export interface HostMethodMap {
       model?: ModelSelection;
       name?: string;
       parentSession?: string;
+      /** Host-only initial Pi journal state for a newly dispatched child. */
+      initialWorkContext?: PiWorkContextCommit["context"];
       permissions?: PermissionPolicy;
       scope?: string[];
       tools?: string[];

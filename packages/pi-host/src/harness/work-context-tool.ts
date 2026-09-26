@@ -11,15 +11,17 @@ const WorkContextParams = Type.Object({
     Type.Literal("scope"),
     Type.Literal("reset"),
   ], { description: "get: read context. discover: list candidate project dirs. select: switch the operation dir. scope: restrict retrieval scope. reset: restore the session launch dir." }),
-  /** select: directory to operate in. scope: ignored. */
+  /** select: directory to operate in. discover: optional start directory. */
   path: Type.Optional(Type.String({ description: "select: target directory, absolute or relative to the workspace root." })),
   /** scope: retrieval roots; empty array clears the scope. */
   paths: Type.Optional(Type.Array(Type.String({ description: "absolute or workspace-root-relative path" }))),
   /** CAS guard from a prior get/select/scope/reset result. */
   expectedRevision: Type.Optional(Type.Number({ description: "Reject the mutation unless the Host context still has this revision." })),
-  /** discover: result cap (default 50, max 200). */
+  /** discover: opaque continuation token from a previous partial result. */
+  cursor: Type.Optional(Type.String()),
+  /** discover: preferred per-page candidate count (default 50). */
   maxResults: Type.Optional(Type.Number()),
-  /** discover: scan depth below the workspace root (default 3, max 3). */
+  /** discover: optional maximum depth below the start directory; omitted scans descendants. */
   depth: Type.Optional(Type.Number()),
 });
 
@@ -56,6 +58,8 @@ export function createWorkContextTool(bridge: HostServicesBridge, sync: WorkCont
         }
         case "discover": {
           const result = await bridge.request("context.discover", {
+            ...(params.path !== undefined ? { path: params.path } : {}),
+            ...(params.cursor !== undefined ? { cursor: params.cursor } : {}),
             ...(params.maxResults !== undefined ? { maxResults: params.maxResults } : {}),
             ...(params.depth !== undefined ? { depth: params.depth } : {}),
           }, requestOptions);

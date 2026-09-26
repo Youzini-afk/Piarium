@@ -167,10 +167,10 @@ describe("harness router", () => {
       resolveActor: async () => resolvedActor(["read.document"]),
       authorizeWorkspacePath: authorize,
     });
-    router.register("document.readSource", { handle: async () => ({ source: "disk" }) });
+    router.register("document.readSource", { handle: async () => ({ source: "disk", base64: "dGVzdA==" }) });
     await router.processEvent(harnessEvent("document.readSource", { path: "new.ts" }));
     expect(authorize).toHaveBeenCalledWith(expect.anything(), "new.ts", { allowMissing: true });
-    expect(responses).toEqual([{ ok: true, result: { source: "disk" } }]);
+    expect(responses).toEqual([{ ok: true, result: { source: "disk", base64: "dGVzdA==" } }]);
     router.dispose();
   });
 

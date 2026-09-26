@@ -17,6 +17,7 @@ import type {
   ThreadReport,
   ThreadRun,
   ThreadRunOutcome,
+  ThreadInitialWorkContext,
   ThreadOccupancy,
   ThreadSpaceMeasurement,
   ThreadRestoreStatus,
@@ -30,7 +31,7 @@ import {
   normalizeFrozenHarnessPermissions,
   threadIntegrationBindingFromPreview,
 } from "@varin/protocol";
-import { scopePathContainedBy } from "./thread-nesting.js";
+import { parseThreadScopePath, scopePathContainedBy } from "./thread-nesting.js";
 import {
   assembleKeepReasons,
   collectBranchObjectHashesFromRoot,
@@ -60,6 +61,7 @@ import {
   type MaterializationSwitchJournal,
 } from "./working-state/materialization-switch.js";
 import { encodeDocumentText } from "../documents/inspect.js";
+import { normalizePathIdentity } from "../workspace/path-safety.js";
 import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
@@ -78,6 +80,7 @@ export interface ThreadSessionAdapter {
     cwd: string;
     name: string;
     parentSession: string;
+    initialWorkContext?: NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>;
     model?: { providerId: string; modelId: string };
     permissions?: import("@varin/protocol").PermissionPolicy;
     scope?: string[];
@@ -280,6 +283,77 @@ const DISCUSSION_TOOLS = new Set([
   "websearch",
 ]);
 const THREAD_CONTROL_TOOLS = new Set(["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "update"]);
+
+const sameDirectory = (left: string, right: string): boolean => (
+  normalizePathIdentity(left) === normalizePathIdentity(right)
+);
+
+const mappedContextPath = (value: string, label: string): string => {
+  const parsed = parseThreadScopePath(value);
+  if (!parsed.ok || parsed.path !== value) {
+    throw new ThreadRuntimeError("invalid-request", `Frozen parent ${label} is not a canonical relative path: ${value}`);
+  }
+  return parsed.path;
+};
+
+/** Map logical paths only when the child has the same authority or a real isolated clone. */
+const childInitialWorkContext = async (
+  frozen: ThreadInitialWorkContext,
+  input: { authorityRoot: string; sessionRoot: string; workspaceId: string; worktree: Thread["worktree"]; scope: readonly string[] },
+): Promise<NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>> => {
+  if (!path.isAbsolute(frozen.authorityRoot) || !path.isAbsolute(input.authorityRoot)
+    || !path.isAbsolute(input.sessionRoot)) {
+    throw new ThreadRuntimeError("invalid-request", "Parent or child work-context authority root is not absolute");
+  }
+  let parentIdentity: string;
+  let childIdentity: string;
+  let sessionIdentity: string;
+  let worktreeIdentity: string | null = null;
+  try {
+    [parentIdentity, childIdentity, sessionIdentity, worktreeIdentity] = await Promise.all([
+      fs.promises.realpath(frozen.authorityRoot),
+      fs.promises.realpath(input.authorityRoot),
+      fs.promises.realpath(input.sessionRoot),
+      input.worktree ? fs.promises.realpath(input.worktree.path) : Promise.resolve(null),
+    ]);
+  } catch {
+    throw new ThreadRuntimeError("unavailable", "Parent or child work-context root is missing or inaccessible");
+  }
+  if (!sameDirectory(parentIdentity, childIdentity)
+    && (!worktreeIdentity || !sameDirectory(worktreeIdentity, childIdentity))) {
+    throw new ThreadRuntimeError("unavailable", "Parent work context cannot be mapped into the child authority root");
+  }
+  if (input.worktree?.viewMode === "virtual" && frozen.operationDir !== "") {
+    throw new ThreadRuntimeError("unavailable", "Inherited operation directory requires a materialized child worktree");
+  }
+  const operationDir = mappedContextPath(frozen.operationDir, "operation directory");
+  const queryScope = frozen.queryScope === null ? null
+    : frozen.queryScope.map((entry) => mappedContextPath(entry, "query scope"));
+  if (input.scope.length > 0) {
+    // The operation directory is an anchor, not a read grant. An ancestor of
+    // the allowed roots (including "") remains necessary when a scope contains
+    // multiple siblings; every eventual target still passes scoped authority.
+    const operationMapped = input.scope.some((root) => (
+      scopePathContainedBy(root, operationDir) || scopePathContainedBy(operationDir, root)
+    ));
+    const outside = (queryScope ?? []).filter((entry) => (
+      !input.scope.some((root) => scopePathContainedBy(root, entry))
+    ));
+    if (!operationMapped || outside.length > 0) {
+      throw new ThreadRuntimeError("invalid-request", `Inherited work context is outside the child scope: ${[
+        ...(!operationMapped ? [operationDir || "workspace root"] : []), ...outside,
+      ].join(", ")}`);
+    }
+  }
+  return {
+    workspaceId: input.workspaceId,
+    authorityRoot: childIdentity,
+    sessionRoot: sessionIdentity,
+    operationDir,
+    queryScope,
+    revision: 1,
+  };
+};
 
 const toolSignature = (name: unknown, args: unknown): string => createHash("sha256")
   .update(typeof name === "string" ? name : "unknown")
@@ -2022,11 +2096,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         reportError(error);
       }
     }
-    const sourceRoot = input.kind === "discussion"
+    const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+    let sourceRoot = input.kind === "discussion"
       ? parent.cwd
       : await options.resolveWorkspaceRoot(input.workspaceId);
     const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
-    const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     const draftBaselineId = existing?.manifest.draftBaselineId ?? input.draftBaselineId ?? null;
     if (existing && (input.draftBaselineId ?? null) !== existing.manifest.draftBaselineId) {
       throw new ThreadRuntimeError("invalid-request", "Thread draft baseline does not match its immutable launch manifest");
@@ -2042,7 +2116,37 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       && input.worktree === "none"
       && Boolean(options.workingStates);
     const effectiveWorktreeMode = retrievalParentInput ? "isolated" as const : input.worktree;
-    const virtualIsolated = effectiveWorktreeMode === "isolated" && (!worktree || isVirtualWorktree(worktree));
+    let physicalCloneOfParent = input.parent.kind === "session";
+    if (input.kind !== "discussion" && input.parent.kind === "thread"
+      && effectiveWorktreeMode === "isolated" && existing?.manifest.initialWorkContext?.operationDir) {
+      const owner = await options.registry.getThreadById(input.workspaceId, input.parent.id);
+      if (!owner) throw new ThreadRuntimeError("not-found", `Parent thread not found: ${input.parent.id}`);
+      if (owner.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
+        // Nested branch capture already uses this source. Physical worktree
+        // preparation must clone the same parent view.
+        sourceRoot = owner.worktree.path;
+        physicalCloneOfParent = true;
+      } else {
+        throw new ThreadRuntimeError("unavailable", "Parent virtual work context cannot be materialized into a child operation directory");
+      }
+    }
+    if (physicalCloneOfParent && effectiveWorktreeMode === "isolated" && existing?.manifest.initialWorkContext) {
+      const frozenRoot = existing.manifest.initialWorkContext.authorityRoot;
+      let sameSource = false;
+      try {
+        sameSource = sameDirectory(await fs.promises.realpath(frozenRoot), await fs.promises.realpath(sourceRoot));
+      } catch {
+        throw new ThreadRuntimeError("unavailable", "Frozen parent work-context authority root is missing or inaccessible");
+      }
+      if (!sameSource) {
+        throw new ThreadRuntimeError("unavailable", "Parent work context cannot be mapped from the child clone source");
+      }
+    }
+    // The Host validates a selected operation directory as a real directory at
+    // registration. A virtual scratch root contains no copied subdirectories.
+    const virtualIsolated = effectiveWorktreeMode === "isolated"
+      && !existing?.manifest.initialWorkContext?.operationDir
+      && (!worktree || isVirtualWorktree(worktree));
     const mayMaterialize = runNeedsMaterializedDirectory(input.tools);
     if (!worktree) {
       if (effectiveWorktreeMode === "isolated" && mayMaterialize && effectiveSettings?.budget) {
@@ -2244,12 +2348,23 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     checkPreparation();
     setPreparationStage("opening-session");
     const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(preparedCwd);
+    const childAuthorityRoot = await options.resolveWorkspaceRoot(runtimeWorkspaceId);
+    const initialWorkContext = existing?.manifest.initialWorkContext
+      ? await childInitialWorkContext(existing.manifest.initialWorkContext, {
+          authorityRoot: childAuthorityRoot,
+          sessionRoot: preparedCwd,
+          workspaceId: runtimeWorkspaceId,
+          worktree,
+          scope: frozen.scope,
+        })
+      : undefined;
     let sessionId: string | null = null;
     try {
       const snapshot = await options.sessions.create({
         cwd: preparedCwd,
         name: `${input.preset ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession: parent.file,
+        ...(initialWorkContext ? { initialWorkContext } : {}),
         ...(input.model ? { model: input.model } : {}),
         permissions: normalizeFrozenHarnessPermissions(input.permissions),
         ...(input.scope?.length ? { scope: [...input.scope] } : {}),

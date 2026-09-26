@@ -56,6 +56,7 @@ import {
   isWorkFocusId,
   isWorkFocusSource,
   type WorkFocusSelection,
+  type PiWorkContextSnapshot,
 } from "@varin/protocol";
 import { CompactionWorkerRuntime } from "./compaction-worker.js";
 import { HostError, toProtocolError } from "./errors.js";
@@ -111,6 +112,30 @@ const optionalPositiveInteger = (params: Record<string, unknown>, key: string): 
     throw new HostError("invalid_params", `${key} must be a positive integer`);
   }
   return Number(value);
+};
+
+const optionalInitialWorkContext = (
+  params: Record<string, unknown>,
+): NonNullable<PiWorkContextSnapshot["context"]> | undefined => {
+  if (params.initialWorkContext === undefined) return undefined;
+  const value = expectRecord(params.initialWorkContext, "initialWorkContext");
+  if (typeof value.workspaceId !== "string" || !value.workspaceId
+    || typeof value.authorityRoot !== "string" || !value.authorityRoot
+    || typeof value.sessionRoot !== "string" || !value.sessionRoot
+    || typeof value.operationDir !== "string"
+    || value.revision !== 1
+    || (value.queryScope !== null && (!Array.isArray(value.queryScope)
+      || !value.queryScope.every((item) => typeof item === "string")))) {
+    throw new HostError("invalid_params", "initialWorkContext is malformed");
+  }
+  return {
+    workspaceId: value.workspaceId,
+    authorityRoot: value.authorityRoot,
+    sessionRoot: value.sessionRoot,
+    operationDir: value.operationDir,
+    queryScope: value.queryScope === null ? null : [...value.queryScope] as string[],
+    revision: 1,
+  };
 };
 
 const readNonNegativeInteger = (params: Record<string, unknown>, key: string): number => {
@@ -913,6 +938,7 @@ export class HostController {
           optionalWorkFocusSelection(params),
           optionalPositiveInteger(params, "workFocusGeneration"),
           optionalWorkFocusRole(params),
+          optionalInitialWorkContext(params),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");

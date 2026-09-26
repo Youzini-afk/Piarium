@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadWaitService } from "./thread-services.js";
+import { seedWorkContext } from "./work-context.js";
 import type { HarnessServiceContext } from "./router.js";
 
 const context = (): HarnessServiceContext => ({
@@ -129,6 +130,8 @@ describe("root execution admission — service/registry acceptance", () => {
 
   it("reserves the last root slot atomically after concurrent baseline captures", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "varin-admission-audit-"));
+    const workspaceRoot = join(dataDir, "workspace");
+    await mkdir(workspaceRoot);
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     let captures = 0;
     let release!: () => void;
@@ -137,6 +140,8 @@ describe("root execution admission — service/registry acceptance", () => {
     const dispatch = createThreadDispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
+      workContextGet: () => ({ workspaceRoot,
+        context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
       threadPrepareIsolatedBranch: async () => {
         captures += 1;
         if (captures === 2) release();
@@ -167,12 +172,16 @@ describe("root execution admission — service/registry acceptance", () => {
 
   it("releases a captured draft when inherit input capture fails", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "varin-inherit-cleanup-"));
+    const workspaceRoot = join(dataDir, "workspace");
+    await mkdir(workspaceRoot);
     const registry = createThreadRegistry({ dataDir, hostId: "audit" });
     const cleanup = vi.fn(async () => undefined);
     const spawn = vi.fn();
     const dispatch = createThreadDispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
+      workContextGet: () => ({ workspaceRoot,
+        context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
       threadCaptureDraftBaseline: async () => ({ draftBaselineId: "draft-owned", cleanup }),
       threadCaptureInputContext: async () => { throw new Error("parent input unavailable"); },
       threadPrepareIsolatedBranch: async () => baseline,

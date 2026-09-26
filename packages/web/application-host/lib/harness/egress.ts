@@ -3,8 +3,10 @@
  * request leaves the process and why it failed when it does.
  *
  * Policy modes:
- * - `auto` (default): honor `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` and
- *   `NO_PROXY` (lowercase accepted). Absent env means direct.
+ * - `auto` (default): inspect this Host's `HTTPS_PROXY`/`HTTP_PROXY`/
+ *   `ALL_PROXY` and `NO_PROXY` (lowercase accepted). A proxy-side DNS route
+ *   needs an explicit Host-owned delegation; mere environment presence is
+ *   not enough to prove the final target address is allowed.
  * - `direct`: never use a proxy.
  * - explicit proxy: caller-supplied proxy URL.
  *
@@ -19,12 +21,14 @@
  *   through the proxy's CONNECT semantics the proxy resolves the target
  *   itself — diagnostics label that `proxy-side` honestly.
  * - Proxy endpoint hosts may be loopback/LAN (that is the whole point of a
- *   local proxy); only the *target* is SSRF-screened.
+ *   local proxy). The target's static URL rules always run; final resolved
+ *   address policy is delegated only when the executing Host says so.
  * - Credentials embedded in a proxy URL are used for CONNECT auth and are
  *   never copied into errors, logs, or diagnostics.
  */
 
 import { lookup } from "node:dns/promises";
+import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { classifyHostname, classifyIp, type EgressAddressClass } from "./ssrf-policy.js";
@@ -37,6 +41,7 @@ export type EgressErrorKind =
   | "proxy-unavailable"
   | "proxy-auth"
   | "proxy-config-invalid"
+  | "proxy-policy-unverified"
   | "tls"
   | "connect"
   | "timeout"
@@ -63,6 +68,16 @@ export interface EgressOverride {
   noProxy?: string;
 }
 
+/** Stored by the executing Application Host, never inherited from a client device or project. */
+export interface EgressHostConfiguration extends EgressOverride {
+  mode: EgressMode;
+  /** Explicit operator delegation to a proxy that enforces final-address policy. */
+  trustedProxy?: boolean;
+  /** Secret used only by the Host's CONNECT dispatcher. */
+  proxyAuth?: { username: string; password: string };
+  invalid?: string;
+}
+
 export interface EgressPolicy {
   /** Frozen policy revision; every resolution stamps a new version. */
   version: number;
@@ -72,7 +87,10 @@ export interface EgressPolicy {
   /** Proxy has CONNECT credentials configured (type only, never the secret). */
   proxyAuth?: "basic";
   noProxy: string[];
-  source: "env" | "override" | "none";
+  source: "env" | "override" | "app" | "none";
+  trust: "direct" | "unverified-proxy" | "delegated-proxy";
+  /** Stable digest of the complete frozen route, including secret rotation. */
+  fingerprint: string;
   /** Non-empty when configuration is malformed — requests must fail, not go direct. */
   invalid?: string;
 }
@@ -95,6 +113,10 @@ export type EgressFetch = (
 export interface EgressRuntime {
   /** Frozen policy for one request (env re-read per call — new version). */
   resolvePolicy(override?: EgressOverride): EgressPolicy;
+  /** Live Host setting snapshot for cache identity and UI diagnosis. */
+  policySnapshot(url?: string): Promise<EgressPolicy>;
+  /** Freeze Host setting and environment for all hops of a logical request. */
+  prepare(url: string, override?: EgressOverride): Promise<{ policy: EgressPolicy; fetch: (url: string, init?: RequestInit & { dispatcher?: never }) => Promise<Response> }>;
   /** Policy + dispatcher for a concrete target URL. */
   resolve(url: string, override?: EgressOverride): EgressResolution;
   fetch: EgressFetch;
@@ -106,12 +128,12 @@ export interface EgressRuntime {
 
 export interface NetworkDiagnosis {
   url: string;
-  policy: EgressPolicy;
+  policy: Omit<EgressPolicy, "fingerprint">;
   /** Static URL/scheme/literal/configuration decision, before DNS. */
   decision: "allowed" | "blocked";
   reason?: string;
   /** Diagnostic address sample, never a guarantee about a later connection. */
-  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified";
+  addressCheck: "not-run" | "public" | "blocked" | "dns-error" | "proxy-side-unverified" | "proxy-policy-incompatible";
   /** How the target gets resolved for this request. */
   resolution: "not-run" | "local" | "proxy-side" | "static-literal";
   /** Locally resolved addresses with their classes (diagnostic only). */
@@ -132,6 +154,9 @@ const parseProxyUrl = (
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return { error: `unsupported proxy scheme "${url.protocol}" (http/https only)` };
+  }
+  if (!url.hostname || url.pathname !== "/" || url.search || url.hash) {
+    return { error: "proxy URL must be an origin without path, query, or fragment" };
   }
   const origin = `${url.protocol}//${url.host}`;
   if (url.username || url.password) {
@@ -171,25 +196,39 @@ export const resolveEgressPolicy = (
   env: NodeJS.ProcessEnv = process.env,
   protocol: "http:" | "https:" = "https:",
   version = ++policyVersionCounter,
+  hostConfiguration?: EgressHostConfiguration,
 ): EgressPolicy => {
+  const selected = override ?? hostConfiguration;
+  const isHostSelection = !override && hostConfiguration !== undefined;
+  const proxyRaw = selected?.mode === "proxy" ? selected.proxyUrl ?? "" : envProxyCandidate(env, protocol)?.raw ?? "";
+  const source = selected?.mode === "proxy" || selected?.mode === "direct"
+    ? isHostSelection ? "app" : "override"
+    : proxyRaw ? "env" : "none";
+  const noProxy = selected?.mode === "proxy"
+    ? selected.noProxy?.split(",").map((e) => e.trim()).filter(Boolean) ?? []
+    : envNoProxy(env);
+  const fingerprint = createHash("sha256").update(JSON.stringify({
+    mode: selected?.mode ?? "auto", proxyRaw, noProxy,
+    envProxyRoutes: selected?.mode === "proxy" || selected?.mode === "direct" ? undefined : [
+      envProxyCandidate(env, "http:")?.raw, envProxyCandidate(env, "https:")?.raw,
+    ],
+    auth: isHostSelection ? hostConfiguration?.proxyAuth : undefined,
+    trust: isHostSelection && hostConfiguration?.trustedProxy === true,
+  })).digest("hex").slice(0, 24);
   const base: Omit<EgressPolicy, "mode"> & { mode: EgressPolicy["mode"] } = {
     version,
     mode: "direct",
-    noProxy: envNoProxy(env),
-    source: "none",
+    noProxy,
+    source,
+    trust: "direct",
+    fingerprint,
   };
-  if (override?.noProxy) {
-    base.noProxy = [...base.noProxy, ...override.noProxy.split(",").map((e) => e.trim()).filter(Boolean)];
+  if (isHostSelection && hostConfiguration.invalid) return { ...base, invalid: hostConfiguration.invalid };
+  if (selected?.mode === "direct") {
+    return base;
   }
-
-  if (override?.mode === "direct") {
-    return { ...base, source: "override" };
-  }
-
-  const proxyRaw = override?.mode === "proxy" ? override.proxyUrl ?? "" : envProxyCandidate(env, protocol)?.raw ?? "";
-  const source = override?.mode === "proxy" ? "override" : proxyRaw ? "env" : "none";
   if (!proxyRaw) {
-    if (override?.mode === "proxy") {
+    if (selected?.mode === "proxy") {
       return { ...base, source, invalid: "proxy mode requires a proxy URL" };
     }
     return { ...base, source };
@@ -203,7 +242,9 @@ export const resolveEgressPolicy = (
     ...base,
     mode: "proxy",
     proxyOrigin: parsed.origin,
-    ...(parsed.auth ? { proxyAuth: parsed.auth } : {}),
+    ...(parsed.auth || (isHostSelection && hostConfiguration?.proxyAuth) ? { proxyAuth: "basic" as const } : {}),
+    trust: isHostSelection && hostConfiguration?.mode === "proxy" && hostConfiguration.trustedProxy === true
+      ? "delegated-proxy" : "unverified-proxy",
     source,
   };
 };
@@ -304,18 +345,26 @@ export const classifyEgressError = (error: unknown, mode: "direct" | "proxy" = "
   if (error instanceof Error && error.name === "AbortError") {
     return new EgressError("cancelled", "request aborted");
   }
-  return new EgressError("unknown", error instanceof Error ? error.message : "fetch failed", { cause: error });
+  // Arbitrary dependency errors can echo URLs or proxy credentials. Keep the
+  // cause in-process, but never project its uncontrolled text to tools/UI.
+  return new EgressError("unknown", "outbound request failed", { cause: error });
 };
 
 export const EGRESS_TIMEOUT = "egress-timeout";
 
 export const createEgressRuntime = (options: {
   env?: NodeJS.ProcessEnv;
+  /** Live serialized settings owned by this executing Host. */
+  getHostConfiguration?: () => Promise<EgressHostConfiguration | undefined>;
   /** DNS resolver override — tests only; production uses `dns.promises.lookup`. */
   resolveAll?: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+  /** Proxy-endpoint resolver override for connector tests only. */
+  resolveProxyAll?: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 } = {}): EgressRuntime => {
   const env = options.env ?? process.env;
+  const getHostConfiguration = options.getHostConfiguration ?? (async () => undefined);
   const resolveAll = options.resolveAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
+  const resolveProxyAll = options.resolveProxyAll ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
 
   // SSRF on the connect path: the classified answer is the address the
   // socket actually dials. Any private/special answer refuses the connect;
@@ -364,10 +413,13 @@ export const createEgressRuntime = (options: {
   let currentProxyKeys = new Set<string>();
   let closed = false;
   let closePromise: Promise<void> | undefined;
-  const proxyKeysFor = (override: EgressOverride | undefined, requestEnv: NodeJS.ProcessEnv): Set<string> => {
-    if (override?.mode === "direct") return new Set();
-    if (override?.mode === "proxy") return new Set(override.proxyUrl ? [override.proxyUrl] : []);
-    return new Set([envProxyCandidate(requestEnv, "http:")?.raw, envProxyCandidate(requestEnv, "https:")?.raw].filter((raw): raw is string => Boolean(raw)));
+  const proxyKey = (raw: string, hostConfig?: EgressHostConfiguration): string =>
+    `${raw}|${hostConfig?.proxyAuth?.username ?? ''}|${hostConfig?.proxyAuth?.password ?? ''}`;
+  const proxyKeysFor = (selected: EgressHostConfiguration | EgressOverride | undefined, requestEnv: NodeJS.ProcessEnv): Set<string> => {
+    if (selected?.mode === "direct") return new Set();
+    if (selected?.mode === "proxy") return new Set(selected.proxyUrl ? [proxyKey(selected.proxyUrl, selected as EgressHostConfiguration)] : []);
+    return new Set([envProxyCandidate(requestEnv, "http:")?.raw, envProxyCandidate(requestEnv, "https:")?.raw]
+      .filter((raw): raw is string => Boolean(raw)).map((raw) => proxyKey(raw)));
   };
   const retireOutdatedDispatchers = (keys: Set<string>): void => {
     if (closed) return;
@@ -391,17 +443,32 @@ export const createEgressRuntime = (options: {
     }
     retireOutdatedDispatchers(currentProxyKeys);
   };
-  const proxyDispatcherFor = (policy: EgressPolicy, rawUrl: string): Dispatcher => {
-    const key = rawUrl;
+  const proxyDispatcherFor = (policy: EgressPolicy, rawUrl: string, hostConfig?: EgressHostConfiguration): Dispatcher => {
+    const key = proxyKey(rawUrl, hostConfig);
     const cached = proxyDispatchers.get(key);
     if (cached) return cached;
     const parsed = new URL(rawUrl);
-    const token = parsed.username || parsed.password
-      ? `Basic ${Buffer.from(`${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`).toString("base64")}`
-      : undefined;
+    const token = hostConfig?.proxyAuth
+      ? `Basic ${Buffer.from(`${hostConfig.proxyAuth.username}:${hostConfig.proxyAuth.password}`).toString("base64")}`
+      : parsed.username || parsed.password
+        ? `Basic ${Buffer.from(`${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`).toString("base64")}`
+        : undefined;
+    // Proxy endpoint DNS belongs to this Host. It is resolved by the actual
+    // proxy connector, independently of target DNS (which the proxy owns).
+    const proxyLookup = (hostname: string, lookupOptions: { all?: boolean }, callback: ConnectLookupCallback): void => {
+      void resolveProxyAll(hostname).then(
+        (addresses) => {
+          if (!addresses.length) return callback(new EgressError("dns", "proxy endpoint DNS returned no addresses"));
+          if (lookupOptions.all) callback(null, addresses);
+          else callback(null, addresses[0]!.address, addresses[0]!.family);
+        },
+        (error) => callback(classifyEgressError(error)),
+      );
+    };
     const dispatcher = new ProxyAgent({
       uri: policy.proxyOrigin!,
       ...(token ? { token } : {}),
+      proxyTls: { lookup: proxyLookup as never },
     });
     proxyDispatchers.set(key, dispatcher);
     return dispatcher;
@@ -413,16 +480,17 @@ export const createEgressRuntime = (options: {
     requestEnv: NodeJS.ProcessEnv,
     version?: number,
     allocateDispatcher = true,
+    hostConfig?: EgressHostConfiguration,
   ): EgressResolution => {
     let url: URL;
     try {
       url = new URL(targetUrl);
     } catch {
-      const policy = resolveEgressPolicy(override, requestEnv, "https:", version);
+      const policy = resolveEgressPolicy(override, requestEnv, "https:", version, hostConfig);
       return { policy, failure: new EgressError("scheme-denied", "unparseable URL") };
     }
     const protocol = url.protocol === "http:" ? "http:" : "https:";
-    const policy = resolveEgressPolicy(override, requestEnv, protocol, version);
+    const policy = resolveEgressPolicy(override, requestEnv, protocol, version, hostConfig);
     const failure = (kind: EgressErrorKind, message: string): EgressResolution => ({
       policy,
       failure: new EgressError(kind, message),
@@ -446,20 +514,33 @@ export const createEgressRuntime = (options: {
     if (matchesNoProxy(url, policy.noProxy)) {
       return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcher } : {}), bypassedProxy: true };
     }
+    if (policy.trust !== "delegated-proxy") {
+      return failure("proxy-policy-unverified", "proxy-side target DNS is not verifiable by this Host; configure an explicitly trusted proxy on the executing Host");
+    }
     if (!allocateDispatcher) return { policy };
     // NOTE: explicit proxy URI keeps credentials — dispatcher cache is
     // keyed on the raw URL so rotated credentials build a fresh agent.
-    const rawProxy = override?.mode === "proxy" ? override.proxyUrl! : envProxyCandidate(requestEnv, protocol)?.raw ?? "";
-    return { policy, dispatcher: proxyDispatcherFor(policy, rawProxy) };
+    const selected = override ?? hostConfig;
+    const rawProxy = selected?.mode === "proxy" ? selected.proxyUrl! : envProxyCandidate(requestEnv, protocol)?.raw ?? "";
+    return { policy, dispatcher: proxyDispatcherFor(policy, rawProxy, !override ? hostConfig : undefined) };
   };
 
   const resolve = (targetUrl: string, override?: EgressOverride): EgressResolution =>
     resolveWithEnv(targetUrl, override, env);
 
-  const fetch = (async (
+  const policySnapshot = async (targetUrl = "https://example.com/"): Promise<EgressPolicy> => {
+    const requestEnv = { ...env };
+    const hostConfig = await getHostConfiguration();
+    return resolveWithEnv(targetUrl, undefined, requestEnv, undefined, false, hostConfig).policy;
+  };
+
+  const fetchWithSnapshot = async (
     targetUrl: string,
     init: RequestInit & { dispatcher?: never } = {},
-    override?: EgressOverride,
+    override: EgressOverride | undefined,
+    requestEnv: NodeJS.ProcessEnv,
+    hostConfig: EgressHostConfiguration | undefined,
+    version: number,
   ): Promise<Response> => {
     // Proxy credentials belong to the CONNECT hop configured by ProxyAgent.
     // A caller-supplied hop header must never reach the origin on a direct or
@@ -469,9 +550,9 @@ export const createEgressRuntime = (options: {
     }
     // Keep one env snapshot and policy version across redirects. The target
     // protocol still selects its own HTTP_PROXY/HTTPS_PROXY value on each hop.
-    const requestEnv = { ...env };
-    const proxyKeys = proxyKeysFor(override, requestEnv);
-    const resolved = resolveWithEnv(targetUrl, override, requestEnv);
+    const selected = override ?? hostConfig;
+    const proxyKeys = proxyKeysFor(selected, requestEnv);
+    const resolved = resolveWithEnv(targetUrl, override, requestEnv, version, true, hostConfig);
     leaseProxySnapshot(proxyKeys);
     retireOutdatedDispatchers(proxyKeys);
     if (resolved.failure) {
@@ -492,7 +573,7 @@ export const createEgressRuntime = (options: {
       // method, credential stripping, and response semantics.
       const redirectDispatcher = {
         dispatch: (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler): boolean => {
-          const hop = resolveWithEnv(String(opts.origin ?? targetUrl), override, requestEnv, resolved.policy.version);
+          const hop = resolveWithEnv(String(opts.origin ?? targetUrl), override, requestEnv, resolved.policy.version, true, hostConfig);
           if (hop.failure) {
             queueMicrotask(() => handler.onError?.(hop.failure!));
             return true;
@@ -520,11 +601,28 @@ export const createEgressRuntime = (options: {
     } finally {
       releaseProxySnapshot(proxyKeys);
     }
-  }) as EgressFetch;
+  };
+
+  const prepare: EgressRuntime['prepare'] = async (targetUrl, override) => {
+    const requestEnv = { ...env };
+    const hostConfig = await getHostConfiguration();
+    const policy = resolveWithEnv(targetUrl, override, requestEnv, undefined, false, hostConfig).policy;
+    return {
+      policy,
+      fetch: (url, init) => fetchWithSnapshot(url, init, override, requestEnv, hostConfig, policy.version),
+    };
+  };
+
+  const fetch: EgressFetch = async (targetUrl, init, override) => {
+    const snapshot = await prepare(targetUrl, override);
+    return snapshot.fetch(targetUrl, init);
+  };
 
   const diagnose = async (targetUrl: string, override?: EgressOverride): Promise<NetworkDiagnosis> => {
-    const resolved = resolveWithEnv(targetUrl, override, env, undefined, false);
-    const policy = resolved.policy;
+    const requestEnv = { ...env };
+    const hostConfig = await getHostConfiguration();
+    const resolved = resolveWithEnv(targetUrl, override, requestEnv, undefined, false, hostConfig);
+    const { fingerprint: _fingerprint, ...policy } = resolved.policy;
     if (resolved.failure) {
       let literal = false;
       try {
@@ -536,7 +634,8 @@ export const createEgressRuntime = (options: {
         decision: "blocked",
         reason: `${resolved.failure.kind}: ${resolved.failure.message}`,
         resolution: literal ? "static-literal" : "not-run",
-        addressCheck: literal && (resolved.failure.kind === "private-network" || resolved.failure.kind === "special-purpose") ? "blocked" : "not-run",
+        addressCheck: resolved.failure.kind === "proxy-policy-unverified" ? "proxy-policy-incompatible"
+          : literal && (resolved.failure.kind === "private-network" || resolved.failure.kind === "special-purpose") ? "blocked" : "not-run",
       };
     }
     let parsed: URL;
@@ -579,13 +678,14 @@ export const createEgressRuntime = (options: {
         ...(addresses.length === 0 ? { lookupError: "DNS resolution returned no addresses" } : {}),
       };
     } catch (error) {
+      const knownDnsCode = [...extractCauseCodes(error).codes].find((code) => DNS_CODES.has(code));
       return {
         url: targetUrl,
         policy,
         decision: "allowed",
         resolution: "local",
         addressCheck: "dns-error",
-        lookupError: error instanceof Error ? error.message : "lookup failed",
+        lookupError: knownDnsCode ? `DNS resolution failed (${knownDnsCode})` : "DNS resolution failed",
       };
     }
   };
@@ -605,5 +705,5 @@ export const createEgressRuntime = (options: {
     return closePromise;
   };
 
-  return { resolvePolicy: (override) => resolveEgressPolicy(override, env), resolve, fetch, diagnose, close };
+  return { resolvePolicy: (override) => resolveEgressPolicy(override, env), policySnapshot, prepare, resolve, fetch, diagnose, close };
 };

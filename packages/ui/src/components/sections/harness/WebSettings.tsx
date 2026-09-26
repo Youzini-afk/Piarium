@@ -9,6 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
+import { OutboundNetworkSettings } from './OutboundNetworkSettings';
 
 const providers = ['brave', 'exa', 'tavily', 'jina', 'searxng'] as const;
 const providerName = (provider: HarnessWebSearchProvider) => provider === 'searxng' ? 'SearXNG' : provider[0]!.toUpperCase() + provider.slice(1);
@@ -102,6 +103,7 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
     update({ web: { search: { provider: nextProvider, endpoint: nextEndpoint.trim() || undefined, credentialRef: `varin-web-search-${nextProvider}` } } });
   };
   return <>
+    <OutboundNetworkSettings />
     <SettingsSection title={t('settings.page.harness.section.web')} settingsItem="harness.web.search" contentClassName="space-y-5">
       <SettingsCheckboxRow checked={harness.tools.websearch !== false} onChange={(enabled) => update({ tools: { websearch: enabled } })}
         ariaLabel={t('settings.page.harness.web.search.enabled')} label={t('settings.page.harness.web.search.enabled')} />

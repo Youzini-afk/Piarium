@@ -38,14 +38,27 @@ describe("harness path authority", () => {
 
   it("folds Windows dot segments and case through the shared Documents identity rules", async () => {
     const pathModule = path.win32 as unknown as typeof path;
+    let openedPath = "";
     const fakeFs = {
       realpath: async (value: string) => path.win32.normalize(value).replace(/^d:\\workspace/i, "D:\\Workspace"),
       stat: async () => ({ isDirectory: () => false }),
     };
+    const fakeReadFs = {
+      open: async (value: string) => {
+        openedPath = value;
+        return {
+          stat: async () => ({ isFile: () => true, dev: 1n, ino: 2n }),
+          readFile: async () => Buffer.from(value.endsWith("File.ts") ? "upper" : "lower"),
+          close: async () => undefined,
+        };
+      },
+      stat: async () => ({ isFile: () => true, dev: 1n, ino: 2n }),
+    } as unknown as Pick<typeof fs.promises, "open" | "stat">;
     const authority = createHarnessPathAuthority({
       authorityId: "host-1",
       documents: { inspectWorkspace: async () => ({ root: "D:\\Workspace" }) },
       fsPromises: fakeFs,
+      readFsPromises: fakeReadFs,
       pathModule,
       platform: "win32",
     });
@@ -53,6 +66,10 @@ describe("harness path authority", () => {
     const second = await authority.resolve(actor(), "d:\\workspace\\file.TS", { allowMissing: false });
     expect(first?.canonicalResourceId).toBe("d:\\workspace\\file.ts");
     expect(second?.canonicalResourceId).toBe(first?.canonicalResourceId);
+    expect(first?.resolvedPath).toBe("D:\\Workspace\\File.ts");
+    expect(second?.resolvedPath).toBe("D:\\Workspace\\file.TS");
+    expect(await authority.readAuthorizedFile(actor(), first!)).toEqual(Buffer.from("upper"));
+    expect(openedPath).toBe("D:\\Workspace\\File.ts");
   });
 
   it("does not convert document authority failures into an outside-workspace answer", async () => {

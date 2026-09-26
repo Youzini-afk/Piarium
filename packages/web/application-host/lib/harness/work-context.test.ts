@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -199,6 +199,161 @@ describe("harness work context", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("continues paged discovery through projects deeper than the former default depth", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-discover-pages-"));
+    const projectPaths = [
+      "packages/p0",
+      "packages/p1",
+      "packages/p2",
+      "groups/one/nested/two/apps/deep",
+    ];
+    for (const relative of projectPaths) {
+      mkdirSync(join(root, relative), { recursive: true });
+      writeFileSync(join(root, relative, "package.json"), "{}");
+    }
+    const deps = harness(root);
+    try {
+      const first = await discoverProjects({ maxResults: 1 }, deps);
+      expect(first.candidates.map((candidate) => candidate.path)).toEqual(["groups/one/nested/two/apps/deep"]);
+      expect(first.truncated).toBe(true);
+      expect(first.nextCursor).toEqual(expect.any(String));
+
+      const all = [...first.candidates];
+      let cursor = first.nextCursor;
+      while (cursor) {
+        const page = await discoverProjects({ cursor, maxResults: 1 }, deps);
+        all.push(...page.candidates);
+        expect(page.truncated).toBe(page.nextCursor !== undefined);
+        cursor = page.nextCursor;
+      }
+      expect(all.map((candidate) => candidate.path).sort()).toEqual(projectPaths.sort());
+      expect(new Set(all.map((candidate) => candidate.path)).size).toBe(projectPaths.length);
+
+      const deepStart = await discoverProjects({ path: "groups/one/nested/two" }, deps);
+      expect(deepStart.candidates.map((candidate) => candidate.path)).toEqual(["groups/one/nested/two/apps/deep"]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("limits discovery to the actor's authorized roots and rejects an unauthorized explicit start", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-discover-scope-"));
+    mkdirSync(join(root, "allowed", "nested"), { recursive: true });
+    mkdirSync(join(root, "private"), { recursive: true });
+    writeFileSync(join(root, "allowed", "nested", "package.json"), "{}");
+    writeFileSync(join(root, "private", "package.json"), "{}");
+    const restricted = actor({ workspaceScope: ["allowed"] });
+    const authority = createHarnessPathAuthority({
+      authorityId: "host-1",
+      documents: { inspectWorkspace: async () => ({ root }) },
+    });
+    let reads = 0;
+    const deps = {
+      workspaceRoot: root,
+      sessionRoot: join(root, "allowed"),
+      authorize: (candidate: string, options: { allowMissing: boolean }) =>
+        authority.resolve(restricted, candidate, options),
+      authorizeScopeRoots: [join(root, "allowed")],
+      fs: {
+        stat: fs.promises.stat.bind(fs.promises),
+        readdir: async (...args: Parameters<typeof fs.promises.readdir>) => {
+          reads++;
+          return fs.promises.readdir(...args);
+        },
+      },
+    };
+    try {
+      const found = await discoverProjects({}, deps as never);
+      expect(found.candidates.map((candidate) => candidate.path)).toEqual(["allowed/nested"]);
+      const beforeDeniedRequest = reads;
+      await expect(discoverProjects({ path: "private" }, deps as never))
+        .rejects.toMatchObject({ harnessCode: "forbidden" });
+      expect(reads).toBe(beforeDeniedRequest);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("reports unreadable authorized directories separately from complete traversal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-discover-unreadable-"));
+    const unreadable = join(root, "a-unreadable");
+    mkdirSync(unreadable);
+    writeFileSync(join(unreadable, "package.json"), "{}");
+    mkdirSync(join(root, "z-readable"));
+    writeFileSync(join(root, "z-readable", "package.json"), "{}");
+    const realReaddir = fs.promises.readdir.bind(fs.promises);
+    const scannedDirectories: string[] = [];
+    let denyUnreadable = true;
+    const deps = {
+      ...harness(root),
+      fs: {
+        stat: fs.promises.stat.bind(fs.promises),
+        readdir: async (...args: Parameters<typeof fs.promises.readdir>) => {
+          scannedDirectories.push(String(args[0]));
+          if (denyUnreadable && resolve(String(args[0])).toLowerCase() === resolve(unreadable).toLowerCase()) {
+            throw Object.assign(new Error("denied"), { code: "EACCES" });
+          }
+          return realReaddir(...args);
+        },
+      },
+    };
+    try {
+      const found = await discoverProjects({}, deps as never);
+      expect(found.candidates.map((candidate) => candidate.path)).toEqual(["z-readable"]);
+      expect(found.truncated).toBe(false);
+      expect(found.nextCursor).toBeUndefined();
+      expect(scannedDirectories.map((directory) => resolve(directory).toLowerCase()))
+        .toContain(resolve(unreadable).toLowerCase());
+      expect(found.unreadablePaths).toEqual(["a-unreadable"]);
+
+      denyUnreadable = false;
+      const retried = await discoverProjects({ path: "a-unreadable" }, deps as never);
+      expect(retried.candidates.map((candidate) => candidate.path)).toEqual(["a-unreadable"]);
+      expect(retried.unreadablePaths).toBeUndefined();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("cancels discovery during directory reads and invalidates cursors across actor generations", async () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-ctx-discover-cancel-"));
+    mkdirSync(join(root, "a"));
+    mkdirSync(join(root, "b"));
+    writeFileSync(join(root, "a", "package.json"), "{}");
+    writeFileSync(join(root, "b", "package.json"), "{}");
+    const deps = harness(root);
+    const controller = new AbortController();
+    const cancelDeps = {
+      ...deps,
+      signal: controller.signal,
+      fs: {
+        stat: fs.promises.stat.bind(fs.promises),
+        readdir: async (...args: Parameters<typeof fs.promises.readdir>) => {
+          const result = await fs.promises.readdir(...args);
+          controller.abort();
+          return result;
+        },
+      },
+    };
+    try {
+      await expect(discoverProjects({}, cancelDeps as never)).rejects.toMatchObject({ name: "AbortError" });
+
+      const first = await discoverProjects({ maxResults: 1 }, { ...deps, cursorBinding: "session-generation-1" });
+      expect(first.nextCursor).toEqual(expect.any(String));
+      const cursor = first.nextCursor!;
+      await expect(discoverProjects({ cursor }, { ...deps, cursorBinding: "session-generation-2" }))
+        .rejects.toMatchObject({ harnessCode: "invalid-params" });
+      await expect(discoverProjects({ cursor: `${cursor}tampered` }, deps))
+        .rejects.toMatchObject({ harnessCode: "invalid-params" });
+      const changedScope = { ...deps, authorizeScopeRoots: [join(root, "a")] };
+      await expect(discoverProjects({ cursor }, changedScope))
+        .rejects.toMatchObject({ harnessCode: "invalid-params" });
+      const revoked = {
+        ...deps,
+        authorize: (candidate: string, options: { allowMissing: boolean }) =>
+          resolve(candidate).toLowerCase() === resolve(join(root, "a")).toLowerCase()
+            ? Promise.resolve(null)
+            : deps.authorize(candidate, options),
+      };
+      await expect(discoverProjects({ cursor }, revoked))
+        .rejects.toMatchObject({ harnessCode: "invalid-params" });
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it("reports the current state through context.get", () => {

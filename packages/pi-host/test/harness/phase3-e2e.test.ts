@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createHarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
+import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { createThreadRegistry, type ThreadReport } from "../../../web/application-host/lib/harness/thread-registry.js";
@@ -64,6 +65,8 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
   const harnessServiceHost = createHarnessServiceHost({
     search: async () => ({ status: "empty" as const, generation: undefined }),
     resolveWorkspaceRoot: async () => workspaceRoot,
+    pathAuthority: createHarnessPathAuthority({ authorityId: ACTOR.authorityInstanceId,
+      documents: { inspectWorkspace: async () => ({ root: workspaceRoot }) } }),
     discoveredShells: { hasBash: process.platform !== "win32", hasPowerShell: process.platform === "win32" },
     threadRegistry,
     threadPrepareIsolatedBranch: async (input) => ({
@@ -100,7 +103,9 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
       },
     }),
   });
-  harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
+  harnessServiceHost.registerSession(await harnessServiceHost.prepareWorkContext({
+    actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot,
+  }));
 
   const router = createHarnessRouter({
     respond: async (identity, requestId, outcome) => { bridge.respond(identity.sessionId, requestId, outcome); },

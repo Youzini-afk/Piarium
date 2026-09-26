@@ -212,6 +212,17 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!registry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       }
+      // The request already passed Host actor admission. Read its confirmed
+      // context synchronously, before any registry or draft-capture await can
+      // interleave a parent context change.
+      const confirmedWorkContext = host.workContextGet(ctx.actor);
+      const initialWorkContext = {
+        authorityRoot: confirmedWorkContext.workspaceRoot,
+        operationDir: confirmedWorkContext.context.operationDir,
+        queryScope: confirmedWorkContext.context.queryScope === null
+          ? null : [...confirmedWorkContext.context.queryScope],
+        revision: confirmedWorkContext.context.revision,
+      };
       // Task-centered dispatch (D-285): `preset` is optional. Without one the
       // child runs on the caller's model and the tools the worker resolved
       // from its own active set — clamped below to the owning Thread's frozen
@@ -343,6 +354,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         ...(preset ? { preset: preset.id } : {}),
         ...(params.input === "inherit" ? { inputOrigin: "inherit" as const } : {}),
         ...(inheritedContext ? { inheritedContext } : {}),
+        initialWorkContext,
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency,

@@ -12,6 +12,7 @@ import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/app
 import { createThreadDispatchService } from "../../../web/application-host/lib/harness/thread-services.js";
 import { createOnThreadDequeued } from "../../../web/application-host/lib/harness/thread-dequeue.js";
 import { createHarnessServiceHost, type HarnessServiceHost } from "../../../web/application-host/lib/harness/service-host.js";
+import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import type { HostEventData } from "@varin/protocol";
@@ -40,7 +41,11 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
       return { model: { ...model, input: ["text", "image"] as Array<"text" | "image"> } };
     };
-    const sourceServices = createHarnessServiceHost({ search: async () => ({ status: "empty" as const, generation: undefined }), resolveWorkspaceRoot: async () => workspace });
+    const sourceServices = createHarnessServiceHost({ search: async () => ({ status: "empty" as const, generation: undefined }),
+      resolveWorkspaceRoot: async () => workspace,
+      pathAuthority: createHarnessPathAuthority({ authorityId: "inherit-test",
+        documents: { inspectWorkspace: async () => ({ root: workspace }) } }),
+    });
     const sourceRouter = createHarnessRouter({
       respond: async (identity, requestId, outcome) => { parentHost.respondHarness(identity.sessionId, requestId, outcome); },
       resolveActor: (identity) => sourceServices.resolveActor(identity),
@@ -64,6 +69,12 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
     });
     try {
       const parent = await parentHost.create(workspace, "Parent");
+      sourceServices.registerSession(await sourceServices.prepareWorkContext({
+        actor: { authorityInstanceId: "inherit-test", sessionId: parent.sessionId,
+          workerId: "parent-worker", workerGeneration: 1 },
+        workspaceId: "workspace", workspaceRoot: workspace,
+        grantedCapabilities: ["context.session", "control.thread", "read.output"],
+      }));
       const manager = parentHost.session.sessionManager;
       manager.appendMessage({ role: "user", content: "OLD_RAW_OUTSIDE_ACTIVE_INPUT", timestamp: 1 });
       manager.appendMessage(fauxAssistantMessage("old answer"));
@@ -87,7 +98,8 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       let spawned!: () => void;
       const childStarted = new Promise<void>((resolve) => { spawned = resolve; });
       const adapter: ThreadSessionAdapter = {
-        create: async (input) => childHost.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions),
+        create: async (input) => childHost.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
+          undefined, 1, "branch", input.initialWorkContext),
         open: async () => { throw new Error("new dispatch must not open an old child"); },
         prompt: async (sessionId, text, instructions, images) => {
           const result = await childHost.prompt(sessionId, text, images, instructions);
@@ -125,6 +137,7 @@ describe("inherit — Pi capture through Host dispatch and dequeue", () => {
       const dispatch = createThreadDispatchService({
         threadRegistry: registry, threadSpawnSession: (input) => runtime.spawn(input),
         threadCaptureInputContext: ({ sessionId }) => runtime.captureInputContext(sessionId),
+        workContextGet: sourceServices.workContextGet,
       } as HarnessServiceHost);
       const result = await dispatch.handle({ task: "Use the inherited evidence", input: "inherit", worktree: "shared",
         concurrency: 1, model: { providerId: model.provider, modelId: model.id }, tools: ["read"] }, {

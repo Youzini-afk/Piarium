@@ -516,7 +516,7 @@ export function createSearchContentService(search: HarnessSearchService): Harnes
  * passed to Documents so aliases cannot select a different snapshot entry.
  */
 export function createDocumentReadSourceService(
-  host: Pick<HarnessServiceHost, "documentReadSource">,
+  host: Pick<HarnessServiceHost, "documentReadSource" | "readAuthorizedDiskFile">,
 ): HarnessService<"document.readSource"> {
   return {
     handle: async (_params, ctx) => {
@@ -531,7 +531,14 @@ export function createDocumentReadSourceService(
         authorized.resourceId,
       );
       ctx.signal.throwIfAborted();
-      if (snapshot.status === "disk") return { source: "disk" };
+      if (snapshot.status === "disk") {
+        if (!host.readAuthorizedDiskFile) {
+          throw new HarnessServiceError("unavailable", "Authorized disk document reading is unavailable.");
+        }
+        const bytes = await host.readAuthorizedDiskFile(ctx, authorized);
+        ctx.signal.throwIfAborted();
+        return { source: "disk", base64: bytes.toString("base64") };
+      }
       if (snapshot.status === "working-branch") {
         if (snapshot.message) throw new HarnessServiceError("unavailable", snapshot.message);
         return {
@@ -1129,7 +1136,7 @@ export function registerHarnessServices(
   // authorized workspace. Registered on every host; the service host rejects
   // mutations when no path authority is wired.
   router.register("context.discover", {
-    handle: (params, ctx) => host.workContextDiscover(ctx.actor, params),
+    handle: (params, ctx) => host.workContextDiscover(ctx.actor, params, ctx.signal),
   });
   router.register("context.get", {
     handle: (_params, ctx) => Promise.resolve(host.workContextGet(ctx.actor)),

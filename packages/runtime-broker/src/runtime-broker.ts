@@ -601,6 +601,8 @@ export class PiRuntimeBroker {
       tools?: string[];
       workFocus?: WorkFocusId;
       workFocusRole?: WorkFocusExecutionRole;
+      /** Host-only journal seed for a newly dispatched child session. */
+      initialWorkContext?: NonNullable<import("@varin/protocol").PiWorkContextSnapshot["context"]>;
     },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
@@ -619,6 +621,7 @@ export class PiRuntimeBroker {
         ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
         ...(launch?.permissions === undefined ? {} : { permissions: launch.permissions }),
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
+        ...(launch?.initialWorkContext === undefined ? {} : { initialWorkContext: structuredClone(launch.initialWorkContext) }),
         workFocus,
         workFocusGeneration: 1,
         ...(launch?.workFocusRole === undefined ? {} : { workFocusRole: launch.workFocusRole }),

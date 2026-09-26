@@ -1,7 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { fetchDiagnostics, trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
@@ -234,12 +233,12 @@ export function createApplyPatchTool(
       }
 
       // Resolve once at execution time against the live operation dir (RR2):
-      // the same absolute path is read locally and forwarded to Host services,
-      // so a stale mirror can never patch a different file than authorized.
+      // file bytes always come back from the authorized Host source lookup.
       const filePaths = parsed.operations.map((operation) => resolve(getOperationDir(), operation.path));
 
-      const decodeDraft = (source: { source: string; base64?: string }): string | null => {
-        if ((source.source !== "working-branch" && source.source !== "surface-draft") || !source.base64) {
+      const decodeSource = (source: { source: string; base64?: string }): string | null => {
+        if ((source.source !== "disk" && source.source !== "working-branch" && source.source !== "surface-draft")
+          || typeof source.base64 !== "string") {
           return null;
         }
         const bytes = Buffer.from(source.base64, "base64");
@@ -248,51 +247,34 @@ export function createApplyPatchTool(
           : bytes.toString("utf8");
       };
       const requestOptions = signal === undefined ? {} : { signal };
-      const readPatchBase = async (opPath: string, filePath: string): Promise<{
+      const readPatchBase = async (opPath: string): Promise<{
         content: string | null;
         revision?: string;
         hash?: string;
         error?: string;
       }> => {
-        if (options.surfaceWrite === true) {
-          let source: Awaited<ReturnType<HostServicesBridge["request"]>>;
-          try {
-            source = await bridge.request("document.readSource", { path: opPath }, requestOptions);
-          } catch (error) {
-            return {
-              content: null,
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
-          if (source.source === "disk") {
-            if (existsSync(filePath)) {
-              const rawContent = readFileSync(filePath, "utf8");
-              const content = rawContent.startsWith("\uFEFF") ? rawContent.slice(1) : rawContent;
-              // Carry the exact source identity into the Host mutation plan.
-              // The file can change between this read and the Documents
-              // surfaceWrite dispatch, so a write-only replacement must still
-              // be conditional on the body used to compute the patch.
-              return { content, hash: diskContentHash(content) };
-            }
-            return { content: null };
-          }
-          const draft = decodeDraft(source);
-          if (draft === null) {
-            return { content: null, error: `document.readSource did not return readable ${source.source} bytes` };
-          }
+        let source: Awaited<ReturnType<HostServicesBridge["request"]>>;
+        try {
+          source = await bridge.request("document.readSource", { path: opPath }, requestOptions);
+        } catch (error) {
           return {
-            content: draft,
-            hash: editorBufferHash(draft),
-            ...("revision" in source && typeof source.revision === "string" ? { revision: source.revision } : {}),
+            content: null,
+            error: error instanceof Error ? error.message : String(error),
           };
         }
-        if (existsSync(filePath)) return { content: readFileSync(filePath, "utf8") };
-        try {
-          const source = await bridge.request("document.readSource", { path: opPath }, requestOptions);
-          return { content: decodeDraft(source) };
-        } catch {
-          return { content: null };
+        const content = decodeSource(source);
+        if (content === null) {
+          return { content: null, error: "document.readSource did not return readable " + source.source + " bytes" };
         }
+        if (source.source === "disk") {
+          // Carry the exact Host-read source identity into Documents' write plan.
+          return { content, hash: diskContentHash(content) };
+        }
+        return {
+          content,
+          hash: editorBufferHash(content),
+          ...("revision" in source && typeof source.revision === "string" ? { revision: source.revision } : {}),
+        };
       };
       const patchResult = await (async () => {
         const prepared: Array<{
@@ -315,7 +297,7 @@ export function createApplyPatchTool(
             prepared.push({ op, filePath, action: "delete" });
             continue;
           }
-          const base = await readPatchBase(op.path, filePath);
+          const base = await readPatchBase(op.path);
           if (base.error) {
             prepared.push({ op, filePath, action: "write", error: base.error });
             continue;

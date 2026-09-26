@@ -48,6 +48,31 @@ async function admit(host: ReturnType<ReturnType<typeof fixture>["createHost"]>,
 }
 
 describe("durable work-context journal", () => {
+  it("restores a root anchor for sibling child scopes without granting root or unrelated paths", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "work-context-scoped-anchor-"));
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, "sibling"));
+    fs.writeFileSync(path.join(root, "only-in-parent.ts"), "export {};");
+    const setup = fixture(root);
+    const host = setup.createHost();
+    const scopedActor = { ...actor, workspaceScope: ["src", "only-in-parent.ts"] };
+    const context = setup.context(scopedActor);
+    const authority = createHarnessPathAuthority({ authorityId: "host",
+      documents: { inspectWorkspace: async () => ({ root }) } });
+    try {
+      const resolved = await admit(host, context);
+      expect(host.workContextGet(resolved).context).toEqual({ operationDir: "", queryScope: null, revision: 0 });
+      expect(await authority.resolve(resolved, path.join(root, "src"), { allowMissing: false })).not.toBeNull();
+      expect(await authority.resolve(resolved, path.join(root, "sibling"), { allowMissing: false })).toBeNull();
+      await expect(host.workContextSelect(resolved, { path: "sibling" })).rejects.toMatchObject({ harnessCode: "forbidden" });
+      await expect(host.workContextSelect(resolved, { path: root })).rejects.toMatchObject({ harnessCode: "forbidden" });
+      setup.navigate({ leafId: "sibling-branch", entryId: "sibling-branch", context: {
+        workspaceId: "workspace", authorityRoot: root, sessionRoot: root,
+        operationDir: "sibling", queryScope: null, revision: 1,
+      } });
+      await expect(host.prepareWorkContext(context)).rejects.toThrow(/no longer authorized/);
+    } finally { await host.dispose(); rmSync(root, { recursive: true, force: true }); }
+  });
   it("restores selected directory and scope after worker and Host replacement", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "work-context-durable-"));
     fs.mkdirSync(path.join(root, "project"));

@@ -178,3 +178,42 @@ test("work_context uses the known revision when the caller omits its CAS guard",
   assert.deepEqual(seen, [{ method: "context.select", params: { path: "second", expectedRevision: 4 } }]);
   assert.equal(mirror.revision, 5);
 });
+
+test("work_context forwards explicit discovery starts, cursors, page preferences, and cancellation", async () => {
+  const mirror = createWorkContextMirror("/ws");
+  const seen: Array<{ method: string; params: unknown; signal?: AbortSignal }> = [];
+  const bridge = {
+    request: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
+      seen.push({ method, params, ...(options?.signal ? { signal: options.signal } : {}) });
+      return { candidates: [], truncated: true, nextCursor: "next-page" };
+    },
+  };
+  const signal = new AbortController().signal;
+  const result = await createWorkContextTool(bridge as never, new WorkContextSync(bridge as never, mirror)).execute(
+    "call-discover",
+    { action: "discover", cursor: "current-page", maxResults: 7, depth: 12 },
+    signal,
+    undefined,
+    {} as never,
+  );
+  await createWorkContextTool(bridge as never, new WorkContextSync(bridge as never, mirror)).execute(
+    "call-discover-start",
+    { action: "discover", path: "packages/web", depth: 4 },
+    signal,
+    undefined,
+    {} as never,
+  );
+  assert.deepEqual(seen, [
+    {
+      method: "context.discover",
+      params: { cursor: "current-page", maxResults: 7, depth: 12 },
+      signal,
+    },
+    {
+      method: "context.discover",
+      params: { path: "packages/web", depth: 4 },
+      signal,
+    },
+  ]);
+  assert.equal((result as { details?: { nextCursor?: string } }).details?.nextCursor, "next-page");
+});

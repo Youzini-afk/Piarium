@@ -1,3 +1,5 @@
+import { normalizeOutboundNetwork } from '../harness/egress-settings.js';
+
 export type SettingsRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is SettingsRecord => (
@@ -188,6 +190,9 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
 
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+    }
+    if (candidate.outboundNetwork !== undefined) {
+      result.outboundNetwork = normalizeOutboundNetwork(candidate.outboundNetwork);
     }
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;

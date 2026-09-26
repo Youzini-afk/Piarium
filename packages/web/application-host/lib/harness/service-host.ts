@@ -335,6 +335,8 @@ export interface HarnessServiceHost {
   materialCollectionsService?: import("./router.js").HarnessService<"materials.collections"> | null;
   documentReader?: import("./document-reading.js").DocumentReader | null;
   readMaterialFile?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath) => Promise<Buffer>;
+  /** Read disk bytes from the already-authorized canonical target through a verified file handle. */
+  readAuthorizedDiskFile?: (ctx: import("./router.js").HarnessServiceContext, path: import("./router.js").HarnessAuthorizedPath) => Promise<Buffer>;
   documentReadingSettings?: (sessionId: string) => Promise<import("@varin/protocol").HarnessSettings["documentReading"]>;
   materialWebPolicy?: (sessionId: string) => Promise<import("@varin/protocol").HarnessWebDomainPolicy>;
   documentReadSource: HarnessDocumentReadSource | null;
@@ -470,7 +472,7 @@ export interface HarnessServiceHost {
   workContextSelect(actor: HarnessActorContext, params: ContextSelectParams): Promise<ContextGetResult>;
   workContextScope(actor: HarnessActorContext, params: ContextScopeParams): Promise<ContextGetResult>;
   workContextReset(actor: HarnessActorContext, params: ContextResetParams): Promise<ContextGetResult>;
-  workContextDiscover(actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult>;
+  workContextDiscover(actor: HarnessActorContext, params: ContextDiscoverParams, signal?: AbortSignal): Promise<ContextDiscoverResult>;
   /** Current context revision for respond piggyback; undefined without a registered session. */
   workContextRevision(sessionId: string): number | undefined;
   workContextIdentity(sessionId: string): { revision: number; entryId: string | null } | undefined;
@@ -603,6 +605,7 @@ export interface HarnessServiceHostOptions {
   materialCollectionsService?: HarnessServiceHost["materialCollectionsService"];
   documentReader?: HarnessServiceHost["documentReader"];
   readMaterialFile?: HarnessServiceHost["readMaterialFile"];
+  readAuthorizedDiskFile?: HarnessServiceHost["readAuthorizedDiskFile"];
   documentReadingSettings?: HarnessServiceHost["documentReadingSettings"];
   materialWebPolicy?: HarnessServiceHost["materialWebPolicy"];
   /** Surface-aware native Pi read source (null when Documents is unavailable). */
@@ -795,10 +798,15 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       grantedCapabilities: await ctx.grantedCapabilities,
       ...(ctx.actor.workspaceScope?.length ? { workspaceScope: ctx.actor.workspaceScope } : {}),
     };
+    const { workspaceScope: _scope, ...anchorActor } = actor;
     const validated = await validateStoredWorkContext(state, {
       workspaceRoot: authorityRoot,
       sessionRoot: ctx.workspaceRoot,
       authorize: (candidate, authorizeOptions) => options.pathAuthority!.resolve(actor, candidate, authorizeOptions),
+      ...(actor.workspaceScope?.length ? {
+        authorizeAnchor: (candidate, authorizeOptions) => options.pathAuthority!.resolve(anchorActor, candidate, authorizeOptions),
+        anchorScopeRoots: actor.workspaceScope.map((scope) => path.isAbsolute(scope) ? scope : path.resolve(authorityRoot, scope)),
+      } : {}),
     });
     return { state: validated, leafId: snapshot.leafId, entryId: snapshot.entryId, authorityRootIdentity, sessionRootIdentity };
   };
@@ -1068,15 +1076,27 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     if (!entry || !options.pathAuthority) return null;
     const workspaceRoot = entry.authorityRoot;
     const authority = options.pathAuthority;
+    const { workspaceScope: _scope, ...anchorActor } = actor;
     return {
       workspaceRoot,
       sessionRoot: entry.workspaceRoot,
+      cursorBinding: JSON.stringify([
+        actor.authorityInstanceId,
+        actor.sessionId,
+        actor.workerId,
+        actor.workerGeneration,
+        actor.workspaceId,
+      ]),
       assertCurrent: () => {
         if (sessions.get(actor.sessionId) !== entry || !hasActor(actor)) {
           throw new HarnessServiceError("forbidden", "Work context owner was retired during the request");
         }
       },
       authorize: (candidate, authorizeOptions) => authority.resolve(actor, candidate, authorizeOptions),
+      ...(actor.workspaceScope?.length ? {
+        authorizeAnchor: (candidate: string, authorizeOptions: { allowMissing: boolean }) => authority.resolve(anchorActor, candidate, authorizeOptions),
+        anchorScopeRoots: actor.workspaceScope.map((scope) => path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope)),
+      } : {}),
       authorizeScopeRoots: actor.workspaceScope?.length
         ? actor.workspaceScope.map((scope) => (path.isAbsolute(scope) ? scope : path.resolve(workspaceRoot, scope)))
         : [workspaceRoot],
@@ -1231,9 +1251,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return mutateWorkContext(actor, (candidate, deps) => resetWorkContext(candidate, params, deps));
   };
 
-  const workContextDiscover = async (actor: HarnessActorContext, params: ContextDiscoverParams): Promise<ContextDiscoverResult> => {
+  const workContextDiscover = async (
+    actor: HarnessActorContext,
+    params: ContextDiscoverParams,
+    signal?: AbortSignal,
+  ): Promise<ContextDiscoverResult> => {
     const { deps } = workContextEntry(actor);
-    return discoverProjects(params, deps);
+    return discoverProjects(params, { ...deps, ...(signal ? { signal } : {}) });
   };
 
   const workContextRevision = (sessionId: string): number | undefined => (
@@ -1336,6 +1360,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     materialCollectionsService,
     documentReader: options.documentReader ?? null,
     ...(options.readMaterialFile ? { readMaterialFile: options.readMaterialFile } : {}),
+    ...(options.readAuthorizedDiskFile ? { readAuthorizedDiskFile: options.readAuthorizedDiskFile } : {}),
     ...(options.documentReadingSettings ? { documentReadingSettings: options.documentReadingSettings } : {}),
     ...(options.materialWebPolicy ? { materialWebPolicy: options.materialWebPolicy } : {}),
     documentReadSource,

@@ -1,9 +1,46 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { commitSessionWorkContext, readSessionWorkContext, VARIN_WORK_CONTEXT_ENTRY_TYPE } from "../src/session-work-context.js";
+import { commitSessionWorkContext, initializeSessionWorkContext, readSessionWorkContext, VARIN_WORK_CONTEXT_ENTRY_TYPE } from "../src/session-work-context.js";
 
 const binding = { workspaceId: "workspace", authorityRoot: "/workspace", sessionRoot: "/workspace" };
+
+test("a child starts with its own durable context and later branch changes stay local", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-child-work-context-"));
+  try {
+    const manager = SessionManager.create(root, join(root, "sessions"));
+    initializeSessionWorkContext(manager, {
+      workspaceId: "child-workspace", authorityRoot: root, sessionRoot: root,
+      operationDir: "project-a", queryScope: ["project-a/src"], revision: 1,
+    });
+    const seeded = readSessionWorkContext(manager);
+    assert.equal(seeded.context?.operationDir, "project-a");
+    assert.deepEqual(seeded.context?.queryScope, ["project-a/src"]);
+    const parentMarker = manager.appendCustomEntry("parent-note", { text: "unrelated" });
+    commitSessionWorkContext(manager, {
+      sessionId: manager.getSessionId(), expectedLeafId: parentMarker, expectedRevision: 1,
+      context: { workspaceId: "child-workspace", authorityRoot: root, sessionRoot: root,
+        operationDir: "project-b", queryScope: null, revision: 2 },
+    });
+    assert.equal(readSessionWorkContext(manager).context?.operationDir, "project-b");
+    // Pi intentionally delays the JSONL write until an assistant turn exists.
+    manager.appendMessage({ role: "assistant", api: "test", provider: "test", model: "test",
+      content: [{ type: "text", text: "done" }], stopReason: "stop", timestamp: Date.now(),
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    const sessionFile = manager.getSessionFile();
+    assert.ok(sessionFile);
+    const reopened = SessionManager.open(sessionFile, undefined, root);
+    assert.equal(readSessionWorkContext(reopened).context?.operationDir, "project-b");
+    reopened.branch(seeded.entryId!);
+    assert.equal(readSessionWorkContext(reopened).context?.operationDir, "project-a");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("work context follows the active Pi branch and exact-leaf CAS", () => {
   const manager = SessionManager.inMemory("/workspace");

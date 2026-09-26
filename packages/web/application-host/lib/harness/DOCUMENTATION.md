@@ -15,7 +15,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── output.store → OutputStore (global)
                            ├── output.read  → OutputStore
                            ├── search.content → HarnessSearchService (surface overlay or exclusive WorkingState corpus)
-                           ├── document.readSource → fixed surface bytes, working-branch bytes, or disk sentinel
+                           ├── document.readSource → fixed surface/working-branch bytes or Host-read authorized disk bytes
                            ├── document.surfaceWrite → shared plan: write the fixed Registry buffer or return the disk sentinel
                            ├── document.pathOverlay → surface merge paths or exclusive working-branch overlay
                            ├── explore.search → same query engine, algorithm-only facade
@@ -133,6 +133,23 @@ references, collection-scoped keyword search, `persisted` workspace-readable set
 `material.grant` records behind `share` — an explicit cross-thread read grant that reuses the
 `thread.send` same-root relation rule and releases with the sender's thread. Grants let the
 receiver reread under its own session/thread authority; they never transfer the sender's receipts.
+
+`egress.ts` is the executing Host's shared outbound path for `web.fetch`, Web search and scholarly
+search. Harness → Web exposes this Host's `outboundNetwork` setting: `auto` reads that Host's
+environment, `direct` checks the DNS answer on the actual connection, and an explicit HTTP(S)
+proxy can be entrusted by the deployment owner with final-address policy after proxy-side DNS.
+An environment proxy alone is not that delegation; an unverified proxy route reports
+`proxy-policy-unverified` instead of silently connecting directly. The proxy origin and trust
+choice live in Host settings; authentication lives separately in the Host's Pi auth owner and is
+bound to the selected endpoint. Requests freeze their configuration, inspect redirect targets on
+every hop, and report whether DNS was local or proxy-side without exposing credentials.
+
+`context.discover` scans only roots the session can already access. The Agent may give an explicit
+start path or continue an incomplete scan with the Host-signed cursor; each page reauthorizes
+its pending directories. The per-page time budget yields a continuation instead of discarding
+deep projects, and an authorized directory that cannot be read is listed under
+`unreadablePaths` rather than counted as scanned. Project discovery does not change permissions,
+the operation directory, or the query scope.
 
 ### PDF material reading (`document-reading.ts`, `material-read-service.ts`, `pdf-engine.ts`)
 
@@ -326,6 +343,13 @@ identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
 Draft merge records that disk commands cannot verify unsaved buffers.
 
+`thread.dispatch` also freezes the Host-confirmed parent operation directory and query scope
+before its first asynchronous step. The launch manifest carries that snapshot through queueing
+and restart; spawn maps it only to a child authority with a proven source/clone relationship and
+writes the child's own Pi work-context journal before its first model or tool request. A narrowed
+scope that excludes the inherited paths, or a virtual parent that cannot materialize a selected
+subdirectory, fails explicitly. Later parent and child switches remain independent.
+
 Input origins are frozen per Run (`task`/`inherit`/`continue`/`fresh`). An
 `input: "inherit"` dispatch captures the parent session's committed input at
 dispatch time through `threadCaptureInputContext` — the last compaction summary
@@ -430,12 +454,18 @@ instead of attaching unrelated lines.
 ### Native read source (`document.readSource`, pi-host `read-tool.ts`)
 
 The Router authorizes the requested path with `allowMissing` so an unsaved new
-document can be read. Documents returns either a disk sentinel or fixed surface
-text with encoding, BOM, and revision. The Host serializes only fixed draft bytes;
-pi-host delegates both branches to Pi's `createReadToolDefinition`, preserving
-native offset/limit truncation and disk image attachments. The wrapper is
-registered only when the Host handshake advertises `harnessDocumentRead`.
-An isolated Thread Run bound to a WorkingBranch never returns the disk sentinel
+document can be read. Documents selects fixed surface/WorkingBranch bytes or disk.
+For disk, the Host rechecks the authorized canonical target, opens one file handle, reads from
+that handle, and checks its identity and the request path again before returning bytes; Pi never
+reopens the original path. The normalized path identity is for comparisons and locks; the Host
+opens the separately retained, case-preserving resolved path so a Windows case-sensitive
+directory cannot redirect `A` to `a`. The Pi wrapper delegates these bytes to
+`createReadToolDefinition`, preserving native offset/limit and image handling. `apply_patch`
+uses the same Host-returned disk bytes for its patch base and conditional hash. This rejects the
+tested original-path and parent-junction replacement races; Node has no cross-platform
+directory-handle-relative open here, so it is not a proof against every adversarial ABA swap.
+The wrapper is registered only when the Host handshake advertises `harnessDocumentRead`.
+An isolated Thread Run bound to a WorkingBranch never returns disk bytes
 for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
 the pinned native fixed view (`base ∪ delta`) with tombstones hidden before
 candidate selection, and provenance names the branch, revision, and origin.

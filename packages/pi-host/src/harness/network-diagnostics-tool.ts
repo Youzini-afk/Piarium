@@ -9,11 +9,11 @@ const NetworkDiagParams = Type.Object({
 
 const formatDiagnosis = (r: NetworkDiagnosisResult): string => {
   const lines: string[] = [];
-  lines.push(`static target check: ${r.decision}${r.reason ? ` (${r.reason})` : ""}`);
+  lines.push(`request policy decision: ${r.decision}${r.reason ? ` (${r.reason})` : ""}`);
   const proxyBits = r.policy.mode === "proxy"
     ? `proxy ${r.policy.proxyOrigin ?? "?"}${r.policy.proxyAuth ? ` (${r.policy.proxyAuth} auth)` : ""}`
     : "direct";
-  lines.push(`egress: ${proxyBits} [policy ${r.policy.source}]${r.policy.invalid ? ` INVALID: ${r.policy.invalid}` : ""}`);
+  lines.push(`egress: ${proxyBits} [policy ${r.policy.source}; trust ${r.policy.trust}]${r.policy.invalid ? ` INVALID: ${r.policy.invalid}` : ""}`);
   if (r.policy.noProxy.length > 0) lines.push(`no_proxy entries: ${r.policy.noProxy.join(", ")}`);
   const addressExplanation = {
     "not-run": "not run because the static target check stopped the request",
@@ -21,6 +21,7 @@ const formatDiagnosis = (r: NetworkDiagnosisResult): string => {
     blocked: "blocked in this diagnostic sample; fetch checks again on its connection",
     "dns-error": "local DNS failed in this diagnostic sample",
     "proxy-side-unverified": "unverified: the proxy resolves the target, so Host cannot classify its final address",
+    "proxy-policy-incompatible": "blocked: the proxy resolves the final address and no Host-owned trusted egress delegation is configured",
   }[r.addressCheck];
   lines.push(`address check: ${addressExplanation}`);
   if (r.addresses?.length) lines.push(`addresses: ${r.addresses.map((a) => `${a.address}(${a.class})`).join(", ")}`);
@@ -39,9 +40,10 @@ export function createNetworkDiagnosticsTool(bridge: HostServicesBridge): ToolDe
     name: "network_diag",
     label: "Network Diagnostics",
     description:
-      "Probe how an outbound request would leave the host: effective egress policy (proxy/direct, " +
-      "NO_PROXY), the static target check, and a separate diagnostic address check. " +
-      "Proxy-side target DNS cannot be verified here. Read-only — never fetches the URL or changes settings.",
+      "Probe how an outbound request would leave the executing Host: effective egress policy (proxy/direct, " +
+      "NO_PROXY), request decision, and a separate diagnostic address check. " +
+      "Proxy-side target DNS remains unverified by Host even when policy is delegated to an explicitly trusted proxy. " +
+      "Read-only — never fetches the URL or changes settings.",
     promptSnippet: "network_diag: inspect outbound network policy and resolution for a URL (read-only)",
     promptGuidelines: [
       "Use network_diag to inspect static blocks, local DNS, and proxy routing; it does not test TLS or connect to the target.",

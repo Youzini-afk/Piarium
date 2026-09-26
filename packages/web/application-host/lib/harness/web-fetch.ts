@@ -346,7 +346,10 @@ export function createWebFetch(deps: WebFetchDeps) {
     });
   };
 
-  const performFetch = async (url: string, ctx: FetchContext, cacheKey: string): Promise<FetchResult> => {
+  const performFetch = async (
+    url: string, ctx: FetchContext, cacheKey: string,
+    outbound?: Awaited<ReturnType<EgressRuntime['prepare']>>,
+  ): Promise<FetchResult> => {
     const finishOk = async (content: Extract<FetchResult, { status: "ok" }>): Promise<FetchResult> => {
       const result = await attachSnapshot(content, ctx);
       cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
@@ -376,8 +379,8 @@ export function createWebFetch(deps: WebFetchDeps) {
         ctx.signal?.removeEventListener("abort", abortFromCaller);
       };
       try {
-        response = deps.egress
-          ? await deps.egress.fetch(currentUrl, {
+        response = outbound
+          ? await outbound.fetch(currentUrl, {
             signal: controller.signal,
             redirect: "manual", // Handle redirects manually for cross-host detection
             headers: { "User-Agent": "Varin-Agent/1.0" },
@@ -678,8 +681,8 @@ export function createWebFetch(deps: WebFetchDeps) {
     // independently passed their current authorization policies. The egress
     // fingerprint is frozen for this request — a proxy↔direct policy change
     // must not serve bytes fetched through the other path.
-    const egressPolicy = deps.egress?.resolvePolicy();
-    const cacheKey = `${url}:${ctx.render ?? false}:${egressPolicy ? `${egressPolicy.mode}|${egressPolicy.proxyOrigin ?? ""}` : "legacy"}`;
+    const outbound = await deps.egress?.prepare(url);
+    const cacheKey = `${url}:${ctx.render ?? false}:${outbound?.policy.fingerprint ?? "legacy"}`;
     if (!request.refresh) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -711,7 +714,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }, cacheKey), false);
+      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }, cacheKey, outbound), false);
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
@@ -719,7 +722,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (!shared || shared.done || shared.controller.signal.aborted) {
       const controller = new AbortController();
       const entry: SharedFetch = { controller, waiters: 0, done: false, promise: Promise.resolve({ status: "failed", url, reason: "unset" }) };
-      entry.promise = performFetch(url, { ...ctx, signal: controller.signal }, cacheKey)
+      entry.promise = performFetch(url, { ...ctx, signal: controller.signal }, cacheKey, outbound)
         .finally(() => {
           entry.done = true;
           if (inflight.get(sharedKey) === entry) inflight.delete(sharedKey);

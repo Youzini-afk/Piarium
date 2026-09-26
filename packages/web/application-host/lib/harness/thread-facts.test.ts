@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadFactsSetService, createThreadReadService } from "./thread-services.js";
+import { seedWorkContext } from "./work-context.js";
 import type { HarnessActorContext } from "@varin/protocol";
 
 const parentCtx = {
@@ -21,14 +22,22 @@ const parentCtx = {
   workspaceId: "workspace-1",
 };
 
+const createFactsDispatch = (registry: ReturnType<typeof createThreadRegistry>, dataDir: string) => {
+  const workspaceRoot = join(dataDir, "workspace");
+  mkdirSync(workspaceRoot);
+  return createThreadDispatchService({
+    threadRegistry: registry,
+    threadSpawnSession: async () => ({ sessionId: "child-1" }),
+    workContextGet: () => ({ workspaceRoot,
+      context: seedWorkContext(workspaceRoot, workspaceRoot), contextEntryId: null }),
+  } as never);
+};
+
 describe("thread.facts.set", () => {
   it("keeps the assistant report and partial validated facts after a failed Run", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     const facts = createThreadFactsSetService({
       threadRegistry: registry,
       readExploreFile: async (_actor: HarnessActorContext, path: string) => {
@@ -105,10 +114,7 @@ describe("thread.facts.set", () => {
   it("preserves a natural-language report when no structured facts are submitted", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-optional-report-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     const read = createThreadReadService({ threadRegistry: registry } as never);
     const conclusion = "The login helper is exported from src/auth.ts; callers remain unknown.";
     try {
@@ -145,10 +151,7 @@ describe("thread.facts.set", () => {
   it("keeps submitted facts when the Run is cancelled", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-cancel-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     const facts = createThreadFactsSetService({
       threadRegistry: registry,
       readExploreFile: async () => ({
@@ -183,10 +186,7 @@ describe("thread.facts.set", () => {
   it("keeps pending facts on lost and clears them when a new Run starts", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-lost-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     const facts = createThreadFactsSetService({
       threadRegistry: registry,
       readExploreFile: async () => ({
@@ -224,8 +224,6 @@ describe("thread.facts.set", () => {
   });
 });
 
-const viSpawn = async () => ({ sessionId: "child-1" });
-
 const waitUntil = async (probe: () => boolean, timeoutMs = 1_000): Promise<void> => {
   const started = Date.now();
   while (!probe()) {
@@ -238,10 +236,7 @@ describe("thread.facts.set run binding", () => {
   it("rejects a late submit when the old Run settles during Documents validation", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-settle-race-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     let releaseRead!: (value: unknown) => void;
     const gate = new Promise((resolve) => {
       releaseRead = resolve;
@@ -298,10 +293,7 @@ describe("thread.facts.set run binding", () => {
   it("rejects a late submit when a lost Run is replaced before Documents returns", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-facts-lost-race-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const dispatch = createThreadDispatchService({
-      threadRegistry: registry,
-      threadSpawnSession: viSpawn,
-    } as never);
+    const dispatch = createFactsDispatch(registry, dataDir);
     let releaseRead!: (value: unknown) => void;
     const gate = new Promise((resolve) => {
       releaseRead = resolve;

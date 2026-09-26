@@ -1222,6 +1222,7 @@ describe("session e2e — fixed surface read", () => {
       await writeFile(join(root, "draft.ts"), "stale disk value\n", "utf8");
       const faux = registerFauxProvider();
       let toolResult = "";
+      let authorizedReadPath: string | undefined;
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "draft.ts" })]),
         (context) => {
@@ -1248,13 +1249,20 @@ describe("session e2e — fixed surface read", () => {
             };
           },
         },
-        authorizeWorkspacePath: async (_actor, inputPath) => ({
-          authorityId: "session-e2e-authority",
-          workspaceId: WORKSPACE_ID,
-          canonicalResourceId: path.resolve(root, inputPath),
-          inputPath,
-          resourceId: inputPath,
-        }),
+        authorizeWorkspacePath: async (_actor, inputPath) => {
+          const absolutePath = path.resolve(inputPath);
+          const expectedPath = path.resolve(root, "draft.ts");
+          assert.equal(path.isAbsolute(inputPath), true);
+          assert.equal(absolutePath, expectedPath);
+          authorizedReadPath = absolutePath;
+          return {
+            authorityId: "session-e2e-authority",
+            workspaceId: WORKSPACE_ID,
+            canonicalResourceId: absolutePath,
+            inputPath,
+            resourceId: path.relative(path.resolve(root), absolutePath).split(path.sep).join("/"),
+          };
+        },
       });
       try {
         const snapshot = await session.host.create(root);
@@ -1269,6 +1277,7 @@ describe("session e2e — fixed surface read", () => {
 
         assert.match(toolResult, /fixed editor value/);
         assert.doesNotMatch(toolResult, /stale disk value/);
+        assert.equal(authorizedReadPath, path.resolve(root, "draft.ts"));
       } finally {
         await session.dispose();
         faux.unregister();

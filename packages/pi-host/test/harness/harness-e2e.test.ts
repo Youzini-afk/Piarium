@@ -234,21 +234,58 @@ describe("harness e2e integration", () => {
       // Node is part of every supported Varin runtime and keeps this test on
       // the selected interpreter instead of nesting PowerShell inside Git Bash.
       const sleepCmd = "node -e \"setTimeout(() => console.log('done'), 2000)\"";
-      const bgText = await executeTool(bashTool, { command: sleepCmd, waitMs: 500 });
-      // Background shell must return a shell ID
-      const shellIdMatch = bgText.match(/sh_\w+/);
-      assert.ok(shellIdMatch, `background bash should return sh_ id: got "${bgText}"`);
-      const shellId = shellIdMatch![0];
+      const callStartedAt = Date.now();
+      const bashResponse = await bashTool.execute(
+        `test-call-${++toolCallSequence}`,
+        { command: sleepCmd, waitMs: 0 } as never,
+        undefined,
+        undefined,
+        undefined as never,
+      ) as {
+        content: Array<{ text: string }>;
+        details?: {
+          kind?: string;
+          id?: string;
+          waitedMs?: number;
+          timing?: { acceptedAt?: number; respondedAt?: number };
+        };
+      };
+      const callReturnedAt = Date.now();
+      const bgText = bashResponse.content.map((content) => content.text).join("\n");
+      const accepted = bashResponse.details;
+      assert.ok(accepted && (accepted.kind === "preparing" || accepted.kind === "background"),
+        `waitMs=0 should return an accepted execution, not a failed command: ${bgText}`);
+      assert.ok(accepted.id, `accepted execution should have a queryable reference: ${bgText}`);
+      const acceptedHandle = accepted.id;
+      if (accepted.kind === "preparing") {
+        assert.match(acceptedHandle, /^exec_[0-9a-f]{32}$/u, `preparing reference must identify the accepted execution: ${bgText}`);
+      } else {
+        assert.match(acceptedHandle, /^sh_\d+$/u, `background result must identify a real shell: ${bgText}`);
+      }
+
+      // waitMs applies from ShellSupervisor acceptance to its response. The
+      // end-to-end bridge call also includes actor admission and transport;
+      // keep those measurements separate so a slow admission is not mistaken
+      // for shell work exceeding the requested observation window.
+      const timing = accepted.timing;
+      assert.ok(timing?.acceptedAt !== undefined && timing.respondedAt !== undefined,
+        `accepted result should expose its Host observation timing: ${JSON.stringify(accepted)}`);
+      const supervisorWaitMs = timing.respondedAt - timing.acceptedAt;
+      assert.ok(supervisorWaitMs >= 0 && callReturnedAt - callStartedAt >= supervisorWaitMs,
+        `end-to-end latency ${callReturnedAt - callStartedAt}ms must include the ${supervisorWaitMs}ms Host observation window`);
 
       const reads: string[] = [];
       let outputText = "";
       do {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        outputText = await executeTool(getOutputTool, { handle: shellId });
+        outputText = await executeTool(getOutputTool, { handle: acceptedHandle, waitMs: 250 });
         reads.push(outputText);
       } while (!/exited 0/.test(outputText));
 
       const transcript = [bgText, ...reads].join("\n");
+      const runtimeShellMatch = transcript.match(/recovered runtime shell: (sh_\d+)/);
+      const shellId = accepted.kind === "background" ? acceptedHandle : runtimeShellMatch?.[1];
+      assert.ok(shellId && /^sh_\d+$/u.test(shellId), `get_output should expose the final runtime shell identity: ${transcript}`);
       assert.match(transcript, /done/, "the initial snapshot or incremental reads must contain the completed output");
       const incrementalOutput = reads.find((read) => /done/.test(read));
       if (incrementalOutput) {
@@ -257,10 +294,13 @@ describe("harness e2e integration", () => {
         assert.match(bgText, /done/, "output absent from incremental reads must already be in the background snapshot");
       }
       assert.match(outputText, /exited 0/s, `the final observation must report the real exit state: got "${outputText}"`);
-      const unchanged = await executeTool(getOutputTool, { handle: shellId });
+      const runtimeBaseline = await executeTool(getOutputTool, { handle: shellId });
+      assert.match(runtimeBaseline, /done/, `the recovered runtime shell must yield its full output: ${runtimeBaseline}`);
+      assert.match(runtimeBaseline, /exited 0/s, `the recovered runtime shell must report the actual exit: ${runtimeBaseline}`);
+      const unchanged = await executeTool(getOutputTool, { handle: acceptedHandle });
       assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
       await bridge.request("context.retained", { retainedObservationRefs: [], retainedGit: false });
-      const reset = await executeTool(getOutputTool, { handle: shellId });
+      const reset = await executeTool(getOutputTool, { handle: acceptedHandle });
       assert.match(reset, /initial read.*exited 0/s, `compaction should restore a full shell baseline with its exit state: got "${reset}"`);
       assert.match(reset, /done/, `the reset baseline should contain the complete shell output: got "${reset}"`);
     } finally {

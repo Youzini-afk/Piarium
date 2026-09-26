@@ -193,6 +193,13 @@ describe('core-routes', () => {
         .send({ url: 'http://127.0.0.1:5173/' })
         .expect(401);
 
+      const saveTrustedProxy = vi.fn((_req, res) => res.json({ ok: true }));
+      app.put('/api/config/settings', saveTrustedProxy);
+      await request(app).put('/api/config/settings')
+        .send({ outboundNetwork: { mode: 'proxy', proxyUrl: 'http://proxy.test:8080', trustedProxy: true } })
+        .expect(401);
+      expect(saveTrustedProxy).not.toHaveBeenCalled();
+
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;

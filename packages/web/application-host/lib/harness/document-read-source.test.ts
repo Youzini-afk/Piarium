@@ -11,11 +11,15 @@ import { attachLiveSurfaceCompleter, hashSurfaceText, type LiveSurfaceBuffer } f
 import { createHarnessPathAuthority } from "./path-authority.js";
 import { createHarnessRouter } from "./router.js";
 import { createHarnessServiceHost } from "./service-host.js";
+import type { HarnessDocumentReadLookup } from "./service-host.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
 
-async function fixture() {
+async function fixture(options: {
+  lookup?: (sessionId: string, context: AgentInputContext, resourceId: string) => HarnessDocumentReadLookup | Promise<HarnessDocumentReadLookup>;
+  readFsPromises?: Pick<typeof fs, "open" | "stat">;
+} = {}) {
   const root = await fs.mkdtemp(path.join(tmpdir(), "varin-document-read-source-"));
   const workspace = path.join(root, "workspace");
   await fs.mkdir(workspace);
@@ -35,14 +39,19 @@ async function fixture() {
     workspaceId,
     grantedCapabilities: ["read.document", "write.document"],
   };
-  const paths = createHarnessPathAuthority({ authorityId: "test-host", documents });
+  const paths = createHarnessPathAuthority({
+    authorityId: "test-host",
+    documents,
+    ...(options.readFsPromises ? { readFsPromises: options.readFsPromises } : {}),
+  });
   const host = createHarnessServiceHost({
     search: async () => ({ status: "empty", generation: undefined }),
     resolveWorkspaceRoot: async () => workspace,
     discoveredShells: {},
-    documentReadSource: (sessionId, context, resourceId) => (
+    documentReadSource: options.lookup ?? ((sessionId, context, resourceId) => (
       documents.readAgentInputSnapshot(sessionId, context, resourceId)
-    ),
+    )),
+    readAuthorizedDiskFile: (ctx, authorized) => paths.readAuthorizedFile(ctx.actor, authorized, ctx.signal),
     documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => (
       documents.applyAgentSurfaceWrite(sessionId, workspaceId, context, changes, signal)
     ),
@@ -122,7 +131,7 @@ async function fixture() {
       workspaceId,
     });
   };
-  return { actor, capture, documents, request, workspace, write };
+  return { actor, capture, documents, paths, request, workspace, write };
 }
 
 describe("native read source through Host router and Documents", () => {
@@ -196,9 +205,11 @@ describe("native read source through Host router and Documents", () => {
     await fs.writeFile(path.join(f.workspace, "draft.ts"), "agent write\n", "utf8");
     await f.documents.observeAgentWrite(f.actor.workspaceId!, path.join(f.workspace, "draft.ts"));
 
-    // The disk sentinel hands the read back to Pi's native tool, which now
-    // reads the bytes the agent just wrote.
-    expect(await f.request("draft.ts", context)).toEqual({ ok: true, result: { source: "disk" } });
+    // Disk bytes come from the Host after this same path was authorized.
+    expect(await f.request("draft.ts", context)).toEqual({
+      ok: true,
+      result: { source: "disk", base64: Buffer.from("agent write\n").toString("base64") },
+    });
     expect(f.documents.agentInputDraftPaths(f.actor.sessionId, context)).toEqual([]);
   });
 
@@ -267,12 +278,112 @@ describe("native read source through Host router and Documents", () => {
     }
   });
 
-  it("returns a disk sentinel when the current input has no draft for the path", async () => {
+  it("returns bytes read from the authorized canonical disk target", async () => {
     const f = await fixture();
     await fs.writeFile(path.join(f.workspace, "disk.txt"), "disk\n", "utf8");
     expect(await f.request("disk.txt", { source: "disk" })).toEqual({
       ok: true,
-      result: { source: "disk" },
+      result: { source: "disk", base64: Buffer.from("disk\n").toString("base64") },
     });
+  });
+
+  it("does not follow an original junction changed after path authorization", async () => {
+    let releaseLookup!: () => void;
+    let notifyLookup!: () => void;
+    const lookupEntered = new Promise<void>((resolve) => { notifyLookup = resolve; });
+    const lookupGate = new Promise<void>((resolve) => { releaseLookup = resolve; });
+    const f = await fixture({ lookup: async () => {
+      notifyLookup();
+      await lookupGate;
+      return { status: "disk" };
+    } });
+    const inside = path.join(f.workspace, "inside");
+    const outside = path.join(path.dirname(f.workspace), "outside");
+    const workspaceLink = path.join(f.workspace, "alias");
+    await fs.mkdir(inside);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(inside, "note.txt"), "authorized bytes\n");
+    await fs.writeFile(path.join(outside, "note.txt"), "outside secret bytes\n");
+    await fs.symlink(inside, workspaceLink, process.platform === "win32" ? "junction" : "dir");
+    try {
+      const pending = f.request("alias/note.txt", { source: "disk" });
+      await lookupEntered;
+      await fs.rm(workspaceLink, { recursive: true, force: true });
+      await fs.symlink(outside, workspaceLink, process.platform === "win32" ? "junction" : "dir");
+      releaseLookup();
+      const response = await pending;
+      expect(response).toMatchObject({ ok: false });
+      expect(JSON.stringify(response)).not.toContain("outside secret bytes");
+      expect(JSON.stringify(response)).not.toContain(Buffer.from("outside secret bytes\n").toString("base64"));
+    } finally {
+      releaseLookup();
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects bytes opened through a swapped parent after the junction is restored", async () => {
+    let canonicalFile = "";
+    let directory = "";
+    let backup = "";
+    let outside = "";
+    let armed = true;
+    let restored = false;
+    let outsideBytesRead = false;
+    const restore = async (): Promise<void> => {
+      if (restored) return;
+      restored = true;
+      await fs.rm(directory, { recursive: true, force: true });
+      await fs.rename(backup, directory);
+    };
+    const readFsPromises = {
+      open: async (target: string, flags: string | number) => {
+        const samePath = process.platform === "win32"
+          ? target.toLowerCase() === canonicalFile.toLowerCase()
+          : target === canonicalFile;
+        if (!armed || !samePath) return fs.open(target, flags);
+        armed = false;
+        await fs.rename(directory, backup);
+        await fs.symlink(outside, directory, process.platform === "win32" ? "junction" : "dir");
+        const handle = await fs.open(target, flags);
+        return {
+          stat: (...args: Parameters<typeof handle.stat>) => handle.stat(...args),
+          readFile: async (...args: Parameters<typeof handle.readFile>) => {
+            try {
+              const bytes = await handle.readFile(...args);
+              outsideBytesRead = bytes.toString("utf8").includes("outside secret bytes\n");
+              return bytes;
+            } finally {
+              // The fd still points at the outside file, while path resolution
+              // sees the restored authorized tree. Identity comparison must
+              // reject the bytes even though the path name looks safe again.
+              await restore();
+            }
+          },
+          close: () => handle.close(),
+        } as typeof handle;
+      },
+      stat: (...args: Parameters<typeof fs.stat>) => fs.stat(...args),
+    } as Pick<typeof fs, "open" | "stat">;
+    const f = await fixture({ readFsPromises });
+    directory = path.join(f.workspace, "tree");
+    backup = `${directory}-authorized`;
+    outside = path.join(path.dirname(f.workspace), "outside-tree");
+    await fs.mkdir(directory);
+    await fs.mkdir(outside);
+    canonicalFile = path.join(directory, "note.txt");
+    await fs.writeFile(canonicalFile, "authorized bytes\n");
+    await fs.writeFile(path.join(outside, "note.txt"), "outside secret bytes\n");
+    try {
+      const response = await f.request("tree/note.txt", { source: "disk" });
+      expect(response).toMatchObject({ ok: false, error: { message: "Document path changed while reading" } });
+      expect(JSON.stringify(response)).not.toContain("outside secret bytes");
+      expect(JSON.stringify(response)).not.toContain(Buffer.from("outside secret bytes\n").toString("base64"));
+      expect(restored).toBe(true);
+      expect(outsideBytesRead).toBe(true);
+      expect(await fs.readFile(canonicalFile, "utf8")).toBe("authorized bytes\n");
+    } finally {
+      await restore();
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });

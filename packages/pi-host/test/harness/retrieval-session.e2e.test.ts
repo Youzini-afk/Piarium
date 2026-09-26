@@ -152,29 +152,31 @@ describe("retrieval thread public slice", () => {
       } as const;
     };
 
-    const ensureRegistered = (sessionId: string): void => {
+    const ensureRegistered = async (sessionId: string): Promise<void> => {
       const actor = actorFor(sessionId);
       if (harnessServiceHost!.hasActor(actor)) return;
       const isParent = sessionId === parentHost?.sessionId;
       const execution = executionContexts.get(sessionId);
-      harnessServiceHost!.registerSession({
+      harnessServiceHost!.registerSession(await harnessServiceHost!.prepareWorkContext({
         actor,
         grantedCapabilities: isParent
           ? ["context.session", "control.thread", "read.output", "read.lsp"]
           : ["context.session", "control.thread", "read.document", "read.search", "read.output", "read.lsp"],
         workspaceId: execution?.workspaceId ?? identity.workspaceId,
         workspaceRoot: execution?.root ?? workspace,
-      });
+      }));
     };
 
     const emitFrom = (sessionId: string, event: HostEvent, data: unknown): void => {
       if (event === "harness.request") {
-        ensureRegistered(sessionId);
-        void router!.processEvent({
-          actor: actorFor(sessionId),
-          kind: "host",
-          envelope: { kind: "event", event: "harness.request", data },
-        });
+        void (async () => {
+          await ensureRegistered(sessionId);
+          await router!.processEvent({
+            actor: actorFor(sessionId),
+            kind: "host",
+            envelope: { kind: "event", event: "harness.request", data },
+          });
+        })();
         return;
       }
       if (event === "agent.event" && sessionId !== parentHost?.sessionId) {
@@ -200,6 +202,7 @@ describe("retrieval thread public slice", () => {
       child.setHarnessDocumentReadEnabled(true);
       child.setHarnessDocumentPathOverlayEnabled(true);
       child.setHarnessLspNavigationEnabled(true);
+      child.setHarnessWorkContextEnabled(true);
       return child;
     };
 
@@ -208,7 +211,8 @@ describe("retrieval thread public slice", () => {
         if (!spawningRunId) throw new Error("retrieval child created without a Run id");
         childScope = input.scope;
         const child = createChildHost();
-        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions,
+          undefined, 1, "branch", input.initialWorkContext);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
         executionContexts.set(created.sessionId, { workspaceId: input.workspaceId, root: input.cwd });
@@ -277,7 +281,7 @@ describe("retrieval thread public slice", () => {
     runtime = createThreadRuntime({
       registry,
       sessions,
-      resolveWorkspaceRoot: async () => workspace,
+      resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
       resolveRuntimeWorkspaceId: async (directory) => (await documents.resolveWorkspace({ path: directory })).workspaceId,
       readBlocks: async () => [{ label: "plan", content: "parent-only block that must not copy the conversation" }],
       workingStates,
@@ -287,7 +291,12 @@ describe("retrieval thread public slice", () => {
 
     harnessServiceHost = createHarnessServiceHost({
       search: (request, options) => search.searchContent(request, options),
-      resolveWorkspaceRoot: async () => workspace,
+      resolveWorkspaceRoot: async (id) => (await documents.inspectWorkspace(id)).root,
+      pathAuthority: paths,
+      workContextJournal: {
+        read: async (actor) => hostFor(actor.sessionId).workContextRead(actor.sessionId),
+        commit: async (actor, input) => hostFor(actor.sessionId).workContextCommit(input),
+      },
       readExploreFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => branchLookups.exploreFile(sessionId, resourceId)),
       pinWorkingBranchQuery: (sessionId, options) => branchLookups.pinQuery(sessionId, options),
       documentReadSource: async (sessionId, _context, resourceId) => (
@@ -308,15 +317,7 @@ describe("retrieval thread public slice", () => {
       },
     });
     router = createHarnessRouter({
-      resolveActor: async (identityActor) => {
-        const registered = harnessServiceHost!.resolveActor(identityActor);
-        if (registered) return registered;
-        return {
-          ...identityActor,
-          workspaceId: identity.workspaceId,
-          grantedCapabilities: ["control.thread", "read.document", "read.search", "read.output", "context.session", "read.lsp"],
-        };
-      },
+      resolveActor: (identityActor, _signal, entryId) => harnessServiceHost!.resolveActor(identityActor, entryId),
       respond: async (identity, requestId, outcome) => {
         hostFor(identity.sessionId).respondHarness(identity.sessionId, requestId, outcome);
       },
@@ -335,6 +336,7 @@ describe("retrieval thread public slice", () => {
       projectTrustOverride: true,
     });
     parentHost.setHarnessThreadRuntimeEnabled(true);
+    parentHost.setHarnessWorkContextEnabled(true);
 
     let parentPhase = 0;
     let childPhase = 0;

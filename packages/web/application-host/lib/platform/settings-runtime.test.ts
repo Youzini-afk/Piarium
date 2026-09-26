@@ -5,7 +5,10 @@ import path from 'path';
 import type { VarinSettingsDocument } from '@varin/settings-store';
 import { createSettingsRuntime } from './settings-runtime.js';
 
-const createRuntime = async (syncPresets: (presets: unknown) => Promise<void> = async () => {}) => {
+const createRuntime = async (
+  syncPresets: (presets: unknown) => Promise<void> = async () => {},
+  mergePersistedSettings: (current: VarinSettingsDocument, changes: VarinSettingsDocument) => VarinSettingsDocument = (_current, changes) => changes,
+) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'varin-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
@@ -14,7 +17,7 @@ const createRuntime = async (syncPresets: (presets: unknown) => Promise<void> = 
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
     sanitizeSettingsUpdate: (settings) => settings as VarinSettingsDocument,
-    mergePersistedSettings: (_current, changes) => changes,
+    mergePersistedSettings,
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     formatSettingsResponse: (settings) => settings,
     syncManagedRemoteTunnelConfigWithPresets: syncPresets,
@@ -94,6 +97,22 @@ describe('settings runtime', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  it('rotates a proxy credential binding whenever the endpoint changes', async () => {
+    const { runtime, cleanup } = await createRuntime(async () => {}, (current, changes) => ({ ...current, ...changes }));
+    const network = (proxyUrl: string) => ({ mode: 'proxy', proxyUrl, noProxy: '', trustedProxy: true });
+    try {
+      const a = await runtime.persistSettings({ outboundNetwork: network('http://proxy-a.test:8080') });
+      const refA = (a.outboundNetwork as { credentialRef: string }).credentialRef;
+      const same = await runtime.persistSettings({ outboundNetwork: network('http://proxy-a.test:8080') });
+      expect((same.outboundNetwork as { credentialRef: string }).credentialRef).toBe(refA);
+      const b = await runtime.persistSettings({ outboundNetwork: network('http://proxy-b.test:8080') });
+      const refB = (b.outboundNetwork as { credentialRef: string }).credentialRef;
+      expect(refB).not.toBe(refA);
+      const back = await runtime.persistSettings({ outboundNetwork: network('http://proxy-a.test:8080') });
+      expect((back.outboundNetwork as { credentialRef: string }).credentialRef).not.toBe(refA);
+    } finally { await cleanup(); }
   });
 
 });

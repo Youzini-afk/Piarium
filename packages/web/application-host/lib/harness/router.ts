@@ -22,6 +22,8 @@ export interface HarnessAuthorizedPath {
   authorityId: string;
   workspaceId: string;
   canonicalResourceId: string;
+  /** Actual resolved filesystem spelling; never derive an open path from the normalized identity key. */
+  resolvedPath?: string;
   inputPath: string;
   resourceId: string;
 }
