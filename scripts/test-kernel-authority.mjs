@@ -47,9 +47,9 @@ run(process.execPath, ['--import', 'tsx', '--test',
 ]);
 // The kernel Vitest config owns the native-file set (KERNEL_VITEST_FILES in
 // packages/web/vitest.config.ts): every file that starts real kernels, durable
-// stores or OS process trees runs here and nowhere else. Windows CI hit
-// shutdown and transport deadlines while running these together, so isolate
-// file workloads there; concurrency within each test remains exercised.
+// stores or OS process trees runs here and nowhere else. These tests start real
+// native resources, so serialize files on every runner; concurrency within
+// each test remains exercised without coupling teardown to another fixture.
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.kernel.config.ts',
-  ...(process.platform === 'win32' ? ['--no-file-parallelism'] : []),
+  '--no-file-parallelism',
 ]);

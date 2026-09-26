@@ -29,6 +29,7 @@ export const KERNEL_VITEST_FILES = [
   'application-host/lib/kernel/kernel-process.test.ts',
   'application-host/lib/kernel/kernel-transport.acceptance.test.ts',
   'application-host/lib/kernel/process-consumers.test.ts',
+  'application-host/lib/kernel/shell-supervisor-process-tree.test.ts',
   'application-host/lib/kernel/storage-adapter.test.ts',
   'application-host/lib/recovery/kernel-durable-engine.test.ts',
   'application-host/lib/harness/shell-assembly.test.ts',
