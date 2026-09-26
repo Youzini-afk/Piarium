@@ -1,11 +1,12 @@
 import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt, WebFetchRequest, WebReadPosition, WebSnapshotStructure } from "@varin/protocol";
 import { isSameHost } from "./ssrf-policy.js";
+import { EGRESS_TIMEOUT, EgressError, type EgressRuntime } from "./egress.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 import type { WebMaterialStore } from "./web-materials.js";
 import { createDocumentReader, type DocumentReader, type DocumentReaderContext } from "./document-reading.js";
 
 export interface SsrfPolicy {
-  check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" }>;
+  check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" | "special-purpose" }>;
   isSameHost(url1: string, url2: string): boolean;
 }
 
@@ -13,6 +14,8 @@ export type DomainPolicy = HarnessWebDomainPolicy;
 
 export interface WebFetchDeps {
   ssrf: SsrfPolicy;
+  /** Outbound egress authority; absent keeps the legacy bare-fetch path. */
+  egress?: EgressRuntime;
   domainPolicy?: (workspaceId: string) => DomainPolicy;
   renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
   cacheTtlMs?: number;
@@ -343,8 +346,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     });
   };
 
-  const performFetch = async (url: string, ctx: FetchContext): Promise<FetchResult> => {
-    const cacheKey = `${url}:${ctx.render ?? false}`;
+  const performFetch = async (url: string, ctx: FetchContext, cacheKey: string): Promise<FetchResult> => {
     const finishOk = async (content: Extract<FetchResult, { status: "ok" }>): Promise<FetchResult> => {
       const result = await attachSnapshot(content, ctx);
       cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
@@ -367,26 +369,52 @@ export function createWebFetch(deps: WebFetchDeps) {
       const abortFromCaller = (): void => controller.abort(ctx.signal?.reason);
       if (ctx.signal?.aborted) controller.abort(ctx.signal.reason);
       else ctx.signal?.addEventListener("abort", abortFromCaller, { once: true });
-      const timeout = setTimeout(() => controller.abort(), 20_000);
+      // Distinct abort reason so a deadline is classified "timeout", not "cancelled".
+      const timeout = setTimeout(() => controller.abort(EGRESS_TIMEOUT), 20_000);
       const finishRequest = (): void => {
         clearTimeout(timeout);
         ctx.signal?.removeEventListener("abort", abortFromCaller);
       };
       try {
-        response = await fetch(currentUrl, {
-          signal: controller.signal,
-          redirect: "manual", // Handle redirects manually for cross-host detection
-          headers: { "User-Agent": "Varin-Agent/1.0" },
-        });
+        response = deps.egress
+          ? await deps.egress.fetch(currentUrl, {
+            signal: controller.signal,
+            redirect: "manual", // Handle redirects manually for cross-host detection
+            headers: { "User-Agent": "Varin-Agent/1.0" },
+          })
+          : await fetch(currentUrl, {
+            signal: controller.signal,
+            redirect: "manual", // Handle redirects manually for cross-host detection
+            headers: { "User-Agent": "Varin-Agent/1.0" },
+          });
       } catch (error) {
         if (ctx.signal?.aborted) {
           finishRequest();
           throw ctx.signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
         }
+        if (controller.signal.aborted && controller.signal.reason === EGRESS_TIMEOUT) {
+          const result: FetchResult = { status: "failed", url, reason: "request timed out", errorClass: "timeout" };
+          cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+          finishRequest();
+          return result;
+        }
+        if (error instanceof EgressError) {
+          finishRequest();
+          if (error.kind === "private-network" || error.kind === "special-purpose") {
+            return { status: "blocked", url, reason: error.kind };
+          }
+          if (error.kind === "scheme-denied") {
+            return { status: "blocked", url, reason: "scheme" };
+          }
+          const result: FetchResult = { status: "failed", url, reason: error.message, errorClass: error.kind };
+          cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+          return result;
+        }
         const result: FetchResult = {
           status: "failed",
           url,
           reason: error instanceof Error ? error.message : "fetch failed",
+          errorClass: "unknown",
         };
         if (!ctx.signal?.aborted) cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
         finishRequest();
@@ -424,6 +452,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           status: "failed",
           url,
           reason: `HTTP ${response.status}`,
+          errorClass: response.status === 407 ? "proxy-auth" : "http",
         };
         cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
         finishRequest();
@@ -646,8 +675,11 @@ export function createWebFetch(deps: WebFetchDeps) {
     };
 
     // Cached bytes are reusable only after this workspace and request have
-    // independently passed their current authorization policies.
-    const cacheKey = `${url}:${ctx.render ?? false}`;
+    // independently passed their current authorization policies. The egress
+    // fingerprint is frozen for this request — a proxy↔direct policy change
+    // must not serve bytes fetched through the other path.
+    const egressPolicy = deps.egress?.resolvePolicy();
+    const cacheKey = `${url}:${ctx.render ?? false}:${egressPolicy ? `${egressPolicy.mode}|${egressPolicy.proxyOrigin ?? ""}` : "legacy"}`;
     if (!request.refresh) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -679,7 +711,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     // A refresh is intentionally a fresh request: it bypasses both the
     // response cache and in-flight sharing so it can mint a new snapshot.
     if (request.refresh) {
-      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }), false);
+      return deliver(await performFetch(url, { ...ctx, forceNewSnapshot: true }, cacheKey), false);
     }
 
     const sharedKey = `${cacheKey}|${policyKeyFor(ctx.workspaceId, ctx.domainPolicy)}`;
@@ -687,7 +719,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (!shared || shared.done || shared.controller.signal.aborted) {
       const controller = new AbortController();
       const entry: SharedFetch = { controller, waiters: 0, done: false, promise: Promise.resolve({ status: "failed", url, reason: "unset" }) };
-      entry.promise = performFetch(url, { ...ctx, signal: controller.signal })
+      entry.promise = performFetch(url, { ...ctx, signal: controller.signal }, cacheKey)
         .finally(() => {
           entry.done = true;
           if (inflight.get(sharedKey) === entry) inflight.delete(sharedKey);

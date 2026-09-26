@@ -1082,6 +1082,11 @@ export function registerHarnessServices(
   if (host.webSearchService) {
     router.register("web.search", host.webSearchService);
   }
+  if (host.networkDiagnostics) {
+    router.register("network.diagnose", {
+      handle: (params) => host.networkDiagnostics!.diagnose(params.url ?? "", params.override),
+    });
+  }
   if (host.researchSearchService) {
     router.register("research.search", host.researchSearchService);
   }

@@ -99,8 +99,13 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
       };
     }
     case "blocked": {
+      const hint = result.reason === "special-purpose"
+        ? " — the address is a special-purpose range (e.g. fake-IP mapping from a fake-ip resolver); a working HTTP(S) proxy is required for this target"
+        : result.reason === "private-network"
+          ? " — the target resolves inside a private/loopback range and is refused"
+          : "";
       return {
-        text: `fetch blocked: ${result.reason}`,
+        text: `fetch blocked: ${result.reason}${hint}`,
         isError: true,
       };
     }
@@ -141,8 +146,16 @@ function formatFetchResult(result: FetchResult, hasPrompt: boolean): { text: str
       };
     }
     case "failed": {
+      const kind = result.errorClass ? ` [${result.errorClass}]` : "";
+      const proxyHint = result.errorClass === "special-purpose" || result.errorClass === "dns"
+        ? " If a fake-ip/resolver proxy is in use, configure HTTP(S)_PROXY so the target resolves inside the proxy."
+        : result.errorClass === "proxy-unavailable"
+          ? " The configured proxy endpoint is unreachable — check proxy state or unset the proxy variables."
+          : result.errorClass === "proxy-config-invalid"
+            ? " Proxy configuration is malformed; requests are refused rather than silently direct."
+            : "";
       return {
-        text: `fetch failed: ${result.reason}`,
+        text: `fetch failed${kind}: ${result.reason}${proxyHint}`,
         isError: true,
       };
     }

@@ -10,6 +10,7 @@ import {
   createDiagnosticsTool,
 } from "./output-tools.js";
 import { createWebFetchTool } from "./webfetch-tool.js";
+import { createNetworkDiagnosticsTool } from "./network-diagnostics-tool.js";
 import { createWebSearchTool } from "./websearch-tool.js";
 import { createResearchSearchTool } from "./research-search-tool.js";
 import { createMaterialsTool } from "./materials-tool.js";
@@ -208,6 +209,9 @@ export function selectHarnessTools(
   }
   if (tools.webfetch !== false) {
     result.push(createWebFetchTool(bridge, sessionId, readPage ? { readPage } : undefined));
+    // Read-only egress probe ships with the web slot: fetch failures are
+    // where an agent needs proxy/DNS/policy diagnostics.
+    result.push(createNetworkDiagnosticsTool(bridge));
   }
   if (webSearchAvailable && tools.websearch !== false) {
     result.push(createWebSearchTool(bridge, sessionId));

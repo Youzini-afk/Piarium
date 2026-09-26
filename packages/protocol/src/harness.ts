@@ -324,12 +324,59 @@ export type FetchResult =
   | { status: "structure-unsupported"; snapshotId: string; kind: string }
   | { status: "position-not-found"; snapshotId: string; detail: string }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
-  | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
+  | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" | "special-purpose" }
   | { status: "empty-shell"; url: string; hint: string }
   | { status: "renderer-unavailable"; url: string }
   | { status: "page-image-unavailable"; snapshotId: string; page?: number; reason: string }
   | { status: "snapshot-missing"; snapshotId: string }
-  | { status: "failed"; url: string; reason: string };
+  | { status: "failed"; url: string; reason: string; errorClass?: FetchErrorClass };
+
+/**
+ * Machine-readable egress failure classes for `web.fetch` and network
+ * diagnostics — DNS failure, proxy problems, and policy denials are
+ * distinguishable instead of collapsing into a raw error string.
+ */
+export type FetchErrorClass =
+  | "dns"
+  | "scheme-denied"
+  | "private-network"
+  | "special-purpose"
+  | "proxy-unavailable"
+  | "proxy-auth"
+  | "proxy-config-invalid"
+  | "tls"
+  | "connect"
+  | "http"
+  | "timeout"
+  | "cancelled"
+  | "unknown";
+
+/** Read-only outbound-network probe. Does not perform a fetch. */
+export interface NetworkDiagnoseParams {
+  url: string;
+  /** Optional per-request policy probe (diagnostic only; never persisted). */
+  override?: { mode?: "auto" | "direct" | "proxy"; proxyUrl?: string; noProxy?: string };
+}
+
+export interface NetworkDiagnosisResult {
+  url: string;
+  decision: "allowed" | "blocked";
+  reason?: string;
+  policy: {
+    version: number;
+    mode: "direct" | "proxy";
+    /** Sanitized origin only — credentials are never exposed. */
+    proxyOrigin?: string;
+    proxyAuth?: "basic";
+    noProxy: string[];
+    source: "env" | "override" | "none";
+    invalid?: string;
+  };
+  /** Where the target name resolves for this request. */
+  resolution: "local" | "proxy-side" | "static-literal";
+  addresses?: Array<{ address: string; class: "public" | "private" | "special-purpose" }>;
+  lookupError?: string;
+}
 
 export interface SearchResultItem {
   title: string;
@@ -1395,6 +1442,7 @@ export interface HarnessServiceMap {
   "web.fetch": { params: WebFetchRequest; result: FetchResult };
   "materials.read": { params: DocumentReadRequest; result: FetchResult };
   "web.search": { params: WebSearchRequest; result: WebSearchResult };
+  "network.diagnose": { params: NetworkDiagnoseParams; result: NetworkDiagnosisResult };
   "materials.collections": { params: MaterialsCollectionParams; result: MaterialsCollectionResult };
   "research.search": { params: import("./research-search.js").ScholarlySearchParams; result: import("./research-search.js").ScholarlySearchResult };
   "research.decide": { params: ResearchDecideParams; result: ResearchDecideResult };
@@ -1553,6 +1601,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "materials.read": "read.document",
   "web.search": "read.web",
+  "network.diagnose": "read.web",
   "research.search": "read.web",
   "research.decide": "read.web",
   "materials.collections": "read.web",
@@ -1690,6 +1739,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "materials.read",
   "web.search",
+  "network.diagnose",
   "research.search",
   "research.decide",
   "materials.collections",

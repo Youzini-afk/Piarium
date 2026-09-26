@@ -306,6 +306,13 @@ export interface HarnessServiceHost {
     }) => Promise<import("@varin/protocol").FetchResult>;
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
+  /** Read-only egress probe — reports policy, decision, and resolution without fetching. */
+  networkDiagnostics?: {
+    diagnose: (
+      url: string,
+      override?: import("@varin/protocol").NetworkDiagnoseParams["override"],
+    ) => Promise<import("@varin/protocol").NetworkDiagnosisResult>;
+  } | null;
   researchSearchService: import("./router.js").HarnessService<"research.search"> | null;
   researchDecideService?: import("./router.js").HarnessService<"research.decide"> | null;
   materialCollectionsService?: import("./router.js").HarnessService<"materials.collections"> | null;
@@ -565,6 +572,8 @@ export interface HarnessServiceHostOptions {
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
   webSearchService?: HarnessServiceHost["webSearchService"];
+  /** Read-only outbound egress probe (diagnostics; never performs a fetch). */
+  networkDiagnostics?: HarnessServiceHost["networkDiagnostics"];
   /** Scholarly metadata service. Uses public OpenAlex/Semantic Scholar APIs. */
   researchSearchService?: HarnessServiceHost["researchSearchService"];
   /** Fast-decision consumer for Web and scholarly candidates (D-315 L5). */
@@ -652,6 +661,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const permissionAudit = options.permissionAudit ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
+  const networkDiagnostics = options.networkDiagnostics ?? null;
   const researchSearchService = options.researchSearchService ?? null;
   const researchDecideService = options.researchDecideService ?? null;
   const materialCollectionsService = options.materialCollectionsService ?? null;
@@ -1107,6 +1117,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     permissionAudit,
     webFetchService,
     webSearchService,
+    networkDiagnostics,
     researchSearchService,
     researchDecideService,
     materialCollectionsService,

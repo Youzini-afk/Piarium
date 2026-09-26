@@ -145,6 +145,7 @@ import { createResearchSearchService } from './lib/harness/research-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { registerPdfMaterialRoutes } from './lib/harness/pdf-material-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
+import { createEgressRuntime } from './lib/harness/egress.js';
 import { readPiAuthFile, resolvePiAgentDir } from './lib/pi-config/storage.js';
 import { seedProductSkills } from './lib/pi-runtime/product-skills.js';
 
@@ -1519,6 +1520,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   // Web fetch service — SSRF-guarded, domain policy from workspace config
   const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
+  // Single outbound egress authority: proxy/NO_PROXY policy + connect-path
+  // SSRF classification shared by web.fetch and web.search providers.
+  const egressRuntime = createEgressRuntime();
   const retrievalEvidenceAccess: {
     persistReceipt?: (
       workspaceId: string,
@@ -1547,6 +1551,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
+    egress: egressRuntime,
     documentReader,
     ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
@@ -1566,6 +1571,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         // Credential material is intentionally resolved live for every call.
         // Revocation makes an old frozen binding unavailable immediately.
         auth: search ? readPiAuthFile() : {},
+        // Search providers share the host egress policy (proxy/NO_PROXY/SSRF).
+        fetch: egressRuntime.fetch as typeof globalThis.fetch,
       });
     },
     async ({ sessionId }) => {
@@ -1581,7 +1588,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       fetchUrl: (url, ctx) => performHarnessWebFetch(harnessServiceHost, { url }, ctx),
     },
   );
-  const researchSearchService = createResearchSearchService();
+  // Scholarly APIs share the same egress authority — proxies and SSRF
+  // classification apply identically to every outbound consumer.
+  const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch as typeof globalThis.fetch });
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
     documents: documentsAuthority,
     resolveWorkspaceId: async (workspaceRoot) => {
@@ -3007,6 +3016,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return bytes;
     },
     ...(webSearchService ? { webSearchService } : {}),
+    networkDiagnostics: { diagnose: (url, override) => egressRuntime.diagnose(url, override) },
     researchSearchService,
     researchDecideService,
     materialCollectionsService,
